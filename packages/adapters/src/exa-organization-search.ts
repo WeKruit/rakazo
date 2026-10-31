@@ -51,13 +51,15 @@ export function organizationResults(
         .split("\n")
         .find((line) => line.startsWith("data:"))
         ?.slice(5);
-  if (!json) return [];
-  const text = JSON.parse(json)?.result?.content?.find(
-    (item: { type?: string }) => item.type === "text",
-  )?.text;
-  if (typeof text !== "string") return [];
+  // An error or rate-limit answer is not "no such organization": it throws so it is asked again.
+  if (!json) throw new Error("organization search returned no result");
+  const result = JSON.parse(json)?.result;
+  const text = result?.isError
+    ? undefined
+    : result?.content?.find((item: { type?: string }) => item.type === "text")?.text;
+  if (typeof text !== "string") throw new Error("organization search failed");
   const results: unknown = JSON.parse(text)?.results;
-  if (!Array.isArray(results)) return [];
+  if (!Array.isArray(results)) throw new Error("organization search returned no results list");
   return results.flatMap((result) => {
     const url = typeof result?.url === "string" ? result.url : "";
     const named = result?.entities?.[0]?.properties?.name;

@@ -357,7 +357,7 @@ async function expireOne(
   });
 }
 
-type StuckNoticeDelivery = "delivered" | "undeliverable" | "failed";
+type StuckNoticeDelivery = "delivered" | "undeliverable" | "suppressed" | "failed";
 
 async function sendStuckNotice(
   notifications: NotificationProvider,
@@ -367,6 +367,7 @@ async function sendStuckNotice(
   const context = {
     operationId: "notify",
     traceId: run.botId,
+    runId: run.id,
     spaceId: run.spaceId,
     userId: run.userId,
     botId: run.botId,

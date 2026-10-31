@@ -1,7 +1,12 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { isConversationalRun } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
-import { appendEventInTransaction, createPendingSteeringRun, INTERRUPT_ORIGIN } from "./events.js";
+import {
+  appendEventInTransaction,
+  createPendingSteeringRun,
+  FOLLOW_UP_ORIGIN,
+  INTERRUPT_ORIGIN,
+} from "./events.js";
 import { IsolationError } from "./scope.js";
 
 /**
@@ -29,7 +34,11 @@ function queuedMessageWhere(threadId: string): Prisma.MessageWhereInput {
       some: {},
       every: {
         claimedAt: null,
-        OR: [{ originTrigger: null }, { originTrigger: INTERRUPT_ORIGIN }],
+        OR: [
+          { originTrigger: null },
+          { originTrigger: INTERRUPT_ORIGIN },
+          { originTrigger: FOLLOW_UP_ORIGIN },
+        ],
       },
     },
     sourceRuns: { none: {} },

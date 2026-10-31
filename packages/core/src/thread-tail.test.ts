@@ -66,8 +66,35 @@ describe("thread tail phase", () => {
       threadTailPhase(thread([{ id: "run", status: "waiting_input" }]), { sending: true }),
     ).toBe("starting");
     expect(threadTailPhase(thread([{ id: "run", status: "running" }]), { sending: true })).toBe(
-      "working",
+      "starting",
     );
+  });
+
+  it("keeps received queued messages visible through a reconnect or an earlier card wait", () => {
+    for (const status of ["waiting_input", "waiting_takeover", "queued", "leased"]) {
+      const snapshot = {
+        ...thread([{ id: "previous", status }]),
+        queuedMessageIds: ["received"],
+      };
+      expect(threadTailPhase(snapshot)).toBe("queued");
+    }
+    expect(threadTailPhase({ ...thread([]), queuedMessageIds: ["received"] })).toBe("queued");
+  });
+
+  it("acknowledges a new send before an older run's reconnect or compaction status", () => {
+    for (const phase of ["retrying", "compacting"] as const) {
+      const snapshot = thread(
+        [{ id: "old", status: "running" }],
+        [
+          {
+            id: "progress:old",
+            runId: "old",
+            blocks: [{ kind: "progress", text: "", activity: true, phase }],
+          },
+        ],
+      );
+      expect(threadTailPhase(snapshot, { sending: true })).toBe("starting");
+    }
   });
 
   it("keeps a group visibly busy while one member works and another waits", () => {

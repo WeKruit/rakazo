@@ -3,6 +3,7 @@ import type {
   AppBootstrap,
   AuthCapabilities,
   AvatarStyle,
+  BackgroundWorkTiming,
   Bot,
   BotSection,
   ComputerMode,
@@ -15,6 +16,7 @@ import type {
   ReplyPreview,
   Space,
   SpaceNavigation,
+  ThreadBackgroundTask,
 } from "@rakazo/contracts";
 import {
   accountSecuritySchema,
@@ -1081,6 +1083,9 @@ export type MobileSpace = Space;
 export type MobileSpaceNavigation = SpaceNavigation;
 
 export type MobileSnapshot = {
+  backgroundTasks?: ThreadBackgroundTask[];
+  backgroundWork?: BackgroundWorkTiming[];
+  queuedMessageIds?: string[];
   botId?: string;
   groupId?: string;
   groupName?: string;
@@ -1095,6 +1100,7 @@ export type MobileSnapshot = {
     error?: string | null;
     startedAt?: string | null;
     createdAt?: string;
+    updatedAt?: string;
   } | null;
   activeRuns?: Array<{
     id: string;
@@ -1102,6 +1108,7 @@ export type MobileSnapshot = {
     status: string;
     startedAt?: string | null;
     createdAt?: string;
+    updatedAt?: string;
   }>;
   members?: MobileGroup["members"];
   computer?: {

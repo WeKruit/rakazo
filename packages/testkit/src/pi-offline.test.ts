@@ -54,6 +54,108 @@ function latestToolResult(request: ModelEmulatorRequest) {
 const PI_INPUT_CHARS_8K = 4 * (8192 - 1024);
 
 describe("real Pi against an offline model HTTP endpoint", () => {
+  it("promotes a slow tool at ten seconds, handles a person's steer before it finishes, and delivers its result once", async () => {
+    let finishTool!: (value: unknown) => void;
+    let toolStarted!: () => void;
+    let personAnswered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      toolStarted = resolve;
+    });
+    const answered = new Promise<void>((resolve) => {
+      personAnswered = resolve;
+    });
+    const toolResult = new Promise<unknown>((resolve) => {
+      finishTool = resolve;
+    });
+    const calls = vi.fn(async () => {
+      toolStarted();
+      return toolResult;
+    });
+    let steer = "";
+    let personEvents: AgentRuntimeEvent[] = [];
+    const server = await startModelEmulator({
+      steps: [
+        {
+          expect() {},
+          response: {
+            type: "tool",
+            id: "slow-write",
+            name: "write_file",
+            arguments: { path: "notes.txt", content: "hello" },
+          },
+        },
+        {
+          expect(request) {
+            expect(
+              request.messages.some((message) =>
+                JSON.stringify(message.content).includes("Use the revised scope"),
+              ),
+            ).toBe(true);
+            expect(latestToolResult(request)).toBeUndefined();
+          },
+          response: { type: "text", text: "I have the revised scope." },
+        },
+        {
+          expect(request) {
+            expect(request.messages.filter((message) => message.role === "tool")).toHaveLength(1);
+            expect(latestToolResult(request)).toMatchObject({ tool_call_id: "slow-write" });
+            expect(String(latestToolResult(request)?.content)).toContain("saved-once");
+          },
+          response: { type: "text", text: "The saved result is ready." },
+        },
+      ],
+    });
+    cleanups.push(() => server.close());
+    const runtime = new PiAgentRuntime();
+    const promote = vi.fn(
+      async (_tool: { name: string; executionId: string; durationMs: number }) => {
+        expect(steer).toBe("Use the revised scope");
+        // The API dispatch proof is thread-target.test.ts's tool_background case. Here Pi and
+        // both model streams stay real, proving the separate turn can finish mid-tool.
+        personEvents = await collect(
+          runtime.run(
+            runRequest(server.model, {
+              prompt: steer,
+              tools: [],
+            }),
+          ),
+        );
+        personAnswered();
+      },
+    );
+    const originalRequest = runRequest(server.model, { executeTool: calls, onSlowTool: promote });
+    const original = collect(runtime.run(originalRequest));
+    try {
+      await started;
+      steer = "Use the revised scope";
+      await answered;
+      expect(personEvents.at(-1)).toEqual({ type: "done", text: "I have the revised scope." });
+      expect(calls).toHaveBeenCalledOnce();
+      finishTool({ result: "saved-once" });
+      const events = await original;
+      server.assertComplete();
+      expect(promote).toHaveBeenCalledOnce();
+      expect(promote.mock.calls[0]?.[0]).toMatchObject({
+        name: "write_file",
+        executionId: JSON.stringify(["pi-tool", "main", "slow-write"]),
+        durationMs: expect.any(Number),
+      });
+      expect(promote.mock.calls[0]?.[0].durationMs).toBeGreaterThanOrEqual(10_000);
+      expect(calls).toHaveBeenCalledOnce();
+      expect(
+        events.filter(
+          (event) => event.type === "text" && event.text === "The saved result is ready.",
+        ),
+      ).toHaveLength(1);
+      expect(events.at(-1)).toEqual({ type: "done", text: "The saved result is ready." });
+    } finally {
+      const abort = runtime.abort(originalRequest.runId);
+      finishTool({ result: "saved-once" });
+      await original.catch(() => undefined);
+      await abort;
+    }
+  });
+
   it("retries a dropped stream and an overloaded provider after tool work without replaying the effect", async () => {
     const delay = vi.spyOn(Core, "abortableDelay").mockResolvedValue(undefined);
     try {

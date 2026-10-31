@@ -68,6 +68,7 @@ export function applyThreadSendReceipt(
     startedAt: null,
     completedAt: null,
     createdAt,
+    updatedAt: createdAt,
   };
   return { ...snapshot, run, activeRuns: [run] };
 }

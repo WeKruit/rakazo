@@ -8,6 +8,7 @@ export const RUN_TRIGGERS = [
   "spawn",
   "skill",
   "bot_message",
+  "tool_background",
   "webhook",
   "messaging",
   "cloud_agent",

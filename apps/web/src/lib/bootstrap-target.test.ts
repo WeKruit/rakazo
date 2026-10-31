@@ -41,7 +41,7 @@ describe("initial bootstrap target", () => {
     const bootstrap = await import("./bootstrap");
     bootstrap.retainInitialBootstrapForIdentity("user", "space");
     expect(await bootstrap.takeInitialBootstrap(undefined, "group-1")).toBe(current);
-    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ activeOnly: true, groupId: "group-1" });
   });
 
   it("does not consume another group's in-flight preload after navigation", async () => {
@@ -59,7 +59,7 @@ describe("initial bootstrap target", () => {
     const response = bootstrap.takeInitialBootstrap(undefined, "new-group");
     finish({ me: { userId: "user", spaceId: "space" }, thread: { groupId: "old-group" } });
     expect(await response).toBe(current);
-    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { groupId: "new-group" });
+    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { activeOnly: true, groupId: "new-group" });
   });
 
   it("rejects a retained group response after its authenticated identity is invalidated", async () => {
@@ -76,7 +76,7 @@ describe("initial bootstrap target", () => {
     bootstrap.invalidateInitialBootstrap();
     finish({ me: { userId: "user", spaceId: "space" }, thread: { groupId: "group-1" } });
     await expect(response).rejects.toThrow("Bootstrap identity changed");
-    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+    expect(bootstrapRpc).toHaveBeenCalledExactlyOnceWith({ activeOnly: true, groupId: "group-1" });
   });
 
   it.each([
@@ -89,7 +89,7 @@ describe("initial bootstrap target", () => {
     const bootstrap = await import("./bootstrap");
     bootstrap.retainInitialBootstrapForIdentity("user", "space");
     expect(await bootstrap.takeInitialBootstrap(undefined, "group-1")).toBe(current);
-    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { groupId: "group-1" });
+    expect(bootstrapRpc).toHaveBeenNthCalledWith(2, { activeOnly: true, groupId: "group-1" });
   });
 
   it.each([

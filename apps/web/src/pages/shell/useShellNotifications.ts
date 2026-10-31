@@ -69,33 +69,61 @@ export function useShellNotifications({
     },
     [markBotRead],
   );
-  const deliverBrowserNotification = useCallback((pending: PendingBrowserNotification): boolean => {
-    const currentBot = botsRef.current.find((bot) => bot.id === pending.botId);
-    if (!currentBot || typeof Notification === "undefined") return true;
-    const result = deliverNativeBrowserNotification(
-      pending.event,
-      currentBot.name || pending.botName,
-      {
-        enabled: pending.groupNotification || currentBot.notifyOnFinish,
-        pageVisible: document.visibilityState === "visible",
-        windowFocused: document.hasFocus(),
-        permission: Notification.permission,
-        notifiedEventIds: notifiedBrowserEvents.current,
-        show: (title, body, tag) => new Notification(title, { body, tag }),
-        shownAt: browserNotificationShownAt.current,
-      },
-    );
-    return result !== "pending";
-  }, []);
-  const flushPendingBrowserNotifications = useCallback(() => {
+  const deliveringBrowserEvents = useRef(new Set<string>());
+  const deliverBrowserNotification = useCallback(
+    async (pending: PendingBrowserNotification): Promise<boolean> => {
+      const currentBot = botsRef.current.find((bot) => bot.id === pending.botId);
+      if (!currentBot || typeof Notification === "undefined") return true;
+      if (Notification.permission === "default") return false;
+      if (
+        Notification.permission === "denied" ||
+        !(pending.groupNotification || currentBot.notifyOnFinish)
+      )
+        return true;
+      if (document.visibilityState === "visible" && document.hasFocus()) return true;
+      if (deliveringBrowserEvents.current.has(pending.event.id)) return true;
+      deliveringBrowserEvents.current.add(pending.event.id);
+      try {
+        // The server reservation survives reconnects and is shared with other tabs and phones.
+        const { allowed } = await rpc.notifications.claimBrowser({
+          threadId: pending.event.threadId,
+          eventId: pending.event.id,
+        });
+        if (!allowed) return true;
+        const result = deliverNativeBrowserNotification(
+          pending.event,
+          currentBot.name || pending.botName,
+          {
+            enabled: pending.groupNotification || currentBot.notifyOnFinish,
+            pageVisible: document.visibilityState === "visible",
+            windowFocused: document.hasFocus(),
+            permission: Notification.permission,
+            notifiedEventIds: notifiedBrowserEvents.current,
+            show: (title, body, tag) => new Notification(title, { body, tag }),
+            shownAt: browserNotificationShownAt.current,
+          },
+        );
+        return result !== "pending";
+      } catch {
+        return false;
+      } finally {
+        deliveringBrowserEvents.current.delete(pending.event.id);
+      }
+    },
+    [],
+  );
+  const flushPendingBrowserNotifications = useCallback(async () => {
     for (const [threadId, pending] of pendingBrowserNotifications.current) {
-      if (deliverBrowserNotification(pending)) {
+      if (
+        (await deliverBrowserNotification(pending)) &&
+        pendingBrowserNotifications.current.get(threadId) === pending
+      ) {
         pendingBrowserNotifications.current.delete(threadId);
       }
     }
   }, [deliverBrowserNotification]);
   const notifyBrowserForEvent = useCallback(
-    (
+    async (
       event: Pick<ProductEvent, "id" | "type" | "threadId" | "seq" | "botId" | "payload">,
       subscribedThreadId: string | undefined,
       initialCursor: number,
@@ -127,7 +155,7 @@ export function useShellNotifications({
         pendingBrowserNotifications.current.set(event.threadId, pending);
         return;
       }
-      if (deliverBrowserNotification(pending)) {
+      if (await deliverBrowserNotification(pending)) {
         pendingBrowserNotifications.current.delete(event.threadId);
       } else {
         pendingBrowserNotifications.current.set(event.threadId, pending);
@@ -135,6 +163,29 @@ export function useShellNotifications({
     },
     [deliverBrowserNotification],
   );
+
+  useEffect(() => {
+    // Mobile web must not suppress its own native phone notifications.
+    if (
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+    )
+      return;
+    const heartbeat = () => {
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        void rpc.notifications.desktopActivity().catch(() => undefined);
+      }
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 45_000);
+    window.addEventListener("focus", heartbeat);
+    document.addEventListener("visibilitychange", heartbeat);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", heartbeat);
+      document.removeEventListener("visibilitychange", heartbeat);
+    };
+  }, []);
 
   useEffect(() => {
     if (!active) return;

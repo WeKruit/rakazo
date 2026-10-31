@@ -2,7 +2,8 @@
 // Release regression on a live deployment: the live layers of the release gate. Unit tests and
 // prompt checks run before deploy (release script); this runs right after it, and a red result
 // rolls the release back. Each case starts its own test copy and never answers an approval card,
-// so nothing is sent, imported or booked.
+// except cards: it clicks every card in the web app, approving a send or booking only on the
+// internal fixtures (@wekruit.com recipients) and cancelling the booking it makes.
 //
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_ORIGIN=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
@@ -10,7 +11,10 @@
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
 //                  (which must end with a report stating the new count), pasted English JD
 //                  (needs <cases>/t3.txt), contacts (找contact twice and send-20 on a fresh first
-//                  ten of <cases>/t1.pdf, ending on the unanswered send card)
+//                  ten of <cases>/t1.pdf, ending on the unanswered send card). cards (full suite or --only cards; it searches, so it costs
+//                  money: card-e2e.mjs clicks question, send and booking cards
+//                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
+//                  {"sendGroup","sendRoleMark","bookingGroup"})
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
@@ -26,6 +30,24 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertFollowUpDelivery, replyAfterInput } from "./follow-up.mjs";
+import { checkNotificationPolicy } from "./notification-policy.mjs";
+import { checkReviewerGrading } from "./reviewer-grading.mjs";
+import { assertSlowToolPromotion } from "./slow-tool.mjs";
+import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
+import {
+  checkCardsAfterReconnect,
+  checkFailureRecoveryUi,
+  checkStageTranscript,
+  sendWithImmediateFeedback,
+  withConversationPage,
+} from "./workloop-browser.mjs";
+import {
+  assertCancelOneTask,
+  assertStopEverything,
+  assertStopKeepsBackground,
+  assertTestCopy,
+} from "./workloop-task-controls.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -221,8 +243,13 @@ function scaleReportChecks(messages, failures, scale) {
 const sendCard = (message) =>
   (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
 
+// A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
+const CONTACT_REPORT =
+  /[\w.+-]+@[\w-]+\.\w|(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
+
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
+  await assertTestCopy(rpc, groupId);
   const before = new Set((await messagesOf(groupId)).map((message) => message.id));
   const busy = await working(groupId);
   const sentAt = Date.now();
@@ -278,50 +305,6 @@ async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {})
   return messages;
 }
 
-// A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
-const CONTACT_REPORT =
-  /[\w.+-]+@[\w-]+\.\w|(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
-/** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. Never answers the card. */
-async function contactsAndSend(groupId, failures, name) {
-  const startedAt = new Date().toISOString();
-  const contacts = await say(groupId, "找contact");
-  if (!contacts.replies.length) failures.push("「找contact」 got no reply");
-  else if (!CONTACT_REPORT.test(recruiterSees(contacts.replies).map(botText).join("\n")))
-    failures.push("「找contact」 reply does not say who has an email");
-  const askedAgain = new Date().toISOString();
-  const again = await say(groupId, "找contact");
-  // A repeat shows the contacts already found first, then continues to the next people.
-  if (again.firstReply === null || again.firstReply > 60)
-    failures.push(
-      `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
-    );
-  else if (!CONTACT_REPORT.test(recruiterSees(again.replies).map(botText).join("\n")))
-    failures.push("repeat 「找contact」 reply does not say who has an email");
-  // Everyone was looked up a moment ago, so the repeat may not pay a source for anyone again.
-  const paid = (await readEvents(groupId).catch(() => []))
-    .filter(
-      (event) =>
-        event.type === "agent.tool.completed" &&
-        event.createdAt > askedAgain &&
-        event.payload?.lookup,
-    )
-    .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
-  if (paid) failures.push(`repeat 「找contact」 paid ${paid} source lookup(s) again`);
-  // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
-  const send = await say(groupId, "发20个人的先", {
-    until: (replies) => replies.some(sendCard),
-    limitMs: 8 * 60_000,
-  });
-  if (!send.replies.some(sendCard))
-    failures.push("「发20个人的先」 did not end on a send confirmation card");
-  // Tool calls and runs of these steps, kept before the end-of-run archive makes the chat unreadable.
-  const events = (await readEvents(groupId).catch(() => [])).filter(
-    (event) =>
-      event.createdAt > startedAt && /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type),
-  );
-  fs.writeFileSync(path.join(OUT, `${name}-contacts.events.json`), JSON.stringify(events, null, 1));
-}
-
 const results = [];
 async function stage(name, body) {
   const failures = [];
@@ -348,6 +331,7 @@ const wanted = new Set(
     (SUITE === "full"
       ? [
           "smoke",
+          "isolation",
           "first10",
           "progress",
           "t3",
@@ -355,527 +339,773 @@ const wanted = new Set(
           "t1",
           "dispatch",
           "ambiguous",
+          "cards",
           "t5",
           "expired",
         ]
-      : ["smoke", "first10", "progress", "t3", "contacts"]),
+      : ["smoke", "isolation", "first10", "progress", "t3", "contacts"]),
 );
 
-if (wanted.has("smoke"))
-  await stage("smoke", async (failures) => {
-    // Both hosts: pages, /health, /ready (revision when RAKAZO_EXPECT_SHA is set), rpc, sign-in.
-    const code = await run("smoke", "smoke.mjs", ["--wait", "60"]);
-    if (code !== 0) failures.push("smoke did not pass; see smoke.log");
-  });
-
-if (wanted.has("first10"))
-  await stage("first10", async (failures) => {
-    const code = await run("first10", "first10-suite.mjs", [
-      "--only",
-      "short",
-      "--out",
-      path.join(OUT, "first10"),
-    ]);
-    if (code !== 0) failures.push("first10 (short JD) did not pass; see first10/summary.md");
-  });
-
-if (wanted.has("progress"))
-  await stage("progress", async (failures) => {
-    // find-50 on the built-in role; a progress question is sent while it scales.
-    const out = path.join(OUT, "progress.json");
-    const finding = run("progress", "recruiting-latency.mjs", [
-      "--target",
-      "50",
-      "--out",
-      out,
-      "--keep",
-    ]);
-    let asked = false;
-    let exit;
-    finding.then((code) => {
-      exit = code;
-    });
-    while (exit === undefined) {
-      await sleep(2_000);
-      // The latency harness rewrites its report while running; a half-written file is read again.
-      let report = null;
-      try {
-        report = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
-      } catch {
-        continue;
-      }
-      if (asked || !report?.groupId || !report.milestones?.scale_sent) continue;
-      if (!(await working(report.groupId))) continue;
-      asked = true;
-      const before = new Set((await messagesOf(report.groupId)).map((message) => message.id));
-      const sentAt = Date.now();
-      await rpc("threads/send", {
-        groupId: report.groupId,
-        addressing: "coordinator",
-        text: "进度怎么样了",
-        interrupt: true,
-      });
-      let answer;
-      while (!answer && Date.now() - sentAt < 15_000) {
-        await sleep(500);
-        answer = (await messagesOf(report.groupId)).find(
-          (message) =>
-            !before.has(message.id) &&
-            message.role !== "user" &&
-            /^Still working:/.test(botText(message)),
-        );
-      }
-      const seconds = (Date.now() - sentAt) / 1000;
-      if (!answer) failures.push("no progress answer within 15 s");
-      else if (seconds > 3) failures.push(`progress answer took ${seconds.toFixed(1)} s (limit 3)`);
-    }
-    if (!asked) failures.push("the search finished before a progress question could be sent");
-    if (exit !== 0)
-      failures.push("find-50 did not pass after the progress question; see progress.log");
-    const report = reportOf("progress");
-    if (report.groupId) {
-      const messages = await settled(report.groupId);
-      commonChecks(messages, failures);
-      scaleReportChecks(messages, failures, report.milestones?.scale_sent);
-    }
-  });
-
-if (wanted.has("t3"))
-  await stage("t3", async (failures) => {
-    const jd = CASES && path.join(CASES, "t3.txt");
-    if (!jd || !fs.existsSync(jd)) return failures.push("missing <cases>/t3.txt");
-    const code = await run("t3", "recruiting-latency.mjs", [
-      "--jd",
-      jd,
-      "--skip-scale",
-      "--keep",
-      "--out",
-      path.join(OUT, "t3.json"),
-    ]);
-    if (code !== 0) failures.push("first ten did not pass; see t3.log");
-    const messages = await settled(reportOf("t3").groupId);
-    commonChecks(messages, failures);
-    tenChecks(messages, failures);
-    const text = fs.readFileSync(jd, "utf8");
-    const statesYears =
-      /\d+\s*\+?\s*(?:(?:-|–|to)\s*\d+\s*\+?\s*)?(?:years?|yrs?)\b|\d+\s*年/i.test(text);
-    if (!statesYears && !cards(messages).some((card) => /years?/i.test(card.text ?? "")))
-      failures.push("JD states no years, and no question asked for a years range");
-  });
-
-if (wanted.has("first10-long"))
-  await stage("first10-long", async (failures) => {
-    const code = await run("first10-long", "first10-suite.mjs", [
-      "--only",
-      "long",
-      "--out",
-      path.join(OUT, "first10-long"),
-    ]);
-    if (code !== 0) failures.push("first10 (long JD) did not pass; see first10-long/summary.md");
-  });
-
-// The contact and send steps of t1 on a fresh first ten, short enough for every release: the
-// first ten of the attached JD, then 找contact twice and 发20个人的先 up to the send card.
-if (wanted.has("contacts"))
-  await stage("contacts", async (failures) => {
-    const pdf = CASES && path.join(CASES, "t1.pdf");
-    if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
-    const code = await run("contacts", "recruiting-latency.mjs", [
-      "--jd-file",
-      pdf,
-      "--skip-scale",
-      "--keep",
-      "--out",
-      path.join(OUT, "contacts.json"),
-    ]);
-    // The first ten's own timing is the first10 case's; here it only has to leave people to contact.
-    const report = fs.existsSync(path.join(OUT, "contacts.json")) ? reportOf("contacts") : {};
-    if (!report.groupId || !report.rounds?.[0]?.count)
-      return failures.push(`no first ten to contact (exit ${code}); see contacts.log`);
-    const groupId = report.groupId;
-    await settled(groupId);
-    await contactsAndSend(groupId, failures, "contacts");
-    const transcript = (await messagesOf(groupId))
-      .map((message) => `[${message.role}] ${botText(message)}`)
-      .join("\n\n");
-    fs.writeFileSync(path.join(OUT, "contacts-chat.txt"), `${transcript}\n`);
-    commonChecks(await messagesOf(groupId), failures);
-  });
-
-if (wanted.has("t1"))
-  await stage("t1", async (failures) => {
-    const pdf = CASES && path.join(CASES, "t1.pdf");
-    if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
-    const code = await run("t1", "recruiting-latency.mjs", [
-      "--jd-file",
-      pdf,
-      "--target",
-      "50",
-      "--scale-text",
-      "lets find 50 ",
-      "--keep",
-      "--out",
-      path.join(OUT, "t1.json"),
-    ]);
-    if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
-    const groupId = reportOf("t1").groupId;
-    // The scale message goes in right after the ten, so no next-step card is expected here, and
-    // the scale-out ends with its own report.
-    const scaled = await settled(groupId);
-    tenChecks(scaled, failures, { card: false });
-    scaleReportChecks(scaled, failures, reportOf("t1").milestones?.scale_sent);
-    const draft = await say(groupId, "来个campign draft看看", {
-      until: (replies) =>
-        (replies
-          .map(botText)
-          .join("\n")
-          .match(/subject:/gi)?.length ?? 0) >= 3,
-      limitMs: 8 * 60_000,
-    });
-    const drafted = recruiterSees(draft.replies).map(botText).join("\n");
-    fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
-    if (/\{\{\s*\w+\s*\}\}/.test(drafted))
-      failures.push("campaign draft in chat shows {{variables}}");
-    if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
-      failures.push("campaign draft is not three emails shown in chat");
-    if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
-    await contactsAndSend(groupId, failures, "t1");
-    const transcript = (await messagesOf(groupId))
-      .map((message) => `[${message.role}] ${botText(message)}`)
-      .join("\n\n");
-    fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
-    commonChecks(await messagesOf(groupId), failures);
-  });
-
-// Each ask names a specialist capability; the coordinator must get it done by the member who has
-// it (or do it itself), never decline. Cards are left unanswered, so nothing is sent or booked.
-const DISPATCH = [
-  { ask: "再找20个人", owners: /sourc|main/i, capability: "search and scale" },
-  { ask: "帮我找前5个人的邮箱", owners: /outreach/i, capability: "contact lookup" },
-  // Asked again: everyone was already looked up, so no source may be paid for them again.
-  {
-    ask: "前5个人的contact",
-    owners: /outreach|main/i,
-    capability: "repeat contact lookup",
-    repeatLookup: true,
-  },
-  { ask: "给第一个人写一封邮件草稿", owners: /outreach/i, capability: "email draft" },
-  // A one-person send right after the draft ends on its confirmation card, never a decline.
-  {
-    ask: "send this email to them",
-    owners: /outreach/i,
-    capability: "send confirmation",
-    sendCard: true,
-  },
-  { ask: "下周二我有哪些时间可以面试", owners: /schedul/i, capability: "availability" },
-  { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
-  { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
-];
-/** Every event of a thread so far, from the replay of its event stream. */
-async function readEvents(groupId) {
-  const controller = new AbortController();
-  let idle = setTimeout(() => controller.abort(), 15_000);
-  const events = [];
-  try {
-    if (EMAIL && !cookie) await signIn();
-    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "text/event-stream",
-        origin: ORIGIN,
-        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
-      },
-      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // The replay arrives at once; a quiet stream means it has caught up.
-      clearTimeout(idle);
-      idle = setTimeout(() => controller.abort(), 3_000);
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        try {
-          const data = JSON.parse(line.slice(5));
-          events.push(data.json ?? data);
-        } catch {}
-      }
-    }
-  } catch (error) {
-    if (error.name !== "AbortError") throw error;
-  } finally {
-    clearTimeout(idle);
-  }
-  return events;
-}
-const DECLINED =
-  /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
-// Offering the work back instead of doing it; the server retries these once, so one left in a
-// reply means the retry did not take.
-const DEFERRED =
-  /\b(?:do you want|would you like|want) me to\b|\bshall I\b|要不要我|是否需要我|需要你先/i;
-
-// What each step's messages and runs looked like, kept before the end-of-run archive: block kinds
-// and text lengths only, so a silent or hidden reply can be told apart from a cut-off run.
-const traceOf = (events, replies) => ({
-  events: events.filter((event) => /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type)),
-  messages: replies.map((message) => ({
-    id: message.id,
-    role: message.role,
-    botId: message.botId,
-    internal: Boolean(message.internal),
-    createdAt: message.createdAt,
-    blocks: (message.blocks ?? []).map((block) => ({
-      kind: block.kind,
-      text: (block.text ?? block.question ?? "").length,
-      ...(block.status ? { status: block.status } : {}),
-    })),
-  })),
-});
-
-if (wanted.has("dispatch"))
-  await stage("dispatch", async (failures) => {
-    const groupId =
-      option("--dispatch-group") ?? (wanted.has("t1") ? reportOf("t1").groupId : undefined);
-    if (!groupId) return failures.push("pass --dispatch-group or run t1 first");
-    const { members } = await rpc("groups/get", { groupId });
-    const nameOf = new Map(members.map((member) => [member.botId, member.name ?? ""]));
-    const notes = [];
-    const steps = [];
-    for (const item of DISPATCH) {
-      const askedAt = new Date().toISOString();
-      const { replies } = await say(groupId, item.ask, {
-        quietMs: 45_000,
-        limitMs: 6 * 60_000,
-        ...(item.sendCard ? { until: (replies) => replies.some(sendCard) } : {}),
-      });
-      if (item.sendCard && !replies.some(sendCard))
-        failures.push(`${item.capability}: did not end on a send confirmation card`);
-      if (item.repeatLookup) {
-        // Everyone was already looked up, so no lookup in this turn may pay a source again.
-        const paid = (await readEvents(groupId))
-          .filter(
-            (event) =>
-              event.type === "agent.tool.completed" &&
-              event.createdAt > askedAt &&
-              event.payload?.lookup,
-          )
-          .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
-        if (paid) failures.push(`${item.capability}: paid ${paid} source lookup(s) again`);
-      }
-      const handlers = new Set(
-        replies.flatMap((message) => [
-          nameOf.get(message.botId) ?? "",
-          ...(message.blocks ?? [])
-            .filter((block) => block.kind === "handoff")
-            .map((block) => nameOf.get(block.toBotId) ?? ""),
-        ]),
-      );
-      const text = recruiterSees(replies).map(botText).join("\n");
-      notes.push(
-        `## ${item.capability}: ${item.ask}\nhandled by: ${[...handlers].filter(Boolean).join(", ")}\n${text}`,
-      );
-      if (!replies.length) failures.push(`${item.capability}: no reply`);
-      else if (![...handlers].some((name) => item.owners.test(name)))
-        failures.push(
-          `${item.capability}: not handled by the member who can (${[...handlers].filter(Boolean).join(", ") || "nobody"})`,
-        );
-      const said = recruiterSees(replies).map(ownWords).join("\n");
-      const declined = said.match(DECLINED);
-      if (declined)
-        failures.push(
-          `${item.capability}: declined "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
-        );
-      commonChecks(replies, failures);
-      // Each step's tool calls, kept before the end-of-run archive makes the group unreadable.
-      steps.push({
-        capability: item.capability,
-        ask: item.ask,
-        ...traceOf(
-          (await readEvents(groupId).catch(() => [])).filter((event) => event.createdAt > askedAt),
-          replies,
-        ),
-      });
-    }
-    fs.writeFileSync(path.join(OUT, "dispatch.txt"), `${notes.join("\n\n")}\n`);
-    fs.writeFileSync(path.join(OUT, "dispatch.events.json"), JSON.stringify(steps, null, 1));
-  });
-
-// Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
-// the action's own card) or exactly one question card, never a decline or an offer to do it.
-// Cards are left unanswered, so nothing is sent or booked.
-// "clarify": who, what or when is open, so the turn must end on one card: a question with
-// options, or the send/booking card naming exact recipients. The rest may act on a stated
-// reading or ask. A card's own question may say why it asks; only the reply's words are checked
-// for a refusal.
-const AMBIGUOUS = [
-  { ask: "发一下", clarify: true },
-  { ask: "约一下他", clarify: true },
-  { ask: "这个人怎么样" },
-  { ask: "处理一下前几个" },
-  { ask: "contact" },
-  { ask: "再来点" },
-  { ask: "改一下邮件", clarify: true },
-];
-if (wanted.has("ambiguous"))
-  await stage("ambiguous", async (failures) => {
-    const groupId =
-      option("--ambiguous-group") ??
-      option("--dispatch-group") ??
-      (wanted.has("t1") ? reportOf("t1").groupId : undefined);
-    if (!groupId) return failures.push("pass --ambiguous-group or run t1 first");
-    const notes = [];
-    const steps = [];
-    for (const { ask, clarify } of AMBIGUOUS) {
-      const askedAt = new Date().toISOString();
-      const { replies } = await say(groupId, ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
-      const allEvents = (await readEvents(groupId).catch(() => [])).filter(
-        (event) => event.createdAt > askedAt,
-      );
-      const events = allEvents.filter((event) => event.type.startsWith("agent.tool."));
-      const acted =
-        events.some((event) => event.type === "agent.tool.completed") ||
-        replies.some((message) => (message.blocks ?? []).some((block) => block.kind === "handoff"));
-      const asks = cards(recruiterSees(replies));
-      const text = recruiterSees(replies).map(botText).join("\n");
-      notes.push(`## ${ask}\ntools: ${events.length}, cards: ${asks.length}\n${text}`);
-      if (!replies.length) failures.push(`「${ask}」: no reply`);
-      else if (!text.trim() && !asks.length)
-        failures.push(`「${ask}」: ended with nothing the recruiter can see`);
-      else if (clarify && asks.length !== 1)
-        failures.push(
-          `「${ask}」: unclear request ended on ${asks.length} cards (want one question)`,
-        );
-      else if (!acted && asks.length !== 1)
-        failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
-      const said = recruiterSees(replies).map(ownWords).join("\n");
-      const declined = said.match(DECLINED) ?? said.match(DEFERRED);
-      if (declined)
-        failures.push(
-          `「${ask}」: declined or deferred "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
-        );
-      commonChecks(replies, failures);
-      steps.push({ ask, ...traceOf(allEvents, replies) });
-    }
-    fs.writeFileSync(path.join(OUT, "ambiguous.txt"), `${notes.join("\n\n")}\n`);
-    fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
-  });
-
-if (wanted.has("t5"))
-  await stage("t5", async (failures) => {
-    // <cases>/t5.json ({"groupId","say"}) names a private test chat that already has a candidate reply.
-    const file = CASES && path.join(CASES, "t5.json");
-    const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
-    const groupId = option("--t5-group") ?? saved.groupId;
-    const text = option("--t5-say") ?? saved.say;
-    if (!groupId || !text)
-      return failures.push(
-        "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
-      );
-    const { replies } = await say(groupId, text);
-    fs.writeFileSync(path.join(OUT, "t5-replies.txt"), `${replies.map(botText).join("\n")}\n`);
-    const card = cards(replies).find((block) => block.approvalEffectId);
-    if (!card) failures.push("no booking confirmation card");
-    else if (!/confirm interview booking/i.test(card.text ?? ""))
-      failures.push(`card text: "${card.text}"`);
-    commonChecks(replies, failures);
-  });
-
-if (wanted.has("expired"))
-  await stage("expired", async (failures) => {
-    // <cases>/expired.json ({"groupId"}) names a private test chat whose question card expired.
-    // Answering it must start the work like any message: the card shows the answer, the answer
-    // replies to the card, a reply follows, and the question is not asked again.
-    const file = CASES && path.join(CASES, "expired.json");
-    const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
-    const groupId = option("--expired-group") ?? saved.groupId;
-    if (!groupId)
-      return failures.push(
-        "pass --expired-group, or <cases>/expired.json, for the expired card case",
-      );
-    const before = await messagesOf(groupId);
-    // Approval, secret and connection cards are never answered here.
-    const card = before.findLast((message) =>
-      (message.blocks ?? []).some(
-        (block) =>
-          block.kind === "ask" &&
-          block.status === "expired" &&
-          !block.approvalEffectId &&
-          block.input !== "secret" &&
-          !block.connection &&
-          !block.requestedSchema &&
-          block.actions?.length,
-      ),
-    );
-    if (!card) return failures.push("no expired question card with choices in the test chat");
-    const ask = card.blocks.find((block) => block.kind === "ask" && block.status === "expired");
-    const choice = ask.actions[0];
-    const seen = new Set(before.map((message) => message.id));
-    await rpc("threads/answer", {
-      groupId,
-      runId: card.runId,
-      messageId: card.id,
-      answer: choice.id,
-    });
-    const messages = await settled(groupId, { quietMs: 30_000, limitMs: 10 * 60_000 });
-    const added = messages.filter((message) => !seen.has(message.id));
-    const answered = messages
-      .find((message) => message.id === card.id)
-      ?.blocks?.find((block) => block.kind === "ask");
-    if (answered?.status !== "answered" || answered.answer !== choice.id)
-      failures.push(`card not shown answered (${answered?.status ?? "missing"})`);
-    const sent = added.filter((message) => message.role === "user");
-    if (sent.length !== 1 || botText(sent[0]) !== choice.label)
-      failures.push(`answer not sent once as "${choice.label}" (${sent.length} messages)`);
-    else if (sent[0].replyToMessageId !== card.id)
-      failures.push("answer does not reply to the card");
-    const replies = recruiterSees(added);
-    if (!replies.some((message) => botText(message).trim()))
-      failures.push("no reply after the answer");
-    if (cards(added).some((block) => block.text === ask.text))
-      failures.push(`asked again: "${ask.text.slice(0, 80)}"`);
-    const notice = added.find((message) => message.role === "system" && !message.internal);
-    if (notice) failures.push(`status line after the answer: "${botText(notice).slice(0, 80)}"`);
-    commonChecks(added, failures);
-  });
-
-const passed = results.every((result) => result.pass);
-const summary = [
-  `# Regression ${passed ? "PASS" : "FAIL"} (${SUITE}, ${Math.round((Date.now() - started) / 60_000)} min)`,
-  "",
-  ...results.map(
-    (result) =>
-      `- ${result.pass ? "PASS" : "FAIL"} ${result.name} (${result.seconds} s)${result.failures.map((failure) => `\n  - ${failure}`).join("")}`,
-  ),
-].join("\n");
-fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
-log(summary);
-// The copies this run made leave the sidebar now that their checks are done.
-for (const name of ["progress", "t3", "contacts", "t1"]) {
-  if (!fs.existsSync(path.join(OUT, `${name}.json`))) continue;
-  const { groupId } = reportOf(name);
-  if (groupId) await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
-}
-// Sweep copies other harness runs left idle (a failed case may stop before archiving its own);
-// keep the booking fixture the t5 case reuses. Runs with a password sign-in too.
-{
+// Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
+// or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that
+// leaves an idle copy unarchived fails the run.
+async function cleanUp() {
   const t5 = CASES && path.join(CASES, "t5.json");
   const keep =
     option("--t5-group") ??
     (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
-  await run("archive-copies", "archive-test-copies.mjs", [
+  for (const file of fs.existsSync(OUT) ? fs.readdirSync(OUT) : []) {
+    if (!file.endsWith(".json")) continue;
+    let groupId;
+    try {
+      groupId = JSON.parse(fs.readFileSync(path.join(OUT, file), "utf8")).groupId;
+    } catch {
+      continue;
+    }
+    if (typeof groupId === "string" && groupId && groupId !== keep)
+      await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
+  }
+  const code = await run("archive-copies", "archive-test-copies.mjs", [
     "--idle-hours",
     "2",
     ...(keep ? ["--keep", keep] : []),
   ]);
+  if (code !== 0) {
+    passed = false;
+    log("archive-copies: FAIL (idle test copies left unarchived; see archive-copies.log)");
+  }
+}
+
+let passed = false;
+try {
+  if (wanted.has("smoke"))
+    await stage("smoke", async (failures) => {
+      // Both hosts: pages, /health, /ready (revision when RAKAZO_EXPECT_SHA is set), rpc, sign-in.
+      const code = await run("smoke", "smoke.mjs", ["--wait", "60"]);
+      if (code !== 0) failures.push("smoke did not pass; see smoke.log");
+    });
+
+  if (wanted.has("isolation"))
+    await stage("isolation", async (failures) => {
+      const code = await run("isolation", "account-isolation.mjs", [
+        "--out",
+        path.join(OUT, "isolation.json"),
+      ]);
+      if (code !== 0) failures.push("account isolation did not pass; see isolation.log");
+    });
+
+  if (wanted.has("first10"))
+    await stage("first10", async (failures) => {
+      const code = await run("first10", "first10-suite.mjs", [
+        "--only",
+        "short",
+        "--out",
+        path.join(OUT, "first10"),
+      ]);
+      if (code !== 0) failures.push("first10 (short JD) did not pass; see first10/summary.md");
+    });
+
+  if (wanted.has("progress"))
+    await stage("progress", async (failures) => {
+      // find-50 on the built-in role; a progress question is sent while it scales.
+      const out = path.join(OUT, "progress.json");
+      const finding = run("progress", "recruiting-latency.mjs", [
+        "--target",
+        "50",
+        "--out",
+        out,
+        "--keep",
+      ]);
+      let asked = false;
+      let stoppedCurrent = false;
+      let exit;
+      finding.then((code) => {
+        exit = code;
+      });
+      while (exit === undefined) {
+        await sleep(2_000);
+        // The latency harness rewrites its report while running; a half-written file is read again.
+        let report = null;
+        try {
+          report = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
+        } catch {
+          continue;
+        }
+        if (!report?.groupId || !report.milestones?.scale_sent) continue;
+        if (
+          asked &&
+          !stoppedCurrent &&
+          (await rpc("threads/backgroundTasks", { groupId: report.groupId })).length
+        ) {
+          await assertStopKeepsBackground(rpc, report.groupId);
+          stoppedCurrent = true;
+        }
+        if (asked) continue;
+        if (!(await working(report.groupId))) continue;
+        asked = true;
+        const before = new Set((await messagesOf(report.groupId)).map((message) => message.id));
+        const sentAt = Date.now();
+        await rpc("threads/send", {
+          groupId: report.groupId,
+          addressing: "coordinator",
+          text: "进度怎么样了",
+          interrupt: true,
+        });
+        let answer;
+        while (!answer && Date.now() - sentAt < 15_000) {
+          await sleep(500);
+          answer = (await messagesOf(report.groupId)).find(
+            (message) =>
+              !before.has(message.id) &&
+              message.role !== "user" &&
+              /^Still working:/.test(botText(message)),
+          );
+        }
+        const seconds = (Date.now() - sentAt) / 1000;
+        if (!answer) failures.push("no progress answer within 15 s");
+        else if (seconds > 3)
+          failures.push(`progress answer took ${seconds.toFixed(1)} s (limit 3)`);
+      }
+      if (!asked) failures.push("the search finished before a progress question could be sent");
+      if (!stoppedCurrent)
+        failures.push("Stop mid-search was not exercised against running background work");
+      if (exit !== 0)
+        failures.push("find-50 did not pass after the progress question; see progress.log");
+      const report = reportOf("progress");
+      if (report.groupId) {
+        const messages = await settled(report.groupId);
+        commonChecks(messages, failures);
+        scaleReportChecks(messages, failures, report.milestones?.scale_sent);
+        checkToolTiming(messages);
+        checkBackgroundTiming(await rpc("threads/get", { groupId: report.groupId }));
+        const grading = await checkReviewerGrading(rpc, report.groupId, readEvents);
+        fs.writeFileSync(path.join(OUT, "progress-reviewer.json"), JSON.stringify(grading));
+        const events = await readEvents(report.groupId);
+        const event = events.find(
+          (event) => event.type === "thread.message.created" && event.payload?.role === "bot",
+        );
+        if (!event) failures.push("notification regression needs a real bot reply event");
+        else await checkNotificationPolicy(rpc, { threadId: event.threadId, eventId: event.id });
+      }
+    });
+
+  if (wanted.has("t3"))
+    await stage("t3", async (failures) => {
+      const jd = CASES && path.join(CASES, "t3.txt");
+      if (!jd || !fs.existsSync(jd)) return failures.push("missing <cases>/t3.txt");
+      const code = await run("t3", "recruiting-latency.mjs", [
+        "--jd",
+        jd,
+        "--skip-scale",
+        "--keep",
+        "--out",
+        path.join(OUT, "t3.json"),
+      ]);
+      if (code !== 0) failures.push("first ten did not pass; see t3.log");
+      const messages = await settled(reportOf("t3").groupId);
+      commonChecks(messages, failures);
+      tenChecks(messages, failures);
+      const text = fs.readFileSync(jd, "utf8");
+      const statesYears =
+        /\d+\s*\+?\s*(?:(?:-|–|to)\s*\d+\s*\+?\s*)?(?:years?|yrs?)\b|\d+\s*年/i.test(text);
+      if (!statesYears && !cards(messages).some((card) => /years?/i.test(card.text ?? "")))
+        failures.push("JD states no years, and no question asked for a years range");
+    });
+
+  if (wanted.has("first10-long"))
+    await stage("first10-long", async (failures) => {
+      const code = await run("first10-long", "first10-suite.mjs", [
+        "--only",
+        "long",
+        "--out",
+        path.join(OUT, "first10-long"),
+      ]);
+      if (code !== 0) failures.push("first10 (long JD) did not pass; see first10-long/summary.md");
+    });
+
+  // The contact and send steps on a fresh first ten, short enough for every release: 找contact,
+  // 找contact again and 发20个人的先 up to the send card, which is never answered.
+  if (wanted.has("contacts"))
+    await stage("contacts", async (failures) => {
+      const pdf = CASES && path.join(CASES, "t1.pdf");
+      if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
+      const code = await run("contacts", "recruiting-latency.mjs", [
+        "--jd-file",
+        pdf,
+        "--skip-scale",
+        "--keep",
+        "--out",
+        path.join(OUT, "contacts.json"),
+      ]);
+      // The first ten's own timing is the first10 case's; here it only has to leave people to contact.
+      const report = fs.existsSync(path.join(OUT, "contacts.json")) ? reportOf("contacts") : {};
+      if (!report.groupId || !report.rounds?.[0]?.count)
+        return failures.push(`no first ten to contact (exit ${code}); see contacts.log`);
+      const groupId = report.groupId;
+      await settled(groupId);
+      await contactsAndSend(groupId, failures);
+      const transcript = (await messagesOf(groupId))
+        .map((message) => `[${message.role}] ${botText(message)}`)
+        .join("\n\n");
+      fs.writeFileSync(path.join(OUT, "contacts-chat.txt"), `${transcript}\n`);
+      commonChecks(await messagesOf(groupId), failures);
+    });
+
+  if (wanted.has("t1"))
+    await stage("t1", async (failures) => {
+      const pdf = CASES && path.join(CASES, "t1.pdf");
+      if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
+      const code = await run("t1", "recruiting-latency.mjs", [
+        "--jd-file",
+        pdf,
+        "--target",
+        "50",
+        "--scale-text",
+        "lets find 50 ",
+        "--keep",
+        "--out",
+        path.join(OUT, "t1.json"),
+      ]);
+      if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
+      const groupId = reportOf("t1").groupId;
+      // The scale message goes in right after the ten, so no next-step card is expected here, and
+      // the scale-out ends with its own report.
+      const scaled = await settled(groupId);
+      tenChecks(scaled, failures, { card: false });
+      scaleReportChecks(scaled, failures, reportOf("t1").milestones?.scale_sent);
+      const draft = await say(groupId, "来个campign draft看看", {
+        until: (replies) =>
+          (replies
+            .map(botText)
+            .join("\n")
+            .match(/subject:/gi)?.length ?? 0) >= 3,
+        limitMs: 8 * 60_000,
+      });
+      const drafted = recruiterSees(draft.replies).map(botText).join("\n");
+      fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
+      if (/\{\{\s*\w+\s*\}\}/.test(drafted))
+        failures.push("campaign draft in chat shows {{variables}}");
+      if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
+        failures.push("campaign draft is not three emails shown in chat");
+      if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
+      await withConversationPage(
+        { rpc, origin: ORIGIN, cookie, token: TOKEN, groupId },
+        async (page) => {
+          const lookup = await rpc("threads/send", {
+            groupId,
+            addressing: "coordinator",
+            text: "找contact",
+          });
+          const lookupMessage = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === lookup.seq,
+          );
+          if (!lookupMessage) throw new Error("lookup source message was not persisted");
+          const toolWaitAt = Date.now();
+          let activePromotion;
+          while (!activePromotion && Date.now() - toolWaitAt < 45_000) {
+            const events = await readEvents(groupId, {
+              limitMs: Math.min(15_000, 45_000 - (Date.now() - toolWaitAt)),
+            });
+            const source = events.find(
+              (event) =>
+                event.type === "thread.message.created" &&
+                event.payload?.role === "user" &&
+                event.payload?.messageId === lookupMessage.id,
+            );
+            if (!source) throw new Error("lookup source event was not persisted");
+            // Include native delegated peers, but never an old tool from before this lookup.
+            activePromotion = events.find(
+              (event) =>
+                event.type === "run.started" &&
+                event.seq > source.seq &&
+                event.payload?.backgrounded === true &&
+                event.payload?.trigger === "tool_background" &&
+                events.some(
+                  (called) =>
+                    called.type === "agent.tool.called" &&
+                    called.seq > source.seq &&
+                    called.runId === event.runId &&
+                    called.payload?.executionId === event.payload.executionId,
+                ) &&
+                !events.some(
+                  (done) =>
+                    done.type === "agent.tool.completed" &&
+                    done.runId === event.runId &&
+                    done.payload?.executionId === event.payload.executionId,
+                ),
+            );
+            if (!activePromotion)
+              await sleep(Math.max(0, Math.min(500, 45_000 - (Date.now() - toolWaitAt))));
+          }
+          if (!activePromotion)
+            throw new Error(
+              "slow-tool regression was not exercised: no new promoted lookup tool remained active before the repeat",
+            );
+          const repeated = await sendWithImmediateFeedback(page, "找contact");
+          const snapshot = await rpc("threads/get", { groupId });
+          const previous = (snapshot.activeRuns ?? []).find((run) =>
+            ["user", "follow_up", "resume"].includes(run.trigger),
+          );
+          if (!previous)
+            throw new Error("follow_up regression needs the person's current reply still running");
+          const followText = "等当前回复说完，再用一句话总结本次联系人查找结果；不要再搜索或查找。";
+          const follow = await sendWithImmediateFeedback(page, followText, {
+            queueMode: "follow_up",
+          });
+          let firstReply = null;
+          while (Date.now() - repeated.startedAt < 60_000 && firstReply === null) {
+            const events = await readEvents(groupId);
+            const reply = replyAfterInput(events, await messagesOf(groupId), repeated.receipt.seq);
+            if (reply && Date.parse(reply.createdAt) - repeated.startedAt < 60_000)
+              firstReply = Math.max(0, Date.parse(reply.createdAt) - repeated.startedAt);
+            else await sleep(500);
+          }
+          if (firstReply === null)
+            throw new Error("repeat 找contact received no visible reply within 60 seconds");
+          fs.writeFileSync(
+            path.join(OUT, "t1-feedback.json"),
+            JSON.stringify({ feedbackMs: repeated.feedbackMs, firstReplyMs: firstReply }),
+          );
+          await settled(groupId);
+          const delayed = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === follow.receipt.seq,
+          );
+          if (!delayed) throw new Error("follow_up message was not persisted");
+          const completedEvents = await readEvents(groupId);
+          assertFollowUpDelivery(completedEvents, delayed.id, follow.receipt.runId);
+          const repeatedMessage = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === repeated.receipt.seq,
+          );
+          if (!repeatedMessage) throw new Error("repeat contact message was not persisted");
+          const promotion = assertSlowToolPromotion(completedEvents, repeatedMessage.id);
+          fs.writeFileSync(path.join(OUT, "t1-slow-tool.json"), JSON.stringify(promotion));
+          await page.screenshot({ path: path.join(OUT, "t1-busy-feedback.png"), fullPage: true });
+        },
+      );
+      // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
+      const send = await say(groupId, "发20个人的先", {
+        until: (replies) => replies.some(sendCard),
+        limitMs: 8 * 60_000,
+      });
+      if (!send.replies.some(sendCard))
+        failures.push("「发20个人的先」 did not end on a send confirmation card");
+      await withConversationPage(
+        { rpc, origin: ORIGIN, cookie, token: TOKEN, groupId },
+        async (page) => {
+          await checkCardsAfterReconnect(rpc, page, groupId);
+          await checkStageTranscript(page);
+          const recovery = await checkFailureRecoveryUi(page, { rpc, groupId });
+          fs.writeFileSync(path.join(OUT, "t1-recovery.json"), JSON.stringify(recovery));
+          await page.screenshot({ path: path.join(OUT, "t1-card-deadlines.png"), fullPage: true });
+        },
+      );
+      const transcript = (await messagesOf(groupId))
+        .map((message) => `[${message.role}] ${botText(message)}`)
+        .join("\n\n");
+      fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
+      commonChecks(await messagesOf(groupId), failures);
+      const pendingTasks = await rpc("threads/backgroundTasks", { groupId });
+      const approvalRunId = send.replies.find(sendCard)?.runId;
+      const approvalTask = pendingTasks.find(
+        (task) => task.kind === "run" && task.id === approvalRunId,
+      );
+      if (!approvalTask)
+        failures.push(
+          "per-task cancellation was not exercised: the unanswered approval has no active native teammate task",
+        );
+      else await assertCancelOneTask(rpc, groupId, approvalTask.id);
+      await assertStopEverything(rpc, groupId);
+    });
+
+  // Each ask names a specialist capability; the coordinator must get it done by the member who has
+  // it (or do it itself), never decline. Cards are left unanswered, so nothing is sent or booked.
+  const DISPATCH = [
+    { ask: "再找20个人", owners: /sourc|main/i, capability: "search and scale" },
+    { ask: "帮我找前5个人的邮箱", owners: /outreach/i, capability: "contact lookup" },
+    // Asked again: everyone was already looked up, so no source may be paid for them again.
+    {
+      ask: "前5个人的contact",
+      owners: /outreach|main/i,
+      capability: "repeat contact lookup",
+      repeatLookup: true,
+    },
+    { ask: "给第一个人写一封邮件草稿", owners: /outreach/i, capability: "email draft" },
+    // A one-person send right after the draft ends on its confirmation card, never a decline.
+    {
+      ask: "send this email to them",
+      owners: /outreach/i,
+      capability: "send confirmation",
+      sendCard: true,
+    },
+    { ask: "下周二我有哪些时间可以面试", owners: /schedul/i, capability: "availability" },
+    { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
+    { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
+  ];
+  /** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. */
+  async function contactsAndSend(groupId, failures) {
+    const startedAt = new Date().toISOString();
+    const contacts = await say(groupId, "找contact");
+    if (!contacts.replies.length) failures.push("「找contact」 got no reply");
+    else if (!CONTACT_REPORT.test(recruiterSees(contacts.replies).map(botText).join("\n")))
+      failures.push("「找contact」 reply does not say who has an email");
+    const askedAgain = new Date().toISOString();
+    const again = await say(groupId, "找contact");
+    if (again.firstReply === null || again.firstReply > 60)
+      failures.push(
+        `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
+      );
+    else if (!CONTACT_REPORT.test(recruiterSees(again.replies).map(botText).join("\n")))
+      failures.push("repeat 「找contact」 reply does not say who has an email");
+    const events = await readEvents(groupId).catch(() => []);
+    // Everyone was looked up a moment ago, so the repeat may not pay a source for anyone again.
+    const paid = events
+      .filter(
+        (event) =>
+          event.type === "agent.tool.completed" &&
+          event.createdAt > askedAgain &&
+          event.payload?.lookup,
+      )
+      .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
+    if (paid) failures.push(`repeat 「找contact」 paid ${paid} source lookup(s) again`);
+    // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
+    const send = await say(groupId, "发20个人的先", {
+      until: (replies) => replies.some(sendCard),
+      limitMs: 8 * 60_000,
+    });
+    if (!send.replies.some(sendCard))
+      failures.push("「发20个人的先」 did not end on a send confirmation card");
+    // Tool calls and runs of these steps, kept before the end-of-run archive.
+    fs.writeFileSync(
+      path.join(OUT, "contacts.events.json"),
+      JSON.stringify(
+        (await readEvents(groupId).catch(() => [])).filter(
+          (event) =>
+            event.createdAt > startedAt &&
+            /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type),
+        ),
+        null,
+        1,
+      ),
+    );
+  }
+  /** Every event of a thread so far, from the replay of its event stream. */
+  async function readEvents(groupId, { limitMs = 15_000 } = {}) {
+    const controller = new AbortController();
+    // A busy stream must not keep replay open beyond a latency assertion's budget.
+    const replayLimit = setTimeout(() => controller.abort(), limitMs);
+    let idle = setTimeout(() => controller.abort(), 15_000);
+    const events = [];
+    try {
+      if (EMAIL && !cookie) await signIn();
+      const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "text/event-stream",
+          origin: ORIGIN,
+          ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+        },
+        body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // The replay arrives at once; a quiet stream means it has caught up.
+        clearTimeout(idle);
+        idle = setTimeout(() => controller.abort(), 3_000);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          try {
+            const data = JSON.parse(line.slice(5));
+            events.push(data.json ?? data);
+          } catch {}
+        }
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") throw error;
+    } finally {
+      clearTimeout(idle);
+      clearTimeout(replayLimit);
+    }
+    return events;
+  }
+  const DECLINED =
+    /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
+  // Offering the work back instead of doing it; the server retries these once, so one left in a
+  // reply means the retry did not take.
+  const DEFERRED =
+    /\b(?:do you want|would you like|want) me to\b|\bshall I\b|要不要我|是否需要我|需要你先/i;
+
+  // What each step's messages and runs looked like, kept before the end-of-run archive: block kinds
+  // and text lengths only, so a silent or hidden reply can be told apart from a cut-off run.
+  const traceOf = (events, replies) => ({
+    events: events.filter((event) => /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type)),
+    messages: replies.map((message) => ({
+      id: message.id,
+      role: message.role,
+      botId: message.botId,
+      internal: Boolean(message.internal),
+      createdAt: message.createdAt,
+      blocks: (message.blocks ?? []).map((block) => ({
+        kind: block.kind,
+        text: (block.text ?? block.question ?? "").length,
+        ...(block.status ? { status: block.status } : {}),
+      })),
+    })),
+  });
+
+  if (wanted.has("dispatch"))
+    await stage("dispatch", async (failures) => {
+      const groupId =
+        option("--dispatch-group") ?? (wanted.has("t1") ? reportOf("t1").groupId : undefined);
+      if (!groupId) return failures.push("pass --dispatch-group or run t1 first");
+      const { members } = await rpc("groups/get", { groupId });
+      const nameOf = new Map(members.map((member) => [member.botId, member.name ?? ""]));
+      const notes = [];
+      const steps = [];
+      for (const item of DISPATCH) {
+        const askedAt = new Date().toISOString();
+        const { replies } = await say(groupId, item.ask, {
+          quietMs: 45_000,
+          limitMs: 6 * 60_000,
+          ...(item.sendCard ? { until: (replies) => replies.some(sendCard) } : {}),
+        });
+        if (item.sendCard && !replies.some(sendCard))
+          failures.push(`${item.capability}: did not end on a send confirmation card`);
+        if (item.repeatLookup) {
+          // Everyone was already looked up, so no lookup in this turn may pay a source again.
+          const paid = (await readEvents(groupId))
+            .filter(
+              (event) =>
+                event.type === "agent.tool.completed" &&
+                event.createdAt > askedAt &&
+                event.payload?.lookup,
+            )
+            .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
+          if (paid) failures.push(`${item.capability}: paid ${paid} source lookup(s) again`);
+        }
+        const handlers = new Set(
+          replies.flatMap((message) => [
+            nameOf.get(message.botId) ?? "",
+            ...(message.blocks ?? [])
+              .filter((block) => block.kind === "handoff")
+              .map((block) => nameOf.get(block.toBotId) ?? ""),
+          ]),
+        );
+        const text = recruiterSees(replies).map(botText).join("\n");
+        notes.push(
+          `## ${item.capability}: ${item.ask}\nhandled by: ${[...handlers].filter(Boolean).join(", ")}\n${text}`,
+        );
+        if (!replies.length) failures.push(`${item.capability}: no reply`);
+        else if (![...handlers].some((name) => item.owners.test(name)))
+          failures.push(
+            `${item.capability}: not handled by the member who can (${[...handlers].filter(Boolean).join(", ") || "nobody"})`,
+          );
+        const said = recruiterSees(replies).map(ownWords).join("\n");
+        const declined = said.match(DECLINED);
+        if (declined)
+          failures.push(
+            `${item.capability}: declined "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+          );
+        commonChecks(replies, failures);
+        // Each step's tool calls, kept before the end-of-run archive makes the group unreadable.
+        steps.push({
+          capability: item.capability,
+          ask: item.ask,
+          ...traceOf(
+            (await readEvents(groupId).catch(() => [])).filter(
+              (event) => event.createdAt > askedAt,
+            ),
+            replies,
+          ),
+        });
+      }
+      fs.writeFileSync(path.join(OUT, "dispatch.txt"), `${notes.join("\n\n")}\n`);
+      fs.writeFileSync(path.join(OUT, "dispatch.events.json"), JSON.stringify(steps, null, 1));
+    });
+
+  // Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
+  // the action's own card) or exactly one question card, never a decline or an offer to do it.
+  // Cards are left unanswered, so nothing is sent or booked.
+  // "clarify": who, what or when is open, so the turn must end on one card: a question with
+  // options, or the send/booking card naming exact recipients. The rest may act on a stated
+  // reading or ask. A card's own question may say why it asks; only the reply's words are checked
+  // for a refusal.
+  const AMBIGUOUS = [
+    { ask: "发一下", clarify: true },
+    { ask: "约一下他", clarify: true },
+    { ask: "这个人怎么样" },
+    { ask: "处理一下前几个" },
+    { ask: "contact" },
+    { ask: "再来点" },
+    { ask: "改一下邮件", clarify: true },
+  ];
+  if (wanted.has("ambiguous"))
+    await stage("ambiguous", async (failures) => {
+      const groupId =
+        option("--ambiguous-group") ??
+        option("--dispatch-group") ??
+        (wanted.has("t1") ? reportOf("t1").groupId : undefined);
+      if (!groupId) return failures.push("pass --ambiguous-group or run t1 first");
+      const notes = [];
+      const steps = [];
+      for (const { ask, clarify } of AMBIGUOUS) {
+        const askedAt = new Date().toISOString();
+        const { replies } = await say(groupId, ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
+        const allEvents = (await readEvents(groupId).catch(() => [])).filter(
+          (event) => event.createdAt > askedAt,
+        );
+        const events = allEvents.filter((event) => event.type.startsWith("agent.tool."));
+        const acted =
+          events.some((event) => event.type === "agent.tool.completed") ||
+          replies.some((message) =>
+            (message.blocks ?? []).some((block) => block.kind === "handoff"),
+          );
+        const asks = cards(recruiterSees(replies));
+        const text = recruiterSees(replies).map(botText).join("\n");
+        notes.push(`## ${ask}\ntools: ${events.length}, cards: ${asks.length}\n${text}`);
+        if (!replies.length) failures.push(`「${ask}」: no reply`);
+        else if (!text.trim() && !asks.length)
+          failures.push(`「${ask}」: ended with nothing the recruiter can see`);
+        else if (clarify && asks.length !== 1)
+          failures.push(
+            `「${ask}」: unclear request ended on ${asks.length} cards (want one question)`,
+          );
+        else if (!acted && asks.length !== 1)
+          failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
+        const said = recruiterSees(replies).map(ownWords).join("\n");
+        const declined = said.match(DECLINED) ?? said.match(DEFERRED);
+        if (declined)
+          failures.push(
+            `「${ask}」: declined or deferred "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+          );
+        commonChecks(replies, failures);
+        steps.push({ ask, ...traceOf(allEvents, replies) });
+      }
+      fs.writeFileSync(path.join(OUT, "ambiguous.txt"), `${notes.join("\n\n")}\n`);
+      fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
+    });
+
+  if (wanted.has("cards"))
+    await stage("cards", async (failures) => {
+      const file = CASES && path.join(CASES, "cards.json");
+      const jd = CASES && path.join(CASES, "t3.txt");
+      if (!file || !fs.existsSync(file)) return failures.push("missing <cases>/cards.json");
+      if (!EMAIL || !PASSWORD) return failures.push("cards needs RAKAZO_EMAIL and RAKAZO_PASSWORD");
+      const fixture = JSON.parse(fs.readFileSync(file, "utf8"));
+      const code = await run("cards", "card-e2e.mjs", [
+        "--out",
+        path.join(OUT, "cards"),
+        "--jd-file",
+        jd,
+        "--send-group",
+        fixture.sendGroup,
+        "--send-role-mark",
+        fixture.sendRoleMark,
+        "--booking-group",
+        fixture.bookingGroup,
+      ]);
+      if (code !== 0) failures.push("card clicks did not pass; see cards/summary.md");
+    });
+
+  if (wanted.has("t5"))
+    await stage("t5", async (failures) => {
+      // <cases>/t5.json ({"groupId","say"}) names a private test chat that already has a candidate reply.
+      const file = CASES && path.join(CASES, "t5.json");
+      const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+      const groupId = option("--t5-group") ?? saved.groupId;
+      const text = option("--t5-say") ?? saved.say;
+      if (!groupId || !text)
+        return failures.push(
+          "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
+        );
+      const { replies } = await say(groupId, text);
+      fs.writeFileSync(path.join(OUT, "t5-replies.txt"), `${replies.map(botText).join("\n")}\n`);
+      const card = cards(replies).find((block) => block.approvalEffectId);
+      if (!card) failures.push("no booking confirmation card");
+      else if (!/confirm interview booking/i.test(card.text ?? ""))
+        failures.push(`card text: "${card.text}"`);
+      commonChecks(replies, failures);
+    });
+
+  if (wanted.has("expired"))
+    await stage("expired", async (failures) => {
+      // <cases>/expired.json ({"groupId"}) names a private test chat whose question card expired.
+      // Answering it must start the work like any message: the card shows the answer, the answer
+      // replies to the card, a reply follows, and the question is not asked again.
+      const file = CASES && path.join(CASES, "expired.json");
+      const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+      const groupId = option("--expired-group") ?? saved.groupId;
+      if (!groupId)
+        return failures.push(
+          "pass --expired-group, or <cases>/expired.json, for the expired card case",
+        );
+      const before = await messagesOf(groupId);
+      // Approval, secret and connection cards are never answered here.
+      const card = before.findLast((message) =>
+        (message.blocks ?? []).some(
+          (block) =>
+            block.kind === "ask" &&
+            block.status === "expired" &&
+            !block.approvalEffectId &&
+            block.input !== "secret" &&
+            !block.connection &&
+            !block.requestedSchema &&
+            block.actions?.length,
+        ),
+      );
+      if (!card) return failures.push("no expired question card with choices in the test chat");
+      const ask = card.blocks.find((block) => block.kind === "ask" && block.status === "expired");
+      const choice = ask.actions[0];
+      const seen = new Set(before.map((message) => message.id));
+      await rpc("threads/answer", {
+        groupId,
+        runId: card.runId,
+        messageId: card.id,
+        answer: choice.id,
+      });
+      const messages = await settled(groupId, { quietMs: 30_000, limitMs: 10 * 60_000 });
+      const added = messages.filter((message) => !seen.has(message.id));
+      const answered = messages
+        .find((message) => message.id === card.id)
+        ?.blocks?.find((block) => block.kind === "ask");
+      if (answered?.status !== "answered" || answered.answer !== choice.id)
+        failures.push(`card not shown answered (${answered?.status ?? "missing"})`);
+      const sent = added.filter((message) => message.role === "user");
+      if (sent.length !== 1 || botText(sent[0]) !== choice.label)
+        failures.push(`answer not sent once as "${choice.label}" (${sent.length} messages)`);
+      else if (sent[0].replyToMessageId !== card.id)
+        failures.push("answer does not reply to the card");
+      const replies = recruiterSees(added);
+      if (!replies.some((message) => botText(message).trim()))
+        failures.push("no reply after the answer");
+      if (cards(added).some((block) => block.text === ask.text))
+        failures.push(`asked again: "${ask.text.slice(0, 80)}"`);
+      const notice = added.find((message) => message.role === "system" && !message.internal);
+      if (notice) failures.push(`status line after the answer: "${botText(notice).slice(0, 80)}"`);
+      commonChecks(added, failures);
+    });
+
+  passed = results.every((result) => result.pass);
+  const summary = [
+    `# Regression ${passed ? "PASS" : "FAIL"} (${SUITE}, ${Math.round((Date.now() - started) / 60_000)} min)`,
+    "",
+    ...results.map(
+      (result) =>
+        `- ${result.pass ? "PASS" : "FAIL"} ${result.name} (${result.seconds} s)${result.failures.map((failure) => `\n  - ${failure}`).join("")}`,
+    ),
+  ].join("\n");
+  fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
+  log(summary);
+} finally {
+  await cleanUp();
 }
 process.exit(passed ? 0 : 1);

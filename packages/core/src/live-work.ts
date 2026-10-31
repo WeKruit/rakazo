@@ -1,4 +1,4 @@
-import type { MessageBlock } from "@rakazo/contracts";
+import type { BackgroundWorkTiming, MessageBlock } from "@rakazo/contracts";
 import { recruitingBotKey } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
@@ -104,8 +104,10 @@ export function workActivityForTool(name: string): WorkActivity {
 type WorkMessage = {
   id: string;
   runId?: string | null;
+  botId?: string;
   seq?: number;
   role?: string;
+  internal?: boolean;
   blocks: readonly MessageBlock[];
   createdAt?: string;
 };
@@ -123,6 +125,7 @@ type WorkRun = {
 export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): {
   done: WorkItem[];
   current: WorkActivity | null;
+  currentStartedAt?: string;
 } {
   if (!message) return { done: [], current: null };
   const done = message.blocks.flatMap((block) =>
@@ -130,13 +133,18 @@ export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): 
       ? block.steps.flatMap((step) =>
           Array.from({ length: step.count }, (): WorkItem => {
             const activity = workActivityForTool(step.label);
-            return step.status || step.peopleWithEmail !== undefined
+            return step.status ||
+              step.peopleWithEmail !== undefined ||
+              step.durationMs !== undefined ||
+              step.startedAt
               ? {
                   activity,
                   ...(step.status ? { status: step.status } : {}),
                   ...(step.peopleWithEmail === undefined
                     ? {}
                     : { peopleWithEmail: step.peopleWithEmail }),
+                  ...(step.durationMs === undefined ? {} : { durationMs: step.durationMs }),
+                  ...(step.startedAt ? { startedAt: step.startedAt } : {}),
                 }
               : activity;
           }),
@@ -147,10 +155,27 @@ export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): 
   if (marker?.kind !== "progress" || marker.activity !== true) return { done, current: null };
   if (marker.phase) return { done, current: null };
   const pending = marker.pendingToolNames?.at(-1);
-  if (pending) return { done, current: workActivityForTool(pending) };
+  if (pending)
+    return {
+      done,
+      current: workActivityForTool(pending),
+      ...(marker.pendingToolCalls?.at(-1)?.startedAt
+        ? { currentStartedAt: marker.pendingToolCalls.at(-1)!.startedAt }
+        : {}),
+    };
   // The steps block already holds the call this empty marker follows.
-  if (marker.text === "" && done.length)
-    return { done: done.slice(0, -1), current: itemActivity(done.at(-1)!) };
+  const currentIndex = done.findLastIndex(
+    (item) => typeof item === "string" || (!item.status && item.durationMs === undefined),
+  );
+  const currentItem = done[currentIndex];
+  if (marker.text === "" && currentItem)
+    return {
+      done: done.filter((_, index) => index !== currentIndex),
+      current: itemActivity(currentItem),
+      ...(typeof currentItem !== "string" && currentItem.startedAt
+        ? { currentStartedAt: currentItem.startedAt }
+        : {}),
+    };
   return { done, current: "working" };
 }
 
@@ -173,6 +198,7 @@ export type WorkSession = {
   /** Latest live steps per run, to tell growth from a fresh row. */
   live: Record<string, WorkItem[]>;
   current: WorkActivity | null;
+  currentStartedAt?: string;
   progress?: { phase: "thinking" | "compacting" | "retrying"; summary?: string };
 };
 
@@ -181,6 +207,8 @@ export type WorkStep = {
   count: number;
   status?: "failed" | "paused";
   peopleWithEmail?: number;
+  startedAt?: string;
+  durationMs?: number;
 };
 export type WorkItem = WorkActivity | Omit<WorkStep, "count">;
 
@@ -220,6 +248,146 @@ function latest(values: readonly (string | null | undefined)[]): string | undefi
  */
 export function observeWorkSession(
   previous: WorkSession | null,
+  thread: {
+    runs: readonly WorkRun[];
+    messages: readonly WorkMessage[];
+    backgroundWork?: readonly BackgroundWorkTiming[];
+  },
+  now: string,
+  options: { notBefore?: string | null } = {},
+): WorkSession | null {
+  let foreground = observeForegroundWorkSession(previous, thread, now, options);
+  const lastUserAt = latest(
+    thread.messages
+      .filter((message) => message.role === "user" && !message.internal)
+      .map((message) => message.createdAt),
+  );
+  if (!foreground && !thread.runs.some((run) => run.status === "running")) {
+    const completed = thread.messages.findLast(
+      (message) =>
+        message.role === "bot" &&
+        message.runId &&
+        Number.isFinite(time(message.createdAt)) &&
+        (!lastUserAt || time(message.createdAt) >= time(lastUserAt)) &&
+        message.blocks.some((block) => block.kind === "steps" && block.durationMs !== undefined),
+    );
+    const duration = completed?.blocks.findLast(
+      (block) => block.kind === "steps" && block.durationMs !== undefined,
+    );
+    if (
+      completed?.runId &&
+      completed.createdAt &&
+      duration?.kind === "steps" &&
+      duration.durationMs !== undefined
+    ) {
+      // Saved messages retain the native crew runs after live rows are gone. A real user
+      // turn bounds the history; internal research wakes must not hide its earlier stages.
+      const rows = thread.messages.filter(
+        (message) =>
+          message.role === "bot" &&
+          message.runId &&
+          (lastUserAt
+            ? time(message.createdAt) >= time(lastUserAt)
+            : message.runId === completed.runId),
+      );
+      const runIds = [...new Set(rows.map((message) => message.runId!))];
+      const start = Math.max(
+        Math.min(
+          ...rows.flatMap((message) =>
+            message.blocks.flatMap((block) =>
+              block.kind === "steps" &&
+              block.durationMs !== undefined &&
+              Number.isFinite(time(message.createdAt))
+                ? [time(message.createdAt) - block.durationMs]
+                : [],
+            ),
+          ),
+        ),
+        lastUserAt ? time(lastUserAt) : -Infinity,
+      );
+      foreground = {
+        startedAt: new Date(start).toISOString(),
+        endedAt: latest(rows.map((message) => message.createdAt)) ?? completed.createdAt,
+        runIds,
+        runBots: Object.fromEntries(
+          rows.flatMap((message) => (message.botId ? [[message.runId!, message.botId]] : [])),
+        ),
+        earlier: Object.fromEntries(
+          runIds.map((runId) => [
+            runId,
+            rows
+              .filter((message) => message.runId === runId)
+              .flatMap((row) => runWorkSteps(row).done),
+          ]),
+        ),
+        live: {},
+        current: null,
+      };
+    }
+  }
+  const background = (thread.backgroundWork ?? []).filter(
+    (work) =>
+      Number.isFinite(time(work.startedAt)) &&
+      (!work.endedAt ||
+        (time(work.endedAt) >= time(work.startedAt) &&
+          (!lastUserAt || time(work.endedAt) >= time(lastUserAt)))) &&
+      (!foreground ||
+        foreground.runIds.includes(work.runId) ||
+        (!previous &&
+          !thread.runs.some((run) => run.status === "running") &&
+          work.endedAt &&
+          time(work.endedAt) >= time(foreground.startedAt) - WORK_SESSION_CONTINUE_MS)),
+  );
+  if (!background.length) return foreground;
+  const runIds = [...new Set(background.map((work) => work.runId))];
+  const starts = background.flatMap((work) => {
+    const userAtStart = latest(
+      thread.messages
+        .filter(
+          (message) =>
+            message.role === "user" &&
+            !message.internal &&
+            time(message.createdAt) <= time(work.startedAt),
+        )
+        .map((message) => message.createdAt),
+    );
+    return [latest([work.turnStartedAt, userAtStart]) ?? work.startedAt, work.startedAt];
+  });
+  const base: WorkSession = foreground ?? {
+    startedAt: starts[0]!,
+    endedAt: null,
+    runIds,
+    runBots: Object.fromEntries(background.map((work) => [work.runId, work.botId])),
+    earlier: Object.fromEntries(
+      runIds.map((runId) => [
+        runId,
+        thread.messages
+          .filter((message) => message.runId === runId)
+          .flatMap((message) => runWorkSteps(message).done),
+      ]),
+    ),
+    live: {},
+    current: null,
+  };
+  const next: WorkSession = {
+    ...base,
+    startedAt: [base.startedAt, ...starts].sort((a, b) => time(a) - time(b))[0]!,
+    endedAt:
+      background.some((work) => !work.endedAt) ||
+      thread.runs.some((run) => run.status === "running")
+        ? null
+        : (latest([base.endedAt, ...background.map((work) => work.endedAt)]) ?? now),
+    runIds: [...new Set([...base.runIds, ...runIds])],
+    runBots: {
+      ...base.runBots,
+      ...Object.fromEntries(background.map((work) => [work.runId, work.botId])),
+    },
+  };
+  return previous && sameSession(previous, next) ? previous : next;
+}
+
+function observeForegroundWorkSession(
+  previous: WorkSession | null,
   thread: { runs: readonly WorkRun[]; messages: readonly WorkMessage[] },
   now: string,
   options: { notBefore?: string | null } = {},
@@ -250,6 +418,7 @@ export function observeWorkSession(
       earlier,
       live: {},
       current: null,
+      currentStartedAt: undefined,
       progress: undefined,
     };
   }
@@ -260,13 +429,16 @@ export function observeWorkSession(
   const startedAt =
     latest([
       runStart,
-      latest(thread.messages.filter((m) => m.role === "user").map((m) => m.createdAt)),
+      latest(
+        thread.messages.filter((m) => m.role === "user" && !m.internal).map((m) => m.createdAt),
+      ),
       previous?.endedAt,
       options.notBefore,
     ]) ?? now;
   const spoke = (since: string) =>
     thread.messages.some(
-      (message) => message.role === "user" && time(message.createdAt) > time(since),
+      (message) =>
+        message.role === "user" && !message.internal && time(message.createdAt) > time(since),
     );
   const continues =
     previous &&
@@ -291,6 +463,7 @@ export function observeWorkSession(
   for (const [runId, steps] of Object.entries(base.live))
     if (!workingIds.has(runId)) addItems(earlier, runId, steps);
   let current: WorkActivity | null = null;
+  let currentStartedAt: string | undefined;
   let currentSeq = -Infinity;
   let progress: WorkSession["progress"];
   let progressSeq = -Infinity;
@@ -310,6 +483,7 @@ export function observeWorkSession(
     live[run.id] = steps.done;
     if (steps.current && (row?.seq ?? 0) >= currentSeq) {
       current = steps.current;
+      currentStartedAt = steps.currentStartedAt;
       currentSeq = row?.seq ?? 0;
     }
   }
@@ -324,6 +498,7 @@ export function observeWorkSession(
     earlier,
     live,
     current,
+    ...(currentStartedAt ? { currentStartedAt } : {}),
     ...(progress ? { progress } : {}),
   };
   return previous && sameSession(previous, next) ? previous : next;
@@ -337,13 +512,17 @@ export const EMPTY_WORK_TRACKER: WorkTracker = { session: null, idleAt: null };
 /** Observes one render of the thread; feed the result back on the next one. */
 export function trackWork(
   tracker: WorkTracker,
-  thread: { runs: readonly WorkRun[]; messages: readonly WorkMessage[] },
+  thread: {
+    runs: readonly WorkRun[];
+    messages: readonly WorkMessage[];
+    backgroundWork?: readonly BackgroundWorkTiming[];
+  },
   now: string,
 ): WorkTracker {
   const session = observeWorkSession(tracker.session, thread, now, {
     notBefore: tracker.idleAt,
   });
-  const idleAt = thread.runs.some((run) => run.status === "running") ? tracker.idleAt : now;
+  const idleAt = session && !session.endedAt ? tracker.idleAt : now;
   return session === tracker.session && idleAt === tracker.idleAt ? tracker : { session, idleAt };
 }
 
@@ -370,6 +549,24 @@ export function workSessionSteps(session: WorkSession | null): WorkStep[] {
  * turn keeps its own steps; a member that runs more than once stays one stage.
  */
 export type WorkStage = { botId: string; running: boolean; steps: WorkStep[] };
+
+/** A stage's own messages plus the handoff brief, always from its original conversation. */
+export function workStageMessages<
+  T extends { runId?: string | null; blocks: readonly MessageBlock[] },
+>(
+  messages: readonly T[],
+  stage: { botId: string; runIds: readonly string[]; sourceRunIds: readonly string[] },
+): T[] {
+  return messages.filter(
+    (message) =>
+      !!message.runId &&
+      (stage.runIds.includes(message.runId) ||
+        (stage.sourceRunIds.includes(message.runId) &&
+          message.blocks.some(
+            (block) => block.kind === "handoff" && block.toBotId === stage.botId,
+          ))),
+  );
+}
 
 export function workSessionStages(session: WorkSession | null): {
   own: WorkStep[];
@@ -439,7 +636,11 @@ function foldSteps(items: readonly WorkItem[]): WorkStep[] {
       !last.status &&
       !row.status &&
       last.peopleWithEmail === undefined &&
-      row.peopleWithEmail === undefined
+      row.peopleWithEmail === undefined &&
+      last.durationMs === undefined &&
+      row.durationMs === undefined &&
+      !last.startedAt &&
+      !row.startedAt
     )
       last.count += 1;
     else steps.push({ ...row, count: 1 });

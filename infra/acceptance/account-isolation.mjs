@@ -8,7 +8,7 @@
 //   4. checks B sees no CRM organization, mailbox or deployment settings it was not given, and
 //      that money and every account's spend show only to verified operator-domain staff;
 //   5. checks every listing refuses a request with no session.
-// Only reads. A's resources are never changed; B's crew is created on first use like a new user.
+// Customer resources are read-only. Mutation probes use disposable native test copies only.
 //
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=<A> RAKAZO_PASSWORD=<A password> \
@@ -24,6 +24,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { checkCopyMutations, withIsolationTestCopies } from "./account-isolation-checks.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -244,7 +245,7 @@ async function collect(client, me, groupLimit) {
 function foreignIds(data, ids) {
   const text = JSON.stringify(data ?? null);
   const found = [];
-  for (const [id, kind] of ids) if (text.includes(id)) found.push(`${kind} ${id}`);
+  for (const [id, kind] of ids) if (text.includes(id)) found.push(kind);
   return found;
 }
 
@@ -379,6 +380,7 @@ async function crossReads(viewer, owner, ownerIds, r) {
     await probe(viewer, owner, ownerIds, "threads/head", target, "role chat");
     await probe(viewer, owner, ownerIds, "threads/get", target, "role chat");
     await probe(viewer, owner, ownerIds, "threads/messages", target, "role chat messages");
+    await probe(viewer, owner, ownerIds, "threads/backgroundTasks", target, "background tasks");
     await probe(viewer, owner, ownerIds, "recruiting/roleSetup", target, "role setup");
     await probe(viewer, owner, ownerIds, "recruiting/calibrationRound", target, "first ten");
     for (const view of ["inbox", "interview", "contacts"])
@@ -638,6 +640,38 @@ const crew = await b.rpc("onboarding/ensureRecruiting", {});
 if (ok(crew)) b.ownGroupId = crew.data.groupId;
 const ensured = await a.rpc("groups/list");
 a.ownGroupId = ok(ensured) ? ensured.data.find((group) => !group.archivedAt)?.id : undefined;
+
+// The endpoint under test is allowed to fail: only these disposable copies can be changed.
+// A failed check still archives both copies before the script exits.
+await withIsolationTestCopies([a, b], async ([copyA, copyB]) => {
+  for (const [viewer, copy] of [
+    [b, copyA],
+    [a, copyB],
+  ]) {
+    const target = { groupId: copy.groupId };
+    const owner = copy.owner;
+    for (const [route, input] of [
+      ["groups/get", target],
+      ["threads/get", target],
+      ["threads/backgroundTasks", target],
+      ["recruiting/getWorkspace", { threadId: copy.threadId }],
+      ["artifacts/getById", { artifactId: copy.artifactId }],
+    ]) {
+      const own = await owner.rpc(route, input);
+      if (own.status !== 200)
+        throw new Error(`${route}: fixture owner read failed (${own.status})`);
+      const foreign = await viewer.rpc(route, input);
+      const denied = foreign.status === 403 || foreign.status === 404;
+      record({
+        name: `${viewer.label} cannot read another account's test copy via ${route}`,
+        verdict: denied ? "ok" : "leak",
+        status: foreign.status,
+        detail: denied ? "ownership refusal" : "ownership was not enforced",
+      });
+    }
+    await checkCopyMutations(viewer, copy, record);
+  }
+});
 
 const collectedA = await collect(a, meA, GROUPS);
 const collectedB = await collect(b, meB, GROUPS);

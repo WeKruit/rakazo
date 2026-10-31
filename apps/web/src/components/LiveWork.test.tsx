@@ -135,7 +135,9 @@ it("shows business progress beside the step in flight", () => {
   expect(container.textContent).toContain("Searching candidates…");
 });
 
-it("puts each handed-off stage under one entry named for its purpose", () => {
+it("opens and cancels only the selected handed-off stage, keeping its transcript after completion", async () => {
+  const onOpenStage = vi.fn();
+  const onCancelStage = vi.fn(async () => {});
   const sourcerRow = {
     id: "progress:r2",
     runId: "r2",
@@ -168,6 +170,8 @@ it("puts each handed-off stage under one entry named for its purpose", () => {
         live
         label="Working…"
         stageKind={(botId) => (botId === "bot-7" ? "sourcing" : "other")}
+        onOpenStage={onOpenStage}
+        onCancelStage={onCancelStage}
       />,
     ),
   );
@@ -177,14 +181,31 @@ it("puts each handed-off stage under one entry named for its purpose", () => {
   expect(stage?.querySelector("summary")?.textContent).toContain("Finding candidates");
   expect(stage?.textContent).toContain("Searching candidates ×2");
   expect(container.textContent).not.toContain("bot-7");
+  const action = (text: string) =>
+    [...container.querySelectorAll("button")].find((button) => button.textContent === text)!;
+  act(() => action("View").click());
+  expect(onOpenStage).toHaveBeenCalledExactlyOnceWith("bot-7");
+  await act(async () => action("Cancel task").click());
+  expect(onCancelStage).toHaveBeenCalledExactlyOnceWith("bot-7");
 
   session = observeWorkSession(session, { runs: [], messages: [liveRow, sourcerRow] }, at(40));
   act(() =>
-    root.render(<LiveWork session={session} live={false} label="" stageKind={() => "sourcing"} />),
+    root.render(
+      <LiveWork
+        session={session}
+        live={false}
+        label=""
+        stageKind={() => "sourcing"}
+        onOpenStage={onOpenStage}
+        onCancelStage={onCancelStage}
+      />,
+    ),
   );
   const done = container.querySelector<HTMLDetailsElement>('[data-testid="work-stage"]');
   expect(done?.open).toBe(false);
   expect(done?.dataset.running).toBeUndefined();
+  expect(action("View")).toBeDefined();
+  expect(action("Cancel task")).toBeUndefined();
   expect(container.querySelector('[data-testid="work-summary"]')?.textContent).toContain(
     "Finding candidates",
   );

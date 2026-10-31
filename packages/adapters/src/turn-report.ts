@@ -306,6 +306,13 @@ const NEGATED =
 function requests(kind: Capability, request: string): boolean {
   return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
 }
+// A booking change, which needs the recruiter's card. Reading the calendar or the interviews
+// ("what interviews are coming up", "when is she free") changes nothing and owes no card.
+const BOOKING_CHANGE =
+  /\b(?:book|re-?schedul|cancel|arrange)\w*|\bschedul\w*\s+(?:an?|the|her|him|them|it|time|\w+\s+for)\b|\bset\s+up\s+(?:an?\s+)?(?:interview|call|meeting)|约.{0,6}(?:时间|面)|(?:安排|取消|改|重新约).{0,4}面试|改期/i;
+function asksBooking(request: string): boolean {
+  return BOOKING_CHANGE.test(request.replace(NEGATED, " "));
+}
 // Tool operations (the last "__" segment) that do each kind of request.
 const TOOL_KINDS: Record<Capability, RegExp> = {
   send: /send|reply_to|activate_campaign|forward/,
@@ -397,7 +404,7 @@ export function retryReason(
   if (declined) return declined;
   // A brief's wording ("no emails will be sent yet") is no send request unless the recruiter's
   // own message asked for one.
-  const asksCard = (text: string) => requests("send", text) || requests("schedule", text);
+  const asksCard = (text: string) => requests("send", text) || asksBooking(text);
   if (!asksCard(request) || (person !== undefined && !asksCard(person))) return undefined;
   if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
   const sentence = reply

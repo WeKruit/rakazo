@@ -1,17 +1,12 @@
-import type { RecruitingReminder, RecruitingRoleCampaign } from "@rakazo/contracts";
+import type { RecruitingReminder } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import type { RoleSummary } from "./dashboard";
 import {
   bucketByWeek,
-  campaignStages,
-  crmReplied,
   firstName,
-  mapWithConcurrency,
   openTasks,
   outreachFunnel,
-  readShortlistPages,
   recentRoles,
-  roleSummary,
   weekStart,
 } from "./dashboard";
 
@@ -23,6 +18,7 @@ const role = (patch: Partial<RoleSummary> = {}): RoleSummary => ({
   contacted: null,
   replied: null,
   interested: null,
+  interestedPartial: false,
   ...patch,
 });
 
@@ -102,122 +98,6 @@ describe("outreachFunnel", () => {
   });
 });
 
-describe("source mapping", () => {
-  const campaign = (
-    status: number | null,
-    leads: { status: number | null; interestStatus: number | null }[],
-  ): RecruitingRoleCampaign => ({
-    status: "ready",
-    leadsComplete: true,
-    serverId: "s",
-    campaign: { id: "c", name: "Role", eaccount: null, status, stopOnReply: true },
-    leads: leads.map((lead, index) => ({ candidateKey: null, email: `${index}@x.test`, ...lead })),
-  });
-
-  it("does not count enrolled leads as contacted, while preserving reported interest", () => {
-    expect(
-      campaignStages(
-        campaign(1, [
-          { status: 1, interestStatus: null },
-          { status: 3, interestStatus: 1 },
-          { status: 3, interestStatus: 2 },
-          { status: -1, interestStatus: -1 },
-        ]),
-      ),
-    ).toEqual({ contacted: null, interested: 2, interestedPartial: false });
-    expect(campaignStages(campaign(0, [{ status: 1, interestStatus: null }]))).toEqual({
-      contacted: 0,
-      interested: 0,
-      interestedPartial: false,
-    });
-  });
-
-  it("keeps failed, partial or unproven campaign lead totals unknown", () => {
-    for (const leadsComplete of [false, undefined])
-      expect(campaignStages({ ...campaign(1, []), leadsComplete })).toEqual({
-        contacted: null,
-        interested: null,
-        interestedPartial: false,
-      });
-    expect(campaignStages(campaign(null, []))).toEqual({
-      contacted: null,
-      interested: null,
-      interestedPartial: false,
-    });
-    expect(campaignStages(campaign(1, []))).toEqual({
-      contacted: null,
-      interested: 0,
-      interestedPartial: false,
-    });
-  });
-
-  it("reports unknown without a readable campaign or CRM", () => {
-    expect(campaignStages(null)).toEqual({
-      contacted: null,
-      interested: null,
-      interestedPartial: false,
-    });
-    expect(campaignStages({ status: "none", serverId: null, campaign: null, leads: [] })).toEqual({
-      contacted: null,
-      interested: null,
-      interestedPartial: false,
-    });
-    const counts = { shortlisted: 1, replied: 4 };
-    for (const crmCountsComplete of [undefined, false])
-      expect(
-        crmReplied({
-          items: [],
-          nextCursor: null,
-          total: 0,
-          counts,
-          crmStatus: "ok",
-          crmCountsComplete,
-        }),
-      ).toBeNull();
-    expect(
-      crmReplied({
-        items: [],
-        nextCursor: null,
-        total: 0,
-        counts,
-        crmStatus: "ok",
-        crmCountsComplete: true,
-      }),
-    ).toBe(4);
-    expect(
-      crmReplied({ items: [], nextCursor: null, total: 0, counts, crmStatus: "not_bound" }),
-    ).toBeNull();
-  });
-
-  it("keeps launched sends unknown and counts only complete known campaign lead reads", () => {
-    for (const status of [0, 1, 2, 3, 999]) {
-      expect(campaignStages(campaign(status, [{ status: 3, interestStatus: 4 }]))).toEqual({
-        contacted: status === 0 ? 0 : null,
-        interested: 1,
-        interestedPartial: false,
-      });
-    }
-    expect(campaignStages(campaign(null, [{ status: 3, interestStatus: 4 }]))).toEqual({
-      contacted: null,
-      interested: null,
-      interestedPartial: false,
-    });
-    expect(campaignStages(campaign(1, []))).toEqual({
-      contacted: null,
-      interested: 0,
-      interestedPartial: false,
-    });
-    expect(
-      campaignStages(
-        campaign(1, [
-          { status: 3, interestStatus: 999 },
-          { status: 3, interestStatus: -1 },
-        ]),
-      ).interested,
-    ).toBe(0);
-  });
-});
-
 describe("helpers", () => {
   it("orders recent roles by activity and leaves out archived ones", () => {
     const group = (id: string, updatedAt: string, archivedAt: string | null = null) =>
@@ -229,20 +109,6 @@ describe("helpers", () => {
         group("c", "2026-10-21T00:00:00Z", "2026-10-21T00:00:00Z"),
       ]).map((item) => item.id),
     ).toEqual(["b", "a"]);
-  });
-
-  it("runs at most the given number of tasks at once and keeps order", async () => {
-    let running = 0;
-    let peak = 0;
-    const result = await mapWithConcurrency([1, 2, 3, 4, 5, 6, 7], 4, async (value) => {
-      running++;
-      peak = Math.max(peak, running);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      running--;
-      return value * 2;
-    });
-    expect(result).toEqual([2, 4, 6, 8, 10, 12, 14]);
-    expect(peak).toBe(4);
   });
 
   it("lists open tasks earliest due first and marks overdue ones", () => {
@@ -266,30 +132,4 @@ describe("helpers", () => {
     expect(firstName("  Ada Lovelace ")).toBe("Ada");
     expect(firstName(undefined)).toBe("");
   });
-});
-
-it("counts recorded shortlist dates from all pages and keeps unknown dates unknown", async () => {
-  const calls: (string | undefined)[] = [];
-  const dates = [null, "2026-10-22T12:00:00Z"];
-  const result = await readShortlistPages(async (cursor) => {
-    calls.push(cursor);
-    const index = cursor ? 1 : 0;
-    return {
-      items: [
-        {
-          shortlisted: true,
-          shortlistedAt: dates[index],
-          firstDiscoveredAt: "2026-10-01T00:00:00Z",
-        },
-      ],
-      total: 2,
-      nextCursor: cursor ? null : "next",
-    } as Awaited<ReturnType<Parameters<typeof readShortlistPages>[0]>>;
-  });
-  expect(calls).toEqual([undefined, "next"]);
-  const summary = roleSummary("g", "r", result, null, null);
-  expect(summary.shortlistedDates).toEqual(dates);
-  expect(
-    bucketByWeek(summary.shortlistedDates, new Date("2026-10-23T12:00:00Z")).at(-1)?.count,
-  ).toBe(1);
 });

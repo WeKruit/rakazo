@@ -42,7 +42,7 @@ describe("compactRosterStatusLabel", () => {
     expect(compactRosterStatusLabel("running")).toBe("Working…");
     expect(compactRosterStatusLabel("waiting_input")).toBe("Needs an answer");
     expect(compactRosterStatusLabel("waiting_takeover")).toBe("Needs you");
-    expect(compactRosterStatusLabel("failed")).toBe("Error");
+    expect(compactRosterStatusLabel("failed")).toBe("Try again");
   });
 
   it("does not add status text to idle rows", () => {

@@ -58,6 +58,12 @@ import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
+import {
+  RECORD_TOOL_DEADLINE_MS,
+  RECORD_TOOL_LATE_TEXT,
+  RECORD_TOOLS,
+  withinDeadline,
+} from "./deadline.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -115,6 +121,7 @@ import { textContentArg } from "./tool-text.js";
 import { REPORT_BEFORE_END } from "./turn-report.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
+export const SLOW_TOOL_BACKGROUND_MS = 10_000;
 interface ToolCallBudget {
   count: number;
   exceeded: boolean;
@@ -1747,6 +1754,21 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       let result: unknown;
       let failure: unknown;
       host.dispatchedToolCalls.add(toolCallId);
+      let promotion: Promise<void> | undefined;
+      // Human interaction tools pause explicitly; only executing work moves to the background.
+      const promotionTimer =
+        host.request.onSlowTool &&
+        !["ask_user", "request_takeover", "request_secret"].includes(tool.name)
+          ? setTimeout(() => {
+              promotion = host.request.onSlowTool!({
+                name: tool.name,
+                executionId,
+                durationMs: Date.now() - startedAt,
+              }).catch((error) => {
+                getLogger().error("slow tool promotion failed", error);
+              });
+            }, SLOW_TOOL_BACKGROUND_MS)
+          : undefined;
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
@@ -1859,12 +1881,22 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (host.request.executeTool) {
+            const call = host.request.executeTool(tool.name, args, executionId, tool.route, {
+              onShellStillRunning: (completion) => {
+                host.pendingShells.push(completion);
+              },
+            });
             const result = await untilStopped(
-              host.request.executeTool(tool.name, args, executionId, tool.route, {
-                onShellStillRunning: (completion) => {
-                  host.pendingShells.push(completion);
-                },
-              }),
+              RECORD_TOOLS.has(tool.name)
+                ? withinDeadline(call, RECORD_TOOL_DEADLINE_MS, () => {
+                    getLogger().warn("run.tool.late", {
+                      runId: host.request.runId,
+                      tool: tool.name,
+                      executionId,
+                    });
+                    return { error: RECORD_TOOL_LATE_TEXT };
+                  })
+                : call,
               host.signal,
               () =>
                 getLogger().warn("run.tool.abandoned", {
@@ -1905,6 +1937,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             details: { error: "no executor" },
           };
         })();
+        clearTimeout(promotionTimer);
+        await promotion;
         if (VERBATIM_TOOL_RESULTS.has(tool.name)) return result as AgentToolResult<unknown>;
         return boundAgentToolResult(
           result as AgentToolResult<unknown>,
@@ -1914,6 +1948,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
         failure = error;
         throw error;
       } finally {
+        clearTimeout(promotionTimer);
         endToolCall(host);
         const completion: AgentToolCompletion = {
           name: tool.name,

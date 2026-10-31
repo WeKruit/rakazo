@@ -30,6 +30,16 @@ describe("organization search", () => {
     ]);
   });
 
+  it("treats an error answer as unanswered, not as no organization", () => {
+    expect(() =>
+      organizationResults(
+        JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "429" }] } }),
+      ),
+    ).toThrow();
+    expect(() => organizationResults(JSON.stringify({ error: { code: -32000 } }))).toThrow();
+    expect(organizationResults(payload([]))).toEqual([]);
+  });
+
   it("asks for companies by name and sends the deployment key when there is one", async () => {
     const fetch = vi.fn(async () => new Response(payload([])));
     await createExaOrganizationSearch({ fetch, apiKey: "test-key" })(

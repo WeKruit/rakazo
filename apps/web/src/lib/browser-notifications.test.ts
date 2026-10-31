@@ -88,10 +88,10 @@ describe("browser notifications", () => {
     );
   });
 
-  it("puts the bot message in the native notification", () => {
+  it("keeps the reply body out of native notifications", () => {
     expect(browserNotificationMessage(event(), "Chief")).toEqual({
       title: "Chief",
-      body: "The pool is balanced.",
+      body: "",
     });
     expect(
       browserNotificationMessage(
@@ -103,7 +103,7 @@ describe("browser notifications", () => {
         }),
         "Chief",
       ),
-    ).toEqual({ title: "Chief", body: "Pool, Total main, 42" });
+    ).toEqual({ title: "Chief", body: "" });
     expect(browserNotificationMessage(event({ type: "run.failed" }), "Chief")).toEqual({
       title: "Chief failed",
       body: "Failed.",
@@ -134,13 +134,13 @@ describe("browser notifications", () => {
     expect(notifiedEventIds).toEqual(new Set());
     expect(delivery("granted")).toBe("delivered");
     expect(notifiedEventIds).toEqual(new Set(["event-1"]));
-    expect(show).toHaveBeenLastCalledWith("Chief", "The pool is balanced.", "thread-1");
+    expect(show).toHaveBeenLastCalledWith("Chief", "", "thread-1");
     expect(delivery("granted")).toBe("discarded");
     expect(delivery("granted", event({ id: "event-2" }))).toBe("delivered");
     expect(show).toHaveBeenCalledTimes(3);
   });
 
-  it("sends one ordinary notification per thread per 15 minutes but always a question", () => {
+  it("sends at most one notification per thread per 15 minutes, including questions and failures", () => {
     const shownAt = new Map<string, number>();
     const show = vi.fn();
     const delivery = (nextEvent: ReturnType<typeof event>, now: number) =>
@@ -163,10 +163,10 @@ describe("browser notifications", () => {
     expect(delivery(event({ id: "a" }), 0)).toBe("delivered");
     expect(delivery(event({ id: "b" }), 60_000)).toBe("discarded");
     expect(delivery(event({ id: "c", threadId: "thread-2" }), 60_000)).toBe("delivered");
-    expect(delivery(ask("d"), 120_000)).toBe("delivered");
+    expect(delivery(ask("d"), 120_000)).toBe("discarded");
     expect(delivery(ask("e", "answered"), 180_000)).toBe("discarded");
-    expect(delivery(event({ id: "f", type: "run.failed" }), 240_000)).toBe("delivered");
-    expect(delivery(event({ id: "g" }), 240_000 + 15 * 60_000)).toBe("delivered");
+    expect(delivery(event({ id: "f", type: "run.failed" }), 240_000)).toBe("discarded");
+    expect(delivery(event({ id: "g" }), 15 * 60_000)).toBe("delivered");
   });
 
   it("allows a later send gesture to retry a dismissed permission prompt", async () => {

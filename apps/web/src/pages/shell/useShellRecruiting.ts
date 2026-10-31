@@ -125,7 +125,13 @@ export function useShellRecruiting({
   setRecruitingTab: Dispatch<
     SetStateAction<{ threadId: string; tab: RecruitingPanelState["tab"] } | null>
   >;
-  sendMessage: (text: string, mentions: ComposerMention[], clientNonce: string) => Promise<boolean>;
+  sendMessage: (
+    text: string,
+    mentions: ComposerMention[],
+    clientNonce: string,
+    queueMode?: "steer" | "follow_up",
+    retry?: boolean,
+  ) => Promise<boolean>;
   setRoleChatOpen: Dispatch<SetStateAction<boolean>>;
   snapshotRef: RefObject<ThreadSnapshot | null>;
   setSendError: Dispatch<SetStateAction<string | null>>;

@@ -331,12 +331,18 @@ export function useShellMessages({
     );
   }, []);
   const sendMessage = useCallback(
-    async (text: string, mentions: ComposerMention[], clientNonce: string) => {
+    async (
+      text: string,
+      mentions: ComposerMention[],
+      clientNonce: string,
+      queueMode?: "steer" | "follow_up",
+      retry = false,
+    ) => {
       const initialBotTarget = activeBotId.current;
       const initialGroupTarget = activeGroupId.current;
       if ((!initialBotTarget && !initialGroupTarget) || sending) return false;
       const originThreadKey = initialGroupTarget ?? initialBotTarget;
-      const attachments = attachmentsForThread(pendingAttachments, originThreadKey);
+      const attachments = retry ? [] : attachmentsForThread(pendingAttachments, originThreadKey);
       const plan = resolveComposerSendPlan({
         text,
         mentions,
@@ -351,20 +357,22 @@ export function useShellMessages({
       const submittedComposer = composerRef;
       const submittedUser = botsRefreshUser.current;
       const selectedEmail = selectedCorrespondence;
-      const recruitingContext = reroutedToGroup
-        ? undefined
-        : recruitingChatContext(
-            chatRoleTitle,
-            selectedContact?.scope === currentRecruitingCacheScope.current
-              ? selectedContact?.contact
-              : undefined,
-            selectedSchedulingPlan &&
-              selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
-              selectedSchedulingPlan.threadId === knownThreadId
-              ? selectedSchedulingPlan.id
-              : undefined,
-          );
+      const recruitingContext =
+        retry || reroutedToGroup
+          ? undefined
+          : recruitingChatContext(
+              chatRoleTitle,
+              selectedContact?.scope === currentRecruitingCacheScope.current
+                ? selectedContact?.contact
+                : undefined,
+              selectedSchedulingPlan &&
+                selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
+                selectedSchedulingPlan.threadId === knownThreadId
+                ? selectedSchedulingPlan.id
+                : undefined,
+            );
       const correspondenceReference =
+        !retry &&
         !reroutedToGroup &&
         selectedEmail?.scope === currentCorrespondenceScope.current &&
         discussionScope.current.active
@@ -392,8 +400,8 @@ export function useShellMessages({
               clientNonce,
               text: trimmed,
               createdAt: new Date().toISOString(),
-              replyToMessageId: activeReplyTarget?.id,
-              replyQuote: activeReplyQuote ?? undefined,
+              replyToMessageId: retry ? undefined : activeReplyTarget?.id,
+              replyQuote: retry ? undefined : (activeReplyQuote ?? undefined),
             }),
         );
         requestAnimationFrame(() => turnTimer.echoed(clientNonce));
@@ -465,6 +473,7 @@ export function useShellMessages({
             () =>
               rpc.threads.send({
                 groupId: groupTarget,
+                ...(queueMode ? { queueMode } : {}),
                 addressing: showToolActivity ? undefined : "coordinator",
                 clientNonce,
                 text: trimmed || undefined,
@@ -472,8 +481,8 @@ export function useShellMessages({
                 ...(recruitingContext ? { recruitingContext } : {}),
                 mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
                 artifactIds: artifactIds.length ? artifactIds : undefined,
-                replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
-                replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
+                replyToMessageId: retry || reroutedToGroup ? undefined : activeReplyTarget?.id,
+                replyQuote: retry || reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
               }),
             { keepTrying: stillSubmitted },
           );
@@ -484,14 +493,15 @@ export function useShellMessages({
             () =>
               rpc.threads.send({
                 botId: botTarget,
+                ...(queueMode ? { queueMode } : {}),
                 clientNonce,
                 text: trimmed || undefined,
                 ...(correspondenceReference ? { correspondenceReference } : {}),
                 ...(recruitingContext ? { recruitingContext } : {}),
                 mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
                 artifactIds: artifactIds.length ? artifactIds : undefined,
-                replyToMessageId: activeReplyTarget?.id,
-                replyQuote: activeReplyQuote ?? undefined,
+                replyToMessageId: retry ? undefined : activeReplyTarget?.id,
+                replyQuote: retry ? undefined : (activeReplyQuote ?? undefined),
               }),
             { keepTrying: stillSubmitted },
           );
@@ -512,11 +522,13 @@ export function useShellMessages({
           }
         }
         dropDelayedSetup();
-        clearReply();
-        revokePendingAttachmentPreviews(attachments);
-        setPendingAttachments((current) =>
-          current.filter((attachment) => attachment.threadKey !== originThreadKey),
-        );
+        if (!retry) {
+          clearReply();
+          revokePendingAttachmentPreviews(attachments);
+          setPendingAttachments((current) =>
+            current.filter((attachment) => attachment.threadKey !== originThreadKey),
+          );
+        }
         if (reroutedToGroup && groupTarget) {
           // The group's sidebar row changes too; the open thread's events cannot say so.
           void refreshBots().catch(() => undefined);

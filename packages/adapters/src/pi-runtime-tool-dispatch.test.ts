@@ -425,6 +425,56 @@ const shellTool = {
 const previousMaxToolCalls = process.env.MAX_TOOL_CALLS_PER_TURN;
 
 describe("Pi connector tool dispatch", () => {
+  it("promotes a pending tool at ten seconds without reexecuting or duplicating its result", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: (value: unknown) => void;
+      const executeTool = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const onSlowTool = vi.fn(async () => {});
+      const onToolCompleted = vi.fn();
+      const work = (async () => {
+        for await (const _event of new PiAgentRuntime().run(
+          {
+            botId: "b",
+            threadId: "t",
+            runId: "r",
+            prompt: "write the result",
+            history: [],
+            instructions: "Complete the task",
+            tools: [destinationTool],
+            model: { provider: "test", id: "dispatch-test-model" },
+            executeTool,
+            onSlowTool,
+            onToolCompleted,
+          },
+          { signal: new AbortController().signal },
+        )) {
+          /* exhaust native events */
+        }
+      })();
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(executeTool).toHaveBeenCalledTimes(1);
+      expect(onSlowTool).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onSlowTool).toHaveBeenCalledExactlyOnceWith({
+        name: "destination.write",
+        executionId: JSON.stringify(["pi-tool", "main", "call-1"]),
+        durationMs: 10_000,
+      });
+      finish({ saved: true });
+      await work;
+      expect(executeTool).toHaveBeenCalledTimes(1);
+      expect(onToolCompleted).toHaveBeenCalledTimes(1);
+      expect(onToolCompleted.mock.calls[0]![0].result.details).toEqual({ saved: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   beforeEach(() => {
     fakeAgentState.mode = "dispatch";
     fakeAgentState.abortCount = 0;

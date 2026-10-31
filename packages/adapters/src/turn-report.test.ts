@@ -264,6 +264,27 @@ describe("declineRetry", () => {
     );
   });
 
+  it("does not read a question about interviews as a booking request", () => {
+    const reply =
+      "Two interviews are coming up: Ana on Tuesday at 10:00 and Li on Thursday at 14:00. No invitation is sent.";
+    for (const request of [
+      "what interviews are coming up",
+      "When is she available?",
+      "show me my calendar this week",
+      "下周有哪些面试",
+    ])
+      expect(retryReason(reply, request)).toBeUndefined();
+    for (const request of [
+      "schedule an interview with Ana",
+      "cancel the interview",
+      "reschedule Li to Friday",
+      "book Ana for Tuesday",
+      "帮我约她下周面试",
+      "取消这个面试",
+    ])
+      expect(retryReason(reply, request)?.kind).toBe("decline");
+  });
+
   it("catches a past-tense refusal of a send", () => {
     expect(
       declinedSentence(

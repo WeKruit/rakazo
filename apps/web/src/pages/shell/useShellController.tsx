@@ -34,6 +34,7 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   isActive,
+  runRecoveryAction,
   withLiveStreamingProgress,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
@@ -816,8 +817,17 @@ export function useShellController() {
     (run) => requeuedRunIds.includes(run.id) && ["queued", "waiting_takeover"].includes(run.status),
   );
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
+  const runErrorNeedsReconnect = Boolean(
+    runError && runRecoveryAction(runError) === "model_connection",
+  );
   const displayedRunError =
-    !sendError && runError ? (showToolActivity ? runError : t`Something went wrong.`) : null;
+    !sendError && runError
+      ? showToolActivity
+        ? runError
+        : runErrorNeedsReconnect
+          ? t`Reconnect your model to continue.`
+          : t`The reply stopped. Try again.`
+      : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);
@@ -1458,6 +1468,7 @@ export function useShellController() {
     runError,
     displayedRunError,
     displayedRunErrorId,
+    runErrorNeedsReconnect,
     handleRunErrorPresented,
     resolveTranscriptBot,
     workingBots,

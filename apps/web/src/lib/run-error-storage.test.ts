@@ -40,6 +40,7 @@ function failedSnapshot(id: string): ThreadSnapshot {
       startedAt: null,
       completedAt: null,
       createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
     },
   };
 }

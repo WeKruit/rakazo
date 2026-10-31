@@ -12,11 +12,19 @@ import {
   serializeComposerPrompt,
   truncateSlashDescription,
 } from "@rakazo/core";
-import { BotAvatar, Button } from "@rakazo/ui-web";
+import {
+  BotAvatar,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@rakazo/ui-web";
 import {
   ArrowUp,
   Box,
   Clock,
+  Ellipsis,
   Mic,
   Paperclip,
   Plus,
@@ -36,6 +44,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { BackgroundTasks } from "../../components/BackgroundTasks";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { newClientId } from "../../lib/client-id";
 import {
@@ -91,12 +100,15 @@ export const Composer = memo(function Composer({
   onRunErrorPresented,
   onDismissError,
   onRetry,
+  retryLabel,
   sending,
   fileInputRef,
   onAttachmentPick,
   onRemoveAttachment,
   onSend,
   onStop,
+  onStopAll,
+  hasBackgroundWork,
   onVoice,
   replyTarget,
   replyQuote,
@@ -124,12 +136,20 @@ export const Composer = memo(function Composer({
   onDismissError: () => void;
   /** Sends a new turn after a failed run, so the fix is one tap. */
   onRetry?: () => void;
+  retryLabel?: string;
   sending: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onAttachmentPick: (files: FileList | null) => boolean;
   onRemoveAttachment: (attachment: PendingAttachment) => void;
-  onSend: (text: string, mentions: ComposerMention[], clientNonce: string) => Promise<boolean>;
+  onSend: (
+    text: string,
+    mentions: ComposerMention[],
+    clientNonce: string,
+    queueMode?: "steer" | "follow_up",
+  ) => Promise<boolean>;
   onStop: () => Promise<void>;
+  onStopAll?: () => Promise<void>;
+  hasBackgroundWork?: boolean;
   onVoice?: () => void;
   artifactTarget: ArtifactTarget;
   replyTarget?: ThreadMessage | null;
@@ -145,7 +165,10 @@ export const Composer = memo(function Composer({
   enterToSend: boolean;
 }) {
   const { t } = useLingui();
+  const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
   const [draft, setDraft] = useState(() => readComposerDraft(draftKey));
+  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
+  useEffect(() => setQueueMode("steer"), [draftKey]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(() => {
     const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(draft);
     return mentionMatch ? (mentionMatch[1] ?? "") : null;
@@ -423,7 +446,10 @@ export const Composer = memo(function Composer({
     const mentions = selectedMentions;
     setSelectedMentions([]);
     try {
-      const accepted = (await onSend(text, mentions, clientNonce)) !== false;
+      const accepted =
+        (await (queueMode === "follow_up"
+          ? onSend(text, mentions, clientNonce, queueMode)
+          : onSend(text, mentions, clientNonce))) !== false;
       settleComposerDraftSubmission(draftKey, submission, accepted);
       if (accepted) return;
     } catch {
@@ -575,7 +601,7 @@ export const Composer = memo(function Composer({
               onClick={onRetry}
               className="shrink-0 font-medium underline-offset-2 hover:underline"
             >
-              {t`Try again`}
+              {retryLabel ?? t`Try again`}
             </button>
           ) : null}
           <button
@@ -811,6 +837,21 @@ export const Composer = memo(function Composer({
             onPaste={handlePaste}
             onKeyDown={(event) => {
               if (
+                running &&
+                event.key === "Tab" &&
+                !event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.nativeEvent.isComposing &&
+                !mentionPickerOpen &&
+                !slashQuery
+              ) {
+                event.preventDefault();
+                setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"));
+                return;
+              }
+              if (
                 event.key === "Backspace" &&
                 draft.length === 0 &&
                 (selectedSkill !== null || selectedMentions.length > 0)
@@ -875,6 +916,18 @@ export const Composer = memo(function Composer({
           />
         </div>
         <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
+          {running ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-pressed={queueMode === "follow_up"}
+              title={t`Tab to switch`}
+              onClick={() => setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"))}
+            >
+              {queueMode === "follow_up" ? t`Follow up` : t`Steer`}
+            </Button>
+          ) : null}
           {onVoice && draft.trim().length === 0 ? (
             <Button
               variant="outline"
@@ -921,8 +974,36 @@ export const Composer = memo(function Composer({
               <ArrowUp size={16} strokeWidth={2.2} />
             </Button>
           )}
+          {onStopAll && (running || hasBackgroundWork) ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={t`Work actions`}
+                    disabled={sending}
+                    className="size-8 rounded-full"
+                  />
+                }
+              >
+                <Ellipsis size={16} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setBackgroundTasksOpen(true)}>
+                  {t`Background tasks`}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void onStopAll()}>
+                  {t`Stop everything`}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </div>
+      {backgroundTasksOpen ? (
+        <BackgroundTasks target={artifactTarget} onClose={() => setBackgroundTasksOpen(false)} />
+      ) : null}
     </fieldset>
   );
 });

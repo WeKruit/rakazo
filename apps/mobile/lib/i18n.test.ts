@@ -51,6 +51,9 @@ describe("mobile i18n", () => {
     const { resetI18nForTests, t } = await import("./i18n");
     resetI18nForTests("zh-CN");
     expect(t("Account")).toBe("账户");
+    expect(t("Expires in {time}", { time: "24h" })).toBe("将在 24h 后过期");
+    expect(t("Follow up")).toBe("稍后发送");
+    expect(t("Steer")).toBe("立即引导");
     expect(t("Sign in to Rakazo")).toBe("登录 Rakazo");
     expect(t("New bot")).toBe("新建 Bot");
     expect(t("{runs} runs · {tokens} tokens", { runs: 3, tokens: 12 })).toBe(

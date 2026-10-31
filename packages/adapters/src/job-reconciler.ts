@@ -8,6 +8,7 @@ import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
 import { watchOpenStages } from "./group-handoff.js";
+import { rearmRecruitingAgentRunWaits } from "./recruiting-agent-run-wait.js";
 import { sweepIdleRecruitingRoles } from "./recruiting-idle-sweep.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
@@ -20,6 +21,8 @@ const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
 const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 const STAGE_WATCH_SCAN_MS = 60_000;
+/** Searches still running at the provider get their follow-up re-armed this often. */
+const SEARCH_WAIT_REARM_MS = 2 * 60_000;
 // Two keys give Rakazo's lock a namespace without relying on a hash that might collide
 // with an application using the one-key advisory-lock API.
 const RECONCILIATION_LOCK_NAMESPACE = 1_380_019_075;
@@ -128,6 +131,7 @@ export function createJobReconciler(
   let controlScanDeadline: Date | undefined;
   let idleSweptAt = 0;
   let stagesWatchedAt = 0;
+  let searchWaitsArmedAt = 0;
 
   const reconcileOnce = async () => {
     if (reconciling) return reconciling;
@@ -167,6 +171,14 @@ export function createJobReconciler(
           });
         } catch (error) {
           getLogger().error("recruiting idle sweep", error);
+        }
+      }
+      if (now.getTime() - searchWaitsArmedAt >= SEARCH_WAIT_REARM_MS) {
+        searchWaitsArmedAt = now.getTime();
+        try {
+          await rearmRecruitingAgentRunWaits(deps, now, batchSize);
+        } catch (error) {
+          getLogger().error("search follow-up re-arm", error);
         }
       }
       if (deps.events && now.getTime() - stagesWatchedAt >= STAGE_WATCH_SCAN_MS) {

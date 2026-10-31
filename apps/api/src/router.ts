@@ -62,6 +62,7 @@ import {
   createCompanySiteResolver,
   createExaOrganizationSearch,
   createFaviconResolver,
+  createPrismaOrganizationLogoStore,
   createTicket,
   createVoiceProvider,
   currentWorkEstimate,
@@ -184,6 +185,7 @@ import {
   promptTextForAttachments,
   resolveGroupTargetBotIds,
   routineIntervalError,
+  streamRecruitingOverview,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -196,6 +198,7 @@ import {
   CannotDeleteSpaceAsNonOwnerError,
   CannotRenameSpaceAsNonOwnerError,
   ComputerLimitError,
+  claimConversationNotification,
   claimEmptySpaceDeletionForMember,
   createExternalConversationRepos,
   createGroupRepos,
@@ -217,6 +220,7 @@ import {
   formatMessagingLinkCode,
   getRecruitingGroupCrmReferences,
   getRecruitingWorkspaceRoleId,
+  hasConversationNotificationReservation,
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
@@ -231,6 +235,7 @@ import {
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
   recordClosedAskAnswer,
+  recordDesktopActivity,
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
@@ -374,6 +379,8 @@ import {
   shouldForwardPeerThreadEvent,
 } from "./thread-message-pages.js";
 import {
+  cancelThreadBackgroundTask,
+  listThreadBackgroundTasks,
   reactToThreadMessage,
   resolveThreadTarget,
   sendThreadMessage,
@@ -918,7 +925,10 @@ export function createRouter(deps: RouterDeps) {
   const favicons = deps.favicons ?? createFaviconResolver();
   const companySites =
     deps.companySites ??
-    createCompanySiteResolver({ searchOrganizations: createExaOrganizationSearch() });
+    createCompanySiteResolver({
+      searchOrganizations: createExaOrganizationSearch(),
+      store: createPrismaOrganizationLogoStore(deps.prisma),
+    });
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>
@@ -1428,8 +1438,16 @@ export function createRouter(deps: RouterDeps) {
         [
           meDto(deps, actor),
           spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
-          repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
-          groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : groupRepos.listGroups(actor, {
+                archived: true,
+                limit: 200,
+                offset: input.offset ?? 0,
+              }),
           input.groupId
             ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
                 threadSnapshot(deps, target),
@@ -2740,7 +2758,20 @@ export function createRouter(deps: RouterDeps) {
       }),
       stop: authed.threads.stop.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        await stopThreadRuns(deps, context.actor, target, input.runId);
+        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope);
+        return { ok: true as const };
+      }),
+      backgroundTasks: authed.threads.backgroundTasks.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        return listThreadBackgroundTasks(deps.prisma, target);
+      }),
+      cancelTask: authed.threads.cancelTask.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        const runs = await cancelThreadBackgroundTask(deps.prisma, context.actor, target, {
+          id: input.id,
+          kind: input.kind,
+        });
+        for (const id of runs) await stopThreadRuns(deps, context.actor, target, id);
         return { ok: true as const };
       }),
       clear: authed.threads.clear.handler(async ({ context, input }) => {
@@ -3973,6 +4004,76 @@ export function createRouter(deps: RouterDeps) {
           spaceId: context.actor.spaceId,
           threadId: target.threadId,
         });
+      }),
+      overview: authed.recruiting.overview.handler(async function* ({ context }) {
+        const actor = context.actor;
+        const groups = [];
+        for (let offset = 0; ; offset += 200) {
+          const page = await groupRepos.listGroups(actor, { limit: 200, offset });
+          groups.push(...page);
+          if (page.length < 200) break;
+        }
+        const targets = new Map<string, ReturnType<typeof resolveThreadTarget>>();
+        const targetOf = (group: { id: string }) => {
+          let target = targets.get(group.id);
+          if (!target) {
+            target = resolveThreadTarget(deps.prisma, actor, { groupId: group.id });
+            targets.set(group.id, target);
+          }
+          return target;
+        };
+        const readDeps = async (group: { id: string }, signal: AbortSignal) => ({
+          prisma: deps.prisma,
+          artifacts: deps.artifacts,
+          connectors: deps.connectors,
+          firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+          signal,
+          stillAuthorized: context.stillAuthorized,
+          reauthorize: () => resolveThreadTarget(deps.prisma, actor, { groupId: group.id }),
+          target: await targetOf(group),
+        });
+        yield* streamRecruitingOverview(
+          groups,
+          {
+            roleId: async (group) =>
+              (await targetOf(group)).threadId === group.threadId
+                ? getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: group.threadId })
+                : null,
+            shortlistPage: (roleId, cursor) =>
+              listRecruitingCandidates(deps, actor, {
+                roleId,
+                shortlisted: true,
+                sort: "recent",
+                limit: 200,
+                ...(cursor ? { cursor } : {}),
+              }),
+            candidates: async (group, signal) => {
+              const { target, ...read } = await readDeps(group, signal);
+              return getRecruitingRoleCandidates(read, actor, target, {
+                threadId: group.threadId,
+                limit: 1,
+              });
+            },
+            campaign: async (group, signal) => {
+              const { target, artifacts: _, ...read } = await readDeps(group, signal);
+              return getRecruitingRoleCampaign(read, actor, target, {});
+            },
+            calendar: async (group, signal) => {
+              const { target, prisma, artifacts: _, ...read } = await readDeps(group, signal);
+              return getRecruitingCorrespondence(
+                prisma,
+                actor,
+                target,
+                "interview",
+                undefined,
+                mcpOAuth,
+                {},
+                read,
+              );
+            },
+          },
+          context.signal ?? new AbortController().signal,
+        );
       }),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(
@@ -6870,6 +6971,26 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     notifications: {
+      desktopActivity: authed.notifications.desktopActivity.handler(async ({ context }) => {
+        await recordDesktopActivity(deps.prisma, context.actor);
+        return { ok: true as const };
+      }),
+      claimBrowser: authed.notifications.claimBrowser.handler(async ({ context, input }) => {
+        const scope = {
+          ...input,
+          spaceId: context.actor.spaceId,
+          userId: context.actor.userId,
+        };
+        const claim = await claimConversationNotification(deps.prisma, {
+          ...scope,
+          channel: "browser",
+        });
+        return {
+          allowed: Boolean(claim),
+          reserved:
+            Boolean(claim) || (await hasConversationNotificationReservation(deps.prisma, scope)),
+        };
+      }),
       registerPush: authed.notifications.registerPush.handler(async ({ context, input }) => {
         const sessionId = context.sessionId;
         if (!sessionId) throw new ORPCError("UNAUTHORIZED");
@@ -7112,10 +7233,11 @@ async function spaceNavigationDto(
   const staleClaimBefore = new Date(Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS);
 
   // Counts include filtered-out groups; an empty mapped page must still advance.
+  // Archived bots and roles are not in these pages, so they must not add empty ones.
   const scope = { userId: actor.userId, spaceId: { in: spaceIds } };
   const totals = await Promise.all([
-    deps.prisma.bot.count({ where: scope }),
-    deps.prisma.chatGroup.count({ where: scope }),
+    deps.prisma.bot.count({ where: { ...scope, archivedAt: null } }),
+    deps.prisma.chatGroup.count({ where: { ...scope, archivedAt: null } }),
     deps.prisma.botSection.count({ where: scope }),
     deps.prisma.externalConversation.count({ where: scope }),
   ]);

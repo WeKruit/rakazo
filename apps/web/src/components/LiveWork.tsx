@@ -15,11 +15,12 @@ import {
   workSessionElapsedMs,
   workSessionStages,
 } from "@rakazo/core";
+import { Button } from "@rakazo/ui-web";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { LoadingState, Shimmer } from "./ai/primitives";
-import { ToolSteps } from "./ToolActivityDisclosure";
+import { ToolStepElapsed, ToolSteps } from "./ToolActivityDisclosure";
 import { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
 
 function useWorkActivityLabels(): Record<WorkActivity, string> {
@@ -67,12 +68,44 @@ function WorkStageEntry({
   label,
   running,
   steps,
+  onOpen,
+  onCancel,
 }: {
   label: string;
   running: boolean;
   steps: LabeledStep[];
+  onOpen?: () => void;
+  onCancel?: () => Promise<void>;
 }) {
   const { t } = useLingui();
+  const [cancelling, setCancelling] = useState(false);
+  const actions =
+    onOpen || (running && onCancel) ? (
+      <div className="flex gap-1">
+        {onOpen ? (
+          <Button variant="ghost" size="xs" onClick={onOpen}>
+            <Trans>View</Trans>
+          </Button>
+        ) : null}
+        {running && onCancel ? (
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={cancelling}
+            onClick={async () => {
+              setCancelling(true);
+              try {
+                await onCancel();
+              } finally {
+                setCancelling(false);
+              }
+            }}
+          >
+            <Trans>Cancel task</Trans>
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
   const title = (
     <>
       <span
@@ -97,6 +130,7 @@ function WorkStageEntry({
         className={`${row} ps-[22px] text-muted-foreground`}
       >
         {title}
+        {actions}
       </div>
     );
   return (
@@ -119,7 +153,12 @@ function WorkStageEntry({
         {title}
       </summary>
       <div className="ms-[7px] mt-0.5 border-s border-border ps-3">
-        <ToolSteps steps={steps} limit={running ? LIVE_TOOL_STEP_WINDOW : undefined} />
+        <ToolSteps
+          steps={steps}
+          limit={running ? LIVE_TOOL_STEP_WINDOW : undefined}
+          live={running}
+        />
+        {actions}
       </div>
     </details>
   );
@@ -217,6 +256,8 @@ export function LiveWork({
   showSteps = true,
   stageKind = () => "other",
   estimate,
+  onOpenStage,
+  onCancelStage,
 }: {
   session: WorkSession | null;
   live: boolean;
@@ -230,6 +271,8 @@ export function LiveWork({
   stageKind?: (botId: string) => WorkStageKind;
   /** Big work this turn is part of: its countdown replaces the turn's clock. */
   estimate?: WorkEstimate | null;
+  onOpenStage?: (botId: string) => void;
+  onCancelStage?: (botId: string) => Promise<void>;
 }) {
   const labels = useWorkActivityLabels();
   const stageLabels = useWorkStageLabels();
@@ -245,6 +288,8 @@ export function LiveWork({
           label={stageLabels[stageKind(stage.botId)]}
           running={stage.running}
           steps={labelSteps(stage.steps)}
+          onOpen={onOpenStage ? () => onOpenStage(stage.botId) : undefined}
+          onCancel={onCancelStage ? () => onCancelStage(stage.botId) : undefined}
         />
       ))}
     </div>
@@ -257,7 +302,7 @@ export function LiveWork({
         : label;
     return (
       <div data-testid="live-work" className="space-y-1">
-        {steps.length ? <ToolSteps steps={steps} limit={LIVE_TOOL_STEP_WINDOW} /> : null}
+        {steps.length ? <ToolSteps steps={steps} limit={LIVE_TOOL_STEP_WINDOW} live /> : null}
         {stages}
         {/* The status names the step; the ticking clock stays out of announcements. */}
         <LoadingState
@@ -273,7 +318,11 @@ export function LiveWork({
               {estimate ? (
                 <EstimateClock estimate={estimate} />
               ) : session ? (
-                <WorkClock session={session} />
+                session.currentStartedAt ? (
+                  <ToolStepElapsed startedAt={session.currentStartedAt} live />
+                ) : (
+                  <WorkClock session={session} />
+                )
               ) : null}
             </span>
           }

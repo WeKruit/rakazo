@@ -120,6 +120,7 @@ import {
   recruitingBriefClarifications,
   recruitingCalibrationIdentity,
   requireRecruitingBriefConfirmation,
+  stuckWorkExpiresAt,
   validateRecruitingBrief,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
@@ -3502,6 +3503,7 @@ async function questionsInTransaction(
       threadId: true,
       botId: true,
       status: true,
+      updatedAt: true,
       bot: { select: { spaceId: true, userId: true } },
     },
   });
@@ -3689,6 +3691,7 @@ async function questionsInTransaction(
       groupId: thread.groupId,
       runId: run.id,
       block,
+      expiresAt: stuckWorkExpiresAt(run.status, run.updatedAt.toISOString()),
       runStatus: run.status,
       isCurrent: current.has(request),
       canAnswer:

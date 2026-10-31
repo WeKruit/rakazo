@@ -360,8 +360,6 @@ export function useShellRoster({
         if (applyBotLists) {
           setBots(bootstrap.bots);
           setBotSections(bootstrap.botSections);
-          setArchivedBots(bootstrap.archivedBots);
-          setArchivedGroups(bootstrap.archivedGroups);
           setGroups(groupList);
           setSpaces(bootstrap.spaces);
           setInitialBotsLoaded(true);
@@ -384,26 +382,43 @@ export function useShellRoster({
           markOnce("rk:renderer:thread-response");
         }
         if (!applyBotLists) return;
+        // The archived lists were left out of the first read and fill in behind it.
+        const archived = Promise.all([rpc.bots.listArchived(), rpc.groups.listArchived()]).then(
+          ([archivedBotList, archivedGroupList]) => {
+            if (cancelled || botsRefreshUser.current !== user) return null;
+            if (appliedAtStart === botsRefreshApplied.current) {
+              setArchivedBots(archivedBotList);
+              setArchivedGroups(archivedGroupList);
+            }
+            return archivedGroupList;
+          },
+        );
         if (
           bootstrap.bots.length === 0 &&
-          bootstrap.archivedBots.length === 0 &&
           groupList.length === 0 &&
-          bootstrap.archivedGroups.length === 0 &&
           !bootstrap.spaces.some((space) => space.hasContent)
         ) {
+          void archived.catch(() => undefined);
           navigate("/onboarding", { replace: true });
           return;
         }
         if (routeGroupId.current) {
-          // An archived role's link shows that role as archived, never a different role.
-          if (
-            !groupList.some((group) => group.id === routeGroupId.current) &&
-            !bootstrap.archivedGroups.some((group) => group.id === routeGroupId.current)
-          ) {
-            navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
+          const routed = routeGroupId.current;
+          if (groupList.some((group) => group.id === routed)) {
+            void archived.catch(() => undefined);
+            return;
           }
-          return;
+          // An archived role's link shows that role as archived, never a different role.
+          return archived.then((archivedGroupList) => {
+            if (
+              archivedGroupList &&
+              routeGroupId.current === routed &&
+              !archivedGroupList.some((group) => group.id === routed)
+            )
+              navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
+          });
         }
+        void archived.catch(() => undefined);
         if (!bootstrap.bots.some((bot) => bot.id === routeBotId.current)) {
           navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
         }

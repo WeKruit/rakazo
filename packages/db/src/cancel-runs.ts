@@ -1,4 +1,29 @@
+import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
 import type { Prisma } from "./client.js";
+
+/** A cancelled turn may finish registering research that the provider already accepted. */
+export const STOPPED_TURN = "turn_stopped";
+
+export function threadStopRunWhere(
+  threadId: string,
+  runId?: string,
+  scope: "turn" | "all" = "turn",
+): Prisma.RunWhereInput {
+  return {
+    threadId,
+    ...(runId !== undefined
+      ? { id: runId }
+      : scope === "turn"
+        ? {
+            trigger: { notIn: [...AUTOMATION_RUN_TRIGGERS] },
+            NOT: {
+              sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } },
+            },
+          }
+        : {}),
+    status: { in: [...ACTIVE_RUN_STATUSES] },
+  };
+}
 
 /** The caller selects authorized runs and owns the surrounding transaction and cleanup. */
 export async function cancelRunsInTransaction(

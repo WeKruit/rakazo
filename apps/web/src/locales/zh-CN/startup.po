@@ -3380,3 +3380,92 @@ msgstr "你的邮箱"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "你的名字"
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr "后台任务"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr "取消任务"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr "正在取消…"
+
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr "无法加载此任务。"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
+msgstr "无法更新任务。"
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "分派的任务"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "寻找候选人"
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
+msgstr "稍后发送"
+
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr "没有后台任务。"
+
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
+msgstr "还没有消息。"
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "排队中"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr "重新连接"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
+msgstr "请重新连接模型以继续。"
+
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr "立即引导"
+
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr "停止所有任务"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr "停止跟进"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr "停止更新"
+
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr "按 Tab 切换"
+
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr "任务记录"
+
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr "回复已中断，请重试。"
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
+msgstr "正在思考…"
+
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr "任务操作"

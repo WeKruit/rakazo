@@ -1,7 +1,9 @@
 import { Plural, useLingui } from "@lingui/react/macro";
 import type { ThreadMessage } from "@rakazo/contracts";
+import { formatWorkClock } from "@rakazo/core";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { formatToolActivityDuration, toolStepCount } from "../lib/tool-activity-view";
 
 type ToolStep = Extract<ThreadMessage["blocks"][number], { kind: "steps" }>["steps"][number];
@@ -11,15 +13,51 @@ import { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
 
 export { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
 
+/** Only the live step clock ticks; completed tool durations come from its execution receipt. */
+export function ToolStepElapsed({
+  startedAt,
+  durationMs,
+  live = false,
+}: {
+  startedAt?: string;
+  durationMs?: number;
+  live?: boolean;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!live || !startedAt || durationMs !== undefined) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [live, startedAt, durationMs]);
+  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const duration =
+    durationMs !== undefined
+      ? formatToolActivityDuration(durationMs)
+      : live && Number.isFinite(start)
+        ? formatWorkClock(Math.max(0, now - start))
+        : null;
+  return duration ? (
+    <span
+      data-testid="tool-step-elapsed"
+      className="shrink-0 font-mono text-[12px] tabular-nums text-muted-foreground"
+    >
+      {duration}
+    </span>
+  ) : null;
+}
+
 export function ToolSteps({
   steps,
   currentIndex,
   limit,
+  live = false,
 }: {
   steps: readonly ToolStep[];
   currentIndex?: number;
   /** Show only the last `limit` steps, with a count of the earlier ones above them. */
   limit?: number;
+  live?: boolean;
 }) {
   const { t } = useLingui();
   const hidden = limit !== undefined && steps.length > limit ? steps.length - limit : 0;
@@ -33,7 +71,10 @@ export function ToolSteps({
       ) : null}
       {shown.map((step, offset) => {
         const index = hidden + offset;
-        const isCurrent = !step.status && index === currentIndex;
+        const isCurrent =
+          !step.status &&
+          step.durationMs === undefined &&
+          (index === currentIndex || (live && Boolean(step.startedAt)));
         return (
           <div key={index} className="flex min-w-0 items-center gap-2 leading-5">
             <span
@@ -68,6 +109,11 @@ export function ToolSteps({
                 </>
               ) : null}
             </span>
+            <ToolStepElapsed
+              startedAt={step.startedAt}
+              durationMs={step.durationMs}
+              live={isCurrent}
+            />
           </div>
         );
       })}
@@ -148,6 +194,7 @@ export function StandaloneToolActivity({
             steps={steps}
             currentIndex={live ? steps.length - 1 : undefined}
             limit={live ? LIVE_TOOL_STEP_WINDOW : undefined}
+            live={live}
           />
         </ToolActivityDisclosure>
       </div>

@@ -235,7 +235,10 @@ describe("tool completion audit", () => {
       },
     );
     expect(blocks).toEqual([
-      { kind: "steps", steps: [{ label: "Connectors execute tool", count: 1, status: "failed" }] },
+      {
+        kind: "steps",
+        steps: [{ label: "Connectors execute tool", count: 1, status: "failed", durationMs: 1 }],
+      },
     ]);
     blocks = [{ kind: "steps", steps: [{ label: "Connectors execute tool", count: 1 }] }];
     await appendToolCompletionAudit(
@@ -255,7 +258,7 @@ describe("tool completion audit", () => {
     expect(blocks).toEqual([
       {
         kind: "steps",
-        steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 3 }],
+        steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 3, durationMs: 1 }],
       },
     ]);
     expect(JSON.stringify(blocks)).not.toContain("private");

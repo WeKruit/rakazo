@@ -77,6 +77,7 @@ import {
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
+  ACTIVE_RUN_STATUSES,
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
@@ -184,6 +185,8 @@ import {
   answerPausedAskWithSteering,
   appendEventInTransaction,
   automationRateLimited,
+  backgroundToolRun,
+  backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
   claimRecruitingReply,
@@ -371,6 +374,7 @@ import {
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
+import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import {
   handoffToGroupBot,
@@ -644,6 +648,7 @@ import {
   startWorkEstimate,
   withWorkNote,
   workEstimateAfterAgentRun,
+  workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
 
@@ -4120,6 +4125,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
       };
       if (!run) return;
+      const schedulingTrigger = run.trigger;
       const previouslyClaimed = run.leaseFence > 0;
       // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
       if (isTerminal(run.status as RunStatus) || run.status === "waiting_input") return;
@@ -4299,6 +4305,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
       const runSecrets = [...deps.secrets];
       try {
+        // Keep the persisted background lane for admission/steering, but recover the exact
+        // original source for messaging, attachments, reply rules and delivery after a lease restart.
+        run.trigger = await backgroundToolSourceTrigger(deps.prisma, run);
         const sourceBlocks =
           run.trigger === "messaging" && run.sourceMessageId
             ? ((
@@ -4485,7 +4494,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: bot.id,
           type: "run.started",
           runId,
-          payload: { trigger: run.trigger, routineId: run.routineId },
+          payload: {
+            trigger: schedulingTrigger,
+            routineId: run.routineId,
+            ...(schedulingTrigger !== run.trigger ? { sourceTrigger: run.trigger } : {}),
+          },
         });
 
         setupMark("runStarted");
@@ -5340,6 +5353,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let pendingTools: {
           name: string;
           executionId: string;
+          startedAt: string;
           completion?: Record<string, unknown>;
         }[] = [];
         const flushPendingTools = () => {
@@ -5348,7 +5362,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             currentTextSegment = "";
           }
           for (const pending of pendingTools) {
-            messageSegments = appendToolCallSegment(messageSegments, pending.name);
+            messageSegments = appendToolCallSegment(messageSegments, pending.name, pending);
             if (pending.completion)
               messageSegments = completeToolStep(messageSegments, pending.completion);
           }
@@ -5690,6 +5704,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const messages = await deps.prisma.message.findMany({
             where: {
               threadId: thread.id,
+              steeringMessages: { none: { originTrigger: "follow_up" } },
               ...(role.revisions[0] ? { createdAt: { gte: role.revisions[0].createdAt } } : {}),
             },
             orderBy: { seq: "asc" },
@@ -5785,6 +5800,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const reply = await deps.prisma.message.findFirst({
             where: {
               threadId: thread.id,
+              steeringMessages: { none: { originTrigger: "follow_up" } },
               role: "user",
               botId: null,
               createdAt: { gt: round.createdAt },
@@ -5941,7 +5957,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             name === "recruiting_role" &&
             args.operation === "update" &&
-            executionId !== `${runId}:brief-after-round`
+            // Its own repaired repeat (":brief-after-round:repaired") must not wait on itself.
+            !executionId.startsWith(`${runId}:brief-after-round`)
           )
             await briefSaving;
           if (
@@ -9786,8 +9803,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // passage the search returned; the turn then ends on the next-step choice.
                 const recorded = round as { roleId?: unknown; candidateKeys?: unknown } | null;
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
-                  briefSaving ??= saveBriefAfterRound(recorded.roleId).catch((error) =>
-                    getLogger().warn("brief not saved after the round", { error: String(error) }),
+                  // A stuck save never holds the turn: the model's own brief save and the
+                  // next-step card wait for this one.
+                  briefSaving ??= withinDeadline(
+                    saveBriefAfterRound(recorded.roleId).catch((error) =>
+                      getLogger().warn("brief not saved after the round", {
+                        error: String(error),
+                      }),
+                    ),
+                    SAVE_WAIT_MS,
+                    () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
                     threadId: run.threadId,
@@ -11479,7 +11504,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 result !== null && typeof result === "object" && !Array.isArray(result)
                   ? (result as Record<string, unknown>)
                   : { providerResult: result };
-              return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
+              // Research runs in the background like an agent run: it gets the same countdown.
+              const countdown =
+                run.trigger === "recruiting_grade"
+                  ? null
+                  : await workEstimateForResearch(
+                      deps.prisma,
+                      run,
+                      followed,
+                      connectorCall.args,
+                    ).catch(() => null);
+              return finish({
+                ...body,
+                background: RECRUITING_RESEARCH_DIRECT_NOTICE,
+                ...(countdown ? { countdown } : {}),
+              });
             }
             const finished = await finish(result);
             // A people search still working when its call window closes is collected later by
@@ -12405,6 +12444,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               emptyResponseText,
               reportOwed: turnReport.enabled ? () => turnReport.owed().length > 0 : undefined,
               executeTool: scripted ? undefined : applyTool,
+              onSlowTool: async (tool) => {
+                const promoted = await backgroundToolRun(deps.prisma, {
+                  runId,
+                  threadId: thread.id,
+                  botId: bot.id,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  executionId: tool.executionId,
+                  toolName: tool.name,
+                  durationMs: tool.durationMs,
+                });
+                if (promoted.eventSeq !== null)
+                  await deps.events.notify(thread.id, promoted.eventSeq).catch((error) => {
+                    getLogger().warn("slow tool promotion notification", { error: String(error) });
+                  });
+                if (promoted.continuationRunId)
+                  await deps.jobs.enqueue(runContinueJob(promoted.continuationRunId));
+              },
               storeToolOutput:
                 scripted || !deps.artifacts
                   ? undefined
@@ -12467,7 +12526,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
                   };
                 const messages = await deps.prisma.message.findMany({
-                  where: { threadId: thread.id },
+                  where: {
+                    threadId: thread.id,
+                    steeringMessages: { none: { originTrigger: "follow_up" } },
+                  },
                   orderBy: { seq: "asc" },
                   select: { role: true, blocks: true },
                 });
@@ -12737,7 +12799,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
               });
             } else if (event.type === "ask") {
-              await Promise.all(savesInFlight);
+              await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
+                getLogger().warn("run.ask.saves_still_running", { runId }),
+              );
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
                 const card = await nextStepCardInstead();
@@ -12943,6 +13007,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (event.name !== "message_user") {
                 await publishMidTurnNarration();
               }
+              const toolStartedAt = new Date().toISOString();
               try {
                 await deps.events.append({
                   spaceId: run.spaceId,
@@ -12953,6 +13018,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   payload: {
                     name: event.name,
                     executionId: event.executionId,
+                    startedAt: toolStartedAt,
                     category: workActivityForTool(event.name),
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
@@ -12960,7 +13026,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               } finally {
                 toolCalledAudit(event.executionId).release();
               }
-              pendingTools.push({ name: event.name, executionId: event.executionId });
+              pendingTools.push({
+                name: event.name,
+                executionId: event.executionId,
+                startedAt: toolStartedAt,
+              });
               if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();
               // A tool call is followed by another model call: stop here when the run is
@@ -13354,7 +13424,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
-          } else if (declineRetried && declineRetried.card === undefined) {
+          } else if (
+            declineRetried &&
+            declineRetried.card === undefined &&
+            // A teammate's handoff run of this bot is already doing the ask; a second run of the
+            // same bot would work the same request twice.
+            !(await deps.prisma.run.findFirst({
+              where: {
+                threadId: thread.id,
+                botId: bot.id,
+                id: { not: run.id },
+                status: { in: [...ACTIVE_RUN_STATUSES] },
+              },
+              select: { id: true },
+            }))
+          ) {
             retryRunId = await sendDeclineRetry(
               deps,
               { ...run, threadId: thread.id, userId: run.userId },
@@ -13758,7 +13842,14 @@ async function runNotice(
 
 async function notifyRun(
   deps: ExecutorDeps,
-  run: { spaceId: string; userId: string; botId: string; threadId: string; trigger: string },
+  run: {
+    id: string;
+    spaceId: string;
+    userId: string;
+    botId: string;
+    threadId: string;
+    trigger: string;
+  },
   message: NotificationMessage,
 ) {
   if (
@@ -13775,6 +13866,7 @@ async function notifyRun(
     .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
       operationId: "notify",
       traceId: run.botId,
+      runId: run.id,
       spaceId: run.spaceId,
       userId: run.userId,
       botId: run.botId,

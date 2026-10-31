@@ -147,7 +147,7 @@ export function useShellAgentActions({
   ]);
 
   const stopRun = useCallback(
-    async (runId?: string) => {
+    async (runId?: string, scope: "turn" | "all" = "turn") => {
       if (sending) return;
       sendingRef.current = true;
       setSending(true);
@@ -159,6 +159,7 @@ export function useShellAgentActions({
           try {
             await rpc.threads.stop({
               groupId: groupTarget,
+              scope,
               ...(runId !== undefined ? { runId } : {}),
             });
           } catch (error) {
@@ -168,7 +169,7 @@ export function useShellAgentActions({
             return;
           }
           // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
-          if (activeGroupId.current === groupTarget) {
+          if (activeGroupId.current === groupTarget && (runId !== undefined || scope === "all")) {
             updateSnapshot((prev) =>
               prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev, runId) : prev,
             );
@@ -179,7 +180,11 @@ export function useShellAgentActions({
         if (!botTarget) return;
         setSendError(null);
         try {
-          await rpc.threads.stop({ botId: botTarget, ...(runId !== undefined ? { runId } : {}) });
+          await rpc.threads.stop({
+            botId: botTarget,
+            scope,
+            ...(runId !== undefined ? { runId } : {}),
+          });
         } catch (error) {
           if (activeBotId.current === botTarget) {
             setSendError(errorText(error, t`Failed to stop`));
@@ -189,7 +194,7 @@ export function useShellAgentActions({
         // Clear local run/busy immediately rather than waiting for run.cancelled so a
         // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
         // blocked while the API is already idle.
-        if (activeBotId.current === botTarget) {
+        if (activeBotId.current === botTarget && (runId !== undefined || scope === "all")) {
           updateSnapshot((prev) =>
             !prev || (prev.botId !== botTarget && prev.botId)
               ? prev

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentRunWaitTarget,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
+  rearmRecruitingAgentRunWaits,
   runningAgentRunId,
   waitForRecruitingAgentRun,
 } from "./recruiting-agent-run-wait.js";
@@ -51,8 +52,8 @@ function fixture(options: {
     },
     externalEffect: {
       findMany: vi.fn(async () => options.answers),
-      findFirst: vi.fn(async () =>
-        options.countdown
+      findFirst: vi.fn(async (args: { where: { status: string } }) =>
+        options.countdown && args.where.status === "running"
           ? {
               id: "estimate",
               request: {
@@ -214,5 +215,35 @@ describe("people-search agent runs that outlive their turn", () => {
       where: { idempotencyKey: "work_estimate:agent_run_1", spaceId: "space", status: "running" },
       data: { status: "done" },
     });
+  });
+
+  it("leaves a search the recruiter stopped alone", async () => {
+    const test = fixture({ answers: [answer("newest", "running")] });
+    (test.prisma.externalEffect.findFirst as ReturnType<typeof vi.fn>).mockImplementation(
+      async (args: { where: { status: string } }) =>
+        args.where.status === "cancelled" ? { id: "estimate" } : null,
+    );
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(test.runCreate).not.toHaveBeenCalled();
+    expect(test.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the follow-up of every search still running", async () => {
+    const findMany = vi.fn(async (_args: unknown) => [
+      {
+        idempotencyKey: "work_estimate:agent_run_1",
+        run: { threadId: "thread", botId: "sourcer" },
+      },
+    ]);
+    const prisma = { externalEffect: { findMany } } as unknown as PrismaClient;
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+    expect(await rearmRecruitingAgentRunWaits({ prisma, jobs }, new Date(now), 50)).toBe(1);
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "recruiting_agent_run.wait",
+        payload: { threadId: "thread", botId: "sourcer", agentRunId: "agent_run_1" },
+        availableAt: new Date(now),
+      }),
+    );
   });
 });

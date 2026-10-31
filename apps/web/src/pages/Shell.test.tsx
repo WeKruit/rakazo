@@ -129,6 +129,10 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
   rpc: {
     bootstrap: shellApi.bootstrap,
     me: shellApi.me,
+    notifications: {
+      desktopActivity: vi.fn(async () => ({ ok: true })),
+      claimBrowser: vi.fn(async () => ({ allowed: true, reserved: true })),
+    },
     threads: {
       get: shellApi.get,
       messages: shellApi.messages,
@@ -334,6 +338,7 @@ async function renderFeedbackShell(
     };
     workspaceReady?: Promise<void>;
     workspaceFailure?: boolean;
+    runTrigger?: "user" | "routine";
   } = {},
 ) {
   setToolActivityPreference(
@@ -428,11 +433,12 @@ async function renderFeedbackShell(
       threadId: "thread-1",
       taskId: "task-main",
       status: "waiting_input",
-      trigger: "user",
+      trigger: options.runTrigger ?? "user",
       routineId: null,
       error: null,
       startedAt: null,
       createdAt: "2026-08-25T12:00:00.000Z",
+      updatedAt: "2026-08-25T12:00:00.000Z",
     },
   };
   if (runStatuses) {
@@ -1844,7 +1850,10 @@ it("uses the authorized group bootstrap without fetching the same thread again",
     openFeedback: false,
     bootstrapGroup: true,
   });
-  expect(shellApi.bootstrap).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  expect(shellApi.bootstrap).toHaveBeenCalledExactlyOnceWith({
+    activeOnly: true,
+    groupId: "group-1",
+  });
   expect(shellApi.get).not.toHaveBeenCalled();
   expect(container?.textContent).toContain("Choose the role location");
   await view.click("Remote");
@@ -2281,8 +2290,8 @@ it.each(["success", "error"] as const)(
     });
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
-    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
-    expect(shellApi.listArchivedBots).toHaveBeenCalledOnce();
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
+    expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(2);
     await act(async () => vi.advanceTimersByTimeAsync(6_000));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     const updated = structuredClone(view.navigation);
@@ -2297,7 +2306,7 @@ it.each(["success", "error"] as const)(
     expect(shellApi.answer).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTimeAsync(15_000));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(3);
-    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -2383,8 +2392,8 @@ it.each(["archive", "order"] as const)(
     await act(async () => resolveNavigation(view.navigation));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     if (operation === "archive") {
-      expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
-      expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(2);
+      expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(3);
+      expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(3);
       expect(container?.querySelector('fieldset[aria-label="Recruiting crew"]')).toBeNull();
       expect(
         container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,
@@ -4272,13 +4281,17 @@ it("stops one group member while preserving the other working run and global Sto
   shellApi.get.mockResolvedValue({ ...view.thread, run: remaining, activeRuns: [remaining] });
   shellApi.stop.mockResolvedValue({ ok: true });
   await view.click("Stop Main");
-  expect(shellApi.stop).toHaveBeenLastCalledWith({ groupId: "group-1", runId: "run-0" });
+  expect(shellApi.stop).toHaveBeenLastCalledWith({
+    groupId: "group-1",
+    runId: "run-0",
+    scope: "turn",
+  });
   expect(document.body.querySelector('button[aria-label="Stop Main"]')).toBeNull();
   expect(document.body.querySelector('button[aria-label="Stop Sourcer"]')).not.toBeNull();
   expect(document.body.textContent).toContain("Sourcer · Working…");
   shellApi.get.mockResolvedValue({ ...view.thread, run: null, activeRuns: [] });
   await view.click("Stop");
-  expect(shellApi.stop).toHaveBeenLastCalledWith({ groupId: "group-1" });
+  expect(shellApi.stop).toHaveBeenLastCalledWith({ groupId: "group-1", scope: "turn" });
   expect(document.body.querySelector('button[aria-label="Stop Sourcer"]')).toBeNull();
 });
 
@@ -4315,9 +4328,9 @@ it("keeps native working states without counting waiting-input time as execution
   });
   const progress = () =>
     [...container!.querySelectorAll('[role="status"]')].find((element) =>
-      /Waiting in line|Working/.test(element.textContent ?? ""),
+      /Queued|Thinking/.test(element.textContent ?? ""),
     );
-  expect(progress()?.textContent).toContain("Waiting in line…");
+  expect(progress()?.textContent).toContain("Queued");
   expect(progress()?.textContent).not.toContain("2m 0.0s");
   shellApi.get.mockImplementation(async ({ groupId }) =>
     groupId
@@ -4336,7 +4349,7 @@ it("keeps native working states without counting waiting-input time as execution
   await view.navigate("/app/bot-1");
   now.mockReturnValue(Date.parse("2026-08-25T12:03:00.000Z"));
   await view.navigate("/app/g/group-1");
-  expect(progress()?.textContent).toContain("Waiting in line…");
+  expect(progress()?.textContent).toContain("Queued");
   expect(progress()?.textContent).not.toContain("3m 0.0s");
   await view.navigate("/app/bot-1");
   const running = { ...view.thread.run, status: "running", startedAt: "2026-08-25T12:01:00.000Z" };
@@ -4351,12 +4364,12 @@ it("keeps native working states without counting waiting-input time as execution
     activeRuns: [running, { ...earlier, status: "waiting_input" }],
   });
   await view.navigate("/app/g/group-1");
-  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).toContain("Thinking…");
   expect(progress()?.textContent).not.toContain("2m 0.0s");
   await view.navigate("/app/bot-1");
   now.mockReturnValue(Date.parse("2026-08-25T12:04:00.000Z"));
   await view.navigate("/app/g/group-1");
-  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).toContain("Thinking…");
   expect(progress()?.textContent).not.toContain("3m 0.0s");
   await view.navigate("/app/bot-1");
   const waiting = { ...running, status: "waiting_input" };
@@ -4375,7 +4388,7 @@ it("keeps native working states without counting waiting-input time as execution
     messageId: "pending-main",
     answer: "remote",
   });
-  expect(progress()?.textContent).toContain("Working…");
+  expect(progress()?.textContent).toContain("Thinking…");
   expect(progress()?.textContent).not.toContain("16m 0.0s");
 });
 
@@ -4757,6 +4770,45 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
 });
 
 describe("Composer", () => {
+  it("uses Tab during work to queue the message until the reply finishes", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const textarea = renderComposer(onSend, { running: true });
+    type(textarea, "Then check the next role");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(container?.textContent).toContain("Follow up");
+    pressEnter(textarea);
+    await act(async () => {});
+    expect(onSend).toHaveBeenCalledWith(
+      "Then check the next role",
+      [],
+      expect.any(String),
+      "follow_up",
+    );
+  });
+
+  it("lets Shift+Tab leave the composer and Tab complete a mention", () => {
+    const textarea = renderComposer(vi.fn(), { running: true });
+    const leave = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => textarea.dispatchEvent(leave));
+    expect(leave.defaultPrevented).toBe(false);
+    type(textarea, "@Bo");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(container?.querySelector("[data-testid='mention-chip']")?.textContent).toContain("Bob");
+    expect(container?.textContent).not.toContain("Follow up");
+  });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend);
@@ -5514,7 +5566,7 @@ it("shows a sent message at once and finishes the turn from events without re-re
   await view.click("Send");
   // Echoed before the server answers.
   expect(container!.textContent).toContain("Find three robotics leads");
-  expect(container!.textContent).toContain("Starting…");
+  expect(container!.textContent).toContain("Thinking…");
   await act(async () => {
     accept({ runId: "run-echo", taskId: "task-echo", seq: 50 });
   });
@@ -5558,6 +5610,56 @@ it("shows a sent message at once and finishes the turn from events without re-re
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
 });
+
+it.each(["busy", "background", "card", "reconnect"] as const)(
+  "shows received input and Thinking within one second during %s, before the send response",
+  async (state) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell(
+      "bot",
+      state === "card" ? ["waiting_input"] : ["running"],
+      {
+        isDeploymentOwner: false,
+        openFeedback: false,
+        runTrigger: state === "background" ? "routine" : "user",
+      },
+    );
+    if (state === "reconnect") {
+      shellApi.get.mockImplementation(() => new Promise(() => {}));
+      await act(async () => {
+        for (const drop of shellApi.dropStreams) drop(new Error("Connection lost"));
+        shellApi.dropStreams.clear();
+      });
+    }
+    let accept!: (value: unknown) => void;
+    shellApi.send.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+    );
+    const textarea = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    type(textarea, "Only use the saved profiles");
+    const sentAt = Date.now();
+    await view.click("Send");
+    expect(shellApi.send).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Only use the saved profiles" }),
+    );
+    await vi.waitFor(
+      () => {
+        expect(container!.textContent).toContain("Only use the saved profiles");
+        expect(container!.textContent).toContain("Thinking…");
+      },
+      { timeout: 900, interval: 10 },
+    );
+    expect(Date.now() - sentAt).toBeLessThan(1000);
+    await act(async () => accept({ runId: "run-received", taskId: "task-received", seq: 2 }));
+    expect(container!.textContent).toContain("Only use the saved profiles");
+    expect(container!.textContent).toContain("Thinking…");
+  },
+);
 
 it("queues a message sent during a working reply above the composer until the reply reads it", async () => {
   const streams: Array<{
@@ -5858,6 +5960,80 @@ it("shows ordinary users the turn's work in plain words and folds it once the re
   expect(summary?.open).toBe(false);
   expect(summary?.textContent).toContain("Searching candidates");
   expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
+});
+
+it("retries a failed reply without sending or clearing the recruiter's new draft, attachment or reply", async () => {
+  let stream: Parameters<typeof CoreModule.runThreadSubscription>[0] | undefined;
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  const view = await renderFeedbackShell("group", ["running"], {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    messages: [
+      {
+        id: "previous-reply",
+        threadId: "thread-1",
+        seq: 2,
+        role: "bot",
+        botId: "bot-1",
+        runId: "previous-run",
+        createdAt: "2026-08-25T12:00:00Z",
+        blocks: [{ kind: "text", text: "An earlier reply." }],
+      },
+    ],
+  });
+  await view.openRoleChat();
+  await act(async () => vi.dynamicImportSettled());
+  const reply = document.body.querySelector<HTMLButtonElement>(
+    '[data-message-id="previous-reply"] button[aria-label="Reply"]',
+  );
+  expect(reply).not.toBeNull();
+  await act(async () => reply!.click());
+  pickAttachment();
+  const draft = "Keep this unsent note for my next message.";
+  type(container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!, draft);
+  shellApi.send.mockResolvedValue({ runId: "retry-run", taskId: "retry-task", seq: 51 });
+  const failure = {
+    id: "retry-failure",
+    type: "run.failed",
+    threadId: "thread-1",
+    spaceId: "space-1",
+    botId: "bot-1",
+    runId: "run-0",
+    seq: 50,
+    payload: { error: "The server timed out." },
+    createdAt: new Date().toISOString(),
+  };
+  await act(async () => {
+    stream!.applyEvent(failure as never);
+    stream!.onEvent(
+      failure as never,
+      { threadId: "thread-1", cursor: 50 },
+      { snapshotStale: false },
+    );
+  });
+  expect(container!.querySelector('[data-testid="composer-error"]')?.textContent).toContain(
+    "The reply stopped. Try again.",
+  );
+  await act(async () =>
+    container!.querySelector<HTMLButtonElement>('[data-testid="composer-error-retry"]')!.click(),
+  );
+  await vi.waitFor(() => expect(shellApi.send).toHaveBeenCalledOnce());
+  expect(shellApi.send).toHaveBeenCalledExactlyOnceWith({
+    groupId: "group-1",
+    text: "Try again",
+    queueMode: "steer",
+    clientNonce: expect.any(String),
+    addressing: "coordinator",
+  });
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+  expect(
+    container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')?.value,
+  ).toBe(draft);
+  expect(container!.textContent).toContain("notes.txt");
+  expect(container!.querySelector('button[aria-label="Cancel reply"]')).not.toBeNull();
 });
 
 shellApi.recruiting.readView.mockImplementation(recruitingReadViewFixture(shellApi.recruiting));

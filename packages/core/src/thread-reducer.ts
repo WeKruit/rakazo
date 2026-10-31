@@ -22,6 +22,7 @@ export type LiveThreadRun = {
   id: string;
   botId?: string;
   status: string;
+  updatedAt?: string;
   error?: string | null;
 };
 
@@ -184,6 +185,7 @@ function newRun(
     startedAt: previous?.startedAt ?? createdAt,
     completedAt: null,
     createdAt: previous?.createdAt ?? createdAt,
+    updatedAt: createdAt,
   } as LiveThreadRun;
 }
 
@@ -224,7 +226,10 @@ function closeAllToolCalls(message: LiveThreadMessage): LiveThreadMessage {
   let blocks: MessageBlock[] = [];
   for (const block of message.blocks) {
     if (block.kind === "progress" && block.activity === true) {
-      for (const name of block.pendingToolNames ?? []) blocks = appendToolCallSegment(blocks, name);
+      for (const call of block.pendingToolCalls ??
+        block.pendingToolNames?.map((name) => ({ name })) ??
+        [])
+        blocks = appendToolCallSegment(blocks, call.name, call);
     } else blocks.push(block);
   }
   return { ...message, blocks };
@@ -249,13 +254,20 @@ function closeToolExecution(
   for (const block of message.blocks) {
     if (block.kind === "progress" && block.activity === true) {
       const pending = [...(block.pendingToolNames ?? [])];
-      const index = pending.indexOf(name);
+      const calls = [...(block.pendingToolCalls ?? pending.map((name) => ({ name })))];
+      const matchedCall = calls.findIndex(
+        (call) => "executionId" in call && call.executionId === executionId,
+      );
+      const index = matchedCall >= 0 ? matchedCall : pending.indexOf(name);
       if (index >= 0) {
         pending.splice(index, 1);
-        blocks = appendToolCallSegment(blocks, name);
+        const [call] = calls.splice(index, 1);
+        blocks = appendToolCallSegment(blocks, name, call);
       }
-      const { pendingToolNames: _settled, ...marker } = block;
-      blocks.push(pending.length ? { ...marker, pendingToolNames: pending } : marker);
+      const { pendingToolNames: _settled, pendingToolCalls: _calls, ...marker } = block;
+      blocks.push(
+        pending.length ? { ...marker, pendingToolNames: pending, pendingToolCalls: calls } : marker,
+      );
     } else blocks.push(block);
   }
   return { message: { ...message, blocks }, toolExecutions };
@@ -352,8 +364,8 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     if (typeof payload.routineId === "string")
       (run as Record<string, unknown>).routineId = payload.routineId;
     const without = runsOf(prev).filter((candidate) => candidate.id !== run.id);
-    // Bot threads keep a single primary run; groups accumulate concurrent member runs.
-    const activeRuns = prev.groupId ? [...without, run] : [run];
+    // A person's new turn can run beside background work in bot and group conversations.
+    const activeRuns = [...without, run];
     return {
       ...prev,
       cursor,
@@ -366,6 +378,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
   }
   if (event.type === "run.waiting_input" || event.type === "computer.takeover.requested") {
     const status = event.type === "run.waiting_input" ? "waiting_input" : "waiting_takeover";
+    const updatedAt = typeof payload.updatedAt === "string" ? payload.updatedAt : undefined;
     const runId = event.runId;
     const knownInRun = Boolean(runId && prev.run?.id === runId);
     const knownInActive = Boolean(
@@ -374,10 +387,18 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     // Peer bot_message runs are omitted from snapshots while busy; the first wait
     // event is how an open thread learns they need ask/takeover UI.
     const needsInsert = Boolean(runId) && !knownInRun && !knownInActive;
-    const runChanged = Boolean(knownInRun && prev.run && prev.run.status !== status);
+    const runChanged = Boolean(
+      knownInRun &&
+        prev.run &&
+        (prev.run.status !== status || (updatedAt && prev.run.updatedAt !== updatedAt)),
+    );
     const activeRunChanged = Boolean(
       knownInActive &&
-        prev.activeRuns?.some((candidate) => candidate.id === runId && candidate.status !== status),
+        prev.activeRuns?.some(
+          (candidate) =>
+            candidate.id === runId &&
+            (candidate.status !== status || (updatedAt && candidate.updatedAt !== updatedAt)),
+        ),
     );
     const members = updateMemberStatus(prev.members, event.botId, status);
     // Waiting pauses delete progress server-side; drop the live bubble so a missed
@@ -402,7 +423,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       return prev;
     }
     if (needsInsert && runId) {
-      const waitingRun = newRun(event, status, "bot_message");
+      const waitingRun = { ...newRun(event, status, "bot_message"), updatedAt };
       const activeRuns = [
         ...runsOf(prev).filter((candidate) => candidate.id !== runId),
         waitingRun,
@@ -426,10 +447,10 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       members,
       messages,
       computer,
-      run: runChanged && prev.run ? { ...prev.run, status } : prev.run,
+      run: runChanged && prev.run ? { ...prev.run, status, updatedAt } : prev.run,
       activeRuns: activeRunChanged
         ? prev.activeRuns?.map((candidate) =>
-            candidate.id === runId ? { ...candidate, status } : candidate,
+            candidate.id === runId ? { ...candidate, status, updatedAt } : candidate,
           )
         : prev.activeRuns,
     };
@@ -492,7 +513,14 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     const name = String(payload.name ?? "");
     const blocks = reduceLiveMessageBlocks(
       previous?.blocks ?? [],
-      event.type === "thread.progress" ? { type: "progress", payload } : { type: "tool", name },
+      event.type === "thread.progress"
+        ? { type: "progress", payload }
+        : {
+            type: "tool",
+            name,
+            startedAt: typeof payload.startedAt === "string" ? payload.startedAt : event.createdAt,
+            executionId: toolExecutionId(payload),
+          },
     );
     // The hidden marker keeps a current call distinct from historical developer steps.
     if (event.type === "agent.tool.called" && blocks.at(-1)?.kind === "steps")
@@ -534,6 +562,8 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
             ? payload.outcome
             : undefined,
           lookup: Number.isSafeInteger(found) && Number(found) >= 0 ? { found } : undefined,
+          durationMs: payload.durationMs,
+          executionId,
         },
       };
       return { ...prev, cursor, toolExecutions: { open, done } };

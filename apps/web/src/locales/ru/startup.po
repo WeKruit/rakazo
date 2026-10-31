@@ -3380,3 +3380,19 @@ msgstr "Ваш адрес электронной почты"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Ваше имя"
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "Поручённая задача"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "Поиск кандидатов"
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "В очереди"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""

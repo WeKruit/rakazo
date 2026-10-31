@@ -182,6 +182,7 @@ export function MessageHoverActions({
 export const MessageView = memo(function MessageView({
   artifactTarget,
   canAnswer,
+  askExpiresAt,
   message,
   onAnswer,
   onOpenBot,
@@ -202,6 +203,7 @@ export const MessageView = memo(function MessageView({
 }: {
   artifactTarget: ArtifactTarget;
   canAnswer: boolean;
+  askExpiresAt?: string | null;
   message: ThreadMessage;
   onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
   onOpenBot: (botId: string) => void;
@@ -660,6 +662,7 @@ export const MessageView = memo(function MessageView({
               key={i}
               block={block}
               canAnswer={canAnswer}
+              expiresAt={askExpiresAt}
               onAnswer={(text, username) => onAnswer(message, text, username)}
             />
           );

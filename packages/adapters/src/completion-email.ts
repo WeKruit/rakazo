@@ -20,7 +20,7 @@ const SIDE_TRIGGERS = ["recruiting_grade", "recruiting_checkin"];
 export const completionEmailTool = {
   name: COMPLETION_EMAIL_TOOL,
   description:
-    'When work you start or hand off will likely take more than five to ten minutes (for example a large or hard search), ask the recruiter once with ask_user, in English: "Want an email when this finishes? It keeps running in the background." with the options "Yes, email me" and "No thanks". Then call this with their answer and carry on with the work. Never ask again in this conversation once they answered. With email true the server emails the recruiter\'s own account address once all of this work has finished, with your final message; it goes only to them, so it needs no approval card.',
+    'When work you start or hand off will likely take more than five to ten minutes (for example a large or hard search), offer once, in the same reply that says how long it takes, as plain text and never as an ask_user card: "Want an email when it finishes? Just say so." Nothing waits for the answer: carry on with the work. When the recruiter answers, call this with their answer. Never offer again in this conversation once they answered. With email true the server emails the recruiter\'s own account address once all of this work has finished, with your final message; it goes only to them, so it needs no approval card.',
   inputSchema: {
     type: "object",
     properties: {
@@ -32,7 +32,7 @@ export const completionEmailTool = {
 };
 
 /** Added to a long stage's first check-in when the recruiter has not been asked yet. */
-export const COMPLETION_EMAIL_OFFER = `This is long work: if the recruiter has not been offered an email yet, ask them now with one ask_user card, "Want an email when this finishes? It keeps running in the background.", and record their answer with ${COMPLETION_EMAIL_TOOL}.`;
+export const COMPLETION_EMAIL_OFFER = `This is long work: if the recruiter has not been offered an email yet, add one plain line to your update, "Want an email when it finishes? Just say so.", without an ask_user card and without waiting; record their answer with ${COMPLETION_EMAIL_TOOL} when they reply.`;
 
 type Turn = { id: string; spaceId: string; threadId: string; botId: string; userId: string };
 

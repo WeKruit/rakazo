@@ -3380,3 +3380,92 @@ msgstr "Your email address"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Your name"
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr "Background tasks"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr "Cancel task"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr "Cancelling…"
+
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr "Could not load this task."
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
+msgstr "Could not update tasks."
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "Delegated task"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "Finding candidates"
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
+msgstr "Follow up"
+
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr "No background tasks."
+
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
+msgstr "No messages yet."
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "Queued"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr "Reconnect"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
+msgstr "Reconnect your model to continue."
+
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr "Steer"
+
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr "Stop everything"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr "Stop following"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr "Stop updates"
+
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr "Tab to switch"
+
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr "Task transcript"
+
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr "The reply stopped. Try again."
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
+msgstr "Thinking…"
+
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr "Work actions"
