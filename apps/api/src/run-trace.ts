@@ -2,6 +2,7 @@ import { ORPCError } from "@orpc/server";
 import type { Actor, RunTrace, UsageRecordedPayload } from "@rakazo/contracts";
 import { UsageRecordedPayloadSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { seesOperatorSpend } from "@rakazo/db";
 
 /** Read the same account-owned history the runtime writes; never another account's trace. */
 export async function readRunTrace(
@@ -9,7 +10,12 @@ export async function readRunTrace(
   actor: Actor,
   input: { runId: string; includeDiagnostics: boolean },
 ): Promise<RunTrace> {
-  if (!actor.isDeploymentOwner || !input.includeDiagnostics) throw new ORPCError("FORBIDDEN");
+  if (
+    !actor.isDeploymentOwner ||
+    !input.includeDiagnostics ||
+    !(await seesOperatorSpend(prisma, actor.userId))
+  )
+    throw new ORPCError("FORBIDDEN");
   const run = await prisma.run.findFirst({
     where: { id: input.runId, spaceId: actor.spaceId, userId: actor.userId },
     select: {

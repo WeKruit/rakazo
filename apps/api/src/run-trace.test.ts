@@ -6,7 +6,7 @@ import { readRunTrace } from "./run-trace.js";
 const actor: Actor = {
   userId: "user",
   spaceId: "space",
-  email: "owner@example.test",
+  email: "staff@wekruit.com",
   isDeploymentOwner: true,
 };
 const at = (seconds: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, seconds));
@@ -26,6 +26,9 @@ function setup() {
     payload,
   });
   const prisma = {
+    user: {
+      findUnique: vi.fn().mockResolvedValue({ email: "staff@wekruit.com", emailVerified: true }),
+    },
     run: { findFirst: vi.fn().mockResolvedValue(run) },
     event: {
       findMany: vi.fn().mockResolvedValue([
@@ -274,3 +277,20 @@ it("rejects malformed timing instead of inventing a model duration", async () =>
     (await readRunTrace(db, actor, { runId: "run", includeDiagnostics: true })).rows[0],
   ).toMatchObject({ durationMs: null, startedAt: at(8).toISOString() });
 });
+
+it.each([
+  { email: "external@example.test", emailVerified: true },
+  { email: "staff@wekruit.com", emailVerified: false },
+  { email: "staff@wekruit.com.evil.test", emailVerified: true },
+])(
+  "denies token traces even to a deployment owner without verified operator membership (%j)",
+  async (user) => {
+    const { db, prisma } = setup();
+    prisma.user.findUnique.mockResolvedValue(user);
+    await expect(
+      readRunTrace(db, actor, { runId: "run", includeDiagnostics: true }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(prisma.run.findFirst).not.toHaveBeenCalled();
+    expect(prisma.usageRecord.findMany).not.toHaveBeenCalled();
+  },
+);

@@ -324,22 +324,17 @@ export function UsageSettingsPanel({
   panelRef?: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useLingui();
-  const owner = usage?.total.estimatedUsd !== undefined;
   return (
     <div
       ref={panelRef}
       tabIndex={-1}
       data-testid="usage-settings"
-      className="space-y-5 rounded-xl border border-border px-4 py-4 outline-none"
+      className="space-y-5 outline-none"
     >
-      <h3 className="text-[15px] font-medium text-foreground">
-        <Trans>Usage</Trans>
-      </h3>
       {usage ? (
         <>
           <UsageTable
             label={t`Usage totals`}
-            owner={owner}
             rows={[
               { key: "month", name: t`This month`, value: usage.month },
               { key: "total", name: t`All time`, value: usage.total },
@@ -361,13 +356,17 @@ export function UsageSettingsPanel({
                       {role.title ?? t`Deleted role`}
                     </span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {usageAmountsText(role, owner)}
+                      {formatUsageNumber(role.credits)}
+                      {role.pending ? (
+                        <span className="ms-2 text-xs">
+                          <Trans>Pending usage</Trans>
+                        </span>
+                      ) : null}
                     </span>
                   </summary>
                   <div className="border-t border-border px-3 py-2">
                     <UsageTable
                       label={t`Rounds`}
-                      owner={owner}
                       rows={role.rounds.map((round) => ({
                         key: round.scale ? "scale" : String(round.round),
                         name: round.scale ? t`Scaling` : t`Round ${round.round}`,
@@ -387,7 +386,6 @@ export function UsageSettingsPanel({
               <div className="mt-2">
                 <UsageTable
                   label={t`Last 30 days`}
-                  owner={owner}
                   rows={[...usage.days].reverse().map((day) => ({
                     key: day.day,
                     name: day.day,
@@ -397,48 +395,6 @@ export function UsageSettingsPanel({
               </div>
             </details>
           ) : null}
-          {usage.services?.length ? (
-            <section className="space-y-2" data-testid="usage-services">
-              <h4 className="text-[13px] font-medium text-foreground/80">
-                <Trans>Services</Trans>
-              </h4>
-              <table className="w-full text-[12.5px]">
-                <tbody>
-                  {usage.services.map((service) => (
-                    <tr
-                      key={`${service.unit}:${service.service}`}
-                      className="border-t border-border"
-                    >
-                      <td className="py-1.5 pr-3 text-foreground">{service.service}</td>
-                      <td className="py-1.5 pr-3 text-muted-foreground">{service.unit}</td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums text-foreground/80">
-                        {formatUsageNumber(service.quantity)}
-                      </td>
-                      <td className="py-1.5 text-right tabular-nums text-foreground">
-                        {service.priced ? formatUsd(service.estimatedUsd) : t`No price`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ) : null}
-          {usage.accounts?.length ? (
-            <section className="space-y-2" data-testid="usage-accounts">
-              <h4 className="text-[13px] font-medium text-foreground/80">
-                <Trans>Accounts</Trans>
-              </h4>
-              <UsageTable
-                label={t`Accounts`}
-                owner
-                rows={usage.accounts.map((account) => ({
-                  key: account.userId,
-                  name: account.email ?? account.userId,
-                  value: account,
-                }))}
-              />
-            </section>
-          ) : null}
         </>
       ) : null}
     </div>
@@ -446,30 +402,14 @@ export function UsageSettingsPanel({
 }
 
 function formatUsageNumber(value: number) {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
-}
-
-function formatUsd(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function usageAmountsText(value: UsageAmounts, owner: boolean) {
-  return owner && value.estimatedUsd !== undefined
-    ? formatUsd(value.estimatedUsd)
-    : formatUsageNumber(value.credits);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(value);
 }
 
 function UsageTable({
   label,
-  owner,
   rows,
 }: {
   label: string;
-  owner: boolean;
   rows: Array<{ key: string; name: string; value: UsageAmounts }>;
 }) {
   return (
@@ -481,19 +421,8 @@ function UsageTable({
               <span className="sr-only">{label}</span>
             </th>
             <th className="py-1.5 pr-3 text-right font-normal">
-              <Trans>Search credits</Trans>
+              <Trans>Credits</Trans>
             </th>
-            <th className="py-1.5 pr-3 text-right font-normal">
-              <Trans>Searches</Trans>
-            </th>
-            <th className="py-1.5 text-right font-normal">
-              <Trans>Model tokens</Trans>
-            </th>
-            {owner ? (
-              <th className="py-1.5 pl-3 text-right font-normal">
-                <Trans>Estimated cost</Trans>
-              </th>
-            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -502,18 +431,12 @@ function UsageTable({
               <td className="max-w-40 truncate py-1.5 pr-3 text-foreground">{row.name}</td>
               <td className="py-1.5 pr-3 text-right text-foreground/80">
                 {formatUsageNumber(row.value.credits)}
+                {row.value.pending ? (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    <Trans>Pending usage</Trans>
+                  </span>
+                ) : null}
               </td>
-              <td className="py-1.5 pr-3 text-right text-foreground/80">
-                {formatUsageNumber(row.value.calls)}
-              </td>
-              <td className="py-1.5 text-right text-foreground/80">
-                {formatUsageNumber(row.value.tokens)}
-              </td>
-              {owner ? (
-                <td className="py-1.5 pl-3 text-right text-foreground">
-                  {formatUsd(row.value.estimatedUsd ?? 0)}
-                </td>
-              ) : null}
             </tr>
           ))}
         </tbody>

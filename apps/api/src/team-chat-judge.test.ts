@@ -1,5 +1,5 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
-import { serializeModelSecret } from "@rakazo/adapters";
+import { estimateCatalogTokenCostUsd, serializeModelSecret } from "@rakazo/adapters";
 import { describe, expect, it, vi } from "vitest";
 import {
   ModelTeamChatEngagementJudge,
@@ -150,8 +150,8 @@ describe("team chat engagement judge", () => {
           outputTokens: 20,
           cacheReadTokens: 40,
           cacheWriteTokens: 10,
-          provider: "google",
-          model: "gemini-3.8-flash",
+          provider: "openai-codex",
+          model: "gpt-6.1-sol",
         };
         yield { type: "done", text: '{"act":false}' };
       },
@@ -188,8 +188,8 @@ describe("team chat engagement judge", () => {
         parentRunId: undefined,
         operationId: expect.stringMatching(/^team-chat-judge:[0-9a-f-]{36}$/),
         operationKind: "setup",
-        provider: "google",
-        model: "gemini-3.8-flash",
+        provider: "openai-codex",
+        model: "gpt-6.1-sol",
         inputTokens: 150,
         outputTokens: 20,
         cacheReadTokens: 40,
@@ -197,9 +197,14 @@ describe("team chat engagement judge", () => {
         cacheWrite1hTokens: null,
         reasoningTokens: null,
         totalTokens: null,
-        costUsd: null,
-        costSource: null,
-        pricingVersion: null,
+        costUsd: estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", {
+          input: 150,
+          output: 20,
+          cacheRead: 40,
+          cacheWrite: 10,
+        }),
+        costSource: "catalog-estimate",
+        pricingVersion: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         usageSource: null,
         callId: null,
         agentId: null,

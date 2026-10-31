@@ -1,4 +1,4 @@
-import type { AccountSecurity, AvatarStyle } from "@rakazo/contracts";
+import type { AccountSecurity, AvatarStyle, UsageCosts } from "@rakazo/contracts";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
@@ -106,12 +106,7 @@ export default function Account() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [archivedBots, setArchivedBots] = useState<MobileBot[]>([]);
-  const [usage, setUsage] = useState<{
-    runs: number;
-    inputTokens: number | null;
-    outputTokens: number | null;
-    totalTokens?: number | null;
-  } | null>(null);
+  const [usage, setUsage] = useState<UsageCosts | null>(null);
   const { avatarStyle, updateAvatarStyle } = useAvatarStyle();
   const appearance = getCachedAppearancePreference();
   const streamReplies = useSyncExternalStore(
@@ -136,12 +131,7 @@ export default function Account() {
     void rpc<MobileMe>("me")
       .then(setMe)
       .catch(() => undefined);
-    void rpc<{
-      runs: number;
-      inputTokens: number | null;
-      outputTokens: number | null;
-      totalTokens?: number | null;
-    }>("usage/summary")
+    void rpc<UsageCosts>("usage/costs")
       .then(setUsage)
       .catch(() => undefined);
     if (Platform.OS === "android") {
@@ -158,10 +148,11 @@ export default function Account() {
       title={t("Usage")}
       detail={
         usage
-          ? t("{runs} runs · {tokens} tokens", {
-              runs: usage.runs,
-              tokens: usage.totalTokens ?? "—",
-            })
+          ? t("{credits} credits", {
+              credits: new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(
+                usage.total.credits,
+              ),
+            }) + (usage.total.pending ? ` · ${t("Pending usage")}` : "")
           : undefined
       }
     />
@@ -341,6 +332,16 @@ export default function Account() {
         contentInsetAdjustmentBehavior="automatic"
       >
         {focus === "usage" ? <SettingsGroup>{usageBlock}</SettingsGroup> : null}
+        {usage?.canViewInternalCosts ? (
+          <SettingsGroup>
+            <SettingsRow
+              title={t("Internal Costs")}
+              chevron="right"
+              accessibilityRole="button"
+              onPress={() => router.push("/(settings)/internal-costs")}
+            />
+          </SettingsGroup>
+        ) : null}
         <SettingsGroup>
           <SettingsRow
             accessible

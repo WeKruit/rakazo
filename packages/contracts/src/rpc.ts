@@ -56,6 +56,7 @@ import {
   GroupDetailSchema,
   GroupSchema,
   IntegrationCatalogResultSchema,
+  InternalUsageCostsSchema,
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
@@ -1364,6 +1365,7 @@ export const appContract = {
       }),
     ),
     costs: oc.output(UsageCostsSchema),
+    internalCosts: oc.output(InternalUsageCostsSchema),
   },
   export: {
     bot: oc.input(botId).output(ExportManifestSchema),

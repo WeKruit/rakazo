@@ -126,7 +126,7 @@ describe("listSpaceArtifacts", () => {
         {
           prisma: { artifact: { findFirst: vi.fn() }, $queryRaw: queryRaw } as unknown as Pick<
             PrismaClient,
-            "artifact" | "$queryRaw"
+            "artifact" | "$queryRaw" | "user"
           >,
         },
         actor,
@@ -170,7 +170,7 @@ describe("listSpaceArtifacts", () => {
       const deps = {
         prisma: { artifact: { findFirst: vi.fn() }, $queryRaw: queryRaw } as unknown as Pick<
           PrismaClient,
-          "artifact" | "$queryRaw"
+          "artifact" | "$queryRaw" | "user"
         >,
       };
       const first = await listSpaceArtifacts(deps, actor, { limit: 2 });
@@ -206,7 +206,7 @@ describe("listSpaceArtifacts", () => {
         {
           prisma: { artifact: { findFirst: vi.fn() }, $queryRaw: queryRaw } as unknown as Pick<
             PrismaClient,
-            "artifact" | "$queryRaw"
+            "artifact" | "$queryRaw" | "user"
           >,
         },
         actor,
@@ -228,7 +228,7 @@ describe("listSpaceArtifacts", () => {
       {
         prisma: { artifact: { findFirst }, $queryRaw: queryRaw } as unknown as Pick<
           PrismaClient,
-          "artifact" | "$queryRaw"
+          "artifact" | "$queryRaw" | "user"
         >,
       },
       actor,
@@ -251,7 +251,7 @@ describe("listSpaceArtifacts", () => {
         {
           prisma: { artifact: { findFirst: vi.fn() }, $queryRaw: queryRaw } as unknown as Pick<
             PrismaClient,
-            "artifact" | "$queryRaw"
+            "artifact" | "$queryRaw" | "user"
           >,
         },
         actor,
@@ -279,7 +279,7 @@ describe("listSpaceArtifacts", () => {
       {
         prisma: { artifact: { findFirst: vi.fn() }, $queryRaw: queryRaw } as unknown as Pick<
           PrismaClient,
-          "artifact" | "$queryRaw"
+          "artifact" | "$queryRaw" | "user"
         >,
       },
       actor,
@@ -296,7 +296,10 @@ describe("listSpaceArtifacts", () => {
 });
 
 describe("internal recruiting context presentation", () => {
-  function fixture(internal = true) {
+  function fixture(
+    internal = true,
+    operator = { email: "staff@wekruit.com", emailVerified: true },
+  ) {
     const bytes = Buffer.from("internal context");
     const row = {
       ...listRow("context", "context"),
@@ -310,6 +313,7 @@ describe("internal recruiting context presentation", () => {
     const get = vi.fn(async () => bytes);
     const remove = vi.fn();
     const prisma = {
+      user: { findUnique: vi.fn(async () => operator) },
       artifact: {
         findFirst: vi.fn(async ({ where }) =>
           where.userId === row.userId && where.spaceId === row.spaceId ? row : null,
@@ -348,6 +352,24 @@ describe("internal recruiting context presentation", () => {
     expect(f.get).not.toHaveBeenCalled();
     expect(f.remove).not.toHaveBeenCalled();
   });
+  it.each([
+    { email: "external@example.test", emailVerified: true },
+    { email: "staff@wekruit.com", emailVerified: false },
+    { email: "staff@wekruit.com.evil.test", emailVerified: true },
+  ])("hides raw provider receipts from nonstaff deployment owners (%j)", async (operator) => {
+    const f = fixture(true, operator);
+    await expect(
+      getSpaceArtifactById(
+        f.deps,
+        { ...actor, isDeploymentOwner: true },
+        {
+          artifactId: "context",
+          includeDiagnostics: true,
+        },
+      ),
+    ).rejects.toThrow("Resource not found");
+    expect(f.get).not.toHaveBeenCalled();
+  });
   it("requires both explicit diagnostics and the deployment owner while preserving document reads", async () => {
     const f = fixture();
     await expect(
@@ -383,7 +405,15 @@ describe("internal recruiting context presentation", () => {
   });
   it("filters context families before pagination and rejects diagnostic cursors in ordinary mode", async () => {
     const queryRaw = vi.fn().mockResolvedValue([listRow("a", "a"), listRow("b", "b")]);
-    const deps = { prisma: { artifact: {}, $queryRaw: queryRaw } as unknown as PrismaClient };
+    const deps = {
+      prisma: {
+        user: {
+          findUnique: vi.fn(async () => ({ email: "staff@wekruit.com", emailVerified: true })),
+        },
+        artifact: {},
+        $queryRaw: queryRaw,
+      } as unknown as PrismaClient,
+    };
     const owner = { ...actor, isDeploymentOwner: true };
     const page = await listSpaceArtifacts(deps, owner, { limit: 1, includeDiagnostics: true });
     await expect(
@@ -407,7 +437,15 @@ describe("internal recruiting context presentation", () => {
 
   it("applies the same family visibility to bot lists and binds cursors to the actor and space", async () => {
     const queryRaw = vi.fn().mockResolvedValue([listRow("a", "a"), listRow("b", "b")]);
-    const deps = { prisma: { artifact: {}, $queryRaw: queryRaw } as unknown as PrismaClient };
+    const deps = {
+      prisma: {
+        user: {
+          findUnique: vi.fn(async () => ({ email: "staff@wekruit.com", emailVerified: true })),
+        },
+        artifact: {},
+        $queryRaw: queryRaw,
+      } as unknown as PrismaClient,
+    };
     const page = await listSpaceArtifacts(deps, actor, { limit: 1 });
     for (const other of [
       { ...actor, userId: "other" },

@@ -239,11 +239,52 @@ describe("catalogModelLabel", () => {
 });
 
 describe("estimateCatalogTokenCostUsd", () => {
-  it("prices subscription model tokens at the catalog list price", () => {
+  it("keeps a charged but unmeasured cache bucket unpriced", () => {
+    expect(
+      estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", {
+        input: 100,
+        output: 20,
+        cacheRead: null,
+        cacheWrite: 0,
+      }),
+    ).toBeNull();
+  });
+
+  it("prices 1h cache writes as a subset of total writes", () => {
+    expect(
+      estimateCatalogTokenCostUsd("anthropic", "claude-sonnet-4-6", {
+        input: 100,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 100,
+        cacheWrite1h: 40,
+      }),
+    ).toBeCloseTo(0.001065, 10);
+    expect(
+      estimateCatalogTokenCostUsd("anthropic", "claude-sonnet-4-6", {
+        input: 100,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 100,
+        cacheWrite1h: null,
+      }),
+    ).toBeNull();
+  });
+  it("knows native OpenAI Responses does not charge cache writes", () => {
+    expect(
+      estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", {
+        input: 100,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: null,
+      }),
+    ).toBeCloseTo(0.0004, 10);
+  });
+  it("prices subscription tokens with the catalog long-context tier", () => {
     const tokens = { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0 };
-    expect(estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", tokens)).toBeCloseTo(3, 6);
+    expect(estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", tokens)).toBeCloseTo(5.5, 6);
     expect(estimateCatalogTokenCostUsd("openai-codex", "openai/gpt-6-luna", tokens)).toBeCloseTo(
-      0.15,
+      0.275,
       6,
     );
     expect(estimateCatalogTokenCostUsd("openai-codex", "no-such-model", tokens)).toBeNull();

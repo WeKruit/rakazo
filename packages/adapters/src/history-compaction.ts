@@ -11,6 +11,7 @@ import type {
   ConfiguredMemoryProvider,
   MemoryProviderResolver,
 } from "./memory-provider-factory.js";
+import { estimateCatalogTokenCostUsd } from "./pi-models.js";
 
 /**
  * Sentinel for "nothing compacted yet". Message `seq` is 0-based, so an exclusive lower bound of
@@ -451,14 +452,19 @@ export async function compactHistory(
       runId: `compact:${threadId}:${fromSeqExclusive}`,
       usageOperationKind: "compaction",
       onUsage: async (event) => {
-        await recordUsage(deps.prisma, event, {
-          spaceId: thread.spaceId,
-          userId: thread.userId,
-          botId,
-          ...(origin ? { runId: origin.id } : {}),
-          operationId: `compact:${threadId}:${fromSeqExclusive}`,
-          operationKind: "compaction",
-        });
+        await recordUsage(
+          deps.prisma,
+          event,
+          {
+            spaceId: thread.spaceId,
+            userId: thread.userId,
+            botId,
+            ...(origin ? { runId: origin.id } : {}),
+            operationId: `compact:${threadId}:${fromSeqExclusive}`,
+            operationKind: "compaction",
+          },
+          estimateCatalogTokenCostUsd,
+        );
       },
       prompt,
       instructions: [
@@ -482,14 +488,19 @@ export async function compactHistory(
     },
   )) {
     if (event.type === "usage" && !event.accounted) {
-      await recordUsage(deps.prisma, event, {
-        spaceId: thread.spaceId,
-        userId: thread.userId,
-        botId,
-        ...(origin ? { runId: origin.id } : {}),
-        operationId: `compact:${threadId}:${fromSeqExclusive}`,
-        operationKind: "compaction",
-      });
+      await recordUsage(
+        deps.prisma,
+        event,
+        {
+          spaceId: thread.spaceId,
+          userId: thread.userId,
+          botId,
+          ...(origin ? { runId: origin.id } : {}),
+          operationId: `compact:${threadId}:${fromSeqExclusive}`,
+          operationKind: "compaction",
+        },
+        estimateCatalogTokenCostUsd,
+      );
     }
     if (event.type === "text" && /^(?:I hit a problem:|Unknown model )/i.test(event.text.trim())) {
       runtimeReportedFailure = true;

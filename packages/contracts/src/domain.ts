@@ -891,25 +891,19 @@ export const UsageRecordSchema = z.object({
   createdAt: z.string(),
 });
 
-/** Spend in neutral units; `estimatedUsd` and service names are only sent to the deployment owner. */
-const UsageAmountsSchema = z.object({
-  credits: z.number().nonnegative(),
-  calls: z.number().int().nonnegative(),
-  tokens: z.number().int().nonnegative(),
-  estimatedUsd: z.number().nonnegative().optional(),
-});
+/** Customer usage contains product credits only; provider accounting has a separate contract. */
+const UsageAmountsSchema = z.object({ credits: z.number().nonnegative(), pending: z.boolean() });
 export type UsageAmounts = z.infer<typeof UsageAmountsSchema>;
 
 export const UsageCostsSchema = z.object({
+  canViewInternalCosts: z.boolean(),
   total: UsageAmountsSchema,
   month: UsageAmountsSchema,
-  /** The last 30 days, oldest first, only days with spend. */
   days: z.array(UsageAmountsSchema.extend({ day: z.string() })),
   roles: z.array(
     UsageAmountsSchema.extend({
       roleId: z.string(),
       title: z.string().nullable(),
-      /** A calibration round includes the work that prepared it; `scale` is after approval. */
       rounds: z.array(
         UsageAmountsSchema.extend({
           round: z.number().int().positive().nullable(),
@@ -918,23 +912,51 @@ export const UsageCostsSchema = z.object({
       ),
     }),
   ),
-  services: z
-    .array(
-      z.object({
-        service: z.string(),
-        unit: z.string(),
-        quantity: z.number(),
-        estimatedUsd: z.number().nonnegative(),
-        /** False when some of this spend has no known price and counts as zero. */
-        priced: z.boolean(),
-      }),
-    )
-    .optional(),
-  accounts: z
-    .array(UsageAmountsSchema.extend({ userId: z.string(), email: z.string().nullable() }))
-    .optional(),
 });
 export type UsageCosts = z.infer<typeof UsageCostsSchema>;
+
+const InternalUsageAmountsSchema = z.object({
+  credits: z.number().nonnegative(),
+  costUsd: z.number().nonnegative().nullable(),
+  priced: z.boolean(),
+  calls: z.number().nonnegative(),
+  tokens: z.number().nonnegative().nullable(),
+  inputTokens: z.number().nonnegative().nullable(),
+  outputTokens: z.number().nonnegative().nullable(),
+  cacheReadTokens: z.number().nonnegative().nullable(),
+  cacheWriteTokens: z.number().nonnegative().nullable(),
+  cacheWrite1hTokens: z.number().nonnegative().nullable(),
+  reasoningTokens: z.number().nonnegative().nullable(),
+});
+export type InternalUsageAmounts = z.infer<typeof InternalUsageAmountsSchema>;
+const UsageModelSchema = InternalUsageAmountsSchema.extend({
+  model: z.string(),
+  unit: z.string(),
+  quantity: z.number().nullable(),
+  costSources: z.array(z.string()),
+  averageUnitCostUsd: z.number().nonnegative().nullable(),
+});
+export type UsageModel = z.infer<typeof UsageModelSchema>;
+const UsageVendorSchema = InternalUsageAmountsSchema.extend({
+  vendor: z.string(),
+  models: z.array(UsageModelSchema),
+});
+export type UsageVendor = z.infer<typeof UsageVendorSchema>;
+const UsageAccountSchema = InternalUsageAmountsSchema.extend({
+  userId: z.string(),
+  email: z.string().nullable(),
+  name: z.string().nullable(),
+  vendors: z.array(UsageVendorSchema),
+});
+export type UsageAccount = z.infer<typeof UsageAccountSchema>;
+export const InternalUsageCostsSchema = z.object({
+  total: InternalUsageAmountsSchema,
+  month: InternalUsageAmountsSchema,
+  pricing: z.object({ creditsPerUsd: z.number().positive(), grossMargin: z.number().min(0).lt(1) }),
+  vendors: z.array(UsageVendorSchema),
+  accounts: z.array(UsageAccountSchema),
+});
+export type InternalUsageCosts = z.infer<typeof InternalUsageCostsSchema>;
 
 export const COMPUTER_UPDATE_STAGES = [
   "preparing",

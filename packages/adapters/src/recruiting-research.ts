@@ -384,7 +384,13 @@ export async function recordAgentRunCost(
     return;
   const body = mcpObject(result);
   const dollars = Number(record(body?.costDollars)?.total);
-  if (body?.status !== "completed" || typeof body.id !== "string" || !(dollars > 0)) return;
+  if (
+    body?.status !== "completed" ||
+    typeof body.id !== "string" ||
+    !Number.isFinite(dollars) ||
+    !(dollars > 0)
+  )
+    return;
   await prisma.usageRecord
     .createMany({
       data: [
@@ -398,6 +404,8 @@ export async function recordAgentRunCost(
           model: toolName,
           unit: "credits",
           quantity: dollars,
+          costUsd: dollars,
+          costSource: "provider-reported",
           usageSource: "provider_receipt",
           callId: `credits:${server.slug}:${body.id}`,
           operationKind: "retrieval",

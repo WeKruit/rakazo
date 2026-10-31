@@ -26,28 +26,16 @@ export async function rpc<T>(page: Page, procedure: string, body: unknown): Prom
 
 export async function completeOnboarding(page: Page, testInfo?: TestInfo) {
   await page.waitForURL(/\/(onboarding|app)/, { timeout: 20_000 });
-  // Optional Server integrations step (needsSetup). Skip when shown, then the
-  // first bot is created automatically — land in Chief's chat with no form.
   const integrations = page.getByRole("heading", { name: "Server integrations", exact: true });
-  const chief = page.getByText("Chief").first();
-  await integrations.or(chief).or(page.getByText("Opening chat…")).waitFor({ timeout: 20_000 });
-  if ((await chief.isVisible().catch(() => false)) && page.url().includes("/app")) {
-    if (testInfo) {
-      await captureScreenshot(page, testInfo, "03-create-first-bot");
-      await captureScreenshot(page, testInfo, "06-onboarding-complete");
-    }
-    return;
-  }
-  if (await integrations.isVisible().catch(() => false)) {
+  const workspace = page.getByRole("navigation", { name: "Recruiting workspace", exact: true });
+  await integrations.or(workspace).waitFor({ timeout: 20_000 });
+  if (await integrations.isVisible()) {
     if (testInfo) await captureScreenshot(page, testInfo, "02-connect-apps");
     await page.getByRole("button", { name: "Skip", exact: true }).click();
   }
-  await page.waitForURL(/\/app\//, { timeout: 20_000 });
-  await expect(page.getByText("Chief").first()).toBeVisible();
-  if (testInfo) {
-    await captureScreenshot(page, testInfo, "03-create-first-bot");
-    await captureScreenshot(page, testInfo, "06-onboarding-complete");
-  }
+  await page.waitForURL(/\/app(?:[/?#]|$)/, { timeout: 20_000 });
+  await expect(workspace).toBeVisible();
+  if (testInfo) await captureScreenshot(page, testInfo, "06-onboarding-complete");
 }
 
 export async function signup(
@@ -135,6 +123,7 @@ export async function openUserSettings(
     | "memory"
     | "voice"
     | "usage"
+    | "internal-costs"
     | "computer"
     | "billing"
     | "updates",

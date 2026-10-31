@@ -253,6 +253,7 @@ import {
   seesOperatorSpend,
   selectSpaceModelPreference,
   selectSpaceVoicePreference,
+  summarizeInternalUsageCosts,
   summarizeUsageCosts,
   toBoardDto,
   toTicketCommentDto,
@@ -4263,9 +4264,18 @@ export function createRouter(deps: RouterDeps) {
       getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
         getRecruitingAssessment(deps.prisma, context.actor, input),
       ),
-      listResearch: authed.recruiting.listResearch.handler(({ context, input }) =>
-        listRecruitingResearch(deps.prisma, context.actor, { ...input, offset: input.offset ?? 0 }),
-      ),
+      listResearch: authed.recruiting.listResearch.handler(async ({ context, input }) => {
+        const result = await listRecruitingResearch(deps.prisma, context.actor, {
+          ...input,
+          offset: input.offset ?? 0,
+        });
+        if (
+          !result.actions.some((action) => action.usage !== null) ||
+          (await seesOperatorSpend(deps.prisma, context.actor.userId))
+        )
+          return result;
+        return { ...result, actions: result.actions.map((action) => ({ ...action, usage: null })) };
+      }),
     },
     memory: {
       list: authed.memory.list.handler(async ({ context, input }) => {
@@ -6897,14 +6907,13 @@ export function createRouter(deps: RouterDeps) {
     },
     usage: {
       list: authed.usage.list.handler(async ({ context }) => {
-        const [rows, staff] = await Promise.all([
-          deps.prisma.usageRecord.findMany({
-            where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
-            orderBy: { createdAt: "desc" },
-            take: 100,
-          }),
-          seesOperatorSpend(deps.prisma, context.actor.userId),
-        ]);
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
+        const rows = await deps.prisma.usageRecord.findMany({
+          where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
+          orderBy: { createdAt: "desc" },
+          take: 100,
+        });
         return rows.map((row) => ({
           id: row.id,
           botId: row.botId,
@@ -6918,10 +6927,9 @@ export function createRouter(deps: RouterDeps) {
           cacheWrite1hTokens: row.cacheWrite1hTokens,
           reasoningTokens: row.reasoningTokens,
           totalTokens: row.totalTokens,
-          // Recruiters see tokens; dollar amounts are operator detail, as in usage.costs.
-          costUsd: staff ? row.costUsd : null,
-          costSource: staff ? row.costSource : null,
-          pricingVersion: staff ? row.pricingVersion : null,
+          costUsd: row.costUsd,
+          costSource: row.costSource,
+          pricingVersion: row.pricingVersion,
           usageSource: row.usageSource,
           callId: row.callId,
           operationId: row.operationId,
@@ -6932,6 +6940,8 @@ export function createRouter(deps: RouterDeps) {
         }));
       }),
       summary: authed.usage.summary.handler(async ({ context }) => {
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
         const [result, runGroups] = await Promise.all([
           deps.prisma.usageRecord.aggregate({
             where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
@@ -6960,6 +6970,13 @@ export function createRouter(deps: RouterDeps) {
           priceTokens: estimateCatalogTokenCostUsd,
         }),
       ),
+      internalCosts: authed.usage.internalCosts.handler(async ({ context }) => {
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
+        return summarizeInternalUsageCosts(deps.prisma, {
+          priceTokens: estimateCatalogTokenCostUsd,
+        });
+      }),
     },
     export: {
       bot: authed.export.bot.handler(async ({ context, input }) => {

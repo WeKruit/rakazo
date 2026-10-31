@@ -332,6 +332,8 @@ model DeploymentSettings {
   defaultModelId                  String?
   deploymentModelCredentialCipher String?
   computerHost                    String?
+  usageCreditsPerUsd              Float    @default(100)
+  usageGrossMargin                Float    @default(0.5)
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 
@@ -1144,6 +1146,8 @@ model UsageRecord {
   reasoningTokens   Int?
   totalTokens       Int?
   costUsd           Float?
+  /// Customer credits per USD vendor cost, frozen when this usage is recorded.
+  creditRate        Float    @default(200)
   costSource        String?
   pricingVersion    String?
   usageSource       String?

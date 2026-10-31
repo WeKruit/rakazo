@@ -140,6 +140,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
         model: "gpt-test",
         inputTokens: 100,
         outputTokens: 20,
+        totalTokens: 120,
       } as never,
       { spaceId, userId, botId, runId },
     );
@@ -180,15 +181,15 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     expect(rows.filter((row) => row.unit === "calls")).toHaveLength(8);
 
     const costs = await db.summarizeUsageCosts(prisma, actor);
-    expect(costs.total).toEqual({ credits: 150, calls: 8, tokens: 120 });
-    expect(costs.month.estimatedUsd).toBeUndefined();
-    expect(costs.services).toBeUndefined();
+    expect(costs.total).toEqual({ credits: 257.8, pending: true });
+    expect(costs.canViewInternalCosts).toBe(false);
+    expect(JSON.stringify(costs)).not.toMatch(/costUsd|tokens|services|accounts/);
     const [role] = costs.roles;
-    expect(role).toMatchObject({ roleId, title: "Quality manager", credits: 150 });
+    expect(role).toMatchObject({ roleId, title: "Quality manager", credits: 257.8 });
     expect(role!.rounds).toEqual([
-      { round: 1, scale: false, credits: 60, calls: 5, tokens: 120 },
-      { round: 2, scale: false, credits: 90, calls: 2, tokens: 0 },
-      { round: null, scale: true, credits: 0, calls: 1, tokens: 0 },
+      { round: 1, scale: false, credits: 103.4, pending: true },
+      { round: 2, scale: false, credits: 153, pending: false },
+      { round: null, scale: true, credits: 1.4, pending: false },
     ]);
 
     // An unverified operator-domain mailbox stays on credits only.
@@ -196,12 +197,12 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       where: { id: userId },
       data: { email: `${userId}@wekruit.com`, emailVerified: false },
     });
-    expect((await db.summarizeUsageCosts(prisma, actor)).total.estimatedUsd).toBeUndefined();
+    expect((await db.summarizeUsageCosts(prisma, actor)).canViewInternalCosts).toBe(false);
     await prisma.user.update({
       where: { id: userId },
       data: { email: `${userId}@notwekruit.com`, emailVerified: true },
     });
-    expect((await db.summarizeUsageCosts(prisma, actor)).accounts).toBeUndefined();
+    expect((await db.summarizeUsageCosts(prisma, actor)).canViewInternalCosts).toBe(false);
     await prisma.user.update({
       where: { id: userId },
       data: { email: `${userId}@WeKruit.com`, emailVerified: true },
@@ -302,35 +303,119 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       content: [{ type: "text", text: JSON.stringify({ credits: 5000 }) }],
     });
 
-    const owner = await db.summarizeUsageCosts(prisma, actor, {
+    const owner = await db.summarizeInternalUsageCosts(prisma, {
       priceTokens: (provider, model, tokens) =>
-        provider === "openai-codex" && model === "gpt-test" && tokens.input === 100 ? 0.5 : null,
+        provider === "openai-codex" && model === "gpt-test" ? tokens.input * 0.005 : null,
     });
-    // 200 research credits, 26 enrichment credits, 2 searches and the model call at list price.
-    expect(owner.total.credits).toBe(226);
-    expect(owner.total.estimatedUsd).toBeCloseTo(200 * 0.0085 + 26 * 0.058 + 2 * 0.007 + 0.5, 2);
-    expect(owner.services).toEqual(
-      expect.arrayContaining([
-        { service: "autumn", unit: "credits", quantity: 200, estimatedUsd: 1.7, priced: true },
-        { service: "fullenrich", unit: "credits", quantity: 26, estimatedUsd: 1.51, priced: true },
-        { service: "people-search", unit: "calls", quantity: 2, estimatedUsd: 0.01, priced: true },
-        {
-          service: "openai-codex/gpt-test",
-          unit: "tokens",
-          quantity: 120,
-          estimatedUsd: 0.5,
-          priced: true,
-        },
-      ]),
+    const account = owner.accounts.find((account) => account.userId === userId)!;
+    const expectedUsd = 200 * 0.0085 + 26 * 0.058 + 2 * 0.007 + 0.5;
+    expect(account.costUsd).toBeCloseTo(expectedUsd, 6);
+    expect(account.credits).toBeCloseTo(expectedUsd * 200, 4);
+    expect(account.vendors.find((vendor) => vendor.vendor === "autumn")!.costUsd).toBeCloseTo(
+      1.7,
+      8,
     );
-    expect(owner.accounts?.find((account) => account.userId === userId)).toMatchObject({
-      credits: 226,
-      estimatedUsd: 3.72,
+    expect(account.vendors.find((vendor) => vendor.vendor === "autumn")!.credits).toBe(340);
+    const llm = account.vendors.find((vendor) => vendor.vendor === "openai-codex")!.models[0]!;
+    expect(llm).toMatchObject({
+      model: "gpt-test",
+      unit: "tokens",
+      tokens: 120,
+      costUsd: 0.5,
+      credits: 100,
+      costSources: ["catalog-estimate"],
     });
-    // Without a known model price the tokens stay visible as unpriced, never silently free.
-    const unpriced = await db.summarizeUsageCosts(prisma, actor);
-    expect(unpriced.services).toContainEqual(
-      expect.objectContaining({ service: "openai-codex/gpt-test", priced: false }),
-    );
+    // A changed catalog cannot reprice finalized token history.
+    const again = await db.summarizeInternalUsageCosts(prisma, { priceTokens: () => 99 });
+    expect(again.accounts.find((value) => value.userId === userId)!.credits).toBe(account.credits);
+  });
+
+  it("does not charge a search surcharge for agent runs or status polling", async () => {
+    const effect = await connectorCall(searchServerId, "agent_run", new Date(), {
+      structuredContent: {
+        id: `paid-agent-${suffix}`,
+        status: "completed",
+        costDollars: { total: 0.21 },
+      },
+    });
+    await connectorCall(searchServerId, "agent_run_status", new Date());
+    await prisma.usageRecord.create({
+      data: {
+        ...actor,
+        provider: "people-search",
+        model: "agent_run",
+        unit: "credits",
+        quantity: 0.21,
+        costUsd: 0.21,
+        costSource: "provider-reported",
+        callId: `paid-agent-${suffix}`,
+      },
+    });
+    const call = await prisma.usageRecord.findUnique({ where: { callId: `call:${effect.id}` } });
+    expect(call).toMatchObject({ costUsd: 0, creditRate: 200 });
+    const summary = await db.summarizeInternalUsageCosts(prisma);
+    const account = summary.accounts.find((item) => item.userId === userId)!;
+    const models = account.vendors.find((item) => item.vendor === "people-search")!.models;
+    expect(
+      models.find((item) => item.unit === "credits" && item.model === "agent_run"),
+    ).toMatchObject({ costUsd: 0.21, credits: 42 });
+    expect(
+      models.find((item) => item.unit === "calls" && item.model === "agent_run_status"),
+    ).toMatchObject({ costUsd: 0, credits: 0 });
+  });
+
+  it("freezes each credit conversion rate across pricing changes and duplicate delivery", async () => {
+    const previous = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
+    try {
+      await prisma.deploymentSettings.upsert({
+        where: { id: "default" },
+        create: { id: "default" },
+        update: { usageCreditsPerUsd: 100, usageGrossMargin: 0.5 },
+      });
+      const event = {
+        type: "usage" as const,
+        provider: "snapshot-test",
+        model: "snapshot-model",
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+        costUsd: 0.007,
+        costSource: "provider-reported",
+        callId: `snapshot-old-${suffix}`,
+      };
+      await db.recordUsage(prisma, event, actor);
+      await prisma.deploymentSettings.update({
+        where: { id: "default" },
+        data: { usageCreditsPerUsd: 200 },
+      });
+      await db.recordUsage(prisma, event, actor);
+      await db.recordUsage(prisma, { ...event, callId: `snapshot-new-${suffix}` }, actor);
+      const rows = await prisma.usageRecord.findMany({
+        where: { provider: "snapshot-test", userId },
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.creditRate).sort()).toEqual([200, 400]);
+      const internal = await db.summarizeInternalUsageCosts(prisma);
+      const model = internal.accounts
+        .find((row) => row.userId === userId)!
+        .vendors.find((row) => row.vendor === "snapshot-test")!.models[0]!;
+      expect(model).toMatchObject({ costUsd: 0.014, credits: 4.2, tokens: 240 });
+      await expect(
+        prisma.deploymentSettings.update({
+          where: { id: "default" },
+          data: { usageGrossMargin: 1 },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      if (previous)
+        await prisma.deploymentSettings.update({
+          where: { id: "default" },
+          data: {
+            usageCreditsPerUsd: previous.usageCreditsPerUsd,
+            usageGrossMargin: previous.usageGrossMargin,
+          },
+        });
+      else await prisma.deploymentSettings.delete({ where: { id: "default" } });
+    }
   });
 });

@@ -280,13 +280,14 @@ it("updates the Enter preference from Settings and reflects external changes", a
   }
 });
 
-it("shows spend per role and round, with dollars and services only for the owner", async () => {
+it("shows only product credits in usage for both customer and staff accounts", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const amounts = { credits: 150, calls: 2, tokens: 1200 };
+  const amounts = { credits: 150.1256, pending: true };
   const usage = {
+    canViewInternalCosts: false,
     total: amounts,
     month: amounts,
     days: [{ day: "2026-10-25", ...amounts }],
@@ -300,50 +301,26 @@ it("shows spend per role and round, with dollars and services only for the owner
     ],
   };
   try {
-    await act(async () => root.render(<UsageSettingsPanel usage={usage} />));
-    expect(container.textContent).toContain("Quality manager");
-    expect(container.textContent).toContain("Search credits");
-    expect(container.textContent).not.toContain("Estimated cost");
-    expect(container.querySelector('[data-testid="usage-services"]')).toBeNull();
-
-    const priced = { ...amounts, estimatedUsd: 1.28 };
-    await act(async () =>
-      root.render(
-        <UsageSettingsPanel
-          usage={{
-            ...usage,
-            total: priced,
-            month: priced,
-            services: [
-              {
-                service: "people-search",
-                unit: "calls",
-                quantity: 2,
-                estimatedUsd: 0.01,
-                priced: true,
-              },
-              {
-                service: "custom/model",
-                unit: "tokens",
-                quantity: 10,
-                estimatedUsd: 0,
-                priced: false,
-              },
-            ],
-            accounts: [{ userId: "user-1", email: "owner@example.test", ...priced }],
-          }}
-        />,
-      ),
-    );
-    expect(container.textContent).toContain("Estimated cost");
-    expect(container.textContent).toContain("$1.28");
-    expect(container.querySelector('[data-testid="usage-services"]')?.textContent).toContain(
-      "people-search",
-    );
-    expect(container.querySelector('[data-testid="usage-services"]')?.textContent).toContain(
-      "No price",
-    );
-    expect(container.textContent).toContain("owner@example.test");
+    for (const canViewInternalCosts of [false, true]) {
+      await act(async () =>
+        root.render(<UsageSettingsPanel usage={{ ...usage, canViewInternalCosts }} />),
+      );
+      expect(container.textContent).toContain("Quality manager");
+      expect(container.textContent).toContain("Credits");
+      expect(container.textContent).toContain("150.1256");
+      expect(container.textContent).toContain("Pending usage");
+      for (const hidden of [
+        "Search credits",
+        "Searches",
+        "Model tokens",
+        "Estimated cost",
+        "$",
+        "Services",
+        "Accounts",
+      ])
+        expect(container.textContent).not.toContain(hidden);
+      expect(container.querySelectorAll("thead th")).toHaveLength(6);
+    }
   } finally {
     await act(async () => root.unmount());
     container.remove();
