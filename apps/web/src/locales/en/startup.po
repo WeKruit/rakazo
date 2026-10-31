@@ -61,6 +61,18 @@ msgstr "{0} KB"
 msgid "{0} MB"
 msgstr "{0} MB"
 
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "{0} selected"
+msgstr "{0} selected"
+
+#. placeholder {0}: offset + 1
+#. placeholder {1}: offset + rows.length
+#. placeholder {2}: data.total
+#: src/pages/recruiting/AllContacts.tsx
+msgid "{0}–{1} of {2}"
+msgstr "{0}–{1} of {2}"
+
 #. placeholder {0}: active.name
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "{0}'s screen"
@@ -202,6 +214,7 @@ msgstr "Access token"
 msgid "Accounts"
 msgstr "Accounts"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr "Actions"
@@ -224,6 +237,7 @@ msgid "Active"
 msgstr "Active"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Activity"
@@ -253,9 +267,31 @@ msgstr "Add note"
 msgid "Add server URL"
 msgstr "Add server URL"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add tag"
+msgstr "Add tag"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add tag to {0} contacts"
+msgstr "Add tag to {0} contacts"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add these people to an outreach sequence. Show me the recipients and the email before anything is sent:"
+msgstr "Add these people to an outreach sequence. Show me the recipients and the email before anything is sent:"
+
+#. placeholder {0}: roleTitle(roleId)
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add these people to the {0} role and shortlist them:"
+msgstr "Add these people to the {0} role and shortlist them:"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Add to routine"
 msgstr "Add to routine"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add to sequence"
+msgstr "Add to sequence"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Added"
@@ -277,6 +313,15 @@ msgstr "All account totals"
 msgid "All accounts"
 msgstr "All accounts"
 
+#. placeholder {0}: data.windowDays
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "All accounts, last {0} days"
+msgstr "All accounts, last {0} days"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "All contacts"
+msgstr "All contacts"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All internal assessments"
 msgstr "All internal assessments"
@@ -288,10 +333,6 @@ msgstr "All internal verdicts"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "All of"
 msgstr "All of"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-#~ msgid "All roles"
-#~ msgstr "All roles"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -321,9 +362,17 @@ msgstr "An API key is stored for this provider, not a subscription sign-in."
 msgid "AND"
 msgstr "AND"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Any"
+msgstr "Any"
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Any of"
 msgstr "Any of"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Any time"
+msgstr "Any time"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
@@ -384,6 +433,10 @@ msgstr "Attachment"
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
 msgstr "Authentication failed."
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Automations"
+msgstr "Automations"
 
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
@@ -739,6 +792,14 @@ msgstr "Color {color}"
 msgid "Compacting…"
 msgstr "Compacting…"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Compactions"
+msgstr "Compactions"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Company"
+msgstr "Company"
+
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Company deck"
 msgstr "Company deck"
@@ -747,6 +808,14 @@ msgstr "Company deck"
 #: src/pages/shell/Composer.tsx
 msgid "Company: {0}"
 msgstr "Company: {0}"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Completed"
+msgstr "Completed"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Completion"
+msgstr "Completion"
 
 #: src/pages/ShellMessage.tsx
 msgid "Computer"
@@ -812,6 +881,7 @@ msgstr "Connection test failed."
 msgid "Contact layout"
 msgstr "Contact layout"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Contacted"
 msgstr "Contacted"
@@ -852,6 +922,10 @@ msgstr "Copy"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "Copy .env example"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Corrected after compaction"
+msgstr "Corrected after compaction"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
@@ -914,6 +988,10 @@ msgstr "Could not download file"
 msgid "Could not export conversation"
 msgstr "Could not export conversation"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Could not finish. Try again."
+msgstr "Could not finish. Try again."
+
 #: src/components/computer/FilesApp.tsx
 msgid "Could not list files"
 msgstr "Could not list files"
@@ -943,6 +1021,10 @@ msgstr "Could not load commands"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Could not load contact details"
 msgstr "Could not load contact details"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Could not load contacts."
+msgstr "Could not load contacts."
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
@@ -988,6 +1070,10 @@ msgstr "Could not load this task."
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "Could not load update status"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Could not load work metrics"
+msgstr "Could not load work metrics"
 
 #: src/components/computer/FilesApp.tsx
 msgid "Could not open file"
@@ -1135,10 +1221,15 @@ msgstr "Criterion name unavailable"
 msgid "Current"
 msgstr "Current"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Current company"
+msgstr "Current company"
+
 #: src/components/AccountAccess.tsx
 msgid "Current password"
 msgstr "Current password"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Current role"
 msgstr "Current role"
@@ -1158,6 +1249,10 @@ msgstr "Cutoff date"
 #: src/pages/RecruitingPanel.tsx
 msgid "Dashboard"
 msgstr "Dashboard"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Date added"
+msgstr "Date added"
 
 #. placeholder {0}: draft.email.date
 #: src/pages/shell/useShellRecruiting.ts
@@ -1311,11 +1406,13 @@ msgstr "Edit"
 msgid "Edit queued message"
 msgstr "Edit queued message"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
 msgstr "Education"
 
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
 msgstr "Email"
 
@@ -1391,6 +1488,10 @@ msgstr "Evidence"
 msgid "Expand {0}"
 msgstr "Expand {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Export"
+msgstr "Export"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Export conversation"
 msgstr "Export conversation"
@@ -1398,6 +1499,11 @@ msgstr "Export conversation"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Export this week's candidate list and drop it in the shared folder"
 msgstr "Export this week's candidate list and drop it in the shared folder"
+
+#. placeholder {0}: list.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Exported {0} contacts."
+msgstr "Exported {0} contacts."
 
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
@@ -1407,6 +1513,10 @@ msgstr "Extra high"
 #: src/components/CloudAgentCard.tsx
 msgid "failed"
 msgstr "failed"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Failed"
+msgstr "Failed"
 
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Failed to load recruiting data"
@@ -1443,6 +1553,10 @@ msgstr "File is too large to upload."
 msgid "Files"
 msgstr "Files"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Filter"
+msgstr "Filter"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
@@ -1463,10 +1577,22 @@ msgstr "finished"
 msgid "Finished"
 msgstr "Finished"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Finished without help"
+msgstr "Finished without help"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Finished."
 msgstr "Finished."
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Fired"
+msgstr "Fired"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "First reply p50 · p95"
+msgstr "First reply p50 · p95"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Fit"
@@ -1519,6 +1645,10 @@ msgstr "Good example: {name}"
 msgid "Group"
 msgstr "Group"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Handoffs"
+msgstr "Handoffs"
+
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "Hang up"
@@ -1564,6 +1694,10 @@ msgstr "How to check"
 msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
 msgstr "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "I want to import a contact list. I'll attach the file; add the people to the role I name."
+msgstr "I want to import a contact list. I'll attach the file; add the people to the role I name."
+
 #: src/pages/Shell.tsx
 msgid "I’m done"
 msgstr "I’m done"
@@ -1571,6 +1705,10 @@ msgstr "I’m done"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Image upload area"
 msgstr "Image upload area"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Import contacts"
+msgstr "Import contacts"
 
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
@@ -1622,6 +1760,10 @@ msgstr "Integrations"
 msgid "Interested"
 msgstr "Interested"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Interjection picked up p50 · p95"
+msgstr "Interjection picked up p50 · p95"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Internal assessment"
 msgstr "Internal assessment"
@@ -1671,6 +1813,10 @@ msgstr "Is a company deck available?"
 msgid "Job Brief"
 msgstr "Job Brief"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Job title"
+msgstr "Job title"
+
 #: src/pages/shell/Transcript.tsx
 msgid "Jump to latest"
 msgstr "Jump to latest"
@@ -1691,13 +1837,27 @@ msgstr "Just started"
 msgid "Key work"
 msgstr "Key work"
 
+#. placeholder {0}: days[key]
+#: src/pages/recruiting/AllContacts.tsx
+msgid "last {0} days"
+msgstr "last {0} days"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Last {count} days"
+msgstr "Last {count} days"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Last 7 days · UTC"
 msgstr "Last 7 days · UTC"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
 msgstr "Last contacted"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Last replied"
+msgstr "Last replied"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Last reply"
@@ -1744,6 +1904,10 @@ msgstr "Load more"
 msgid "Loading costs…"
 msgstr "Loading costs…"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Loading metrics…"
+msgstr "Loading metrics…"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
 msgstr "Loading preview…"
@@ -1771,14 +1935,33 @@ msgstr "Loading…"
 msgid "Local"
 msgstr "Local"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Location"
 msgstr "Location"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Log activity"
+msgstr "Log activity"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Log activity for {0} contacts"
+msgstr "Log activity for {0} contacts"
+
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Log out"
 msgstr "Log out"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Logged for {0} contacts."
+msgstr "Logged for {0} contacts."
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Long work"
+msgstr "Long work"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Looks good, find more"
@@ -1792,10 +1975,6 @@ msgstr "Low"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "Low"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-#~ msgid "Main"
-#~ msgstr "Main"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1826,6 +2005,7 @@ msgid "Medium"
 msgstr "Medium"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "Memory"
 
@@ -1927,6 +2107,7 @@ msgstr "Mute"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Name"
@@ -1977,14 +2158,18 @@ msgstr "New role"
 msgid "New Role"
 msgstr "New Role"
 
-#: src/pages/routine-next-run.ts
-#~ msgid "Next {when}"
-#~ msgstr "Next {when}"
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Next"
+msgstr "Next"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "Next: {0}"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "No"
+msgstr "No"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No accounts"
@@ -2014,6 +2199,10 @@ msgstr "No bots match"
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No contacts for this role yet."
 msgstr "No contacts for this role yet."
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "No contacts match."
+msgstr "No contacts match."
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "No dated sends in the available records."
@@ -2138,10 +2327,18 @@ msgstr "Note"
 msgid "Notes"
 msgstr "Notes"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Nothing to add"
+msgstr "Nothing to add"
+
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
 msgid "On a call with {0}"
 msgstr "On a call with {0}"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "On hold"
+msgstr "On hold"
 
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
@@ -2273,6 +2470,10 @@ msgstr "Overdue ({0})"
 msgid "Partial match"
 msgstr "Partial match"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Passed"
+msgstr "Passed"
+
 #: src/pages/Auth.tsx
 msgid "Password"
 msgstr "Password"
@@ -2335,6 +2536,10 @@ msgstr "Preview only"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "Preview only. Ask for the complete message to read the full body."
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Previous"
+msgstr "Previous"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -2538,6 +2743,12 @@ msgstr "Reminder"
 msgid "Remove {0}"
 msgstr "Remove {0}"
 
+#. placeholder {0}: chip.label
+#. placeholder {0}: textLabels[key]
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Remove {0} filter"
+msgstr "Remove {0} filter"
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Remove {name} from shortlist"
 msgstr "Remove {name} from shortlist"
@@ -2568,6 +2779,7 @@ msgstr "Rename section"
 msgid "Rename space"
 msgstr "Rename space"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Replied"
@@ -2636,6 +2848,10 @@ msgstr "Resize navigation"
 msgid "Resize panel"
 msgstr "Resize panel"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Responsiveness"
+msgstr "Responsiveness"
+
 #: src/components/DesktopUpdates.tsx
 msgid "Restart to update"
 msgstr "Restart to update"
@@ -2671,12 +2887,17 @@ msgstr "Resume ready"
 msgid "Resume: {0}"
 msgstr "Resume: {0}"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Resumed after restart"
+msgstr "Resumed after restart"
+
 #: src/components/AccountAccess.tsx
 #: src/components/BackgroundTasks.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/RetryNotice.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
 msgstr "Retry"
 
@@ -2696,6 +2917,7 @@ msgstr "Return to the original role before saving this draft."
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Role"
 msgstr "Role"
@@ -2728,6 +2950,10 @@ msgstr "Role version: {0}"
 msgid "Role: {0}"
 msgstr "Role: {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Roles"
+msgstr "Roles"
+
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -2756,6 +2982,10 @@ msgstr "Routines"
 msgid "Run time must be in the future."
 msgstr "Run time must be in the future."
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Run time p50 · p95"
+msgstr "Run time p50 · p95"
+
 #: src/components/RunTrace.tsx
 msgid "Run trace"
 msgstr "Run trace"
@@ -2773,6 +3003,7 @@ msgid "Salary range"
 msgstr "Salary range"
 
 #: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/queued-messages.tsx
@@ -2784,6 +3015,7 @@ msgid "Save the workspace and install current software."
 msgstr "Save the workspace and install current software."
 
 #: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/AllContacts.tsx
 msgid "Saved"
 msgstr "Saved"
 
@@ -2827,6 +3059,10 @@ msgstr "Schedule unavailable."
 msgid "Scheduled"
 msgstr "Scheduled"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "School"
+msgstr "School"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
@@ -2846,9 +3082,17 @@ msgstr "Search apps"
 msgid "Search bots and switch conversations"
 msgstr "Search bots and switch conversations"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Search by name, company, etc."
+msgstr "Search by name, company, etc."
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Search candidates"
 msgstr "Search candidates"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Search contacts"
+msgstr "Search contacts"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
@@ -2871,9 +3115,17 @@ msgstr "Search roles"
 msgid "Search update {0}"
 msgstr "Search update {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Select {name}"
+msgstr "Select {name}"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Select a bot"
 msgstr "Select a bot"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Select all on this page"
+msgstr "Select all on this page"
 
 #: src/pages/shell/Composer.tsx
 msgid "Send"
@@ -2975,10 +3227,21 @@ msgstr "Shell"
 msgid "Shortlist"
 msgstr "Shortlist"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Shortlist in role"
+msgstr "Shortlist in role"
+
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Shortlisted"
 msgstr "Shortlisted"
+
+#. placeholder {0}: inRole.length
+#. placeholder {1}: roleTitle(roleId)
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Shortlisted {0} in {1}."
+msgstr "Shortlisted {0} in {1}."
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Shortlisted only"
@@ -3059,6 +3322,10 @@ msgstr "Skill {0}"
 msgid "Skill evidence"
 msgstr "Skill evidence"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Skills"
+msgstr "Skills"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/Shell.tsx
 msgid "Skip"
@@ -3073,6 +3340,7 @@ msgid "Skip or deploy key"
 msgstr "Skip or deploy key"
 
 #: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Skipped"
 msgstr "Skipped"
 
@@ -3141,6 +3409,7 @@ msgstr "Starting…"
 msgid "Statement"
 msgstr "Statement"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Status"
 msgstr "Status"
@@ -3179,6 +3448,10 @@ msgstr "Stop everything"
 msgid "Stop following"
 msgstr "Stop following"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Stop reasons"
+msgstr "Stop reasons"
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "Stop speaking"
@@ -3195,6 +3468,10 @@ msgstr "Stop updates"
 msgid "Stopped"
 msgstr "Stopped"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Stopped by a person"
+msgstr "Stopped by a person"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -3209,6 +3486,10 @@ msgstr "Subject unavailable."
 msgid "Subject: {0}"
 msgstr "Subject: {0}"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Succeeded"
+msgstr "Succeeded"
+
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
 msgstr "Switch bot"
@@ -3222,9 +3503,26 @@ msgstr "Tab to switch"
 msgid "Table"
 msgstr "Table"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tag"
+msgstr "Tag"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tagged {0} contacts."
+msgstr "Tagged {0} contacts."
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tags"
+msgstr "Tags"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "Take control"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Task time p50 · p95"
+msgstr "Task time p50 · p95"
 
 #: src/components/StageTranscript.tsx
 msgid "Task transcript"
@@ -3232,6 +3530,7 @@ msgstr "Task transcript"
 
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Tasks"
 msgstr "Tasks"
 
@@ -3246,6 +3545,14 @@ msgstr "Teaching in progress. Stop teaching before sending a new message."
 #: src/pages/shell/computer-presentation.tsx
 msgid "Team Computer"
 msgstr "Team Computer"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Teammate replies"
+msgstr "Teammate replies"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Teamwork"
+msgstr "Teamwork"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"
@@ -3303,6 +3610,10 @@ msgstr "The reply stopped. Try again."
 msgid "The workspace changed. Open the role again."
 msgstr "The workspace changed. Open the role again."
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Thinking"
+msgstr "Thinking"
+
 #: src/lib/roster-status.ts
 msgid "Thinking…"
 msgstr "Thinking…"
@@ -3342,6 +3653,11 @@ msgstr "This reset link is invalid or expired"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
+
+#. placeholder {0}: formatToolActivityDuration(row.thinkingMs)
+#: src/components/RunTrace.tsx
+msgid "Thought for {0}"
+msgstr "Thought for {0}"
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Thread"
@@ -3410,6 +3726,10 @@ msgstr "Type without recording"
 msgid "Type your note here"
 msgstr "Type your note here"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Unanswered messages"
+msgstr "Unanswered messages"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Unavailable"
 msgstr "Unavailable"
@@ -3428,6 +3748,10 @@ msgstr "Unmet"
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
 msgstr "Unmute"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Unnamed"
+msgstr "Unnamed"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -3551,6 +3875,10 @@ msgstr "Waiting in line…"
 msgid "week"
 msgstr "week"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Week"
+msgstr "Week"
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "WeKruit home"
 msgstr "WeKruit home"
@@ -3609,6 +3937,10 @@ msgstr "XLSX is not supported yet. Save as CSV and upload again."
 #: src/lib/billing.ts
 msgid "year"
 msgstr "year"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Yes"
+msgstr "Yes"
 
 #: src/pages/shell/chat-context.tsx
 #: src/pages/shell/DeveloperSidebar.tsx

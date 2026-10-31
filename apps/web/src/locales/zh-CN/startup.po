@@ -61,6 +61,18 @@ msgstr "{0} KB"
 msgid "{0} MB"
 msgstr "{0} MB"
 
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "{0} selected"
+msgstr "已选 {0} 人"
+
+#. placeholder {0}: offset + 1
+#. placeholder {1}: offset + rows.length
+#. placeholder {2}: data.total
+#: src/pages/recruiting/AllContacts.tsx
+msgid "{0}–{1} of {2}"
+msgstr "第 {0}–{1} 人，共 {2} 人"
+
 #. placeholder {0}: active.name
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "{0}'s screen"
@@ -202,6 +214,7 @@ msgstr "访问令牌"
 msgid "Accounts"
 msgstr "账号"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr "操作"
@@ -224,6 +237,7 @@ msgid "Active"
 msgstr "启用"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Activity"
@@ -253,9 +267,31 @@ msgstr "添加备注"
 msgid "Add server URL"
 msgstr "添加服务器地址"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add tag"
+msgstr "添加标签"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add tag to {0} contacts"
+msgstr "给 {0} 位联系人添加标签"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add these people to an outreach sequence. Show me the recipients and the email before anything is sent:"
+msgstr "把这些人加入外联序列。发送前先给我看收件人和邮件内容："
+
+#. placeholder {0}: roleTitle(roleId)
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add these people to the {0} role and shortlist them:"
+msgstr "把这些人加入「{0}」岗位并放进 Shortlist："
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Add to routine"
 msgstr "加入例行任务"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Add to sequence"
+msgstr "加入序列"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Added"
@@ -277,6 +313,15 @@ msgstr ""
 msgid "All accounts"
 msgstr ""
 
+#. placeholder {0}: data.windowDays
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "All accounts, last {0} days"
+msgstr "所有账号，最近 {0} 天"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "All contacts"
+msgstr "全部联系人"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All internal assessments"
 msgstr "全部内部评估"
@@ -288,10 +333,6 @@ msgstr "全部内部结论"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "All of"
 msgstr "全部满足"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-#~ msgid "All roles"
-#~ msgstr "全部岗位"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -321,9 +362,17 @@ msgstr "此提供方存储的是 API 密钥，不是订阅登录。"
 msgid "AND"
 msgstr "且"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Any"
+msgstr "不限"
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Any of"
 msgstr "满足任一项"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Any time"
+msgstr "不限时间"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "API is back, but the update did not finish. Check the host logs."
@@ -384,6 +433,10 @@ msgstr "附件"
 #: src/lib/model-connection-preflight.ts
 msgid "Authentication failed."
 msgstr "身份验证失败。"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Automations"
+msgstr "自动化"
 
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
@@ -739,6 +792,14 @@ msgstr "颜色 {color}"
 msgid "Compacting…"
 msgstr "正在压缩上下文…"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Compactions"
+msgstr "上下文压缩"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Company"
+msgstr "公司"
+
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Company deck"
 msgstr "公司介绍材料"
@@ -747,6 +808,14 @@ msgstr "公司介绍材料"
 #: src/pages/shell/Composer.tsx
 msgid "Company: {0}"
 msgstr "公司：{0}"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Completed"
+msgstr "已完成"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Completion"
+msgstr "完成情况"
 
 #: src/pages/ShellMessage.tsx
 msgid "Computer"
@@ -812,6 +881,7 @@ msgstr "连接测试失败。"
 msgid "Contact layout"
 msgstr "联系人布局"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Contacted"
 msgstr "已联系"
@@ -852,6 +922,10 @@ msgstr "复制"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "复制 .env 示例"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Corrected after compaction"
+msgstr "压缩后已纠正"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Cost"
@@ -914,6 +988,10 @@ msgstr "无法下载文件"
 msgid "Could not export conversation"
 msgstr "无法导出对话"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Could not finish. Try again."
+msgstr "没有完成，请重试。"
+
 #: src/components/computer/FilesApp.tsx
 msgid "Could not list files"
 msgstr "无法列出文件"
@@ -943,6 +1021,10 @@ msgstr "无法加载命令"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Could not load contact details"
 msgstr "无法加载联系方式"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Could not load contacts."
+msgstr "无法加载联系人。"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
@@ -988,6 +1070,10 @@ msgstr "无法加载此任务。"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "无法加载更新状态"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Could not load work metrics"
+msgstr "无法加载工作指标"
 
 #: src/components/computer/FilesApp.tsx
 msgid "Could not open file"
@@ -1135,10 +1221,15 @@ msgstr "标准名称不可用"
 msgid "Current"
 msgstr "当前"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Current company"
+msgstr "当前公司"
+
 #: src/components/AccountAccess.tsx
 msgid "Current password"
 msgstr "当前密码"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Current role"
 msgstr "当前职位"
@@ -1158,6 +1249,10 @@ msgstr "截止日期"
 #: src/pages/RecruitingPanel.tsx
 msgid "Dashboard"
 msgstr "概览"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Date added"
+msgstr "添加日期"
 
 #. placeholder {0}: draft.email.date
 #: src/pages/shell/useShellRecruiting.ts
@@ -1311,11 +1406,13 @@ msgstr "编辑"
 msgid "Edit queued message"
 msgstr "编辑排队消息"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
 msgstr "教育经历"
 
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
 msgstr "邮箱"
 
@@ -1391,6 +1488,10 @@ msgstr "证据"
 msgid "Expand {0}"
 msgstr "展开 {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Export"
+msgstr "导出"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Export conversation"
 msgstr "导出对话"
@@ -1399,6 +1500,11 @@ msgstr "导出对话"
 msgid "Export this week's candidate list and drop it in the shared folder"
 msgstr "导出本周的候选人名单并放到共享文件夹"
 
+#. placeholder {0}: list.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Exported {0} contacts."
+msgstr "已导出 {0} 位联系人。"
+
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Extra high"
@@ -1406,6 +1512,10 @@ msgstr "极高"
 
 #: src/components/CloudAgentCard.tsx
 msgid "failed"
+msgstr "失败"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Failed"
 msgstr "失败"
 
 #: src/pages/shell/useShellRecruiting.ts
@@ -1443,6 +1553,10 @@ msgstr "文件太大，无法上传。"
 msgid "Files"
 msgstr "文件"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Filter"
+msgstr "筛选"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "根据已保存的证据或已连接的服务查找这个人的工作邮箱。如果缺少连接，请说明需要连接什么。保存返回的来源和状态，不要编造联系方式，也不要发送消息。"
@@ -1463,10 +1577,22 @@ msgstr "已完成"
 msgid "Finished"
 msgstr "已完成"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Finished without help"
+msgstr "无需协助完成"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Finished."
 msgstr "已完成。"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Fired"
+msgstr "已触发"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "First reply p50 · p95"
+msgstr "首次回复 p50 · p95"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Fit"
@@ -1519,6 +1645,10 @@ msgstr "合适：{name}"
 msgid "Group"
 msgstr "群组"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Handoffs"
+msgstr "交接"
+
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "挂断"
@@ -1564,6 +1694,10 @@ msgstr "如何检查"
 msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
 msgstr "我修改了附件中的邮件序列。请把它作为这个岗位当前未发送的草稿保存。不要发送，也不要加入任何人。"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "I want to import a contact list. I'll attach the file; add the people to the role I name."
+msgstr "我要导入一份联系人名单。我会附上文件，请把这些人加入我指定的岗位。"
+
 #: src/pages/Shell.tsx
 msgid "I’m done"
 msgstr "我做完了"
@@ -1571,6 +1705,10 @@ msgstr "我做完了"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Image upload area"
 msgstr "图片上传区域"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Import contacts"
+msgstr "导入联系人"
 
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
@@ -1622,6 +1760,10 @@ msgstr "集成"
 msgid "Interested"
 msgstr "感兴趣"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Interjection picked up p50 · p95"
+msgstr "插话响应 p50 · p95"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Internal assessment"
 msgstr "内部评估"
@@ -1671,6 +1813,10 @@ msgstr "有公司介绍材料吗？"
 msgid "Job Brief"
 msgstr "职位需求"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Job title"
+msgstr "职位"
+
 #: src/pages/shell/Transcript.tsx
 msgid "Jump to latest"
 msgstr "跳到最新"
@@ -1691,13 +1837,27 @@ msgstr ""
 msgid "Key work"
 msgstr "代表作"
 
+#. placeholder {0}: days[key]
+#: src/pages/recruiting/AllContacts.tsx
+msgid "last {0} days"
+msgstr "最近 {0} 天"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Last {count} days"
+msgstr "最近 {count} 天"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Last 7 days · UTC"
 msgstr "最近 7 天 · UTC"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
 msgstr "最近联系"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Last replied"
+msgstr "最近回复"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Last reply"
@@ -1744,6 +1904,10 @@ msgstr "加载更多"
 msgid "Loading costs…"
 msgstr ""
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Loading metrics…"
+msgstr "正在加载指标…"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
 msgstr "正在加载预览…"
@@ -1771,14 +1935,33 @@ msgstr "加载中…"
 msgid "Local"
 msgstr "本地"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Location"
 msgstr "地点"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Log activity"
+msgstr "记录活动"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Log activity for {0} contacts"
+msgstr "为 {0} 位联系人记录活动"
+
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Log out"
 msgstr "退出登录"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Logged for {0} contacts."
+msgstr "已为 {0} 位联系人记录。"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Long work"
+msgstr "长任务"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Looks good, find more"
@@ -1792,10 +1975,6 @@ msgstr "低"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "低"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-#~ msgid "Main"
-#~ msgstr "Main"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1826,6 +2005,7 @@ msgid "Medium"
 msgstr "中"
 
 #: src/pages/RecruitingPanel.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Memory"
 msgstr "记忆"
 
@@ -1927,6 +2107,7 @@ msgstr "静音"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Name"
@@ -1977,14 +2158,18 @@ msgstr "新岗位"
 msgid "New Role"
 msgstr "新岗位"
 
-#: src/pages/routine-next-run.ts
-#~ msgid "Next {when}"
-#~ msgstr ""
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Next"
+msgstr "下一页"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Next: {0}"
 msgstr "下一步：{0}"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "No"
+msgstr "否"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No accounts"
@@ -2014,6 +2199,10 @@ msgstr "没有匹配的助手"
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No contacts for this role yet."
 msgstr "这个岗位还没有联系人。"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "No contacts match."
+msgstr "没有符合条件的联系人。"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "No dated sends in the available records."
@@ -2138,10 +2327,18 @@ msgstr "备注"
 msgid "Notes"
 msgstr "备注"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Nothing to add"
+msgstr "没有可补充的"
+
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
 msgid "On a call with {0}"
 msgstr "正在与 {0} 通话"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "On hold"
+msgstr "暂缓"
 
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
@@ -2273,6 +2470,10 @@ msgstr "已逾期（{0}）"
 msgid "Partial match"
 msgstr "部分符合"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Passed"
+msgstr "不合适"
+
 #: src/pages/Auth.tsx
 msgid "Password"
 msgstr "密码"
@@ -2335,6 +2536,10 @@ msgstr "仅预览"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Previous"
+msgstr "上一页"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -2538,6 +2743,12 @@ msgstr "提醒"
 msgid "Remove {0}"
 msgstr "移除 {0}"
 
+#. placeholder {0}: chip.label
+#. placeholder {0}: textLabels[key]
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Remove {0} filter"
+msgstr "移除筛选：{0}"
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Remove {name} from shortlist"
 msgstr "将{name}移出候选名单"
@@ -2568,6 +2779,7 @@ msgstr "重命名分组"
 msgid "Rename space"
 msgstr "重命名工作区"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Replied"
@@ -2636,6 +2848,10 @@ msgstr "调整导航宽度"
 msgid "Resize panel"
 msgstr "调整面板大小"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Responsiveness"
+msgstr "响应速度"
+
 #: src/components/DesktopUpdates.tsx
 msgid "Restart to update"
 msgstr "重启以更新"
@@ -2671,12 +2887,17 @@ msgstr "简历已就绪"
 msgid "Resume: {0}"
 msgstr "简历：{0}"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Resumed after restart"
+msgstr "重启后已恢复"
+
 #: src/components/AccountAccess.tsx
 #: src/components/BackgroundTasks.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/RetryNotice.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
 msgstr "重试"
 
@@ -2696,6 +2917,7 @@ msgstr "保存这份草稿前，请返回原岗位。"
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Role"
 msgstr "岗位"
@@ -2728,6 +2950,10 @@ msgstr "岗位版本：{0}"
 msgid "Role: {0}"
 msgstr "岗位：{0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Roles"
+msgstr "岗位"
+
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -2756,6 +2982,10 @@ msgstr "例行任务"
 msgid "Run time must be in the future."
 msgstr "运行时间必须是将来的时间。"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Run time p50 · p95"
+msgstr "运行时长 p50 · p95"
+
 #: src/components/RunTrace.tsx
 msgid "Run trace"
 msgstr "运行追踪"
@@ -2773,6 +3003,7 @@ msgid "Salary range"
 msgstr "薪资范围"
 
 #: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/queued-messages.tsx
@@ -2784,6 +3015,7 @@ msgid "Save the workspace and install current software."
 msgstr "保存工作区并安装最新软件。"
 
 #: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/AllContacts.tsx
 msgid "Saved"
 msgstr "已保存"
 
@@ -2827,6 +3059,10 @@ msgstr "暂无发送安排。"
 msgid "Scheduled"
 msgstr "已安排"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "School"
+msgstr "学校"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
@@ -2846,9 +3082,17 @@ msgstr "搜索应用"
 msgid "Search bots and switch conversations"
 msgstr "搜索助手并切换对话"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Search by name, company, etc."
+msgstr "按姓名、公司等搜索"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Search candidates"
 msgstr "搜索候选人"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Search contacts"
+msgstr "搜索联系人"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
@@ -2871,9 +3115,17 @@ msgstr "搜索岗位"
 msgid "Search update {0}"
 msgstr "搜索更新 {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Select {name}"
+msgstr "选择 {name}"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Select a bot"
 msgstr "选择 Bot"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Select all on this page"
+msgstr "全选本页"
 
 #: src/pages/shell/Composer.tsx
 msgid "Send"
@@ -2975,10 +3227,21 @@ msgstr "Shell"
 msgid "Shortlist"
 msgstr "候选名单"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Shortlist in role"
+msgstr "加入岗位 Shortlist"
+
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Shortlisted"
 msgstr "已入围"
+
+#. placeholder {0}: inRole.length
+#. placeholder {1}: roleTitle(roleId)
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Shortlisted {0} in {1}."
+msgstr "已在「{1}」中加入 {0} 人。"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Shortlisted only"
@@ -3059,6 +3322,10 @@ msgstr "技能 {0}"
 msgid "Skill evidence"
 msgstr "技能证据"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Skills"
+msgstr "技能"
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/Shell.tsx
 msgid "Skip"
@@ -3073,6 +3340,7 @@ msgid "Skip or deploy key"
 msgstr "跳过或使用部署密钥"
 
 #: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Skipped"
 msgstr "已跳过"
 
@@ -3141,6 +3409,7 @@ msgstr "正在开始…"
 msgid "Statement"
 msgstr "陈述"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Status"
 msgstr "状态"
@@ -3179,6 +3448,10 @@ msgstr "停止所有任务"
 msgid "Stop following"
 msgstr "停止跟进"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Stop reasons"
+msgstr "停止原因"
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "停止朗读"
@@ -3195,6 +3468,10 @@ msgstr "停止更新"
 msgid "Stopped"
 msgstr "已停止"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Stopped by a person"
+msgstr "被人工停止"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
@@ -3209,6 +3486,10 @@ msgstr "暂无主题。"
 msgid "Subject: {0}"
 msgstr "主题：{0}"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Succeeded"
+msgstr "成功"
+
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
 msgstr "切换助手"
@@ -3222,9 +3503,26 @@ msgstr "按 Tab 切换"
 msgid "Table"
 msgstr "表格"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tag"
+msgstr "标签"
+
+#. placeholder {0}: people.length
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tagged {0} contacts."
+msgstr "已为 {0} 位联系人添加标签。"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Tags"
+msgstr "标签"
+
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "接管控制权"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Task time p50 · p95"
+msgstr "任务时长 p50 · p95"
 
 #: src/components/StageTranscript.tsx
 msgid "Task transcript"
@@ -3232,6 +3530,7 @@ msgstr "任务记录"
 
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Tasks"
 msgstr "任务"
 
@@ -3246,6 +3545,14 @@ msgstr "正在示范，发送新消息前请先停止示范。"
 #: src/pages/shell/computer-presentation.tsx
 msgid "Team Computer"
 msgstr "团队电脑"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Teammate replies"
+msgstr "同事回复"
+
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Teamwork"
+msgstr "协作"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"
@@ -3303,6 +3610,10 @@ msgstr "回复已中断，请重试。"
 msgid "The workspace changed. Open the role again."
 msgstr "工作区已变更，请重新打开岗位。"
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Thinking"
+msgstr "思考中"
+
 #: src/lib/roster-status.ts
 msgid "Thinking…"
 msgstr "正在思考…"
@@ -3342,6 +3653,11 @@ msgstr "此重置链接无效或已过期"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "This role changed. Select the candidate again."
 msgstr "这个岗位已变更，请重新选择候选人。"
+
+#. placeholder {0}: formatToolActivityDuration(row.thinkingMs)
+#: src/components/RunTrace.tsx
+msgid "Thought for {0}"
+msgstr "思考了 {0}"
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Thread"
@@ -3410,6 +3726,10 @@ msgstr "输入文字，不录音"
 msgid "Type your note here"
 msgstr "在这里写备注"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Unanswered messages"
+msgstr "未回复消息"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Unavailable"
 msgstr "不可用"
@@ -3428,6 +3748,10 @@ msgstr "不符合"
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
 msgstr "取消静音"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Unnamed"
+msgstr "未命名"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -3551,6 +3875,10 @@ msgstr "排队等候…"
 msgid "week"
 msgstr "周"
 
+#: src/pages/WorkMetricsSettingsPanel.tsx
+msgid "Week"
+msgstr "周"
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "WeKruit home"
 msgstr "WeKruit 首页"
@@ -3609,6 +3937,10 @@ msgstr "XLSX 暂不支持，请另存为 CSV 后上传"
 #: src/lib/billing.ts
 msgid "year"
 msgstr "年"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Yes"
+msgstr "是"
 
 #: src/pages/shell/chat-context.tsx
 #: src/pages/shell/DeveloperSidebar.tsx

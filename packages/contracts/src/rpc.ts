@@ -180,6 +180,12 @@ import {
   RecruitingAccountViewInputSchema,
   RecruitingAccountViewOutputSchema,
 } from "./recruiting-account.js";
+import {
+  ListRecruitingContactsInput,
+  ListRecruitingContactsOutput,
+  RecruitingContactFacetsOutput,
+  UpdateRecruitingContactTagsInput,
+} from "./recruiting-contacts.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import {
   RecruitingSchedulingPlanInputSchema,
@@ -759,6 +765,13 @@ export const appContract = {
     accountView: oc
       .input(RecruitingAccountViewInputSchema)
       .output(RecruitingAccountViewOutputSchema),
+    contacts: {
+      list: oc.input(ListRecruitingContactsInput).output(ListRecruitingContactsOutput),
+      facets: oc.input(z.strictObject({})).output(RecruitingContactFacetsOutput),
+      updateTags: oc
+        .input(UpdateRecruitingContactTagsInput)
+        .output(z.object({ ok: z.literal(true) })),
+    },
     profileActivity: {
       list: oc.input(RecruitingProfileActivityInput).output(RecruitingProfileActivityOutput),
       recordView: oc.input(RecordRecruitingProfileViewInput).output(RecruitingProfileViewSchema),

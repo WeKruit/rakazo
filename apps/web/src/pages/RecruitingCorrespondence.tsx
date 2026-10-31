@@ -10,6 +10,7 @@ import {
   RecruitingCorrespondenceReferenceSchema,
   RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
+import { hideVendorNames, isVendorService } from "@rakazo/core";
 import { Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowRight, CalendarDays, ChevronRight, Inbox, Mail, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -710,32 +711,34 @@ function SavedCorrespondenceView({
       </div>
       {data ? (
         <ul className="mb-5 flex flex-wrap gap-2 text-sm" aria-label={t`Service connections`}>
-          {data.connections.map((connection, index) => (
-            <li key={index} className="rounded-lg border border-border px-3 py-2">
-              {connection.name}
-              {" · "}
-              {connection.status === "configured" ? (
-                <Trans>Configured</Trans>
-              ) : connection.status === "needs_access" ? (
-                <Trans>Enable for this role</Trans>
-              ) : connection.status === "disabled" ? (
-                <Trans>Disabled</Trans>
-              ) : connection.status === "unavailable" ? (
-                <Trans>Temporarily unavailable</Trans>
-              ) : (
-                <Trans>Connect account</Trans>
-              )}
-              {connection.checkIssue ? (
-                <p role="alert" className="mt-1 text-destructive">
-                  {connection.checkIssue.status === "failed" ? (
-                    <Trans>A saved check failed.</Trans>
-                  ) : (
-                    <Trans>A saved result cannot be displayed.</Trans>
-                  )}
-                </p>
-              ) : null}
-            </li>
-          ))}
+          {data.connections
+            .filter((connection) => !isVendorService(connection))
+            .map((connection, index) => (
+              <li key={index} className="rounded-lg border border-border px-3 py-2">
+                {connection.name}
+                {" · "}
+                {connection.status === "configured" ? (
+                  <Trans>Configured</Trans>
+                ) : connection.status === "needs_access" ? (
+                  <Trans>Enable for this role</Trans>
+                ) : connection.status === "disabled" ? (
+                  <Trans>Disabled</Trans>
+                ) : connection.status === "unavailable" ? (
+                  <Trans>Temporarily unavailable</Trans>
+                ) : (
+                  <Trans>Connect account</Trans>
+                )}
+                {connection.checkIssue ? (
+                  <p role="alert" className="mt-1 text-destructive">
+                    {connection.checkIssue.status === "failed" ? (
+                      <Trans>A saved check failed.</Trans>
+                    ) : (
+                      <Trans>A saved result cannot be displayed.</Trans>
+                    )}
+                  </p>
+                ) : null}
+              </li>
+            ))}
           {!data.connections.length ? (
             <li>
               <Trans>No service configured for this role.</Trans>
@@ -933,7 +936,7 @@ function SavedCorrespondenceView({
                 >
                   {[...sources].map(([key, email]) => (
                     <NativeSelectOption key={key} value={key}>
-                      {email.sourceName}
+                      {hideVendorNames(email.sourceName)}
                       {email.eaccount ? ` · ${email.eaccount}` : ""}
                     </NativeSelectOption>
                   ))}

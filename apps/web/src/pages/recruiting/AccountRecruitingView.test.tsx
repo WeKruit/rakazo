@@ -16,8 +16,17 @@ vi.mock("@lingui/react/macro", () => ({
 }));
 const read = vi.hoisted(() => vi.fn());
 const updateReminder = vi.hoisted(() => vi.fn());
+const listContacts = vi.hoisted(() => vi.fn());
+const contactFacets = vi.hoisted(() => vi.fn());
+const updateTags = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { accountView: read, reminders: { update: updateReminder } } },
+  rpc: {
+    recruiting: {
+      accountView: read,
+      reminders: { update: updateReminder },
+      contacts: { list: listContacts, facets: contactFacets, updateTags },
+    },
+  },
 }));
 vi.mock("./RecruitingRoutines", () => ({ RecruitingRoutines: () => null }));
 
@@ -558,7 +567,7 @@ it("does not claim zero people when candidate records could not be read", async 
   try {
     await act(async () =>
       pageRoot.render(
-        <MemoryRouter initialEntries={["/app?view=contacts&role=all"]}>
+        <MemoryRouter initialEntries={["/app?view=shortlist&role=all"]}>
           <AccountRecruitingView
             accountKey="user-space"
             groups={[]}
@@ -636,31 +645,47 @@ it("completes an open native reminder and does not offer Done on already complet
   }
 });
 
-it("shows each role as it arrives while a slow role is still loading", async () => {
-  const people = (id: string) => ({
-    items: [],
-    nextCursor: null,
-    total: id === "two" ? 7 : 0,
-    counts: { shortlisted: 0, replied: 0 },
-    crmStatus: "not_bound" as const,
-    crmCountsComplete: false,
+it("lists every role's people in one server-paged table", async () => {
+  const person = (key: string, name: string) => ({
+    personKey: key,
+    name,
+    title: "Engineer",
+    company: "Acme",
+    location: "Los Angeles",
+    school: "UCLA",
+    linkedinUrl: null,
+    email: null,
+    status: "shortlisted",
+    noteKey: `autumn:${key}`,
+    roles: [
+      {
+        id: "one",
+        title: "Role one",
+        groupId: "group-one",
+        candidateKey: key,
+        shortlisted: true,
+        threadId: "thread-one",
+        revision: 1,
+      },
+    ],
+    tags: [],
+    addedAt: "2026-10-01T00:00:00Z",
+    lastContactedAt: null,
+    lastRepliedAt: null,
   });
-  read.mockImplementation((input: { view: string; roleId?: string }) =>
-    input.view === "roles"
-      ? Promise.resolve({
-          roles,
-          items: roles.map((role) => ({ roleId: role.id })),
-          nextCursor: null,
-        })
-      : input.roleId === "one"
-        ? new Promise(() => {})
-        : Promise.resolve({
-            roles,
-            items: [{ roleId: "two", candidates: people("two") }],
-            nextCursor: null,
-          }),
-  );
+  listContacts.mockResolvedValue({
+    items: [person("linkedin:/in/ada", "Ada Lovelace"), person("linkedin:/in/bob", "Bob Stone")],
+    total: 120,
+    nextCursor: "50",
+  });
+  contactFacets.mockResolvedValue({
+    roles: [{ id: "one", title: "Role one" }],
+    statuses: [],
+    tags: [],
+  });
+  updateTags.mockResolvedValue({ ok: true });
   const container = document.createElement("div");
+  document.body.append(container);
   const pageRoot = createRoot(container);
   try {
     await act(async () =>
@@ -677,15 +702,20 @@ it("shows each role as it arrives while a slow role is still loading", async () 
         </MemoryRouter>,
       ),
     );
-    expect(container.querySelector('section[aria-label="Role two"]')?.textContent).toContain(
-      "7 people",
+    expect(read).not.toHaveBeenCalled();
+    expect(listContacts).toHaveBeenCalledWith({ filters: {}, limit: 50 });
+    expect(container.textContent).toContain("Ada Lovelace");
+    expect(container.textContent).toContain("UCLA");
+    expect(container.textContent).toContain("1–2 of 120");
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Next")!
+        .click(),
     );
-    expect(
-      container.querySelector('section[aria-label="Role one"]')?.getAttribute("aria-busy"),
-    ).toBe("true");
-    expect(container.textContent).not.toContain("No roles yet.");
+    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
   } finally {
     await act(async () => pageRoot.unmount());
+    container.remove();
   }
 });
 it("shows the interview calendar for arrived roles and marks only the rest as loading", async () => {

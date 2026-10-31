@@ -1,4 +1,5 @@
 import type { RecruitingCrmDataInput } from "@rakazo/contracts";
+import { hideVendorNames } from "@rakazo/core";
 import { useEffect } from "react";
 import { withFeatureMessages } from "../../lib/i18n";
 
@@ -312,7 +313,7 @@ export function CrmHistory({ model }: { model: ReturnType<typeof useCrmWorkbench
                       <tbody>
                         {campaigns.items.map((campaign) => (
                           <tr key={campaign.id}>
-                            <th scope="row">{campaign.name}</th>
+                            <th scope="row">{hideVendorNames(campaign.name)}</th>
                             <td>{campaign.status ?? "—"}</td>
                             <td>{new Date(campaign.syncedAt).toLocaleString()}</td>
                           </tr>
@@ -590,7 +591,9 @@ export function CrmHistory({ model }: { model: ReturnType<typeof useCrmWorkbench
                   ) : null}
                   {details.campaignAssociations.leadCampaigns.map((association) => (
                     <p key={association.leadId}>
-                      {association.campaign?.name ?? t`Campaign details unavailable`}
+                      {association.campaign?.name
+                        ? hideVendorNames(association.campaign.name)
+                        : t`Campaign details unavailable`}
                       {association.campaign ? (
                         <>
                           {" "}
@@ -695,7 +698,9 @@ export function CrmHistory({ model }: { model: ReturnType<typeof useCrmWorkbench
                   {inboxEmails.length ? (
                     <>
                       <p className="my-3 text-sm text-muted-foreground">
-                        {selectedNativeMail?.email?.sourceName ?? mailPage.source.name}
+                        {hideVendorNames(
+                          selectedNativeMail?.email?.sourceName ?? mailPage.source.name,
+                        )}
                         {selectedNativeMail ? (
                           <> · {nativeMailStatus[selectedNativeMail.status]}</>
                         ) : null}

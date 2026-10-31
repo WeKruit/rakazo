@@ -258,10 +258,6 @@ msgstr "请在设置中添加模型后再使用。"
 msgid "Add a name and prompt."
 msgstr "请输入名称和指令。"
 
-#: src/pages/RoutineEditor.tsx
-#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-#~ msgstr "添加定时、Webhook、GitHub 或消息触发器来运行这个自动任务。"
-
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
 msgstr "请填写服务器名称。"
@@ -3290,10 +3286,6 @@ msgstr "小写字母、数字、连字符和下划线，以字母开头。"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr "未记录邮箱"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-#~ msgid "Main"
-#~ msgstr "Main"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6407,6 +6399,10 @@ msgstr "Bot 应在哪里运行？"
 #: src/pages/GroupPanel.tsx
 msgid "Who are you looking for?"
 msgstr "你在找什么样的人？"
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Work Metrics"
+msgstr "工作指标"
 
 #: src/components/LiveWork.tsx
 msgid "Worked for {duration}"
