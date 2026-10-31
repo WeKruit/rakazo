@@ -5943,7 +5943,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             name === "recruiting_role" &&
             args.operation === "update" &&
-            executionId !== `${runId}:brief-after-round`
+            // Its own repaired repeat (":brief-after-round:repaired") must not wait on itself.
+            !executionId.startsWith(`${runId}:brief-after-round`)
           )
             await briefSaving;
           if (
