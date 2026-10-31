@@ -2005,6 +2005,20 @@ model RecruitingSavedProfile {
   @@map("recruiting_saved_profiles")
 }
 
+/// An organization's logo found once from its name and shared by everyone: public data, no person.
+model OrganizationLogo {
+  /// The organization's normalized name words, e.g. "usc korean american student association".
+  key String @id
+  host String?
+  /// A small PNG data URL of the logo, when one was found.
+  icon String?
+  checkedAt DateTime @default(now())
+  /// A miss is looked up again after this; a found logo is kept.
+  checkAgainAt DateTime
+
+  @@map("organization_logos")
+}
+
 /// Exact CRM workspace selected through an authenticated read, never an execution/approval receipt.
 model RecruitingCrmWorkspaceAttachment {
   roleId String @id

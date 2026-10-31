@@ -12,7 +12,8 @@ const MAX_CONCURRENT = 6;
 const MAX_WAITING = 64;
 const MAX_WAIT_MS = 15_000;
 const MAX_CACHED_NAMES = 5_000;
-const FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// A found logo is kept a year; organizations rarely change it.
+const FOUND_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const MISSING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 // A miss while the index could not answer (rate limit, timeout) is only a guess: asked again soon.
 const UNSURE_TTL_MS = 10 * 60 * 1000;
@@ -81,7 +82,7 @@ const PARKED =
  * logo from the organization index as a small data URL, when the index has one.
  */
 export type CompanySiteAnswer = { host: string | null; icon?: string; retry?: true };
-type Found = { host: string | null; icon?: string; unsure?: true };
+export type Found = { host: string | null; icon?: string; unsure?: true };
 
 export type CompanySiteResolver = {
   companySite(name: string): Promise<CompanySiteAnswer>;
@@ -99,6 +100,14 @@ export type CompanySiteResolverOptions = {
   searchOrganizations?: OrganizationSearch;
   resolveHostname?: ResolveHostname;
   now?: () => number;
+  /** Lasting answers shared across processes and deploys, read before any lookup. */
+  store?: OrganizationLogoStore;
+};
+
+/** Where found logos (and confirmed misses) are kept beyond this process. */
+export type OrganizationLogoStore = {
+  get(key: string): Promise<(Found & { expiresAt: number }) | null>;
+  put(key: string, found: Found, expiresAt: number): Promise<void>;
 };
 
 /**
@@ -116,16 +125,35 @@ export function createCompanySiteResolver(
   const cache = new Map<string, Found & { expiresAt: number }>();
   const inFlight = new Map<string, Promise<CompanySiteAnswer>>();
   const limit = concurrencyLimit(MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS);
-  const remember = (key: string, found: Found) => {
+  const ttl = (found: Found) =>
+    found.host || found.icon ? FOUND_TTL_MS : found.unsure ? UNSURE_TTL_MS : MISSING_TTL_MS;
+  const remember = (key: string, found: Found, expiresAt = now() + ttl(found)) => {
     cache.delete(key);
-    const ttl =
-      found.host || found.icon ? FOUND_TTL_MS : found.unsure ? UNSURE_TTL_MS : MISSING_TTL_MS;
-    cache.set(key, {
-      host: found.host,
-      ...(found.icon ? { icon: found.icon } : {}),
-      expiresAt: now() + ttl,
-    });
+    cache.set(key, { host: found.host, ...(found.icon ? { icon: found.icon } : {}), expiresAt });
     while (cache.size > MAX_CACHED_NAMES) cache.delete(cache.keys().next().value!);
+  };
+  const answerOf = (found: Found): CompanySiteAnswer => ({
+    host: found.host,
+    ...(found.icon ? { icon: found.icon } : {}),
+  });
+  const resolve = async (key: string, tokens: string[]): Promise<CompanySiteAnswer> => {
+    // A saved answer survives deploys; a store failure only means looking it up again.
+    const stored = await options.store?.get(key).catch(() => null);
+    if (stored && stored.expiresAt > now()) {
+      remember(key, stored, stored.expiresAt);
+      return answerOf(stored);
+    }
+    const found = await limit(() =>
+      findCompanySite(tokens, options, AbortSignal.timeout(LOOKUP_DEADLINE_MS)).catch(() => null),
+    );
+    // Turned away by a full queue is not a miss: not remembered, and the client asks again.
+    if (found === BUSY) return { host: null, retry: true };
+    const answer = found ?? { host: null, unsure: true as const };
+    remember(key, answer);
+    // A miss while the index could not answer is a guess, never saved for everyone.
+    if (!answer.unsure)
+      await options.store?.put(key, answerOf(answer), now() + ttl(answer)).catch(() => undefined);
+    return answerOf(answer);
   };
   return {
     async companySite(name) {
@@ -133,21 +161,10 @@ export function createCompanySiteResolver(
       if (!tokens.length) return { host: null };
       const key = tokens.join(" ");
       const cached = cache.get(key);
-      if (cached && cached.expiresAt > now())
-        return { host: cached.host, ...(cached.icon ? { icon: cached.icon } : {}) };
+      if (cached && cached.expiresAt > now()) return answerOf(cached);
       const pending = inFlight.get(key);
       if (pending) return pending;
-      const lookup = limit(() =>
-        findCompanySite(tokens, options, AbortSignal.timeout(LOOKUP_DEADLINE_MS)).catch(() => null),
-      )
-        .then((found): CompanySiteAnswer => {
-          // Turned away by a full queue is not a miss: not remembered, and the client asks again.
-          if (found === BUSY) return { host: null, retry: true };
-          const answer = found ?? { host: null, unsure: true as const };
-          remember(key, answer);
-          return { host: answer.host, ...(answer.icon ? { icon: answer.icon } : {}) };
-        })
-        .finally(() => inFlight.delete(key));
+      const lookup = resolve(key, tokens).finally(() => inFlight.delete(key));
       inFlight.set(key, lookup);
       return lookup;
     },

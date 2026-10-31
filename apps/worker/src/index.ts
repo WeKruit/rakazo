@@ -19,10 +19,13 @@ import {
   createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
+  createCompanySiteResolver,
   createConnectorStack,
+  createExaOrganizationSearch,
   createJobReconciler,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
+  createPrismaOrganizationLogoStore,
   createRunExecutor,
   createRunSandbox,
   createRunSecretWriter,
@@ -33,6 +36,7 @@ import {
   databaseCapacityBackoffMs,
   ExpoPushProvider,
   fillAllRecruitingRoleProfiles,
+  fillOrganizationLogos,
   firstPartyMcpUrl,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
@@ -82,6 +86,8 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 
 /** The one-time profile fill waits for boot and the first queued jobs to settle. */
 const PROFILE_FILL_DELAY_MS = 60_000;
+// Organization lookups per start for logos not saved yet; each is one company-index search.
+const LOGO_FILL_MAX_LOOKUPS = 6_000;
 
 const staging = hostedStagingConfig(process.env);
 const logger = createRootLogger(
@@ -381,7 +387,19 @@ async function main() {
       .then((result) => logger.info("recruiting.profiles.fill_all", result))
       .catch((error) =>
         logger.warn("recruiting.profiles.fill_all failed", { error: String(error) }),
-      );
+      )
+      // Every saved person's companies and schools get a saved logo, for all users at once.
+      .then(() =>
+        fillOrganizationLogos(
+          prisma,
+          createCompanySiteResolver({
+            searchOrganizations: createExaOrganizationSearch(),
+            store: createPrismaOrganizationLogoStore(prisma),
+          }),
+          { signal: shutdown.signal, maxLookups: LOGO_FILL_MAX_LOOKUPS },
+        ),
+      )
+      .catch((error) => logger.warn("organization.logos.fill failed", { error: String(error) }));
   }, PROFILE_FILL_DELAY_MS).unref();
 
   const drain = createWorkerDrain({
