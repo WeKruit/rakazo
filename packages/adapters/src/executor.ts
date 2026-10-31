@@ -237,6 +237,7 @@ import {
   prepareRecruitingSchedulingPlan,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
+  RecruitingGradeRowsError,
   RecruitingIntentQuoteError,
   RecruitingSourceCheckError,
   RecruitingSourceValidationError,
@@ -556,6 +557,7 @@ import {
   repairedRoleSave,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
+  saveRecruitingGrades,
   saveRecruitingPeopleSearch,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
@@ -6531,6 +6533,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (researchInput.data.operation === "save_results" ||
                 researchInput.data.operation === "import_csv" ||
                 researchInput.data.operation === "save_search" ||
+                researchInput.data.operation === "save_grades" ||
                 researchInput.data.operation === "calibration_round"));
           const researchActor = {
             actor: {
@@ -10076,6 +10079,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (researchInput.data.operation !== "save_results" &&
                 researchInput.data.operation !== "import_csv" &&
                 researchInput.data.operation !== "save_search" &&
+                researchInput.data.operation !== "save_grades" &&
                 researchInput.data.operation !== "calibration_round")
             )
               return finish({
@@ -10166,6 +10170,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP }
                   : saved;
               }
+              if (researchInput.data.operation === "save_grades") {
+                if (!applied || !claimedEffect) throw new IsolationError();
+                // Internal record keeping like save_search: page, rows and effect commit together.
+                return await saveRecruitingGrades(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  {
+                    ...researchActor,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied.effect.id,
+                    effectRequest: applied.effect.request,
+                  },
+                  researchInput.data,
+                  context,
+                );
+              }
               if (researchInput.data.operation === "import_csv") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // Internal record keeping like save_results: page, rows and effect commit together.
@@ -10226,6 +10246,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error instanceof RecruitingCandidateOutputError ||
                 error instanceof RecruitingCsvImportError ||
                 error instanceof RecruitingPeopleSearchError ||
+                error instanceof RecruitingGradeRowsError ||
                 error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });

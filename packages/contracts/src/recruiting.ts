@@ -1052,6 +1052,33 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
+/** People one save_grades call may grade. */
+export const RECRUITING_GRADE_PAGE_LIMIT = 20;
+const GradeText = (max: number) => ResearchText.max(max);
+/** One person's grade from the quality check: the same columns a search's grading returns. */
+export const RecruitingGradeRowSchema = z.object({
+  name: GradeText(300),
+  linkedin_url: GradeText(500),
+  current_title: GradeText(300).nullish(),
+  current_company: GradeText(300).nullish(),
+  location: GradeText(300).nullish(),
+  education: z.array(GradeText(500)).max(10).nullish(),
+  match_score: z.number().int().min(0).max(100),
+  match_tier: z.enum(["Strong", "Promising", "Partial", "Uncertain"]),
+  fit_reasons: GradeText(2000),
+  concerns: z.array(GradeText(500)).max(10).default([]),
+  requirements_assessment: z
+    .array(
+      z.object({
+        requirement: GradeText(500),
+        status: z.enum(["met", "not_met", "unknown"]),
+        evidence: z.string().max(1000).nullable(),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type RecruitingGradeRow = z.infer<typeof RecruitingGradeRowSchema>;
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
@@ -1104,6 +1131,13 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   z.strictObject({
     operation: z.literal("save_search"),
     expectedRoleRevision: Revision,
+  }),
+  // The quality check's own grades for people already saved in the role, judged from their
+  // full public profiles; saved as one page on the role like a search's grades.
+  z.strictObject({
+    operation: z.literal("save_grades"),
+    expectedRoleRevision: Revision,
+    rows: z.array(RecruitingGradeRowSchema).min(1).max(RECRUITING_GRADE_PAGE_LIMIT),
   }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({

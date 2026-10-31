@@ -15,6 +15,8 @@ const BUSY_RETRY_MS = 30_000;
 const MAX_ATTEMPTS = 120;
 /** People per grading request. */
 export const GRADE_BATCH = 50;
+/** People per batch the quality check grades itself, since it reads each full profile. */
+export const SELF_GRADE_BATCH = 10;
 /** Grading requests the research service works on at once for one conversation. */
 export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
@@ -48,13 +50,17 @@ function laterGradingStart(payload: { threadId: string; attempt?: number }, at: 
 /** Tools a grading turn may use: read the role's people, run the grading research, save its rows. */
 const GRADING_BUILTIN_TOOLS = new Set([
   "artifact_read",
+  // The quality check reads each person's full public profile before grading them itself.
+  "web_fetch",
   "recruiting_candidates",
   "search_history",
   "read_history",
   "skill_read",
   "task_catalog",
 ]);
-const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
+const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results", "save_grades"]);
+/** The saves that record grades: a search's grading rows, or the quality check's own. */
+const GRADE_SAVE_OPERATIONS = ["save_results", "save_grades"];
 /** The request turn only starts research; the turn its finish wakes reads and saves the grades. */
 // A people-search agent run grades the batch within the turn; a research request finishes later.
 const START_PROVIDER_TOOLS = new Set(["research", "credits", "agent_run"]);
@@ -145,7 +151,7 @@ export function gradingToolRefusal(
     (executed !== undefined && gradingProviderCall(executed, record(args.arguments), start));
   if (allowed) return undefined;
   return start
-    ? "Not run: this turn only grades the batch: the people-search agent run, then recruiting_research save_results with its run id (or the research request, whose grades are saved when it finishes). End the turn with an empty reply."
+    ? "Not run: this turn only grades the batch: read each listed person's profile with web_fetch and save your grades with recruiting_research save_grades (or the people-search agent run then save_results with its run id, or the research request, whose grades are saved when it finishes). End the turn with an empty reply."
     : "Not run: this turn only reads the grading research's rows and saves them with recruiting_research save_results; nothing else.";
 }
 
@@ -165,9 +171,18 @@ export const NOT_GRADING_TASK = {
 
 export function recruitingGradePrompt(
   people: readonly { name: string; url: string }[],
-  service: { slug: string; serverId: string; tool: "agent_run" | "research" },
+  service: GradingService,
 ) {
   const list = people.map((person) => `- ${person.name}: ${person.url}`);
+  if (service.tool === "self")
+    return [
+      `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
+      `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge only from what each page shows; when a page can't be read, use the person's saved profile from recruiting_candidates.`,
+      SELF_GRADE_RUBRIC,
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (each degree with school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "",
+      ...list,
+    ].join("\n");
   if (service.tool === "agent_run")
     return [
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements.`,
@@ -184,6 +199,20 @@ export function recruitingGradePrompt(
     ...list,
   ].join("\n");
 }
+
+/** Characters of each profile the quality check reads; the education section must fit. */
+const SELF_GRADE_PAGE_CHARS = 15_000;
+
+/** How the quality check decides each requirement, so every grade follows the same rules. */
+export const SELF_GRADE_RUBRIC = [
+  "How to grade each requirement:",
+  "- met: the profile clearly shows it; quote its words as evidence.",
+  "- not_met: the profile shows the opposite (located elsewhere, clearly fewer years, only worked at the school, a different field).",
+  "- unknown: the profile is silent or too vague. Never assume, and never judge ethnicity, race or background from a name or photo: only what the profile states counts.",
+  "- Years of experience: add up the dated roles that match the requirement, counting overlapping roles once; a stated total in the person's own summary counts too.",
+  "- Location: the current location; a nearby commuting area counts.",
+  "Score and tier: Strong needs every hard requirement met; any hard requirement not_met is Partial at most; unknown hard requirements make Promising or Uncertain, never Strong. When the role is a job opening, the score and tier grade the fit for the job as a whole: the person's current role, experience and seniority against the job description count with the listed requirements, so someone who meets a listed condition but whose current work doesn't fit the job is Partial at most. A list of people that is not a job opening is graded on its listed requirements alone. When the brief names reference people, say how closely each person matches them on those details; wrong-fit profiles and companies to avoid count against.",
+].join("\n");
 
 /** The profile links one grading request sent. */
 function sentUrls(prompt: string): Set<string> {
@@ -260,7 +289,9 @@ export async function startRecruitingGrading(
               runId: { in: requests.map((request) => request.id) },
               kind: "recruiting_research",
               status: "completed",
-              request: { path: ["operation"], equals: "save_results" },
+              OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+                request: { path: ["operation"], equals: operation },
+              })),
             },
             select: { runId: true },
           })
@@ -282,7 +313,7 @@ export async function startRecruitingGrading(
   // An agent run grades its batch within its own turn, so earlier research requests that are
   // still out never hold it up.
   const grader = await researchTeammate(deps.prisma, thread);
-  if (grader?.tool !== "agent_run" && recent.length >= GRADE_IN_FLIGHT) {
+  if (grader?.tool === "research" && recent.length >= GRADE_IN_FLIGHT) {
     const saved = await deps.prisma.run.findMany({
       where: {
         threadId: thread.id,
@@ -330,7 +361,13 @@ export async function startRecruitingGrading(
     deps.prisma.recruitingCandidateOccurrence.findMany({
       where: {
         roleId: role.id,
-        page: { effect: { request: { path: ["operation"], equals: "save_results" } } },
+        page: {
+          effect: {
+            OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+              request: { path: ["operation"], equals: operation },
+            })),
+          },
+        },
       },
       distinct: ["candidateKey"],
       select: { candidateKey: true },
@@ -343,8 +380,9 @@ export async function startRecruitingGrading(
   ]);
   const skip = new Set(graded.map((row) => row.candidateKey));
   const people = new Map<string, { name: string; url: string }>();
+  const batchSize = grader?.tool === "self" ? SELF_GRADE_BATCH : GRADE_BATCH;
   for (const row of found) {
-    if (people.size >= GRADE_BATCH) break;
+    if (people.size >= batchSize) break;
     if (!row.linkedinUrl || skip.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
     skip.add(row.candidateKey);
     people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
@@ -553,28 +591,38 @@ async function reportGradedRole(
   });
 }
 
+/** Who grades a batch: the quality check itself, or a teammate's search service. */
+type GradingService =
+  | { botId: string; tool: "self" }
+  | { botId: string; slug: string; serverId: string; tool: "agent_run" | "research" };
+
 /**
- * The conversation's bot that may start research: the thread's own bot or a group member whose
- * research service assignment allows the research tool, not only reads of earlier research.
+ * The conversation's grader: its quality-check teammate, else the thread's own bot or a group
+ * member whose research service assignment allows the research tool, not only reads of earlier
+ * research.
  */
 async function researchTeammate(
   prisma: PrismaClient,
   thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null },
-): Promise<{
-  botId: string;
-  slug: string;
-  serverId: string;
-  tool: "agent_run" | "research";
-} | null> {
-  // The quality-check teammate takes grading first; any research teammate otherwise.
+): Promise<GradingService | null> {
+  // The quality-check teammate takes grading first and grades itself from full profiles; any
+  // research teammate's search grades otherwise.
+  const group = thread.groupId
+    ? await prisma.chatGroupMember.findMany({
+        where: { groupId: thread.groupId },
+        orderBy: { createdAt: "asc" },
+        select: {
+          botId: true,
+          bot: { select: { name: true, spawnKey: true, archivedAt: true } },
+        },
+      })
+    : [];
+  const reviewer = group.find(
+    (member) => member.bot && !member.bot.archivedAt && recruitingBotKey(member.bot) === "reviewer",
+  );
+  if (reviewer) return { botId: reviewer.botId, tool: "self" };
   const members = thread.groupId
-    ? (
-        await prisma.chatGroupMember.findMany({
-          where: { groupId: thread.groupId },
-          orderBy: { createdAt: "asc" },
-          select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
-        })
-      )
+    ? group
         .map((member, index) => ({
           id: member.botId,
           // The coordinator only talks with the recruiter: it grades only when nobody else can.

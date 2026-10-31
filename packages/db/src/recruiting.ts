@@ -7289,13 +7289,24 @@ type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_
  * Non-null for a CSV import or people-search save effect: an unassessed page with no provider
  * task, whose artifact proof differs from a provider observation's.
  */
-function unassessedPageRequest(request: unknown): CsvImportInput | PeopleSearchInput | null {
+function unassessedPageRequest(
+  request: unknown,
+): CsvImportInput | PeopleSearchInput | GradesInput | null {
   const parsed = RecruitingResearchToolInputSchema.safeParse(request);
   return parsed.success &&
-    (parsed.data.operation === "import_csv" || parsed.data.operation === "save_search")
+    (parsed.data.operation === "import_csv" ||
+      parsed.data.operation === "save_search" ||
+      parsed.data.operation === "save_grades")
     ? parsed.data
     : null;
 }
+
+/** Artifact nonce of an unassessed page's receipt, by the operation that saved it. */
+const UNASSESSED_RECEIPT_NONCE = {
+  import_csv: "recruiting-csv-import:",
+  save_search: "recruiting-people-search:",
+  save_grades: "recruiting-grades:",
+} as const;
 
 /** Canonical receipt bytes for one CSV import; recomputed here, never trusted from the caller. */
 export function recruitingCsvImportReceipt(
@@ -7527,6 +7538,117 @@ export async function saveRecruitingCandidatePeopleSearch(
   });
 }
 
+type GradesInput = Extract<RecruitingResearchToolInput, { operation: "save_grades" }>;
+
+/** Canonical receipt bytes for one save_grades call; recomputed here, never trusted from the caller. */
+export function recruitingGradesReceipt(input: GradesInput) {
+  return {
+    version: 1,
+    kind: "reviewer_grades",
+    request: input,
+    rows: input.rows.map((row, rowIndex) => ({ rowIndex, row })),
+  };
+}
+
+/**
+ * Save the quality check's own grades as one page on the thread's role. Every graded person must
+ * already be saved for the role: grading never adds anyone.
+ */
+export async function saveRecruitingCandidateGrades(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
+  raw: GradesInput,
+  captured: { outputArtifact: RecruitingResearchArtifactInput },
+) {
+  const input = RecruitingResearchToolInputSchema.parse(raw);
+  if (
+    input.operation !== "save_grades" ||
+    stableJsonValue(input) !==
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const saving = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
+      },
+    });
+    if (
+      saving?.kind !== "recruiting_research" ||
+      saving.runId !== run.id ||
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
+        stableJsonValue(input)
+    )
+      throw new IsolationError();
+    if (saving.status === "completed") return saving.result;
+    requireResearchLease(run, trusted);
+    if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
+    if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
+      throw new RecruitingConflictError();
+    const rows = input.rows.map((grade, rowIndex) => {
+      const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
+      if (grade.current_title) row.current_title = grade.current_title;
+      if (grade.current_company) row.current_company = grade.current_company;
+      if (grade.location) row.location = grade.location;
+      return {
+        rowIndex,
+        row,
+        matchFields: { match_score: grade.match_score, match_tier: grade.match_tier },
+        candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
+      };
+    });
+    const keys = rows.map((row) => row.candidateKey);
+    const saved = await tx.recruitingCandidate.count({
+      where: { roleId: role.id, candidateKey: { in: keys.filter((key) => key !== null) } },
+    });
+    if (
+      keys.some((key) => key === null) ||
+      new Set(keys).size !== keys.length ||
+      saved !== keys.length
+    )
+      throw new RecruitingGradeRowsError(
+        "Grade only people already saved for this role, each once, with their saved LinkedIn profile link.",
+      );
+    const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)));
+    const file = captured.outputArtifact;
+    if (
+      file.hash !== createHash("sha256").update(bytes).digest("hex") ||
+      file.size !== bytes.length ||
+      file.clientNonce !== `recruiting-grades:${saving.id}`
+    )
+      throw new IsolationError();
+    return saveUnassessedCandidatePage(
+      tx,
+      actor,
+      { run, thread, role, saving, trusted, file },
+      {
+        rows,
+        describe: ({ artifact, observedAt, candidateRows }) => ({
+          source: {
+            kind: "reviewer_grades",
+            gradedBy: { userId: actor.userId, runId: run.id },
+            observedAt: observedAt.toISOString(),
+          },
+          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+          graded: candidateRows.length,
+        }),
+      },
+    );
+  });
+}
+
+/** A save_grades call named someone who is not saved for the role. */
+export class RecruitingGradeRowsError extends Error {}
+
 type UnassessedPageContext = {
   run: { id: string; botId: string; threadId: string };
   thread: { groupId: string | null };
@@ -7546,7 +7668,12 @@ async function saveUnassessedCandidatePage(
   actor: Actor,
   { run, thread, role, saving, trusted, file }: UnassessedPageContext,
   input: {
-    rows: ReadonlyArray<{ rowIndex: number; row: Record<string, string> }>;
+    rows: ReadonlyArray<{
+      rowIndex: number;
+      row: Record<string, string>;
+      /** A grade's score and tier, kept as the role's match for this person. */
+      matchFields?: Prisma.InputJsonObject;
+    }>;
     describe: (saved: {
       artifact: { id: string; hash: string };
       observedAt: Date;
@@ -7557,7 +7684,7 @@ async function saveUnassessedCandidatePage(
   if (!role.currentRevisionId) throw new RecruitingConflictError();
   const artifact = await createResearchArtifact(tx, actor, run, thread, file);
   if (input.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
-  const rows = input.rows.map(({ rowIndex, row }) => {
+  const rows = input.rows.map(({ rowIndex, row, matchFields }) => {
     // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
     const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
       schemaKnown: true,
@@ -7570,6 +7697,7 @@ async function saveUnassessedCandidatePage(
       ...profile,
       evidenceUrls: Prisma.DbNull,
       issues: [...profile.issues],
+      ...(matchFields ? { matchFields } : {}),
     };
   });
   const observedAt = new Date();
@@ -7891,10 +8019,7 @@ async function candidatePageArtifacts(
         artifact.userId !== actor.userId ||
         artifact.runId !== run.id ||
         artifact.botId !== run.botId ||
-        artifact.clientNonce !==
-          (imported.operation === "import_csv"
-            ? `recruiting-csv-import:${effect.id}`
-            : `recruiting-people-search:${effect.id}`) ||
+        artifact.clientNonce !== `${UNASSESSED_RECEIPT_NONCE[imported.operation]}${effect.id}` ||
         artifact.hash !== page.artifactHash ||
         (imported.operation === "import_csv" ? imported.roleId : result?.roleId) !== page.roleId ||
         result?.roleRevisionId !== page.roleRevisionId ||
