@@ -41,6 +41,9 @@ if (EMAIL && PASSWORD) {
 const IDLE_MS = Number(option("--idle-hours", "2")) * 3_600_000;
 const KEEP = new Set((option("--keep", "") ?? "").split(",").filter(Boolean));
 const DRY = args.includes("--dry-run");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// How long a stopped chat gets to queue its follow-up before it is checked again.
+const SETTLE_MS = Number(process.env.RAKAZO_SETTLE_MS ?? 2_000);
 const ONLY = new Set((option("--only", "") ?? "").split(",").filter(Boolean));
 // Copies the harnesses and verification runs make: a "测试副本 · " or "[验证用N]" prefix, or a
 // "（测试副本）" / "（测试 · JD 副本）" suffix. Real roles never carry these marks.
@@ -120,7 +123,14 @@ for (const group of idleCopies(groups)) {
     try {
       const closed = await closeCards(group.id);
       if (closed) console.log(`closed ${closed} open cards in ${group.id}`);
-      if (activeRuns.length) await rpc("threads/stop", { groupId: group.id, scope: "all" });
+      // Answering a card or stopping a turn can queue a follow-up (a teammate's stage report), so
+      // stop until the chat stays quiet: a turn left queued in an archived chat retries forever.
+      for (let check = 0; check < 5; check += 1) {
+        const { activeRuns: active = [] } = await rpc("threads/get", { groupId: group.id });
+        if (!active.length) break;
+        await rpc("threads/stop", { groupId: group.id, scope: "all" });
+        await sleep(SETTLE_MS);
+      }
       await rpc("groups/archive", { groupId: group.id });
     } catch (error) {
       skipped.push(`${group.id} (${error.message})`);

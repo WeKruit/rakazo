@@ -1113,6 +1113,16 @@ describe("computer that will not start", () => {
     );
   });
 
+  it("ends the turn when its chat is gone instead of retrying it forever", async () => {
+    const f = fixture("setup-resource-gone");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+    ]);
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new IsolationError());
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
+  });
+
   it("retries an early failed start instead of ending the turn", async () => {
     const f = fixture("computer-start-retry");
     f.setCalls([
