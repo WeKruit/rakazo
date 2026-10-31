@@ -1,4 +1,4 @@
-import type { Routine } from "@rakazo/contracts";
+import type { Routine, RoutineRecordTrigger, RoutineSessionMode } from "@rakazo/contracts";
 import type { CronPreset } from "@rakazo/core";
 import { isOneShotRoutineCrons, modelOptionKey, presetFromCron } from "@rakazo/core";
 
@@ -28,6 +28,13 @@ export type RoutineDraftState = {
   active: boolean;
   /** Push a notification when a run finishes. */
   notify: boolean;
+  sessionMode: RoutineSessionMode;
+  condition: string;
+  probeCommand: string;
+  recordTrigger: RoutineRecordTrigger | null;
+  shared: boolean;
+  /** Set on a member's copy of a shared routine; copies follow the original. */
+  sharedFromId: string | null;
   runAtLocal: string;
   /** Empty runs this routine on the bot's model. */
   modelKey: string;
@@ -44,6 +51,12 @@ export function emptyRoutineDraft(): RoutineDraftState {
     messageProvider: null,
     active: true,
     notify: true,
+    sessionMode: "new",
+    condition: "",
+    probeCommand: "",
+    recordTrigger: null,
+    shared: false,
+    sharedFromId: null,
     runAtLocal: "",
     modelKey: "",
     thinkingLevel: "",
@@ -60,6 +73,12 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
     messageProvider: routine.messageProvider,
     active: routine.active,
     notify: routine.notify,
+    sessionMode: routine.sessionMode ?? "new",
+    condition: routine.condition ?? "",
+    probeCommand: routine.probeCommand ?? "",
+    recordTrigger: routine.recordTrigger ?? null,
+    shared: routine.shared ?? false,
+    sharedFromId: routine.sharedFromId ?? null,
     runAtLocal: routineNeedsOneShotArm(routine, routine.crons) ? defaultArmRunAtLocal() : "",
     modelKey:
       routine.modelProvider && routine.modelId
@@ -67,4 +86,26 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
         : "",
     thinkingLevel: routine.thinkingLevel ?? "",
   };
+}
+
+/** The optional settings to send: every one on create, only the changed ones on update. */
+export function routineOptionInput(draft: RoutineDraftState, routine?: Routine | null) {
+  const next = {
+    sessionMode: draft.sessionMode,
+    condition: draft.condition.trim() || null,
+    probeCommand: draft.probeCommand.trim() || null,
+    recordTrigger: draft.recordTrigger,
+    ...(draft.sharedFromId ? {} : { shared: draft.shared }),
+  };
+  if (!routine) return next;
+  const current = {
+    sessionMode: routine.sessionMode ?? "new",
+    condition: routine.condition ?? null,
+    probeCommand: routine.probeCommand ?? null,
+    recordTrigger: routine.recordTrigger ?? null,
+    shared: routine.shared ?? false,
+  };
+  return Object.fromEntries(
+    Object.entries(next).filter(([key, value]) => value !== current[key as keyof typeof current]),
+  ) as Partial<typeof next>;
 }

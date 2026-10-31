@@ -22,6 +22,8 @@ function fakePrisma(input: {
   counts?: { messages?: number; inbound?: number; recruiting?: number };
   lastRunAt?: Date | null;
   claimCount?: number;
+  routine?: Record<string, unknown>;
+  pages?: number;
 }) {
   const counts = { messages: 0, inbound: 0, recruiting: 0, ...input.counts };
   const updateMany = vi.fn(async () => ({ count: input.claimCount ?? 1 }));
@@ -39,6 +41,10 @@ function fakePrisma(input: {
         active: true,
         nextRunAt: scheduledAt,
         lastRunAt: input.lastRunAt === undefined ? lastRunAt : input.lastRunAt,
+        createdAt: new Date(Date.now() - 86_400_000),
+        condition: null,
+        recordTrigger: null,
+        ...input.routine,
       })),
       updateMany,
     },
@@ -48,6 +54,7 @@ function fakePrisma(input: {
     message: { count: vi.fn(async () => counts.messages) },
     externalMessage: { count: vi.fn(async () => counts.inbound) },
     recruitingRoleRevision: { count: vi.fn(async () => counts.recruiting) },
+    recruitingCandidatePage: { count: vi.fn(async () => input.pages ?? 0) },
   };
   return { prisma: prisma as unknown as PrismaClient, updateMany, raw: prisma };
 }
@@ -243,6 +250,60 @@ describe("routine.wakeup precondition", () => {
     expect(await skipRoutineWithoutNewActivity(deps as never, payload)).toBe(true);
     expect(enqueue).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();
+  });
+});
+
+describe("routine.wakeup condition and record triggers", () => {
+  const payload = { routineId: "routine-1", scheduledFor: scheduledAt.toISOString() };
+
+  it("skips a schedule whose condition is false and records why", async () => {
+    const { prisma } = fakePrisma({ prompt: "Triage.", routine: { condition: "now.hour == 99" } });
+    const { deps, wakeRoutine, append } = fakeDeps(prisma);
+    await createBackgroundJobHandlers(deps)["routine.wakeup"](payload);
+    expect(wakeRoutine).not.toHaveBeenCalled();
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ skipped: true, reason: "condition_false" }),
+      }),
+    );
+  });
+
+  it("runs when the condition holds, and when a saved condition is invalid", async () => {
+    for (const condition of ['source == "schedule"', "now.hour ==="]) {
+      const { prisma } = fakePrisma({ prompt: "Triage.", routine: { condition } });
+      const { deps, wakeRoutine } = fakeDeps(prisma);
+      await createBackgroundJobHandlers(deps)["routine.wakeup"](payload);
+      expect(wakeRoutine).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("polls a record trigger quietly until the watched record changes", async () => {
+    const quiet = fakePrisma({
+      prompt: "Summarize.",
+      routine: { crons: [], recordTrigger: "recruiting_candidate" },
+    });
+    const idle = fakeDeps(quiet.prisma);
+    await createBackgroundJobHandlers(idle.deps)["routine.wakeup"](payload);
+    expect(idle.wakeRoutine).not.toHaveBeenCalled();
+    expect(idle.append).not.toHaveBeenCalled();
+    expect(idle.enqueue).toHaveBeenCalledOnce();
+    expect(quiet.raw.recruitingCandidatePage.count).toHaveBeenCalledWith({
+      where: {
+        observedAt: { gt: lastRunAt },
+        role: { spaceId: "space-1", userId: "user-1" },
+        rowCount: { gt: 0 },
+      },
+      take: 1,
+    });
+
+    const changed = fakePrisma({
+      prompt: "Summarize.",
+      routine: { crons: [], recordTrigger: "recruiting_candidate" },
+      pages: 1,
+    });
+    const busy = fakeDeps(changed.prisma);
+    await createBackgroundJobHandlers(busy.deps)["routine.wakeup"](payload);
+    expect(busy.wakeRoutine).toHaveBeenCalledOnce();
   });
 });
 
