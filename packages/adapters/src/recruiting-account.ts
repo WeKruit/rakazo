@@ -40,7 +40,7 @@ export type RecruitingAccountReadDeps = {
   productIdentity?: { endpoint: string; connected: boolean };
 };
 
-const ROLE_READ_CONCURRENCY = 6;
+const ROLE_READ_CONCURRENCY = 2;
 
 /** One account-scoped read used by the recruiting pages and the native recruiting tool. */
 export async function readRecruitingAccountView(
@@ -404,8 +404,8 @@ export async function readRecruitingAccountView(
         });
       return item;
     };
-    // Roles are independent reads (CRM, mail, calendar); one at a time made a full page of roles
-    // outlast the gateway timeout.
+    // Roles are independent reads (CRM, mail, calendar). Two at a time keeps a page quick without
+    // taking the shared database pool from the rest of the app; a closed page stops reading.
     const items: RecruitingAccountViewOutput["items"] = new Array(page.length);
     let next = 0;
     await Promise.all(
@@ -413,6 +413,7 @@ export async function readRecruitingAccountView(
         { length: Math.min(ROLE_READ_CONCURRENCY, page.length) },
         async () => {
           while (next < page.length) {
+            deps.signal?.throwIfAborted();
             const index = next++;
             items[index] = await readItem(page[index]!);
           }

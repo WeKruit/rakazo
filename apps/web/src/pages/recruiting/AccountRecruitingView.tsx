@@ -12,6 +12,9 @@ import { RecruitingRoutines } from "./RecruitingRoutines";
 import { RetryNotice } from "./RetryNotice";
 import { formatDate, TabLoading } from "./shared";
 
+// Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
+const ROLES_PER_PAGE = 5;
+
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 
 /** One account-scoped server read; changing a role never opens its conversation. */
@@ -62,7 +65,7 @@ export function AccountRecruitingView({
         view,
         ...(scopedGroupId ? { groupId: scopedGroupId } : role !== "all" ? { roleId: role } : {}),
         cursor,
-        limit: 20,
+        limit: ROLES_PER_PAGE,
       })
       .then((result) => {
         if (!cancelled) setRead({ key: readKey, data: result });

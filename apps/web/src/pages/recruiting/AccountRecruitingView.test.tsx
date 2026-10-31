@@ -88,7 +88,7 @@ it("uses one account read, one calendar, role labels and a picker that filters w
       ),
     );
     expect(read).toHaveBeenCalledTimes(1);
-    expect(read.mock.calls[0]![0]).toEqual({ view: "interview", cursor: undefined, limit: 20 });
+    expect(read.mock.calls[0]![0]).toEqual({ view: "interview", cursor: undefined, limit: 5 });
     expect(host.querySelectorAll('[aria-label="Calendar"]').length).toBe(1);
     expect(host.textContent).toContain("Role one / Role two · Candidate interview");
     const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Role"]')!;
@@ -101,7 +101,7 @@ it("uses one account read, one calendar, role labels and a picker that filters w
       view: "interview",
       roleId: "two",
       cursor: undefined,
-      limit: 20,
+      limit: 5,
     });
     expect(host.querySelectorAll('select[aria-label="Role"] option').length).toBe(3);
     expect(host.textContent).not.toContain("Role one / Role two · Candidate interview");
