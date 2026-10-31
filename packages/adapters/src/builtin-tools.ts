@@ -449,6 +449,17 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: z.toJSONSchema(SecretHttpRequest, { io: "input" }),
   },
   {
+    name: "allow_computer_site",
+    description:
+      "Ask the person to let your computer reach one more site. Your computer can reach only the sites they allowed; use this after a command or page on your computer could not connect to a site the work needs. Name the site and why.",
+    inputSchema: z.toJSONSchema(
+      z.object({
+        site: z.string().min(1).max(253).describe("Host name, for example pypi.org"),
+        reason: z.string().min(1).max(300),
+      }),
+    ),
+  },
+  {
     name: "forget_secret",
     description:
       "Remove a saved credential for this bot and user, preventing future requests from using it.",

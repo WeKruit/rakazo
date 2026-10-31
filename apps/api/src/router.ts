@@ -71,6 +71,8 @@ import {
   deploymentAutoReviewDefault,
   destroyBot,
   displayBotWorkspacePath,
+  EGRESS_ALL_SITES,
+  egressHost,
   enqueueTakeoverContinuation,
   ensureComputerWorkspaceLayout,
   estimateCatalogTokenCostUsd,
@@ -6776,12 +6778,19 @@ export function createRouter(deps: RouterDeps) {
         return rows.map((row) => ({
           id: row.id,
           effect: row.effect as ActionApprovalRule["effect"],
-          matchKind: row.matchKind as "tool" | "connector" | "category",
+          matchKind: row.matchKind as ActionApprovalRule["matchKind"],
           matchValue: row.matchValue,
           createdAt: row.createdAt.toISOString(),
         }));
       }),
       set: authed.approvalRules.set.handler(async ({ context, input }) => {
+        if (input.matchKind === "egress") {
+          const host = egressHost(input.matchValue);
+          // Only "*" may be locked as a whole; allowing every site is the unlocked default.
+          if (!host || (host === EGRESS_ALL_SITES && input.effect !== "block"))
+            throw new ORPCError("BAD_REQUEST", { message: "Enter a site such as example.com." });
+          input = { ...input, matchValue: host };
+        }
         const row = await deps.prisma.actionApprovalRule.upsert({
           where: {
             spaceId_createdByUserId_effect_matchKind_matchValue: {
@@ -6804,7 +6813,7 @@ export function createRouter(deps: RouterDeps) {
         return {
           id: row.id,
           effect: row.effect as ActionApprovalRule["effect"],
-          matchKind: row.matchKind as "tool" | "connector" | "category",
+          matchKind: row.matchKind as ActionApprovalRule["matchKind"],
           matchValue: row.matchValue,
           createdAt: row.createdAt.toISOString(),
         };

@@ -11,6 +11,7 @@ import type {
   ControlLeaseRef,
   PortableFile,
   ProcessEvent,
+  SandboxNetworkPolicy,
   SandboxProvider,
   ScreenRequest,
   ScreenSession,
@@ -47,6 +48,27 @@ export function e2bCreateOptions(botId: string, apiKey: string) {
     resolution: [1280, 800] as [number, number],
     lifecycle: { onTimeout: "pause" as const, autoResume: false },
   };
+}
+
+/**
+ * E2B enforces these at its edge: a locked computer reaches only the listed hosts, and a
+ * credential header is added there, so the value never exists inside the sandbox.
+ */
+export function e2bNetworkUpdate(policy: SandboxNetworkPolicy) {
+  const rules = Object.fromEntries(
+    policy.credentials.map((credential) => [
+      credential.host,
+      [{ transform: { headers: credential.headers } }],
+    ]),
+  );
+  const denied = new Set(policy.denyHosts);
+  if (!policy.allowHosts) {
+    return { ...(denied.size ? { denyOut: [...denied] } : {}), rules };
+  }
+  const allowed = [
+    ...new Set([...policy.allowHosts, ...policy.credentials.map((credential) => credential.host)]),
+  ].filter((host) => !denied.has(host));
+  return { allowOut: allowed, denyOut: ["0.0.0.0/0", ...denied], rules };
 }
 
 // How the E2B SDK words a sandbox that no longer exists. It does not always say "not found":
@@ -407,6 +429,17 @@ export class E2BSandboxProvider implements SandboxProvider {
     } catch (error) {
       if (!isSandboxGoneError(error)) throw error;
     }
+  }
+
+  async setNetworkPolicy(
+    computer: ComputerRef,
+    policy: SandboxNetworkPolicy,
+    context: AdapterContext,
+  ): Promise<void> {
+    context.signal.throwIfAborted();
+    await (await this.box(computer)).updateNetwork(e2bNetworkUpdate(policy), {
+      signal: context.signal,
+    });
   }
 
   async destroy(computer: ComputerRef, _context: AdapterContext): Promise<void> {
