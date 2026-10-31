@@ -1363,7 +1363,9 @@ export class McpConnector implements ConnectorProvider {
       // A known rate limit leaves the session healthy. Other thrown calls keep the existing
       // reconnect and uncertain-outcome handling for transport or authentication failures.
       const secrets = material ? oauthMaterialSecrets(material) : [];
-      if (sessionKey && !(error instanceof PeopleSearchRateLimitError))
+      // A caller that stopped waiting (a page closed or ran out of time) leaves the session
+      // healthy; closing it would also fail every other call still running on it.
+      if (sessionKey && !(error instanceof PeopleSearchRateLimitError) && !context.signal.aborted)
         await this.evict(sessionKey);
       let message = sanitizeConnectorError(error, secrets);
       getLogger().warn("mcp.call.failed", {
