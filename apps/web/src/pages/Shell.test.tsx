@@ -2712,6 +2712,42 @@ it("defers hidden conversation icons until revealed without remounting the draft
   expect(shellApi.send).not.toHaveBeenCalled();
 });
 
+it("replaces role chat with candidate detail and restores the same draft on return", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
+  const draft = "Keep this unsent note.";
+  type(composer, draft);
+  await view.click(view.candidate.name);
+  await vi.waitFor(() =>
+    expect(container!.querySelector('[data-testid="recruiting-detail-panel"]')).not.toBeNull(),
+  );
+  expect(chat.hidden).toBe(true);
+  expect(chat.hasAttribute("inert")).toBe(true);
+  expect(container!.querySelector("main")!.classList.contains("hire-role-chat-open")).toBe(false);
+  await view.click("Back");
+  await vi.waitFor(() =>
+    expect(container!.querySelector('[data-testid="recruiting-detail-panel"]')).toBeNull(),
+  );
+  expect(chat.hidden).toBe(false);
+  expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
+  expect(composer.value).toBe(draft);
+  await view.click(view.candidate.name);
+  await view.openRoleChat();
+  await vi.waitFor(() =>
+    expect(container!.querySelector('[data-testid="recruiting-detail-panel"]')).toBeNull(),
+  );
+  expect(chat.hidden).toBe(false);
+  expect(composer.value).toBe(draft);
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
 it("keeps one native chat, draft, attachment and pending card through full-width brief and feedback views", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {

@@ -257,7 +257,7 @@ export function ShellConversation({
         "isolate flex min-w-0 flex-1 flex-col bg-background",
         homeView && "hidden",
         roleChatWorkspace && "hire-role-chat-workspace",
-        roleChatWorkspace && roleChatOpen && "hire-role-chat-open",
+        roleChatWorkspace && !roleChatHidden && "hire-role-chat-open",
       )}
     >
       {workspaceFull ? (
@@ -501,7 +501,7 @@ export function ShellConversation({
           </div>
         </div>
       ) : null}
-      {roleChatWorkspace && !roleChatOpen ? (
+      {roleChatWorkspace && roleChatHidden ? (
         <Button
           ref={roleChatTrigger}
           className="hire-role-chat-trigger absolute bottom-4 end-4 z-20"
@@ -544,9 +544,7 @@ export function ShellConversation({
           </div>
         ) : null}
         <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
-          <LinkFaviconsContext.Provider
-            value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}
-          >
+          <LinkFaviconsContext.Provider value={roleChatHidden ? null : linkFavicons}>
             <section
               ref={roleChatSection}
               id={roleChatId}
@@ -808,7 +806,7 @@ export function ShellConversation({
                 <Transcript
                   key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
                   narrow={roleChatWorkspace || !showToolActivity}
-                  visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
+                  visible={!roleChatHidden}
                   scrollRef={messageScroll}
                   scrollRequest={scrollRequest}
                   onScrollRequestHandled={clearScrollRequest}

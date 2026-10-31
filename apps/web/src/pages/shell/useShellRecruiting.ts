@@ -396,11 +396,13 @@ export function useShellRecruiting({
     workspaceNewRole ||
     workspaceCandidates ||
     workspaceCorrespondence;
+  const recruitingDetail = useRecruitingDetailController(activeSnapshot?.threadId);
   const roleChatWorkspace = workspaceFull && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
   // Hidden and inert together: a closed role chat's composer must not be reachable or typed into.
-  const roleChatHidden = workspaceFull && !(roleChatWorkspace && roleChatOpen);
+  const roleChatHidden =
+    workspaceFull && (Boolean(recruitingDetail.current) || !(roleChatWorkspace && roleChatOpen));
   useEffect(() => {
-    if (roleChatWorkspace && roleChatOpen)
+    if (roleChatWorkspace && roleChatOpen && !roleChatSection.current?.hidden)
       roleChatSection.current
         ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
         ?.focus();
@@ -519,7 +521,6 @@ export function useShellRecruiting({
     }),
     [selectCorrespondence],
   );
-  const recruitingDetail = useRecruitingDetailController(activeSnapshot?.threadId);
   // The candidate whose email the workbench (Inbox tab or detail panel) has selected.
   const selectedReplyCandidate = useRef<string>(undefined);
   selectedReplyCandidate.current =
@@ -534,6 +535,7 @@ export function useShellRecruiting({
     return (emptyCrmChat ? sendCrmRoleMessage : sendMessage)(...args);
   };
   function openRoleChat(text?: string) {
+    recruitingDetail.close();
     if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
     if (roleChatWorkspace) setRoleChatOpen(true);
     else openRecruitingView("conversation");
