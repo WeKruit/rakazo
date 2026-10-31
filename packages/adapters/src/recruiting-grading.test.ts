@@ -283,6 +283,43 @@ describe("startRecruitingGrading", () => {
     );
   });
 
+  it("has the quality check grade itself from full profiles, ten at a time", async () => {
+    const f = fixture({
+      found: Array.from({ length: 14 }, (_, index) => person(`p${index}`)),
+      agentRunBots: ["main"],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "main", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ] as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "reviewer" }),
+    });
+    const prompt = promptOf(f);
+    expect(prompt).toContain("Grade these 10 people");
+    expect(prompt).toContain("one web_fetch per person");
+    expect(prompt).toContain("recruiting_research save_grades");
+    expect(prompt).toContain("never judge ethnicity, race or background");
+    expect(prompt).not.toContain("agent_run");
+    expect(prompt).not.toContain("in/p10");
+    // Grades the quality check saved itself count as graded.
+    expect(f.prisma.recruitingCandidateOccurrence.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          page: {
+            effect: {
+              OR: [
+                { request: { path: ["operation"], equals: "save_results" } },
+                { request: { path: ["operation"], equals: "save_grades" } },
+              ],
+            },
+          },
+        }),
+      }),
+    );
+  });
+
   it("grades with a people-search agent run when a teammate may start one", async () => {
     const f = fixture({ found: [person("a")], agentRunBots: ["main"] });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
@@ -437,6 +474,16 @@ describe("gradingToolRefusal", () => {
     expect(
       gradingToolRefusal("recruiting_research", { operation: "save_results" }, start),
     ).toBeUndefined();
+  });
+
+  it("lets the quality check read profiles and save its own grades", () => {
+    expect(
+      gradingToolRefusal("web_fetch", { url: "https://www.linkedin.com/in/a" }, start),
+    ).toBeUndefined();
+    expect(
+      gradingToolRefusal("recruiting_research", { operation: "save_grades" }, start),
+    ).toBeUndefined();
+    expect(gradingToolRefusal("web_search", { query: "a" }, start)).toMatch(/end the turn/i);
   });
 
   it("lets the request turn only start the research, then end", () => {

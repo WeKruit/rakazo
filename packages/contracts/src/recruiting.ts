@@ -1052,6 +1052,33 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
+/** People one save_grades call may grade. */
+export const RECRUITING_GRADE_PAGE_LIMIT = 20;
+const GradeText = (max: number) => ResearchText.max(max);
+/** One person's grade from the quality check: the same columns a search's grading returns. */
+export const RecruitingGradeRowSchema = z.object({
+  name: GradeText(300),
+  linkedin_url: GradeText(500),
+  current_title: GradeText(300).nullish(),
+  current_company: GradeText(300).nullish(),
+  location: GradeText(300).nullish(),
+  education: z.array(GradeText(500)).max(10).nullish(),
+  match_score: z.number().int().min(0).max(100),
+  match_tier: z.enum(["Strong", "Promising", "Partial", "Uncertain"]),
+  fit_reasons: GradeText(2000),
+  concerns: z.array(GradeText(500)).max(10).default([]),
+  requirements_assessment: z
+    .array(
+      z.object({
+        requirement: GradeText(500),
+        status: z.enum(["met", "not_met", "unknown"]),
+        evidence: z.string().max(1000).nullable(),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type RecruitingGradeRow = z.infer<typeof RecruitingGradeRowSchema>;
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
@@ -1104,6 +1131,13 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   z.strictObject({
     operation: z.literal("save_search"),
     expectedRoleRevision: Revision,
+  }),
+  // The quality check's own grades for people already saved in the role, judged from their
+  // full public profiles; saved as one page on the role like a search's grades.
+  z.strictObject({
+    operation: z.literal("save_grades"),
+    expectedRoleRevision: Revision,
+    rows: z.array(RecruitingGradeRowSchema).min(1).max(RECRUITING_GRADE_PAGE_LIMIT),
   }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({
@@ -1795,7 +1829,17 @@ export const RecruitingRoleSetupSchema = z.strictObject({
 });
 export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
+export const RecruitingCandidateHistorySchema = z.strictObject({
+  id: Id,
+  candidateKey: RecruitingId,
+  at: IsoDate,
+  label: z.string().min(1).max(200),
+  before: z.string().nullable(),
+  after: z.string().nullable(),
+});
+
 export const RecruitingCorrespondenceSchema = z.strictObject({
+  history: z.array(RecruitingCandidateHistorySchema).optional(),
   /** Actual reply failures/uncertainty, not a confirmation-to-booking association. */
   operations: z
     .array(
@@ -1828,6 +1872,19 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       id: Id,
       sourceName: z.string(),
       ...CorrespondenceOriginFields,
+      /** Imported history is evidence, never authority to replay a provider operation. */
+      imported: z.literal(true).optional(),
+      candidateKey: RecruitingId.optional(),
+      attachments: z
+        .array(
+          z.strictObject({
+            id: Id,
+            name: z.string(),
+            mimeType: z.string(),
+            size: z.number().int().min(0),
+          }),
+        )
+        .optional(),
       direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
       /** Optional provider observations, never application viewed-by state or current totals. */
       unread: z.boolean().nullable().optional(),
@@ -1838,6 +1895,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       crm: CorrespondenceCrmContext,
       sender: z.string().nullable(),
       recipients: z.array(z.string()),
+      cc: z.array(z.string()).optional(),
+      bcc: z.array(z.string()).optional(),
       subject: z.string(),
       body: z.string(),
       snippet: z.boolean(),
@@ -1863,7 +1922,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   contacts: z.array(
     z.strictObject({
       candidateKey: RecruitingId,
-      linkedinUrl: z.httpUrl(),
+      imported: z.literal(true).optional(),
+      linkedinUrl: z.httpUrl().nullable(),
       emails: z.array(z.strictObject({ address: z.email(), status: z.string().nullable() })),
       phones: z.array(z.strictObject({ number: z.string(), type: z.string().nullable() })),
       source: z.string(),
@@ -1875,6 +1935,19 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   nextCursor: z.string().nullable(),
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;
+
+/** Immutable records retained by an authenticated backoffice import, not provider execution. */
+export const RecruitingHistoryImportSchema = RecruitingCorrespondenceSchema.pick({
+  emails: true,
+  events: true,
+  contacts: true,
+  history: true,
+}).extend({
+  version: z.literal(1),
+  roleId: RecruitingId,
+  sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  importedAt: IsoDate,
+});
 
 /** One role's Home numbers. `null` means no source reported the number. */
 export const RecruitingOverviewRoleSchema = z.strictObject({

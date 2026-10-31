@@ -995,3 +995,46 @@ it.each([
   if (count) expect(view.container.textContent).toContain("Retained conversation history");
   expect(readCorrespondence).toHaveBeenCalledTimes(1);
 });
+
+it("opens imported email attachments through the existing scoped artifact card", async () => {
+  readCorrespondence.mockResolvedValue({
+    roleId: "role",
+    status: "ready",
+    checkedAt: "2026-10-23T00:00:00.000Z",
+    connections: [],
+    emails: [
+      {
+        id: "imported-mail",
+        sourceName: "Email history",
+        sourceId: "history",
+        providerMessageId: "original-mail",
+        savedRead: null,
+        imported: true,
+        direction: "received",
+        sender: "candidate@example.test",
+        recipients: ["recruiter@example.test"],
+        subject: "Resume attached",
+        body: "This is my complete original reply.",
+        snippet: false,
+        date: "2026-10-22T00:00:00.000Z",
+        url: null,
+        attachments: [
+          { id: "original-resume", name: "Resume.pdf", mimeType: "application/pdf", size: 120 },
+        ],
+      },
+    ],
+    events: [],
+    contacts: [],
+    partial: false,
+    nextCursor: null,
+  });
+  const view = await mount({ view: "inbox", threadId: "thread" });
+  expect(view.container.textContent).toContain("This is my complete original reply.");
+  expect(view.container.querySelector('[data-artifact-id="original-resume"]')).not.toBeNull();
+  expect(preview).toHaveBeenCalledWith(
+    expect.objectContaining({
+      artifactId: "original-resume",
+      target: { groupId: "role-group" },
+    }),
+  );
+});

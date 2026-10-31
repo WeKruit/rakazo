@@ -338,6 +338,8 @@ function describeApprovalAction(
       ? `${displayToolName.replace("_", " ")} (${String(name)})`
       : displayToolName.replace("_", " ");
   }
+  if (toolName === "allow_computer_site")
+    return `Let the computer reach ${String(args.site ?? "")}`;
   if (toolName === "create_space") {
     const name = args.name ? String(args.name) : "Untitled";
     return `Create space “${name}”`;
@@ -363,6 +365,7 @@ function formatApprovalDetail(
 ): string | undefined {
   const booking = formatBooking(toolName, args) ?? formatBookingChange(toolName, args);
   if (booking) return booking;
+  if (toolName === "allow_computer_site") return String(args.reason ?? "") || undefined;
   if (toolName === "recruiting_crm_target") {
     const target = args.target as RecruitingCrmTarget;
     return [

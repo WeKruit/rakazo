@@ -13,6 +13,7 @@ import {
   RoutineListHeader,
   RoutineListRow,
   routineNeedsOneShotArm,
+  routineOptionInput,
 } from "../RoutineList";
 import { RetryNotice } from "./RetryNotice";
 import { TabLoading } from "./shared";
@@ -117,6 +118,7 @@ export function RecruitingRoutines({
       crons,
       active: draft.active,
       notify: draft.notify,
+      ...routineOptionInput(draft, editing),
       webhookEnabled: draft.webhookEnabled,
       githubEnabled: draft.githubEnabled,
       messageProvider: draft.messageProvider,

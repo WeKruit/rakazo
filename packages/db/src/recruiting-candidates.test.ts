@@ -7065,6 +7065,77 @@ describe("people search candidate save", () => {
   });
 });
 
+describe("quality check grade save", () => {
+  function gradesFixture() {
+    const f = nativeCandidateFixture();
+    const grade = {
+      name: "Ada Example",
+      linkedin_url: "https://www.linkedin.com/in/example",
+      current_title: "Sort Center Manager",
+      match_score: 88,
+      match_tier: "Strong" as const,
+      fit_reasons: "Runs a parcel sort center in Edison, NJ",
+      concerns: [],
+      requirements_assessment: [
+        { requirement: "Based in New Jersey", status: "met" as const, evidence: "Edison, NJ" },
+      ],
+    };
+    const input = {
+      operation: "save_grades" as const,
+      expectedRoleRevision: 1,
+      rows: [grade],
+    };
+    Object.assign(f.saveEffect, { request: input });
+    const trusted = { ...f.trusted, effectRequest: input };
+    const saved = { count: 1 };
+    Object.assign(f.tx.recruitingCandidate, {
+      count: vi.fn(async () => saved.count),
+      createManyAndReturn: vi.fn(async () => []),
+    });
+    const bytes = Buffer.from(stableJsonValue(recruiting.recruitingGradesReceipt(input)));
+    const outputArtifact = {
+      name: "recruiting-grades.json",
+      mimeType: "application/json",
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: "receipt",
+      clientNonce: "recruiting-grades:save",
+    };
+    const save = () =>
+      recruiting.saveRecruitingCandidateGrades(f.prisma, actor, trusted, input, { outputArtifact });
+    return { ...f, input, saved, outputArtifact, save };
+  }
+
+  it("saves grades for people already in the role with their score and tier", async () => {
+    const f = gradesFixture();
+    const result = (await f.save()) as Record<string, unknown>;
+    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        expect.objectContaining({
+          candidateKey: "linkedin:/in/example",
+          matchFields: { match_score: 88, match_tier: "Strong" },
+        }),
+      ],
+    });
+    expect(result).toMatchObject({
+      status: "saved",
+      source: { kind: "reviewer_grades" },
+      graded: 1,
+    });
+    expect(f.saveEffect).toMatchObject({ status: "completed", result });
+  });
+
+  it.each(["not-in-role", "receipt-hash"])("refuses %s", async (boundary) => {
+    const f = gradesFixture();
+    if (boundary === "not-in-role") f.saved.count = 0;
+    if (boundary === "receipt-hash") f.outputArtifact.hash = "e".repeat(64);
+    await expect(f.save()).rejects.toThrow(
+      boundary === "not-in-role" ? recruiting.RecruitingGradeRowsError : IsolationError,
+    );
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("recruiter CSV page provenance on read", () => {
   async function importedSourceFixture() {
     const f = await nativeSourceFixture();

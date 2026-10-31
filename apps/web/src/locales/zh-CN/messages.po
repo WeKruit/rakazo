@@ -411,6 +411,10 @@ msgstr "全部时间"
 msgid "All tools"
 msgstr "全部工具"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr "允许"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -441,6 +445,10 @@ msgstr "允许购买操作，无需询问"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "已允许一次"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr "允许的网站"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -1194,6 +1202,20 @@ msgstr "已完成"
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "电脑"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr "电脑可以访问 {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr "电脑不能访问 {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr "电脑只能访问允许的网站"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"

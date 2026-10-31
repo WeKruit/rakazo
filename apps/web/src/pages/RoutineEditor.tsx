@@ -24,6 +24,7 @@ import {
 import {
   ChevronLeft,
   Clock,
+  Database,
   GitBranch,
   Globe,
   MessageSquare,
@@ -141,7 +142,11 @@ export function RoutineEditor({
     draft.schedules.length > 0 ||
     draft.webhookEnabled ||
     draft.githubEnabled ||
-    Boolean(draft.messageProvider);
+    Boolean(draft.messageProvider) ||
+    Boolean(draft.recordTrigger);
+  const [moreOpen, setMoreOpen] = useState(
+    Boolean(draft.condition || draft.probeCommand || draft.sessionMode === "reuse" || draft.shared),
+  );
   const canTest = Boolean(editing) && !saving && !running;
   const needsOneShotArm =
     editing != null && routineNeedsOneShotArm(editing, draft.schedules.map(cronFromPreset));
@@ -390,6 +395,13 @@ export function RoutineEditor({
             />
           ) : null}
 
+          {draft.recordTrigger ? (
+            <RecordTriggerCard
+              kind={draft.recordTrigger}
+              onRemove={() => onChange({ ...draft, recordTrigger: null })}
+            />
+          ) : null}
+
           {needsOneShotArm ? (
             <label htmlFor={`${fieldId}-run-at`} className="block text-sm text-muted-foreground">
               <Trans>Run at</Trans>
@@ -414,7 +426,7 @@ export function RoutineEditor({
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top">
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger disabled={Boolean(draft.recordTrigger)}>
                 <Clock />
                 <Trans>On a schedule</Trans>
               </DropdownMenuSubTrigger>
@@ -469,13 +481,89 @@ export function RoutineEditor({
               <Globe />
               <Trans>Webhook</Trans>
             </DropdownMenuItem>
+
+            <DropdownMenuItem
+              disabled={Boolean(draft.recordTrigger) || draft.schedules.length > 0}
+              onClick={() => onChange({ ...draft, recordTrigger: "recruiting_role" })}
+            >
+              <Database />
+              <Trans>When a role changes</Trans>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              disabled={Boolean(draft.recordTrigger) || draft.schedules.length > 0}
+              onClick={() => onChange({ ...draft, recordTrigger: "recruiting_candidate" })}
+            >
+              <Database />
+              <Trans>When people are saved</Trans>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
         {!hasTriggers ? (
           <p className="mt-2 text-xs text-muted-foreground/70">
-            <Trans>Add a schedule, webhook, GitHub, or message trigger to run this routine.</Trans>
+            <Trans>Add a trigger to run this routine.</Trans>
           </p>
+        ) : null}
+      </div>
+
+      <div className="mt-5">
+        <Button
+          variant="link"
+          size="xs"
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen(!moreOpen)}
+          className="px-0 text-muted-foreground"
+        >
+          <Trans>More options</Trans>
+        </Button>
+        {moreOpen ? (
+          <div className="mt-2 space-y-3">
+            <label htmlFor={`${fieldId}-condition`} className="block text-sm text-muted-foreground">
+              <Trans>Only run when</Trans>
+              <Input
+                id={`${fieldId}-condition`}
+                value={draft.condition}
+                placeholder='event.action == "opened"'
+                onChange={(e) => onChange({ ...draft, condition: e.target.value })}
+                className="mt-1.5 font-mono text-xs"
+              />
+            </label>
+            <label htmlFor={`${fieldId}-probe`} className="block text-sm text-muted-foreground">
+              <Trans>Check command</Trans>
+              <Input
+                id={`${fieldId}-probe`}
+                value={draft.probeCommand}
+                placeholder="./check-new-applicants.sh"
+                onChange={(e) => onChange({ ...draft, probeCommand: e.target.value })}
+                className="mt-1.5 font-mono text-xs"
+              />
+            </label>
+            <div className="flex items-center gap-2.5 text-sm text-foreground/75">
+              <Switch
+                aria-labelledby={`${fieldId}-session`}
+                checked={draft.sessionMode === "reuse"}
+                onCheckedChange={(reuse) =>
+                  onChange({ ...draft, sessionMode: reuse ? "reuse" : "new" })
+                }
+              />
+              <span id={`${fieldId}-session`}>
+                <Trans>Continue the conversation each run</Trans>
+              </span>
+            </div>
+            {draft.sharedFromId ? null : (
+              <div className="flex items-center gap-2.5 text-sm text-foreground/75">
+                <Switch
+                  aria-labelledby={`${fieldId}-shared`}
+                  checked={draft.shared}
+                  onCheckedChange={(shared) => onChange({ ...draft, shared })}
+                />
+                <span id={`${fieldId}-shared`}>
+                  <Trans>Share with my team</Trans>
+                </span>
+              </div>
+            )}
+          </div>
         ) : null}
       </div>
 
@@ -502,6 +590,35 @@ export function RoutineEditor({
       ) : null}
 
       {editing ? <RoutineRunHistory key={editing.id} routineId={editing.id} /> : null}
+    </div>
+  );
+}
+
+function RecordTriggerCard({
+  kind,
+  onRemove,
+}: {
+  kind: NonNullable<RoutineDraftState["recordTrigger"]>;
+  onRemove: () => void;
+}) {
+  const { t } = useLingui();
+  return (
+    <div className="rounded-xl border border-border p-3">
+      <div className="flex items-center gap-2.5 px-0.5">
+        <Database size={16} strokeWidth={1.6} className="text-muted-foreground" aria-hidden />
+        <span className="flex-1 text-[14.5px] text-foreground">
+          {kind === "recruiting_role" ? t`When a role changes` : t`When people are saved`}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={t`Remove record trigger`}
+          onClick={onRemove}
+          className="text-muted-foreground"
+        >
+          <X />
+        </Button>
+      </div>
     </div>
   );
 }

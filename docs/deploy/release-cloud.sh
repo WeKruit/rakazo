@@ -221,11 +221,12 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
   # A fresh container may be cold, so it gets a second try. Needs RAKAZO_EMAIL/RAKAZO_PASSWORD.
   if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
     home=1
-    for attempt in 1 2; do
+    # A fresh container runs its startup backfills first, so later attempts wait longer.
+    for attempt in 1 2 3; do
       RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
         node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-$SHORT.log" 2>&1 && home=0 || home=$?
       [ "$home" = 1 ] || [ "$home" = 4 ] || break
-      sleep 10
+      sleep 30
     done
     case "$home" in
       0) log "home load ok: $(grep -o 'overview [0-9]* ms' "$WORK/home-$SHORT.log")" ;;
@@ -247,10 +248,20 @@ fi
 # Contact lookup and the send card on a fresh first ten (about 10 minutes; the card is never
 # answered, so nothing is sent). Needs the private JD fixtures in RELEASE_CASES and the test account
 # in RAKAZO_EMAIL/RAKAZO_PASSWORD; a red result rolls the release back. Skipped on a rollback.
-if [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
+# It pays for a search, grading and contact lookups, so it runs only when this release changes
+# search, grading or contact code (or RELEASE_PAID_CHECKS=1); every other release stays free.
+PAID_PATHS='^packages/(adapters/src/(recruiting-|mcp-connector|contact-)|core/src/recruiting-)|^infra/acceptance/regression\.mjs$'
+paid_change() {
+  [ "${RELEASE_PAID_CHECKS:-}" = 1 ] && return 0
+  [ "$LIVE" != unknown ] || return 0
+  git -C "$REPO" diff --name-only "$LIVE" "$SHA" -- . 2>/dev/null | grep -v '\.test\.' | grep -qE "$PAID_PATHS"
+}
+if [ "${RELEASE_ROLLBACK:-}" != 1 ] && ! paid_change; then
+  log "contacts check skipped: no search, grading or contact code changed (RELEASE_PAID_CHECKS=1 to run it)"
+elif [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
   && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
   RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
-    node "$DIR/infra/acceptance/regression.mjs" --only contacts --cases "$RELEASE_CASES" \
+    node "$DIR/infra/acceptance/regression.mjs" --only contacts --paid --cases "$RELEASE_CASES" \
       --out "$WORK/contacts-$SHORT" > "$WORK/contacts-$SHORT.log" 2>&1 \
     || { tail -8 "$WORK/contacts-$SHORT.log"; rollback "contacts check failed (log: $WORK/contacts-$SHORT.log)"; }
   log "contacts ok"

@@ -25,6 +25,7 @@ export const BUILTIN_TOOL_NAMES = [
   "list_secrets",
   "secret_request",
   "forget_secret",
+  "allow_computer_site",
   "render_plot",
   "render_view",
   "canvas_write",

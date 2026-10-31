@@ -1,6 +1,45 @@
 import { expect, it } from "vitest";
 import { buildActivity, relativeTime } from "./activity";
 
+it("retains dated imported status changes only for the selected candidate", () => {
+  const items = buildActivity({
+    candidateKey: "linkedin:/in/candidate-a",
+    history: [
+      {
+        id: "stage-1",
+        candidateKey: "linkedin:/in/candidate-a",
+        at: "2026-01-02T00:00:00Z",
+        label: "Stage",
+        before: "Interested",
+        after: "Interview",
+      },
+      {
+        id: "review-1",
+        candidateKey: "linkedin:/in/candidate-a",
+        at: "2026-01-03T00:00:00Z",
+        label: "Reviewed",
+        before: "false",
+        after: "true",
+      },
+      {
+        id: "foreign",
+        candidateKey: "linkedin:/in/candidate-b",
+        at: "2026-01-04T00:00:00Z",
+        label: "Stage",
+        before: "Interested",
+        after: "Declined",
+      },
+    ],
+  });
+  expect(items.map((item) => item.id)).toEqual(["import:review-1", "import:stage-1"]);
+  expect(items[1]).toMatchObject({
+    kind: "change",
+    label: "Stage",
+    before: "Interested",
+    after: "Interview",
+  });
+});
+
 const email = (id: string, extra: Record<string, unknown>) => ({
   id,
   providerMessageId: `p-${id}`,
@@ -232,4 +271,35 @@ it("does not attribute scheduling to the future message sender/date", () => {
     } as never,
   });
   expect(items[0]).toMatchObject({ kind: "scheduled", actor: null, at: null });
+});
+
+it("uses the recorded candidate identity for imported mail even when its address is absent from headers", () => {
+  const source = {
+    id: "original",
+    providerMessageId: "provider-original",
+    imported: true,
+    candidateKey: "person-a",
+    direction: "received",
+    sender: "alias@example.test",
+    recipients: ["team@example.test"],
+    subject: "Original reply",
+    date: "2026-01-02T00:00:00Z",
+  };
+  const items = buildActivity({
+    candidateKey: "person-a",
+    email: "person@example.test",
+    saved: [
+      source,
+      {
+        ...source,
+        id: "foreign",
+        providerMessageId: "foreign",
+        candidateKey: "person-b",
+        sender: "person@example.test",
+      },
+    ] as never,
+  });
+  expect(items).toEqual([
+    expect.objectContaining({ id: "saved:original", kind: "received", subject: "Original reply" }),
+  ]);
 });

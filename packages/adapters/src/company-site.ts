@@ -85,6 +85,8 @@ export type Found = { host: string | null; icon?: string; unsure?: true };
 
 export type CompanySiteResolver = {
   companySite(name: string): Promise<CompanySiteAnswer>;
+  /** A page's names at once: saved answers are read in one store query, in `names`' order. */
+  companySites(names: readonly string[]): Promise<CompanySiteAnswer[]>;
 };
 
 /** Organizations matching a name: each one's own website, indexed name and logo image, if any. */
@@ -106,6 +108,7 @@ export type CompanySiteResolverOptions = {
 /** Where found logos (and confirmed misses) are kept beyond this process. */
 export type OrganizationLogoStore = {
   get(key: string): Promise<(Found & { expiresAt: number }) | null>;
+  getMany?(keys: readonly string[]): Promise<Map<string, Found & { expiresAt: number }>>;
   put(key: string, found: Found, expiresAt: number): Promise<void>;
 };
 
@@ -154,18 +157,33 @@ export function createCompanySiteResolver(
     await options.store?.put(key, answerOf(answer), now() + ttl(answer)).catch(() => undefined);
     return answerOf(answer);
   };
+  const companySite = async (name: string): Promise<CompanySiteAnswer> => {
+    const tokens = companyTokens(name);
+    if (!tokens.length) return { host: null };
+    const key = tokens.join(" ");
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > now()) return answerOf(cached);
+    const pending = inFlight.get(key);
+    if (pending) return pending;
+    const lookup = resolve(key, tokens).finally(() => inFlight.delete(key));
+    inFlight.set(key, lookup);
+    return lookup;
+  };
   return {
-    async companySite(name) {
-      const tokens = companyTokens(name);
-      if (!tokens.length) return { host: null };
-      const key = tokens.join(" ");
-      const cached = cache.get(key);
-      if (cached && cached.expiresAt > now()) return answerOf(cached);
-      const pending = inFlight.get(key);
-      if (pending) return pending;
-      const lookup = resolve(key, tokens).finally(() => inFlight.delete(key));
-      inFlight.set(key, lookup);
-      return lookup;
+    companySite,
+    async companySites(names) {
+      const unknown = new Set<string>();
+      for (const name of names) {
+        const key = companyTokens(name).join(" ");
+        const cached = cache.get(key);
+        if (key && !(cached && cached.expiresAt > now()) && !inFlight.has(key)) unknown.add(key);
+      }
+      if (unknown.size && options.store?.getMany) {
+        const stored = await options.store.getMany([...unknown]).catch(() => new Map());
+        for (const [key, found] of stored)
+          if (found.expiresAt > now()) remember(key, found, found.expiresAt);
+      }
+      return Promise.all(names.map(companySite));
     },
   };
 }

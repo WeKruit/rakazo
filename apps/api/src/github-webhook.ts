@@ -6,6 +6,7 @@ import {
   deliverWebhookEvent,
   loadWebhookTarget,
   parseWebhookPayload,
+  routinesMatchingEvent,
   WEBHOOK_MAX_BODY_BYTES,
   type WebhookDeps,
   type WebhookSecretCache,
@@ -212,6 +213,7 @@ export function mountGithubWebhookRoute(
         modelProvider: true,
         modelId: true,
         thinkingLevel: true,
+        condition: true,
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -230,7 +232,11 @@ export function mountGithubWebhookRoute(
     return c.json(
       await deliverWebhookEvent(deps, target, {
         prompt: eventPrompt,
-        routines: githubRoutines,
+        routines: routinesMatchingEvent(githubRoutines, {
+          source: "github",
+          eventName: githubEvent,
+          event: payload,
+        }),
         source: "github",
         idempotencyKey: deliveryId,
       }),

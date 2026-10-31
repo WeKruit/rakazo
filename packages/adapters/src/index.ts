@@ -43,6 +43,7 @@ export * from "./computer-browser.js";
 export * from "./computer-control.js";
 export * from "./computer-idle.js";
 export * from "./computer-lifecycle.js";
+export * from "./computer-network.js";
 export * from "./computer-screens.js";
 export * from "./computer-support.js";
 export * from "./computer-tools.js";

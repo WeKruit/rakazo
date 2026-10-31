@@ -76,8 +76,8 @@ export interface CompactedHistorySelection {
 }
 
 /**
- * Uses a local summary only when the messages following its cursor are present and contiguous.
- * Otherwise the caller keeps the complete legacy window instead of silently creating a gap.
+ * Uses a local summary only when the window reaches back to its cursor. Otherwise the caller keeps
+ * the complete legacy window instead of silently dropping messages the summary does not cover.
  */
 export function selectCompactedHistory(options: {
   messages: CompactedHistoryMessage[];
@@ -92,11 +92,14 @@ export function selectCompactedHistory(options: {
   }
 
   const uncompacted = messages.filter((message) => message.seq > cursor);
-  for (let index = 0; index < uncompacted.length; index += 1) {
-    if (uncompacted[index]!.seq !== cursor + index + 1) {
-      return { history: messages, summary: null, usedLocalSummary: false };
-    }
-  }
+  // The window is the thread's newest messages, so once it reaches the cursor it holds every
+  // message after it; a hole inside is a deleted message. Only a window that stops short of the
+  // cursor could hide messages the summary does not cover.
+  const reachesCursor =
+    uncompacted.length === 0 ||
+    uncompacted.length < messages.length ||
+    uncompacted[0]!.seq === cursor + 1;
+  if (!reachesCursor) return { history: messages, summary: null, usedLocalSummary: false };
 
   return { history: uncompacted, summary, usedLocalSummary: true };
 }
@@ -346,16 +349,14 @@ export async function compactHistory(
   if (!bootstrappingLocalSummary) {
     const range = nextCompactionBatchRange(previousCursor, COMPACTION_BATCH_SIZE);
     fromSeqExclusive = range.fromSeqExclusive;
+    // A message and its seq commit together, so every seq below the thread's nextMessageSeq read
+    // above is either here or deleted (a removed queued message): a hole there is not a gap.
     batch = await deps.prisma.message.findMany({
-      where: { threadId, seq: { gt: range.fromSeqExclusive } },
+      where: { threadId, seq: { gt: range.fromSeqExclusive, lt: thread.nextMessageSeq } },
       orderBy: { seq: "asc" },
       take: range.take,
       select: { id: true, seq: true, role: true, botId: true, blocks: true },
     });
-    if (batch.some((message, index) => message.seq !== fromSeqExclusive + index + 1)) {
-      logHistoryCompactPermanentFailure(threadId, "message_coverage_gap");
-      return;
-    }
   }
   if (sourceRunId) {
     batch = batch.filter((message) => message.seq < thread.nextMessageSeq - HISTORY_WINDOW_SIZE);

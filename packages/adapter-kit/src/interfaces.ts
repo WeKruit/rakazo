@@ -87,8 +87,27 @@ import type {
   WebSearchRequest,
 } from "./types.js";
 
+/**
+ * Outbound network rules a provider enforces outside the computer, so code inside cannot see or
+ * route around them.
+ */
+export type SandboxNetworkPolicy = {
+  /** Hosts the computer may reach; absent means every public host. */
+  allowHosts?: string[];
+  /** Hosts the computer may never reach. */
+  denyHosts: string[];
+  /** Headers added to requests for a host at the provider's edge; the values never enter it. */
+  credentials: Array<{ host: string; headers: Record<string, string> }>;
+};
+
 export interface SandboxProvider {
   describe(): AdapterDescriptor<SandboxCapabilities>;
+  /** Replace the computer's outbound rules; a provider without the method cannot enforce any. */
+  setNetworkPolicy?(
+    computer: ComputerRef,
+    policy: SandboxNetworkPolicy,
+    context: AdapterContext,
+  ): Promise<void>;
   /** Optional live browser on the same leased screen as observe/act. */
   pageBrowser?(
     computer: ComputerRef,
