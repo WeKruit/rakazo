@@ -10,7 +10,8 @@
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
 //                  (which must end with a report stating the new count), pasted English JD
-//                  (needs <cases>/t3.txt). cards (full suite or --only cards; it searches, so it costs
+//                  (needs <cases>/t3.txt), contacts (找contact twice and send-20 on a fresh first
+//                  ten of <cases>/t1.pdf, ending on the unanswered send card). cards (full suite or --only cards; it searches, so it costs
 //                  money: card-e2e.mjs clicks question, send and booking cards
 //                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
 //                  {"sendGroup","sendRoleMark","bookingGroup"})
@@ -76,11 +77,17 @@ const log = (text) =>
 let cookie = "";
 async function signIn() {
   if (!EMAIL) return;
-  const response = await fetch(`${BASE}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
+  let response;
+  // Sign-in is rate limited; right after a deploy the smoke check may have used the allowance.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    response = await fetch(`${BASE}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+    });
+    if (response.status !== 429) break;
+    await sleep(60_000);
+  }
   if (!response.ok) throw new Error(`sign-in ${response.status}`);
   cookie = (response.headers.getSetCookie?.() ?? []).map((line) => line.split(";")[0]).join("; ");
 }
@@ -287,6 +294,19 @@ async function readEvents(groupId, { limitMs = 15_000 } = {}) {
   }
   return events;
 }
+// A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
+const COUNT = String.raw`(?:\d+|all|none)`;
+const CONTACT_WORD = String.raw`(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)`;
+const CONTACT_REPORT = new RegExp(
+  [
+    String.raw`[\w.+-]+@[\w-]+\.\w`,
+    String.raw`\bno ${CONTACT_WORD}\b[^.\n]{0,20}\bfound\b`,
+    String.raw`${CONTACT_WORD}[^.\n]{0,80}\b${COUNT}\b`,
+    String.raw`\b${COUNT}\b[^.\n]{0,80}${CONTACT_WORD}`,
+  ].join("|"),
+  "i",
+);
+
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
   await assertTestCopy(rpc, groupId);
@@ -384,7 +404,7 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3"]),
+      : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3", "contacts"]),
 );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
@@ -586,6 +606,34 @@ try {
       if (code !== 0) failures.push("first10 (long JD) did not pass; see first10-long/summary.md");
     });
 
+  // The contact and send steps on a fresh first ten, short enough for every release: 找contact,
+  // 找contact again and 发20个人的先 up to the send card, which is never answered.
+  if (wanted.has("contacts"))
+    await stage("contacts", async (failures) => {
+      const pdf = CASES && path.join(CASES, "t1.pdf");
+      if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
+      const code = await run("contacts", "recruiting-latency.mjs", [
+        "--jd-file",
+        pdf,
+        "--skip-scale",
+        "--keep",
+        "--out",
+        path.join(OUT, "contacts.json"),
+      ]);
+      // The first ten's own timing is the first10 case's; here it only has to leave people to contact.
+      const report = fs.existsSync(path.join(OUT, "contacts.json")) ? reportOf("contacts") : {};
+      if (!report.groupId || !report.rounds?.[0]?.count)
+        return failures.push(`no first ten to contact (exit ${code}); see contacts.log`);
+      const groupId = report.groupId;
+      await settled(groupId);
+      await contactsAndSend(groupId, failures);
+      const transcript = (await messagesOf(groupId))
+        .map((message) => `[${message.role}] ${botText(message)}`)
+        .join("\n\n");
+      fs.writeFileSync(path.join(OUT, "contacts-chat.txt"), `${transcript}\n`);
+      commonChecks(await messagesOf(groupId), failures);
+    });
+
   if (wanted.has("t1"))
     await stage("t1", async (failures) => {
       const pdf = CASES && path.join(CASES, "t1.pdf");
@@ -776,6 +824,59 @@ try {
     { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
     { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
   ];
+  // The turn's result is its last words; its opening line only says what it is about to do.
+  const lastReply = (replies) =>
+    recruiterSees(replies)
+      .map(botText)
+      .filter((text) => text.trim())
+      .at(-1) ?? "";
+  /** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. */
+  async function contactsAndSend(groupId, failures) {
+    const startedAt = new Date().toISOString();
+    const contacts = await say(groupId, "找contact");
+    if (!contacts.replies.length) failures.push("「找contact」 got no reply");
+    else if (!CONTACT_REPORT.test(lastReply(contacts.replies)))
+      failures.push("「找contact」 reply does not say who has an email");
+    const askedAgain = new Date().toISOString();
+    const again = await say(groupId, "找contact");
+    if (again.firstReply === null || again.firstReply > 60)
+      failures.push(
+        `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
+      );
+    else if (!CONTACT_REPORT.test(lastReply(again.replies)))
+      failures.push("repeat 「找contact」 reply does not say who has an email");
+    const events = await readEvents(groupId).catch(() => []);
+    // Everyone was looked up a moment ago, so the repeat may not pay a source for anyone again.
+    const paid = events
+      .filter(
+        (event) =>
+          event.type === "agent.tool.completed" &&
+          event.createdAt > askedAgain &&
+          event.payload?.lookup,
+      )
+      .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
+    if (paid) failures.push(`repeat 「找contact」 paid ${paid} source lookup(s) again`);
+    // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
+    const send = await say(groupId, "发20个人的先", {
+      until: (replies) => replies.some(sendCard),
+      limitMs: 8 * 60_000,
+    });
+    if (!send.replies.some(sendCard))
+      failures.push("「发20个人的先」 did not end on a send confirmation card");
+    // Tool calls and runs of these steps, kept before the end-of-run archive.
+    fs.writeFileSync(
+      path.join(OUT, "contacts.events.json"),
+      JSON.stringify(
+        (await readEvents(groupId).catch(() => [])).filter(
+          (event) =>
+            event.createdAt > startedAt &&
+            /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type),
+        ),
+        null,
+        1,
+      ),
+    );
+  }
   const DECLINED =
     /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
   // Offering the work back instead of doing it; the server retries these once, so one left in a
