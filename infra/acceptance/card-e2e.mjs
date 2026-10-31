@@ -65,14 +65,21 @@ async function signIn() {
 }
 
 async function rpc(route, json) {
-  const response = await fetch(`${BASE}/rpc/${route}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN, cookie },
-    body: JSON.stringify({ json }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`${route} ${response.status}`);
-  return body.json;
+  // A transient 5xx or dropped connection is retried, so one blip does not fail the release.
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(`${BASE}/rpc/${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN, cookie },
+      body: JSON.stringify({ json }),
+    }).catch(() => null);
+    if (response?.ok) return (await response.json()).json;
+    if (attempt < 3 && (!response || response.status >= 500)) {
+      log(`${route} ${response?.status ?? "network error"}; retrying`);
+      await sleep(3_000 * (attempt + 1));
+      continue;
+    }
+    throw new Error(`${route} ${response?.status ?? "network error"}`);
+  }
 }
 
 const messagesOf = async (groupId) =>
