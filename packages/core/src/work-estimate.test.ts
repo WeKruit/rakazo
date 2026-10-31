@@ -36,4 +36,12 @@ describe("work estimates", () => {
     expect(peopleNamedIn("Find 30 nurses")).toBe(30);
     expect(peopleNamedIn(undefined)).toBe(100);
   });
+
+  it("counts the people asked for on top of a running total", () => {
+    expect(
+      peopleNamedIn("Results show 518 people. Deliver 100 additional people, targeting 618 total."),
+    ).toBe(100);
+    expect(peopleNamedIn("再找 300 个人，目前 451 人")).toBe(300);
+    expect(peopleNamedIn("Find another 250; Results have 900")).toBe(250);
+  });
 });
