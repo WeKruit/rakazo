@@ -8,8 +8,12 @@ function fixture(options: {
   latest?: {
     role: string;
     createdAt?: Date;
-    sourceRuns?: Array<{ botId: string; trigger: string }>;
-    steeringMessages?: Array<{ botId: string; claimedAt: Date | null }>;
+    sourceRuns?: Array<{ botId: string; trigger: string; status?: string; error?: string | null }>;
+    steeringMessages?: Array<{
+      botId: string;
+      claimedAt: Date | null;
+      run?: { status: string; error: string | null } | null;
+    }>;
   } | null;
   busy?: boolean;
   nudged?: boolean;
@@ -49,6 +53,30 @@ function fixture(options: {
 }
 
 describe("every message gets a reply", () => {
+  it("still answers a message whose turn the server cancelled as stuck", async () => {
+    const test = fixture({
+      latest: {
+        role: "user",
+        sourceRuns: [
+          { botId: "main", trigger: "user", status: "cancelled", error: "The turn stopped." },
+        ],
+      },
+    });
+    await checkThreadReplied(test, { threadId: "thread" }, now);
+    expect(test.events.sendUserMessage).toHaveBeenCalledOnce();
+  });
+
+  it("answers a new message after an earlier turn was stopped", async () => {
+    const test = fixture({
+      latest: {
+        role: "user",
+        sourceRuns: [{ botId: "main", trigger: "user", status: "completed" }],
+      },
+    });
+    await checkThreadReplied(test, { threadId: "thread" }, now);
+    expect(test.events.sendUserMessage).toHaveBeenCalledOnce();
+  });
+
   it("asks the agent once to answer a message its turn left unanswered", async () => {
     const test = fixture({});
     await checkThreadReplied(test, { threadId: "thread" }, now);
@@ -98,6 +126,31 @@ describe("every message gets a reply", () => {
       },
     ],
     ["no agent received it", { latest: { role: "user", sourceRuns: [] } }],
+    [
+      "the person stopped the turn for their message",
+      {
+        latest: {
+          role: "user",
+          sourceRuns: [{ botId: "main", trigger: "user", status: "cancelled", error: null }],
+        },
+      },
+    ],
+    [
+      "the person stopped the turn that took their message",
+      {
+        latest: {
+          role: "user",
+          sourceRuns: [],
+          steeringMessages: [
+            {
+              botId: "main",
+              claimedAt: new Date(now - 30_000),
+              run: { status: "cancelled", error: null },
+            },
+          ],
+        },
+      },
+    ],
   ])("leaves the conversation alone when %s", async (_case, options) => {
     const test = fixture(options as Parameters<typeof fixture>[0]);
     await checkThreadReplied(test, { threadId: "thread" }, now);
