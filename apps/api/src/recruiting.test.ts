@@ -43,6 +43,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     getRecruitingCrmTarget: vi.fn(),
     getRecruitingCrmCandidateSyncs: vi.fn(),
     readRecruitingNativeCorrespondence: vi.fn(async () => null),
+    readRecruitingImportedCorrespondence: vi.fn(async () => null),
     reviseRecruitingRole: vi.fn(),
     listRecruitingAssessments: vi.fn(),
     listRecruitingFeedback: vi.fn(),
@@ -64,9 +65,10 @@ const actor: Actor = {
 };
 
 describe("saved recruiting correspondence", () => {
-  beforeEach(() =>
-    vi.mocked(db.readRecruitingNativeCorrespondence).mockReset().mockResolvedValue(null),
-  );
+  beforeEach(() => {
+    vi.mocked(db.readRecruitingNativeCorrespondence).mockReset().mockResolvedValue(null);
+    vi.mocked(db.readRecruitingImportedCorrespondence).mockReset().mockResolvedValue(null);
+  });
   const target = {
     kind: "group" as const,
     groupId: "role-group",
@@ -149,6 +151,131 @@ describe("saved recruiting correspondence", () => {
     vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never);
     return { client, prisma: client as unknown as PrismaClient, retained };
   }
+  it("reads and pages imported full mail without a configured provider connection", async () => {
+    const f = fixture({ enabled: false });
+    const imported = {
+      checkedAt: "2026-10-24T00:00:00.000Z",
+      emails: [
+        {
+          id: "older-import",
+          sourceName: "Email history",
+          sourceId: "history",
+          providerMessageId: "older-provider-mail",
+          savedRead: null,
+          imported: true as const,
+          sender: "person@example.test",
+          recipients: ["team@example.test"],
+          subject: "Earlier reply",
+          body: "The original full body.",
+          date: "2026-10-23T01:00:00.000+09:00",
+          snippet: false,
+          url: null,
+        },
+        {
+          id: "newer-import",
+          sourceName: "Email history",
+          sourceId: "history",
+          providerMessageId: "newer-provider-mail",
+          savedRead: null,
+          imported: true as const,
+          sender: "person@example.test",
+          recipients: ["team@example.test"],
+          subject: "Later reply",
+          body: "The later original body.",
+          date: "2026-10-23T00:00:00.000Z",
+          snippet: false,
+          url: null,
+        },
+      ],
+      events: [],
+      history: [],
+      contacts: [],
+    };
+    vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce(imported);
+    const first = await api.getRecruitingCorrespondence(
+      f.prisma,
+      actor,
+      target,
+      "inbox",
+      undefined,
+      undefined,
+      { limit: 1 },
+    );
+    expect(first.status).toBe("ready");
+    expect(first.emails.map((email) => email.id)).toEqual(["newer-import"]);
+    expect(first.nextCursor).toBe("1");
+    vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce(imported);
+    const second = await api.getRecruitingCorrespondence(
+      f.prisma,
+      actor,
+      target,
+      "inbox",
+      undefined,
+      undefined,
+      { limit: 1, cursor: "1" },
+    );
+    expect(second.emails.map((email) => email.id)).toEqual(["older-import"]);
+    expect(second.nextCursor).toBeNull();
+    expect(f.client.externalEffect.findMany).not.toHaveBeenCalled();
+  });
+
+  it("shows imported contact details without a provider connection", async () => {
+    const f = fixture({ enabled: false });
+    const contact = {
+      candidateKey: "linkedin:/in/person",
+      linkedinUrl: "https://www.linkedin.com/in/person",
+      emails: [{ address: "person@example.test", status: null }],
+      phones: [{ number: "+12025550123", type: null }],
+      source: "Contact history",
+      checkedAt: "2026-10-24T00:00:00.000Z",
+    };
+    vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce({
+      checkedAt: contact.checkedAt,
+      emails: [],
+      events: [],
+      history: [],
+      contacts: [contact],
+    });
+    const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "contacts");
+    expect(output.status).toBe("ready");
+    expect(output.contacts).toEqual([contact]);
+  });
+
+  it("deduplicates the same provider message while retaining the imported original attachment", async () => {
+    const f = fixture();
+    const attachment = { id: "resume", name: "Resume.pdf", mimeType: "application/pdf", size: 50 };
+    vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce({
+      checkedAt: "2026-10-24T00:00:00.000Z",
+      events: [],
+      history: [],
+      contacts: [],
+      emails: [
+        {
+          id: "imported-copy",
+          sourceName: "Email history",
+          sourceId: "history",
+          providerMessageId: email.id,
+          campaignId: email.campaign_id,
+          eaccount: email.eaccount,
+          savedRead: null,
+          imported: true,
+          sender: "person@example.test",
+          recipients: ["team@example.test"],
+          subject: email.subject,
+          body: email.body.text,
+          date: email.timestamp_email,
+          snippet: false,
+          url: null,
+          attachments: [attachment],
+        },
+      ],
+    });
+    const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+    expect(output.emails).toHaveLength(1);
+    expect(output.emails[0]?.imported).toBe(true);
+    expect(output.emails[0]?.attachments).toEqual([attachment]);
+  });
+
   it.each([
     [true, true],
     [false, false],

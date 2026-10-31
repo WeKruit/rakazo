@@ -42,6 +42,7 @@ const ICONS: Record<ActivityItem["kind"], LucideIcon> = {
   queued: Clock,
   failed: AlertCircle,
   status: Flag,
+  change: Flag,
   highSignal: Star,
   review: MailCheck,
 };
@@ -81,7 +82,7 @@ export function ActivityTab({
     scope,
   );
   const saved = useSavedCorrespondence(
-    person.email ? scope : { ...scope, conversation: undefined },
+    person.email || candidateKey ? scope : { ...scope, conversation: undefined },
     "inbox",
   );
   const campaign = useRoleCampaign(scope);
@@ -123,6 +124,8 @@ export function ActivityTab({
     roleKey,
     crmRoleId: ready?.crmRoleId,
     saved: saved.data?.emails,
+    history: saved.data?.history,
+    candidateKey,
     views: profileViews.data?.items,
   });
   const reads = [mail, details, saved, campaign, profileViews];
@@ -194,6 +197,8 @@ export function ActivityTab({
         const label = workflow[item.status];
         return t`Status changed to “${label}”`;
       }
+      case "change":
+        return item.label;
       case "highSignal":
         return t`Marked high signal`;
       case "review":
@@ -201,13 +206,17 @@ export function ActivityTab({
     }
   };
   const detail = (item: ActivityItem) =>
-    "subject" in item
-      ? item.subject
-      : "preview" in item
-        ? item.preview
-        : item.kind === "review"
-          ? item.notes
-          : null;
+    item.kind === "change"
+      ? item.before || item.after
+        ? `${item.before ?? ""} → ${item.after ?? ""}`.trim()
+        : null
+      : "subject" in item
+        ? item.subject
+        : "preview" in item
+          ? item.preview
+          : item.kind === "review"
+            ? item.notes
+            : null;
 
   const sourceLabel: Record<ActivityItem["source"], string> = {
     profile: t`Profile`,

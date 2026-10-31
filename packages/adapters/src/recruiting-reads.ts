@@ -1454,6 +1454,55 @@ export async function getRecruitingCorrespondence(
         output.operations = outcomes.operations;
         output.partial ||= outcomes.partial;
       }
+      const imported = workspace
+        ? await recruiting.readRecruitingImportedCorrespondence(prisma, actor, {
+            threadId: target.threadId,
+            roleId: workspace.role.id,
+          })
+        : null;
+      if (imported) {
+        output.history = imported.history;
+        const contacts = new Map(
+          imported.contacts.map((contact) => [contact.candidateKey, contact]),
+        );
+        for (const contact of output.contacts) {
+          const saved = contacts.get(contact.candidateKey);
+          contacts.set(contact.candidateKey, {
+            ...contact,
+            emails: [
+              ...new Map(
+                [...(saved?.emails ?? []), ...contact.emails].map((email) => [
+                  email.address.toLowerCase(),
+                  email,
+                ]),
+              ).values(),
+            ],
+            phones: [
+              ...new Map(
+                [...(saved?.phones ?? []), ...contact.phones].map((phone) => [phone.number, phone]),
+              ).values(),
+            ],
+          });
+        }
+        output.contacts = [...contacts.values()];
+        if (view === "inbox") output.emails.push(...imported.emails);
+        if (view === "interview") {
+          output.events = [
+            ...new Map(
+              [...imported.events, ...output.events].map((event) => [event.id, event]),
+            ).values(),
+          ].sort((a, b) => Date.parse(b.start) - Date.parse(a.start) || a.id.localeCompare(b.id));
+        }
+        if (imported.checkedAt && (!output.checkedAt || imported.checkedAt > output.checkedAt))
+          output.checkedAt = imported.checkedAt;
+        if (
+          output.emails.length ||
+          output.events.length ||
+          output.history.length ||
+          output.contacts.length
+        )
+          output.status = "ready";
+      }
       // One provider message can arrive through live campaign mail and its CRM projection.
       // Only exact campaign or mailbox provenance identifies the same message across sources.
       const uniqueMail = new Map<string, RecruitingCorrespondence["emails"][number]>();
@@ -1465,9 +1514,37 @@ export async function getRecruitingCorrespondence(
             : ["source", email.id];
         const key = JSON.stringify(identity);
         const saved = uniqueMail.get(key);
-        if (!saved || (saved.snippet && !email.snippet)) uniqueMail.set(key, email);
+        if (!saved) uniqueMail.set(key, email);
+        else {
+          const preferred =
+            saved.snippet !== email.snippet
+              ? saved.snippet
+                ? email
+                : saved
+              : saved.imported && !email.imported
+                ? email
+                : saved;
+          const attachments = [
+            ...new Map(
+              [...(saved.attachments ?? []), ...(email.attachments ?? [])].map((file) => [
+                file.id,
+                file,
+              ]),
+            ).values(),
+          ];
+          uniqueMail.set(key, {
+            ...preferred,
+            ...(attachments.length ? { attachments } : {}),
+          });
+        }
       }
       output.emails = [...uniqueMail.values()];
+      if (imported)
+        output.emails.sort(
+          (a, b) =>
+            (b.date ? Date.parse(b.date) : Number.NEGATIVE_INFINITY) -
+              (a.date ? Date.parse(a.date) : Number.NEGATIVE_INFINITY) || b.id.localeCompare(a.id),
+        );
       // Offset over the merged inbox order; refresh from page one after new mail.
       const rows =
         view === "contacts"

@@ -1,6 +1,45 @@
 import { expect, it } from "vitest";
 import { buildActivity, relativeTime } from "./activity";
 
+it("retains dated imported status changes only for the selected candidate", () => {
+  const items = buildActivity({
+    candidateKey: "linkedin:/in/candidate-a",
+    history: [
+      {
+        id: "stage-1",
+        candidateKey: "linkedin:/in/candidate-a",
+        at: "2026-01-02T00:00:00Z",
+        label: "Stage",
+        before: "Interested",
+        after: "Interview",
+      },
+      {
+        id: "review-1",
+        candidateKey: "linkedin:/in/candidate-a",
+        at: "2026-01-03T00:00:00Z",
+        label: "Reviewed",
+        before: "false",
+        after: "true",
+      },
+      {
+        id: "foreign",
+        candidateKey: "linkedin:/in/candidate-b",
+        at: "2026-01-04T00:00:00Z",
+        label: "Stage",
+        before: "Interested",
+        after: "Declined",
+      },
+    ],
+  });
+  expect(items.map((item) => item.id)).toEqual(["import:review-1", "import:stage-1"]);
+  expect(items[1]).toMatchObject({
+    kind: "change",
+    label: "Stage",
+    before: "Interested",
+    after: "Interview",
+  });
+});
+
 const email = (id: string, extra: Record<string, unknown>) => ({
   id,
   providerMessageId: `p-${id}`,
