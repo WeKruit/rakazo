@@ -610,7 +610,7 @@ describe("open stage watch", () => {
         data: expect.objectContaining({
           blocks: [
             expect.objectContaining({
-              text: expect.stringContaining("Want an email when this finishes?"),
+              text: expect.stringContaining("Want an email when it finishes? Just say so."),
             }),
           ],
         }),

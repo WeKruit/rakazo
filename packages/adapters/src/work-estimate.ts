@@ -211,7 +211,7 @@ export function workStartNote(kind: WorkEstimateKind, estimateMs: number): strin
   return [
     `This is a big ${what}: about ${minutes(estimateMs)} minutes. The recruiter sees a countdown.`,
     `Tell them in one line that it takes about ${minutes(estimateMs)} minutes and they can keep chatting or leave; you report when the time is up.`,
-    `If you have ${COMPLETION_EMAIL_TOOL} and they were not asked yet in this conversation, offer the email when it finishes.`,
+    `If you have ${COMPLETION_EMAIL_TOOL} and they were not offered it yet in this conversation, add "Want an email when it finishes? Just say so." to that line. Never use an ask_user card here and never wait for an answer: no click is needed for the work or the countdown to go on.`,
     ...(kind === "search" ? [SHORTFALL_RULE] : []),
   ].join(" ");
 }
