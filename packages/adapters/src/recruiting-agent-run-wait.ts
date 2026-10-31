@@ -132,11 +132,17 @@ export async function waitForRecruitingAgentRun(
     await finishWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
     return skipped("finished");
   }
-  // The recruiter's own conversation comes first: a wake waits while they are writing.
-  const talking = await deps.prisma.message.findFirst({
-    where: { threadId: thread.id, role: "user", createdAt: { gte: new Date(now - QUIET_MS) } },
-    select: { id: true },
-  });
+  // When the recruiter's countdown runs out, this wake reports progress instead of staying quiet.
+  const estimate = await readWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
+  const due = estimate?.estimateMs ? countdownReportDue(estimate, now) : null;
+  // The recruiter's own conversation comes first: a quiet check-in waits while they are writing.
+  // A run-out countdown is reported anyway; it is what the recruiter is waiting for.
+  const talking =
+    !due &&
+    (await deps.prisma.message.findFirst({
+      where: { threadId: thread.id, role: "user", createdAt: { gte: new Date(now - QUIET_MS) } },
+      select: { id: true },
+    }));
   if (talking) {
     await deps.jobs.enqueue(
       recruitingAgentRunWaitJob(payload, new Date(now + RECRUITING_AGENT_RUN_WAIT_MS)),
@@ -146,9 +152,6 @@ export async function waitForRecruitingAgentRun(
   // One wake per provider answer: a wake that ends without asking again is the agent's choice.
   // A wake that gave way to the recruiter was cancelled before it finished, so it is retried.
   const answerNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
-  // When the recruiter's countdown runs out, this wake reports progress instead of staying quiet.
-  const estimate = await readWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
-  const due = estimate?.estimateMs ? countdownReportDue(estimate, now) : null;
   const runId = await deps.prisma.$transaction(async (tx) => {
     // The thread row serializes this with other automated starts in the conversation.
     const locked = await tx.thread.updateMany({

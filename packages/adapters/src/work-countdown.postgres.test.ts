@@ -1,0 +1,214 @@
+import type { PrismaClient } from "@rakazo/db";
+import { createDb } from "@rakazo/db";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
+import {
+  currentWorkEstimate,
+  startWorkEstimate,
+  wakeForResearchCountdown,
+} from "./work-estimate.js";
+
+const databaseUrl = process.env.DATABASE_URL;
+const describePostgres =
+  process.env.VERIFY_DATABASE && databaseUrl ? describe.sequential : describe.skip;
+const MINUTE = 60_000;
+
+/**
+ * A search that outlives its countdown, walked through the real follow-up job against the
+ * database: the recruiter hears one progress line each time the countdown runs out, quiet
+ * check-ins in between, and the countdown ends when the search does.
+ */
+describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const organizationId = `countdown-org-${suffix}`;
+  const spaceId = `countdown-space-${suffix}`;
+  const userId = `countdown-user-${suffix}`;
+  let prisma: PrismaClient;
+  let close: () => Promise<void>;
+  beforeAll(async () => {
+    const db = createDb(databaseUrl!);
+    prisma = db.prisma;
+    close = async () => {
+      await prisma.$disconnect();
+      await db.pool.end();
+    };
+    await prisma.user.create({
+      data: { id: userId, name: "Synthetic recruiter", email: `${userId}@example.test` },
+    });
+    await prisma.organization.create({
+      data: {
+        id: organizationId,
+        name: "Synthetic countdown",
+        slug: organizationId,
+        createdAt: new Date(),
+        spaces: { create: { id: spaceId, name: "Synthetic countdown" } },
+      },
+    });
+  });
+  afterAll(async () => {
+    if (!prisma) return;
+    try {
+      await prisma.organization.deleteMany({ where: { id: organizationId } });
+      await prisma.user.deleteMany({ where: { id: userId } });
+    } finally {
+      await close();
+    }
+  });
+
+  /** A crew conversation where the recruiter just asked for 100 more people. */
+  async function conversation() {
+    const bot = await prisma.bot.create({
+      data: { spaceId, userId, name: "Sourcer", color: "ink" },
+    });
+    const group = await prisma.chatGroup.create({ data: { spaceId, userId, name: "Crew" } });
+    await prisma.chatGroupMember.create({ data: { groupId: group.id, botId: bot.id } });
+    const thread = await prisma.thread.create({ data: { spaceId, userId, groupId: group.id } });
+    const asked = await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 0,
+        role: "user",
+        blocks: [{ kind: "text", text: "再找 100 个人" }],
+      },
+    });
+    const task = await prisma.task.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bot.id,
+        threadId: thread.id,
+        prompt: "Find 100 more",
+        status: "completed",
+      },
+    });
+    const turn = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bot.id,
+        threadId: thread.id,
+        taskId: task.id,
+        status: "completed",
+        trigger: "user",
+        sourceMessageId: asked.id,
+      },
+    });
+    return { bot, thread, turn, askedAt: asked.createdAt.getTime() };
+  }
+
+  let answers = 0;
+  /** One provider answer to an agent_run call, saved the way the executor saves it. */
+  async function answer(runId: string, agentRunId: string, status: string) {
+    await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId,
+        kind: "connector_call",
+        idempotencyKey: `countdown-answer-${suffix}-${answers++}`,
+        status: "completed",
+        request: { "3": { toolName: "agent_run" } },
+        result: { content: [{ type: "text", text: JSON.stringify({ id: agentRunId, status }) }] },
+      },
+    });
+  }
+
+  /** The agent finishes each wake it was given, as a real turn would. */
+  async function finishWakes(threadId: string) {
+    await prisma.run.updateMany({
+      where: { threadId, status: "queued", trigger: "recruiting_research" },
+      data: { status: "completed" },
+    });
+  }
+
+  async function wakes(threadId: string) {
+    return prisma.run.findMany({
+      where: { threadId, trigger: "recruiting_research" },
+      orderBy: { createdAt: "asc" },
+      select: { task: { select: { prompt: true } } },
+    });
+  }
+
+  it("reports progress each time a search's countdown runs out, then ends with the search", async () => {
+    const { bot, thread, turn } = await conversation();
+    const agentRunId = `agent_run_${suffix}`;
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+    const payload = { threadId: thread.id, botId: bot.id, agentRunId };
+    await answer(turn.id, agentRunId, "running");
+    const started = await startWorkEstimate(prisma, turn, {
+      ref: agentRunId,
+      kind: "search",
+      people: 100,
+    });
+    expect(started?.estimateMs).toBe(2 * MINUTE);
+    const t0 = Date.parse(started!.startedAt);
+    const shown = await currentWorkEstimate(prisma, { spaceId, threadId: thread.id }, t0 + MINUTE);
+    expect(shown).toMatchObject({ kind: "search", people: 100, estimateMs: 2 * MINUTE });
+
+    // One minute in, the recruiter wrote moments ago: the quiet check-in waits for them.
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + MINUTE);
+    expect(await wakes(thread.id)).toHaveLength(0);
+
+    // The 2-minute countdown runs out, two minutes after the recruiter asked: one progress line.
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 2.5 * MINUTE);
+    let woken = await wakes(thread.id);
+    expect(woken).toHaveLength(1);
+    expect(woken[0]?.task?.prompt).toContain("estimated 2 minutes are up");
+    await finishWakes(thread.id);
+    await answer(turn.id, agentRunId, "running");
+
+    // Still inside the second countdown and the recruiter wrote under five minutes ago: quiet.
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 3.5 * MINUTE);
+    expect(await wakes(thread.id)).toHaveLength(1);
+
+    // The second countdown runs out: a second progress line.
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 4.5 * MINUTE);
+    woken = await wakes(thread.id);
+    expect(woken).toHaveLength(2);
+    expect(woken[1]?.task?.prompt).toContain("estimated 2 minutes are up");
+    await finishWakes(thread.id);
+    await answer(turn.id, agentRunId, "running");
+
+    // Later, with the recruiter quiet, a check-in inside the third countdown stays quiet.
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 5.5 * MINUTE);
+    woken = await wakes(thread.id);
+    expect(woken).toHaveLength(3);
+    expect(woken[2]?.task?.prompt).not.toContain("minutes are up");
+    await finishWakes(thread.id);
+
+    // The search finishes: no more wakes from the job, and the countdown is gone.
+    await answer(turn.id, agentRunId, "completed");
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 6 * MINUTE);
+    expect(await wakes(thread.id)).toHaveLength(3);
+    expect(
+      await currentWorkEstimate(prisma, { spaceId, threadId: thread.id }, t0 + 6 * MINUTE),
+    ).toBeNull();
+  });
+
+  it("reports progress once per run-out countdown for background research", async () => {
+    const { bot, thread, turn } = await conversation();
+    const taskId = `research-${suffix}`;
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+    const started = await startWorkEstimate(prisma, turn, {
+      ref: `research:${taskId}`,
+      kind: "search",
+      people: 300,
+    });
+    expect(started?.estimateMs).toBe(10 * MINUTE);
+    const t0 = Date.parse(started!.startedAt);
+    const run = { spaceId, threadId: thread.id, botId: bot.id, userId };
+    const tick = (at: number) =>
+      wakeForResearchCountdown({ prisma, jobs }, { id: taskId, roleId: "role" }, run, at);
+
+    await tick(t0 + 5 * MINUTE);
+    expect(await wakes(thread.id)).toHaveLength(0);
+    await tick(t0 + 10.5 * MINUTE);
+    await tick(t0 + 11 * MINUTE);
+    let woken = await wakes(thread.id);
+    expect(woken).toHaveLength(1);
+    expect(woken[0]?.task?.prompt).toContain("estimated 10 minutes are up");
+    await finishWakes(thread.id);
+    await tick(t0 + 20.5 * MINUTE);
+    woken = await wakes(thread.id);
+    expect(woken).toHaveLength(2);
+  });
+});
