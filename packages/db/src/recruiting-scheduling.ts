@@ -746,18 +746,30 @@ export async function listRecruitingSchedulingPlans(
   input: { threadId: string },
 ) {
   const workspace = await scope(prisma, actor, input.threadId);
-  const rows = await prisma.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      run: { userId: actor.userId, spaceId: actor.spaceId, threadId: input.threadId },
-    },
-    include: { run: true },
-    orderBy: { createdAt: "desc" },
-    take: LIMIT + 1,
-  });
+  const run = { userId: actor.userId, spaceId: actor.spaceId, threadId: input.threadId };
+  // A role's thread holds many other tool effects. Plans are read on their own so those never
+  // crowd them out; slots come from the latest reads only, since older availability is stale.
+  const [planRows, otherRows] = await Promise.all([
+    prisma.externalEffect.findMany({
+      where: { spaceId: actor.spaceId, kind: KIND, run },
+      include: { run: true },
+      orderBy: { createdAt: "desc" },
+      take: LIMIT + 1,
+    }),
+    prisma.externalEffect.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        kind: { not: KIND },
+        run: { ...run, initialRecruitingRoleRevisionId: workspace.role.currentRevisionId },
+      },
+      include: { run: true },
+      orderBy: { createdAt: "desc" },
+      take: LIMIT,
+    }),
+  ]);
   const plans: RecruitingSchedulingPlan[] = [];
   const available: Array<ReturnType<typeof slots>[number] & { observedAt: string }> = [];
-  for (const row of rows.slice(0, LIMIT)) {
+  for (const row of [...planRows.slice(0, LIMIT), ...otherRows]) {
     try {
       if (row.kind === KIND)
         plans.push(
@@ -785,7 +797,7 @@ export async function listRecruitingSchedulingPlans(
   const current = await scope(prisma, actor, input.threadId);
   if (current.role.id !== workspace.role.id || current.role.revision !== workspace.role.revision)
     throw new IsolationError();
-  return { plans, slots: available, partial: rows.length > LIMIT };
+  return { plans, slots: available, partial: planRows.length > LIMIT };
 }
 export async function bindRecruitingSchedulingOperation(
   prisma: PrismaClient,
