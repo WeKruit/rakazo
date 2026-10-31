@@ -20,6 +20,7 @@ export * from "./external-conversations.js";
 export * from "./groups.js";
 export * from "./history-retrieval.js";
 export * from "./message-embeddings.js";
+export * from "./message-thinking.js";
 export * from "./memory-config.js";
 export * from "./messages.js";
 export * from "./messaging.js";
