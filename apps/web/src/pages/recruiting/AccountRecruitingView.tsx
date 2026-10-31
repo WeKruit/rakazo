@@ -14,6 +14,10 @@ import { formatDate, TabLoading } from "./shared";
 
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
+// The all-roles pages read each role on its own and show it when it arrives, so one role with a
+// large CRM never holds back the others.
+const PER_ROLE_VIEWS = new Set(["contacts", "sequence", "inbox", "interview"]);
+const ROLE_READS = 2;
 
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 
@@ -55,11 +59,69 @@ export function AccountRecruitingView({
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
   const readKey = JSON.stringify([pageKey, cursor, reload, refreshSignal]);
   const page = read?.key === readKey ? read.data : undefined;
+  const [pendingRoles, setPendingRoles] = useState<{ key: string; ids: string[] }>();
+  const pending = pendingRoles?.key === readKey ? pendingRoles.ids : [];
   useEffect(() => {
     if (view === "routines") return;
     let cancelled = false;
     setLoading(true);
     setFailed(false);
+    if (PER_ROLE_VIEWS.has(view) && role === "all" && !scopedGroupId) {
+      const abort = new AbortController();
+      void (async () => {
+        const list = await rpc.recruiting.accountView(
+          { view: "roles", cursor, limit: ROLES_PER_PAGE },
+          { signal: abort.signal },
+        );
+        if (cancelled) return;
+        const order = list.items.map((item) => item.roleId);
+        setRead({ key: readKey, data: { ...list, items: [] } });
+        setPendingRoles({ key: readKey, ids: order });
+        setLoading(false);
+        let next = 0;
+        await Promise.all(
+          Array.from({ length: Math.min(ROLE_READS, order.length) }, async () => {
+            while (next < order.length && !cancelled) {
+              const roleId = order[next++]!;
+              const result = await rpc.recruiting.accountView(
+                { view, roleId, limit: 1 },
+                { signal: abort.signal },
+              );
+              if (cancelled) return;
+              const item = result.items[0];
+              setRead((current) =>
+                current?.key !== readKey || !item
+                  ? current
+                  : {
+                      key: readKey,
+                      data: {
+                        ...current.data,
+                        items: [...current.data.items, item].sort(
+                          (a, b) => order.indexOf(a.roleId) - order.indexOf(b.roleId),
+                        ),
+                      },
+                    },
+              );
+              setPendingRoles((current) =>
+                current?.key !== readKey
+                  ? current
+                  : { key: readKey, ids: current.ids.filter((id) => id !== roleId) },
+              );
+            }
+          }),
+        );
+      })().catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+          setLoading(false);
+          setPendingRoles(undefined);
+        }
+      });
+      return () => {
+        cancelled = true;
+        abort.abort();
+      };
+    }
     void rpc.recruiting
       .accountView({
         view,
@@ -324,6 +386,7 @@ export function AccountRecruitingView({
             </RetryNotice>
           ) : null}
           {page?.items.length === 0 &&
+          !pending.length &&
           !page.unassignedReminders?.items.some((reminder) => reminder.status === "open") ? (
             <p className="text-sm text-muted-foreground">
               {view === "tasks" ? <Trans>No open tasks.</Trans> : <Trans>No roles yet.</Trans>}
@@ -331,7 +394,7 @@ export function AccountRecruitingView({
           ) : null}
           {view === "interview" && page ? (
             <>
-              {!calendarConnected && !calendarFailed ? (
+              {!calendarConnected && !calendarFailed && !pending.length ? (
                 <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
                   <Trans>Connect calendar</Trans>
                 </Button>
@@ -701,6 +764,25 @@ export function AccountRecruitingView({
                 );
               },
             )}
+            {view === "interview" && !renderCorrespondence && pending.length ? (
+              <TabLoading />
+            ) : null}
+            {view !== "interview" || renderCorrespondence
+              ? pending.map((roleId) => {
+                  const title = page?.roles.find((entry) => entry.id === roleId)?.title;
+                  return (
+                    <section
+                      key={roleId}
+                      className="space-y-3 rounded-xl border border-border p-4"
+                      aria-label={title}
+                      aria-busy="true"
+                    >
+                      <h2 className="font-semibold">{title}</h2>
+                      <TabLoading />
+                    </section>
+                  );
+                })
+              : null}
           </div>
           {page?.nextCursor ? (
             <Button
