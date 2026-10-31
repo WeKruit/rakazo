@@ -484,7 +484,7 @@ export function declineRetry(input: {
   );
   // A turn that did work reports it, and the coordinator checks it against the brief. Only a send
   // or booking that ended without its card is retried, since no card means nothing was asked.
-  const cardOwed = asked.includes("send") || asked.includes("schedule");
+  const cardOwed = asked.includes("send") || asksBooking(input.request);
   if (input.worked && !(declined.kind === "decline" && cardOwed)) return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
