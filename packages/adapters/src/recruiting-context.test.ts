@@ -7,6 +7,7 @@ import {
   RECRUITING_SCALE_START,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -196,6 +197,16 @@ describe("recruiting run context", () => {
     ).rejects.toThrow("Source access revoked");
     expect(f.deps.artifacts.put).not.toHaveBeenCalled();
     expect(db.adopt).not.toHaveBeenCalled();
+  });
+
+  it("leaves out CRM material whose link no longer checks out instead of failing the turn", async () => {
+    const f = fixture();
+    db.crmSource.mockRejectedValue(new IsolationError());
+    const loaded = await loadRecruitingRunContext(f.deps, run, { documents: [] }, context, {
+      reason: "run",
+      trustedWorkspace: workspace,
+    });
+    expect(loaded?.text).not.toContain("recruiting_crm_source");
   });
   it("keeps UI CRM bindings out of role context and reuses the same native role fingerprint", async () => {
     db.workspace.mockResolvedValueOnce({

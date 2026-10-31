@@ -17,6 +17,7 @@ import {
   getRecruitingRoleSnapshot,
   type getRecruitingWorkspace,
   getRecruitingWorkspaceCrmSourceMaterial,
+  IsolationError,
   listRecruitingFeedback,
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
@@ -98,9 +99,14 @@ export async function loadRecruitingRunContext(
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
   const [crmSourceMaterial, recent] = await Promise.all([
+    // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
+    // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
       threadId: run.threadId,
       roleId: workspace.role.id,
+    }).catch((error: unknown) => {
+      if (error instanceof IsolationError) return null;
+      throw error;
     }),
     listRecruitingFeedback(deps.prisma, actor, { roleId: workspace.role.id, limit: 20 }),
   ]);
