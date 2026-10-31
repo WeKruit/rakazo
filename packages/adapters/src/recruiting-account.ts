@@ -237,17 +237,24 @@ export async function readRecruitingAccountView(
           input.view === "sequence" ||
           input.view === "inbox")
       )
-        item.candidates = await getRecruitingRoleCandidates(reads, actor, target, {
-          threadId: thread.id,
-          limit: 50,
-          ...(input.itemCursor && input.view !== "inbox" ? { cursor: input.itemCursor } : {}),
-          ...(input.view === "shortlist"
-            ? {
-                shortlistedOnly: true,
-                ...(input.since ? { shortlistedSince: input.since } : {}),
-              }
-            : {}),
-        });
+        item.candidates = await getRecruitingRoleCandidates(
+          reads,
+          actor,
+          target,
+          {
+            threadId: thread.id,
+            limit: 50,
+            ...(input.itemCursor && input.view !== "inbox" ? { cursor: input.itemCursor } : {}),
+            ...(input.view === "shortlist"
+              ? {
+                  shortlistedOnly: true,
+                  ...(input.since ? { shortlistedSince: input.since } : {}),
+                }
+              : {}),
+          },
+          // These pages list names only, so a role's first CRM page is enough until "Load more".
+          { summary: !input.itemCursor || input.view === "inbox" },
+        );
       if (input.view === "sequence" && input.campaignLeadCursor) {
         const campaign = await getRecruitingRoleCampaign(reads, actor, target, {
           serverId: input.campaignServerId,
@@ -343,7 +350,8 @@ export async function readRecruitingAccountView(
               : undefined),
           deps.oauth,
           {
-            limit: 200,
+            // The inbox shows its newest mail first and pages the rest.
+            limit: input.view === "inbox" ? 50 : 200,
             ...(input.itemCursor && (input.view === "inbox" || input.view === "interview")
               ? { cursor: input.itemCursor }
               : {}),
