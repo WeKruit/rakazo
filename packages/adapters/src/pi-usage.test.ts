@@ -114,6 +114,48 @@ describe("Pi model stream timing", () => {
     installLogger(previousLogger);
   });
 
+  it("records how long the model reasoned before answering", async () => {
+    const upstream = createAssistantMessageEventStream();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const recordUsage = vi.fn();
+    const stream = observedPiStream(
+      {
+        streamSimple: () => {
+          markStarted();
+          return upstream;
+        },
+      } as never,
+      model,
+      { messages: [] },
+      undefined,
+      vi.fn(),
+      undefined,
+      undefined,
+      { recordUsage },
+    );
+    await started;
+    const consumer = stream[Symbol.asyncIterator]();
+    clock = 10;
+    upstream.push({ type: "thinking_start", contentIndex: 0, partial: message });
+    await consumer.next();
+    clock = 2_010;
+    upstream.push({ type: "thinking_delta", contentIndex: 0, delta: "plan", partial: message });
+    await consumer.next();
+    clock = 3_010;
+    upstream.push({ type: "thinking_end", contentIndex: 0, content: "plan", partial: message });
+    await consumer.next();
+    clock = 5_000;
+    upstream.push({ type: "done", reason: "stop", message });
+    await consumer.next();
+    await stream.result();
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ timing: expect.objectContaining({ thinkingMs: 3_000 }) }),
+    );
+  });
+
   it("separates SDK events and terminal time from accounting and observer waits", async () => {
     const upstream = createAssistantMessageEventStream();
     let markStarted!: () => void;

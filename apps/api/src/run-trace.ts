@@ -184,6 +184,7 @@ export async function readRunTrace(
       status: timing?.outcome ?? "unknown",
       tokens: call.totalTokens,
       costUsd: call.costUsd,
+      ...(timing?.thinkingMs !== undefined ? { thinkingMs: timing.thinkingMs } : {}),
     });
   }
   rows.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));

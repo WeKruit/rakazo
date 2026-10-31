@@ -117,6 +117,27 @@ it("scopes the run, events and usage and returns measured durations without priv
   ]);
   expect(JSON.stringify(trace)).not.toContain("private");
 });
+it("shows how long the model thought on its row", async () => {
+  const { db, prisma } = setup();
+  prisma.event.findMany.mockResolvedValue([
+    {
+      id: "timing",
+      type: "usage.recorded",
+      createdAt: at(8),
+      payload: {
+        callId: "existing-call",
+        startedAt: at(2).toISOString(),
+        durationMs: 6000,
+        outcome: "completed",
+        thinkingMs: 3000,
+      },
+    },
+  ]);
+  const trace = await readRunTrace(db, actor, { runId: "run", includeDiagnostics: true });
+  expect(trace.rows).toEqual([
+    expect.objectContaining({ kind: "model", durationMs: 6000, thinkingMs: 3000 }),
+  ]);
+});
 it("does not read any trace data for a run outside the caller's account", async () => {
   const { db, prisma } = setup();
   prisma.run.findFirst.mockResolvedValue(null);

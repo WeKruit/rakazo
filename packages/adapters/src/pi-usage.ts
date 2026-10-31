@@ -250,6 +250,8 @@ export function observedPiStream(
   let callStartedAt: string | undefined;
   let streamStartedAt: number | undefined;
   let streamEndedAt: number | undefined;
+  let thinkingStartedAt: number | undefined;
+  let thinkingEndedAt: number | undefined;
   let outcome: "completed" | "error" | "cancelled" = "completed";
   const emitUsage = async (usage: AgentUsage, operationKind = attribution.operationKind) => {
     const event: Extract<AgentRuntimeEvent, { type: "usage" }> = {
@@ -267,6 +269,11 @@ export function observedPiStream(
               startedAt: callStartedAt,
               durationMs: Math.max(0, streamEndedAt - streamStartedAt),
               outcome: outcome === "completed" ? ("completed" as const) : ("failed" as const),
+              ...(thinkingStartedAt !== undefined
+                ? {
+                    thinkingMs: Math.max(0, (thinkingEndedAt ?? streamEndedAt) - thinkingStartedAt),
+                  }
+                : {}),
             },
           }
         : {}),
@@ -366,6 +373,11 @@ export function observedPiStream(
         const elapsed = performance.now() - streamStartedAt;
         firstStreamEventMs ??= elapsed;
         if (event.type === "text_delta" && event.delta.length > 0) firstTextDeltaMs ??= elapsed;
+        if (event.type === "thinking_start" || event.type === "thinking_delta") {
+          thinkingStartedAt ??= performance.now();
+          thinkingEndedAt = undefined;
+        }
+        if (event.type === "thinking_end") thinkingEndedAt = performance.now();
         if (hooks?.onProviderError) {
           partialMessage =
             event.type === "done"
