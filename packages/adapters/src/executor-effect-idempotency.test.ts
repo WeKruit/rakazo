@@ -1010,6 +1010,24 @@ describe("worker shutdown recovery", () => {
   });
 });
 
+describe("questions after the person moved on", () => {
+  it("does not ask when a newer message is already answered by another reply", async () => {
+    const f = fixture("ask-after-newer-message");
+    Object.assign(f.runData, { createdAt: new Date(0) });
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { where?: { OR?: unknown } }) =>
+      query?.where?.OR
+        ? { blocks: [{ kind: "text", text: "找 100 个类似的人" }] }
+        : null) as unknown as typeof findFirst);
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    const answer = await request.beforeAsk?.("What would you like to do next?", undefined);
+    expect(answer).toEqual({
+      instead: expect.stringContaining("找 100 个类似的人"),
+    });
+  });
+});
+
 describe("computer that will not start", () => {
   it("fails the turn with the reset-the-computer notice instead of the provider error", async () => {
     const f = fixture("computer-start-failed");

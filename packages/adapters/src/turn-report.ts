@@ -518,3 +518,26 @@ export function declineRetry(input: {
       : "";
   return { sentence, note: `${lead} ${DECLINE_RETRY_NOTE}${named}` };
 }
+
+const words = (text: string) =>
+  new Set(
+    text
+      .toLowerCase()
+      .replace(/[*_`#>[\]()]/g, " ")
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(Boolean),
+  );
+
+/**
+ * A final reply that only says again what the turn's last progress update just said (same
+ * facts, not much longer) adds a duplicate message, so the update stands as the answer.
+ */
+export function restatesUpdate(reply: string, update: string | undefined): boolean {
+  if (!update?.trim() || !reply.trim()) return false;
+  if (reply.trim().length > update.trim().length * 1.5) return false;
+  const a = words(reply);
+  const b = words(update);
+  let shared = 0;
+  for (const word of a) if (b.has(word)) shared += 1;
+  return shared / (a.size + b.size - shared) >= 0.55;
+}

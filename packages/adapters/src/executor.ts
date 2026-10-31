@@ -632,6 +632,7 @@ import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
   questionStatesWork,
+  restatesUpdate,
   TurnReportLedger,
   turnReportText,
 } from "./turn-report.js";
@@ -1101,6 +1102,10 @@ const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
+/** Model-facing: a backgrounded turn must not question the person after they moved on. */
+export const askAfterNewerMessage = (text: string) =>
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user and end the turn.`;
+
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_ENGLISH =
@@ -5802,6 +5807,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ?.savedCandidates
             : undefined;
           return turnReportText(work, saved);
+        };
+        /** The person's newest message since this run began that a different run answers. */
+        const newerMessageAnsweredElsewhere = async () => {
+          if (!run.createdAt) return undefined;
+          let newer: { blocks: unknown } | null = null;
+          try {
+            newer = await deps.prisma.message.findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                createdAt: { gt: run.createdAt },
+                OR: [
+                  { sourceRuns: { some: { id: { not: runId } } } },
+                  {
+                    steeringMessages: {
+                      some: { runId: { not: runId }, claimedAt: { not: null } },
+                    },
+                  },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { blocks: true },
+            });
+          } catch {
+            // Without the check the question is asked as before.
+          }
+          if (!newer) return undefined;
+          return (Array.isArray(newer.blocks) ? (newer.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
         };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
@@ -12540,6 +12576,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question, plannedSearches) => {
                 if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                // Workloop: work running behind the conversation never asks the person after
+                // they moved on; a newer message another reply answers wins.
+                const moved = await newerMessageAnsweredElsewhere();
+                if (moved !== undefined) return { instead: askAfterNewerMessage(moved) };
                 if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                   askDeclineBounced = true;
                   return { instead: ASK_DECLINES };
@@ -13412,6 +13452,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             emptyDelegatedToolTurnShouldFail(completionBlocks)
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
+          }
+          // The update just sent already said it: no second, near-identical message.
+          if (
+            run.trigger !== "bot_message" &&
+            blocks.every((block) => block.kind === "text") &&
+            restatesUpdate(text, midTurnUserTexts.at(-1))
+          ) {
+            text = "";
+            blocks = [];
           }
           const markUnread = completionMarksUnread(
             run.trigger,
