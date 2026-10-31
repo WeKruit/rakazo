@@ -116,6 +116,7 @@ export function RecruitingRoutines({
       prompt: draft.prompt,
       crons,
       active: draft.active,
+      notify: draft.notify,
       webhookEnabled: draft.webhookEnabled,
       githubEnabled: draft.githubEnabled,
       messageProvider: draft.messageProvider,
@@ -143,7 +144,6 @@ export function RecruitingRoutines({
             threadId: target.threadId,
             ...fields,
             timezone: localTimezone(),
-            notify: true,
           });
     });
   };

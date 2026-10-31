@@ -1,4 +1,5 @@
-import { redactSecrets } from "@rakazo/core";
+import { containsSecret, redactSecrets } from "@rakazo/core";
+import { getLogger } from "@rakazo/logging";
 
 export function combineSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
   return AbortSignal.any(signals.filter((signal): signal is AbortSignal => Boolean(signal)));
@@ -17,7 +18,11 @@ export function sanitizeConnectorError(error: unknown, secrets: string[] = []): 
 export function redactConnectorPayload(value: unknown, secrets: string[]): unknown {
   if (secrets.length === 0) return value;
   try {
-    return redactPayloadValue(JSON.parse(JSON.stringify(value)), secrets);
+    const copied: unknown = JSON.parse(JSON.stringify(value));
+    if (containsSecret(copied, secrets))
+      // A secret reached a tool result: counted as an exposure path, never logged itself.
+      getLogger().warn("security.secret_redacted", { path: "tool_result" });
+    return redactPayloadValue(copied, secrets);
   } catch {
     return { ok: true };
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
+  blockedToolEffect,
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
   catalogApprovalDetails,
@@ -23,6 +24,7 @@ import {
   UNATTENDED_MEMORY_WRITE_REFUSAL,
   unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
+  withoutHiddenTools,
 } from "./action-approval.js";
 
 describe("internalMcpWriteEndpoint", () => {
@@ -870,5 +872,28 @@ describe("native bound approval envelopes", () => {
       boundDirectApprovalDetails([marker, "direct", { route: [], args: {} }], marker),
     ).toBeUndefined();
     expect(catalogApprovalDetails([marker, "other", {}], marker)).toBeUndefined();
+  });
+});
+
+describe("owner block and hide rules", () => {
+  const rules: ActionApprovalRule[] = [
+    { effect: "always_allow", matchKind: "tool", matchValue: "gmail_send_email" },
+    { effect: "block", matchKind: "connector", matchValue: "gmail" },
+    { effect: "hide", matchKind: "tool", matchValue: "shell" },
+  ];
+
+  it("blocks at every match level and never turns into allow or ask", () => {
+    expect(blockedToolEffect({ toolName: "gmail_send_email", rules })).toBe("block");
+    expect(blockedToolEffect({ toolName: "shell", rules })).toBe("hide");
+    expect(blockedToolEffect({ toolName: "web_fetch", rules })).toBeUndefined();
+    expect(resolveActionApprovalDetail({ toolName: "shell", rules }).source).toBe("default");
+  });
+
+  it("leaves only hidden tools out of the model's list", () => {
+    const listed = withoutHiddenTools(
+      [{ name: "shell" }, { name: "gmail_send_email" }, { name: "web_fetch" }],
+      rules,
+    );
+    expect(listed.map((tool) => tool.name)).toEqual(["gmail_send_email", "web_fetch"]);
   });
 });

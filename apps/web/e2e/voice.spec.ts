@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, rpc, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  rpc,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
+
+// Models, Voice and Updates settings are only shown to the deployment owner.
+test.beforeEach(({ page }) => setDeploymentOwner(page, true));
 
 test("voice settings connect a key, speak a reply, and open a call", async ({ page }, testInfo) => {
   const stamp = Date.now();

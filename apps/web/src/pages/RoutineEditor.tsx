@@ -18,6 +18,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Switch,
   Textarea,
 } from "@rakazo/ui-web";
 import {
@@ -476,6 +477,17 @@ export function RoutineEditor({
             <Trans>Add a schedule, webhook, GitHub, or message trigger to run this routine.</Trans>
           </p>
         ) : null}
+      </div>
+
+      <div className="mt-5 flex items-center gap-2.5 text-sm text-foreground/75">
+        <Switch
+          aria-labelledby={`${fieldId}-notify`}
+          checked={draft.notify}
+          onCheckedChange={(notify) => onChange({ ...draft, notify })}
+        />
+        <span id={`${fieldId}-notify`}>
+          <Trans>Notify when done</Trans>
+        </span>
       </div>
 
       <div className="mt-5">

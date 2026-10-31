@@ -6,6 +6,7 @@ import {
   loadSavedInbox,
   readSavedInbox,
   readSavedThread,
+  SAVED_CHAT_IDLE_MS,
   SAVED_CHAT_MAX_BYTES,
   SAVED_CHAT_MESSAGES,
   SAVED_CHATS,
@@ -88,7 +89,7 @@ vi.mock("expo-file-system", () => {
     }
     write(value: string) {
       state.files.set(this.uri, value);
-      state.written.set(this.uri, state.written.size + 1);
+      state.written.set(this.uri, Date.now() + state.written.size + 1);
     }
   }
   return { Directory, File, Paths: { cache: "cache" } };
@@ -273,4 +274,17 @@ it("clears everything", () => {
   clearSavedChats();
   expect(state.files.size).toBe(0);
   expect(readSavedInbox(scope)).toBeNull();
+});
+
+it("stops keeping chats nobody opened for 30 days", () => {
+  writeSavedThread(scope, "bot:bot-a", thread(1));
+  writeSavedThread(scope, "bot:bot-b", thread(1, "bot-b"));
+  const [idlePath, otherPath] = [...state.files.keys()];
+  state.written.set(idlePath!, Date.now() - SAVED_CHAT_IDLE_MS - 1);
+  state.written.set(otherPath!, Date.now() - SAVED_CHAT_IDLE_MS - 1);
+  expect(readSavedThread(scope, "bot:bot-a")).toBeNull();
+  expect(state.files.has(idlePath!)).toBe(false);
+  writeSavedThread(scope, "bot:bot-c", thread(1, "bot-c"));
+  expect(state.files.has(otherPath!)).toBe(false);
+  expect(readSavedThread(scope, "bot:bot-c")).not.toBeNull();
 });

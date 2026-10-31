@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
+
+// Models, Voice and Updates settings are only shown to the deployment owner.
+test.beforeEach(({ page }) => setDeploymentOwner(page, true));
 
 test("onboarding preflight stays on the connection being tested", async ({ page }, testInfo) => {
   await page.route("**/rpc/me", async (route) => {
@@ -7,7 +16,7 @@ test("onboarding preflight stays on the connection being tested", async ({ page 
     const body = (await response.json()) as { json: Record<string, unknown> };
     await route.fulfill({
       response,
-      json: { json: { ...body.json, needsModel: true } },
+      json: { json: { ...body.json, isDeploymentOwner: true, needsModel: true } },
     });
   });
 

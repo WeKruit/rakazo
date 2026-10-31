@@ -14,6 +14,7 @@ import {
   missingTurnImagesInstruction,
   parseUpdateBotPatch,
   persistentComputerInstruction,
+  routineNotifies,
   runNotificationsEnabled,
   selectBuiltinToolsForRun,
   settleSteeringAttachmentLoads,
@@ -1173,6 +1174,23 @@ describe("run notification preference", () => {
         userId: "user-1",
       }),
     ).resolves.toBe(true);
+  });
+});
+
+describe("routineNotifies", () => {
+  it("follows the routine's own notify setting and allows runs without a routine", async () => {
+    let row: unknown = { routine: { notify: false } };
+    const findUnique = vi.fn(async () => row);
+    const prisma = { run: { findUnique } } as unknown as PrismaClient;
+    await expect(routineNotifies(prisma, "run-1")).resolves.toBe(false);
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      select: { routine: { select: { notify: true } } },
+    });
+    row = { routine: { notify: true } };
+    await expect(routineNotifies(prisma, "run-1")).resolves.toBe(true);
+    row = { routine: null };
+    await expect(routineNotifies(prisma, "run-1")).resolves.toBe(true);
   });
 });
 

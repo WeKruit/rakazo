@@ -55,6 +55,8 @@ import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
+/** Live-only events one follower may hold while its client is not reading. */
+export const MAX_PENDING_TRANSIENTS = 100;
 /**
  * Interject marker stored in SteeringMessage.originTrigger (no migration). Only rows
  * attached to a live conversational run carry it; it is cleared when a row reverts to
@@ -2111,7 +2113,10 @@ export async function appendEventInTransaction(
   });
   stashSidebarSignal(input, thread.nextEventSeq - 1, thread.userId);
   await assertEventRunWritable(tx, input);
-  return tx.event.create({ data: eventRow(input, thread.nextEventSeq - 1) });
+  const seq = thread.nextEventSeq - 1;
+  return alarmOnSeqConflict(input.threadId, seq, 1, () =>
+    tx.event.create({ data: eventRow(input, seq) }),
+  );
 }
 
 /**
@@ -2150,8 +2155,35 @@ export async function appendEventsInTransaction(
     stashSidebarSignal(input, firstSeq + index, thread.userId);
   });
   const rows = inputs.map((input, index) => eventRow(input, firstSeq + index));
-  await tx.event.createMany({ data: rows });
+  await alarmOnSeqConflict(threadId, firstSeq, inputs.length, () =>
+    tx.event.createMany({ data: rows }),
+  );
   return rows;
+}
+
+/**
+ * The thread counter hands out every seq once, so a duplicate (threadId, seq) means two writers
+ * bypassed it or the counter was reset. The unique index still rejects the write; this makes the
+ * conflict an alert instead of an anonymous failed transaction.
+ */
+async function alarmOnSeqConflict<T>(
+  threadId: string,
+  firstSeq: number,
+  count: number,
+  write: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      getLogger().error("event.seq.conflict", error, { threadId, firstSeq, count });
+    }
+    throw error;
+  }
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
 
 // run.cancelled is appended after the run row already reads cancelled, so it
@@ -2378,11 +2410,17 @@ export async function* followThreadEvents(
   let seq = cursor;
   const latch = new ChangeLatch();
   const transients: ProductEvent[] = [];
+  let droppedTransients = 0;
   const unsubscribe = realtime
     ? await realtime
         .subscribe(threadTopic(threadId), (payload) => {
           const transient = parseTransientSignal(payload);
-          if (transient && transient.threadId === threadId) transients.push(transient);
+          if (transient && transient.threadId === threadId) {
+            if (transients.length >= MAX_PENDING_TRANSIENTS && droppedTransients++ === 0) {
+              getLogger().warn("thread.follow.transients.backlog", { threadId });
+            }
+            queueTransient(transients, transient);
+          }
           latch.notify();
         })
         .catch(() => async () => {})
@@ -2410,6 +2448,34 @@ export async function* followThreadEvents(
   } finally {
     await unsubscribe();
   }
+}
+
+/**
+ * Keeps one follower's live-only queue bounded while its client reads slowly. Once full, a
+ * streamed text delta joins the progress preview before it (so the text stays whole), and
+ * anything else replaces the oldest preview: the durable final message supersedes them all.
+ */
+export function queueTransient(queue: ProductEvent[], event: ProductEvent): void {
+  if (queue.length < MAX_PENDING_TRANSIENTS) {
+    queue.push(event);
+    return;
+  }
+  const last = queue[queue.length - 1]!;
+  const delta = event.type === "thread.progress" ? event.payload.delta : undefined;
+  const base = last.payload.text ?? last.payload.delta;
+  if (
+    typeof delta === "string" &&
+    last.type === "thread.progress" &&
+    last.runId === event.runId &&
+    typeof base === "string" &&
+    !last.payload.activity
+  ) {
+    const key = typeof last.payload.text === "string" ? "text" : "delta";
+    queue[queue.length - 1] = { ...last, payload: { ...last.payload, [key]: base + delta } };
+    return;
+  }
+  queue.shift();
+  queue.push(event);
 }
 
 function threadTopic(threadId: string): string {

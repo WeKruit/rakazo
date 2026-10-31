@@ -789,6 +789,31 @@ const RunRequeuedPayloadSchema = z.strictObject({
   status: z.enum(["queued", "waiting_takeover"]),
 });
 
+/**
+ * Typed payloads of stored events. Rows are kept forever and replayed, so a change here (or to
+ * the event types or message blocks) must bump EVENT_FORMAT_VERSION; the golden test enforces it.
+ */
+export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.ZodType>> = {
+  "recruiting.profile.viewed": RecruitingProfileViewedPayloadSchema,
+  "recruiting.changed": RecruitingChangedPayloadSchema,
+  "recruiting.context.adopted": RecruitingContextAdoptedPayloadSchema,
+  "recruiting.action.transitioned": RecruitingActionTransitionedPayloadSchema,
+  "recruiting.read": RecruitingReadPayloadSchema,
+  "recruiting.candidates.saved": RecruitingCandidatesSavedPayloadSchema,
+  "recruiting.material.read": RecruitingMaterialReadPayloadSchema,
+  "recruiting.assessment.saved": RecruitingAssessmentSavedPayloadSchema,
+  "recruiting.question.asked": RecruitingQuestionAskedPayloadSchema,
+  "recruiting.searches.planned": RecruitingSearchesPlannedPayloadSchema,
+  "thread.choice": NativeAskAnswerPayloadSchema,
+  "effect.approval.answered": EffectApprovalAnsweredPayloadSchema,
+  "run.requeued": RunRequeuedPayloadSchema,
+  "run.completed": RunCompletedPayloadSchema,
+  "thread.progress": ThreadProgressPayloadSchema,
+};
+
+/** Version of the stored event and message format. Bump it with every shape change. */
+export const EVENT_FORMAT_VERSION = 2;
+
 export const ProductEventSchema = z
   .object({
     id: Id,
@@ -805,38 +830,7 @@ export const ProductEventSchema = z
     if (event.type === "run.requeued" && !event.runId) {
       ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
     }
-    const schema =
-      event.type === "recruiting.profile.viewed"
-        ? RecruitingProfileViewedPayloadSchema
-        : event.type === "recruiting.changed"
-          ? RecruitingChangedPayloadSchema
-          : event.type === "recruiting.context.adopted"
-            ? RecruitingContextAdoptedPayloadSchema
-            : event.type === "recruiting.action.transitioned"
-              ? RecruitingActionTransitionedPayloadSchema
-              : event.type === "recruiting.read"
-                ? RecruitingReadPayloadSchema
-                : event.type === "recruiting.candidates.saved"
-                  ? RecruitingCandidatesSavedPayloadSchema
-                  : event.type === "recruiting.material.read"
-                    ? RecruitingMaterialReadPayloadSchema
-                    : event.type === "recruiting.assessment.saved"
-                      ? RecruitingAssessmentSavedPayloadSchema
-                      : event.type === "recruiting.question.asked"
-                        ? RecruitingQuestionAskedPayloadSchema
-                        : event.type === "recruiting.searches.planned"
-                          ? RecruitingSearchesPlannedPayloadSchema
-                          : event.type === "thread.choice"
-                            ? NativeAskAnswerPayloadSchema
-                            : event.type === "effect.approval.answered"
-                              ? EffectApprovalAnsweredPayloadSchema
-                              : event.type === "run.requeued"
-                                ? RunRequeuedPayloadSchema
-                                : event.type === "run.completed"
-                                  ? RunCompletedPayloadSchema
-                                  : event.type === "thread.progress"
-                                    ? ThreadProgressPayloadSchema
-                                    : null;
+    const schema = PRODUCT_EVENT_PAYLOAD_SCHEMAS[event.type];
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

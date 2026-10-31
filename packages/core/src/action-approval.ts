@@ -409,6 +409,49 @@ function ruleSpecificity(rule: ActionApprovalRule): number {
   }
 }
 
+/** "block" refuses the call; "hide" also leaves the tool out of the list the model sees. */
+const TOOL_BLOCK_EFFECTS = new Set(["block", "hide"]);
+
+export const BLOCKED_TOOL_REFUSAL =
+  "The owner of this workspace has turned this tool off, so it was not run. Continue without it, or tell the user what you would have done.";
+
+/**
+ * The owner's block or hide rule for this tool, if any. Unlike allow and ask, a block or hide
+ * rule wins at every match level: turning a connector off also turns off each of its tools.
+ */
+export function blockedToolEffect(input: {
+  toolName: string;
+  connectorKind?: string;
+  readOnly?: boolean;
+  rules: ActionApprovalRule[];
+}): "block" | "hide" | undefined {
+  const connectorKind = input.connectorKind ?? connectorKindFromToolName(input.toolName);
+  const matching = input.rules.filter(
+    (rule) =>
+      TOOL_BLOCK_EFFECTS.has(rule.effect) &&
+      ruleMatches(rule, input.toolName, connectorKind, input.readOnly),
+  );
+  if (matching.some((rule) => rule.effect === "hide")) return "hide";
+  return matching.length ? "block" : undefined;
+}
+
+/** Leave hidden tools out of the list the model is given. */
+export function withoutHiddenTools<T extends { name: string }>(
+  tools: T[],
+  rules: ActionApprovalRule[],
+  connectorKinds: string[] = [],
+): T[] {
+  if (!rules.some((rule) => rule.effect === "hide")) return tools;
+  return tools.filter(
+    (tool) =>
+      blockedToolEffect({
+        toolName: tool.name,
+        connectorKind: connectorKindFromToolName(tool.name, connectorKinds),
+        rules,
+      }) !== "hide",
+  );
+}
+
 export type ActionApprovalSource = "require_approval" | "always_allow" | "default";
 
 export type ActionApprovalResolved = {
@@ -425,8 +468,10 @@ export function resolveActionApprovalDetail(input: {
   rules: ActionApprovalRule[];
 }): ActionApprovalResolved {
   const connectorKind = input.connectorKind ?? connectorKindFromToolName(input.toolName);
-  const matchingRules = input.rules.filter((rule) =>
-    ruleMatches(rule, input.toolName, connectorKind, input.readOnly),
+  const matchingRules = input.rules.filter(
+    (rule) =>
+      !TOOL_BLOCK_EFFECTS.has(rule.effect) &&
+      ruleMatches(rule, input.toolName, connectorKind, input.readOnly),
   );
   if (matchingRules.length === 0) {
     return { decision: "allow", source: "default", matchingRules };

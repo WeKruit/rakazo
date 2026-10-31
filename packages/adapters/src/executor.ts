@@ -89,6 +89,8 @@ import {
   asksToSendTo,
   assertTransition,
   attachmentExtensionForMimeType,
+  BLOCKED_TOOL_REFUSAL,
+  blockedToolEffect,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
   boundDirectApprovalDetails,
@@ -105,6 +107,7 @@ import {
   endsSentence,
   expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
+  findSkillByName,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
   hideVendorBlocks,
@@ -119,15 +122,18 @@ import {
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
+  isSkillFilePath,
   isTerminal,
   messageFileReferences,
   messagingChannelId,
   messagingChannelPrivacyBlock,
   messagingDmSurfaceNote,
+  missingSkillRequirement,
   NAMED_EMAILS_NOTE,
   nextCronDateAcross,
   nextFence,
   oneTimeMcpWriteEndpoint,
+  parseSkillMd,
   POLL_DEFAULT_MINUTES,
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
@@ -162,6 +168,8 @@ import {
   sendRecipients,
   sendToNote,
   shortQuestion,
+  skillAvailabilityFromTools,
+  skillRequirements,
   toolReadsExternalText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
@@ -169,6 +177,7 @@ import {
   unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
+  withoutHiddenTools,
   workActivityForTool,
 } from "@rakazo/core";
 import {
@@ -426,6 +435,8 @@ import {
 import { requireMcpToolAssignment } from "./mcp-connector.js";
 import {
   buildMcpCredentialBlob,
+  isMcpConfigPath,
+  mcpConfigFileServers,
   needsOAuthProbe,
   parseMcpServerToolArgs,
 } from "./mcp-server-tool.js";
@@ -5249,6 +5260,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .then((rules) => rules as ActionApprovalRule[]);
           return approvalRulesPromise;
         };
+        // The owner's block and hide rules. A failed read lists every tool and blocks none: the
+        // approval gate still reads the same rules before any consequential call.
+        const loadOwnerToolRules = () =>
+          Promise.resolve()
+            .then(loadApprovalRules)
+            .catch((error: unknown) => {
+              getLogger().warn("tool_rules.load_failed", {
+                runId: run.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return [] as ActionApprovalRule[];
+            });
         let autoReviewPreferencePromise: Promise<boolean> | undefined;
         const loadAutoReviewPreference = () => {
           autoReviewPreferencePromise ??= deps.prisma.actionAutoReviewPreference
@@ -5267,14 +5290,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The intro turn confirms how a bot read its own role before anyone hands it
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
+        const listedTools = withoutHiddenTools(
+          [...builtins, ...exposedConnectorTools],
+          await loadOwnerToolRules(),
+          connectedPlugins.map((plugin) => plugin.provider),
+        );
         const tools =
           run.trigger === "created"
             ? []
             : run.trigger === "recruiting_grade"
-              ? gradingTools([...builtins, ...exposedConnectorTools], run.clientNonce)
+              ? gradingTools(listedTools, run.clientNonce)
               : run.trigger === "recruiting_checkin"
-                ? checkinTools([...builtins, ...exposedConnectorTools])
-                : [...builtins, ...exposedConnectorTools];
+                ? checkinTools(listedTools)
+                : listedTools;
         if (run.trigger === "recruiting_grade")
           getLogger().info("recruiting.grade.tools", {
             runId: run.id,
@@ -5840,6 +5868,156 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          const addMcpServer = async (
+            toolArgs: Record<string, unknown>,
+          ): Promise<Record<string, unknown>> => {
+            const parsed = parseMcpServerToolArgs(toolArgs);
+            if (!parsed) {
+              return {
+                error:
+                  "Invalid MCP server details. Required: name, transport (streamable_http|sse|stdio); endpoint for remote transports; command for stdio.",
+              };
+            }
+            if (parsed.endpoint) {
+              try {
+                await assertSafeRemoteUrl(parsed.endpoint, deps.secretHttp?.resolveHostname, {
+                  allowPrivateEndpoint: await actorMayUsePrivateEndpoint(
+                    deps.prisma,
+                    run.userId,
+                    deps.mcpAllowPrivateEndpoint === true,
+                  ),
+                });
+              } catch (error) {
+                return {
+                  error: error instanceof Error ? error.message : "Invalid MCP endpoint",
+                };
+              }
+            }
+            if (!deps.secretStore) {
+              return {
+                error: "Secret storage is not available in this deployment.",
+              };
+            }
+            const credentialBlob = buildMcpCredentialBlob(parsed);
+            let storedCredential: { id: string; ciphertext: string } | null = null;
+            if (credentialBlob) {
+              storedCredential = await deps.secretStore.put(credentialBlob, {
+                operationId: executionId,
+                traceId: executionId,
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                signal: new AbortController().signal,
+              });
+            }
+            const oauthLikely = needsOAuthProbe(parsed);
+            let serverRow: McpServer;
+            let approvalEventSeq: number | undefined;
+            try {
+              const created = await deps.prisma.$transaction(async (tx) => {
+                if (storedCredential) {
+                  await tx.secret.create({
+                    data: {
+                      id: storedCredential.id,
+                      userId: run.userId,
+                      spaceId: run.spaceId,
+                      kind: "mcp",
+                      ciphertext: storedCredential.ciphertext,
+                    },
+                  });
+                }
+                const server = await tx.mcpServer.create({
+                  data: {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    slug: parsed.slug,
+                    name: parsed.name,
+                    description: parsed.description,
+                    transport: parsed.transport,
+                    endpoint: parsed.endpoint ?? null,
+                    command: parsed.command ?? null,
+                    args: parsed.args as unknown as Prisma.InputJsonValue,
+                    env: Object.fromEntries(Object.keys(parsed.env).map((key) => [key, true])),
+                    headers: Object.fromEntries(
+                      Object.keys(parsed.headers).map((key) => [key, true]),
+                    ),
+                    secretId: storedCredential?.id,
+                    enabled: true,
+                  },
+                });
+                if (!parsed.assignToSelf) return { server };
+                const blocks: MessageBlock[] = [
+                  {
+                    kind: "mcp_approval",
+                    name: server.name,
+                    serverId: server.id,
+                    transport: parsed.transport,
+                    endpoint: parsed.endpoint ?? null,
+                    needsOAuth: oauthLikely,
+                    status: "pending",
+                  },
+                ];
+                const committed = await persistMessageInTransaction(tx, run, "bot", blocks);
+                return { server, eventSeq: committed.eventSeq };
+              });
+              serverRow = created.server;
+              approvalEventSeq = created.eventSeq;
+            } catch (error) {
+              if (isUniqueViolation(error)) {
+                return {
+                  error: `An MCP server named "${parsed.name}" already exists. Ask the user to remove it first or pick another name.`,
+                };
+              }
+              throw error;
+            }
+            if (approvalEventSeq !== undefined) {
+              await deps.events.notify(run.threadId, approvalEventSeq).catch((error) => {
+                getLogger().error("MCP approval realtime notification", error);
+              });
+            }
+            return {
+              ok: true,
+              server_id: serverRow.id,
+              assigned_to_self: false,
+              next_step: parsed.assignToSelf
+                ? oauthLikely
+                  ? "An approval card was posted. The user must authorize and approve it before its tools become available."
+                  : "An approval card was posted. The user must approve it before its tools become available."
+                : "The server was registered without assigning it to this bot.",
+            };
+          };
+          const registerWorkspaceFile = async (
+            filePath: string,
+            text: string,
+          ): Promise<Record<string, unknown>> => {
+            const owner = { spaceId: run.spaceId, userId: run.userId };
+            if (isSkillFilePath(filePath)) {
+              contextWatch?.acknowledge("skills");
+              const parsed = parseSkillMd(text);
+              if ("error" in parsed) return { skill: { error: parsed.error } };
+              const existing = findSkillByName(
+                await listAgentSkillRecords(deps.prisma, owner),
+                parsed.name,
+              );
+              const saved =
+                existing?.source === "user" && existing.id && !existing.id.startsWith("builtin:")
+                  ? await skillUpdateFromTool(deps.prisma, owner, {
+                      skillId: existing.id,
+                      content: text,
+                    })
+                  : await skillCreateFromTool(deps.prisma, owner, { content: text });
+              return { skill: saved };
+            }
+            if (isMcpConfigPath(filePath)) {
+              const servers = mcpConfigFileServers(text);
+              if (!Array.isArray(servers)) return { mcp: servers };
+              const results: Array<Record<string, unknown>> = [];
+              for (const server of servers)
+                results.push({ name: server.name, ...(await addMcpServer(server)) });
+              return { mcp: results };
+            }
+            return {};
+          };
           if (run.trigger === "recruiting_grade") {
             const refusal = gradingToolRefusal(name, rawArgs, run.clientNonce, gradingToolCalls++);
             if (gradingToolCalls > GRADE_TOOL_CALL_STOP) {
@@ -5862,6 +6040,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const refusal = checkinToolRefusal(name);
             if (refusal) return { error: refusal };
           }
+          if (
+            blockedToolEffect({
+              toolName: name,
+              connectorKind: connectorKindFromToolName(
+                name,
+                connectedPlugins.map((plugin) => plugin.provider),
+              ),
+              rules: await loadOwnerToolRules(),
+            })
+          )
+            return { error: BLOCKED_TOOL_REFUSAL };
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks
@@ -7548,6 +7737,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   policyToolName,
                   connectedPlugins.map((plugin) => plugin.provider),
                 );
+          // The owner's "off" rule beats every other gate, including a recruiter's "send".
+          const ownerRules = await loadOwnerToolRules();
+          if (
+            [
+              { toolName: policyToolName, connectorKind: policyConnectorKind },
+              { toolName: name, connectorKind },
+            ].some((target) =>
+              blockedToolEffect({ ...target, readOnly: declaredReadOnly, rules: ownerRules }),
+            )
+          )
+            return { error: BLOCKED_TOOL_REFUSAL };
           let approvalResolved = requiresMandatoryApproval
             ? {
                 decision: "ask" as const,
@@ -9300,7 +9500,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             }
             await recordComputerAction("write_file", filePath, { bytes: content.byteLength });
+            // A written SKILL.md or .mcp.json takes effect now, through the same paths as the tools.
+            const registered = original
+              ? {}
+              : await registerWorkspaceFile(filePath, textContentArg(args.content, ""));
             return finish({
+              ...registered,
               ok: true,
               path: filePath,
               ...(original
@@ -10588,122 +10793,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             );
           }
-          if (name === "add_mcp_server") {
-            const parsed = parseMcpServerToolArgs(args);
-            if (!parsed) {
-              return finish({
-                error:
-                  "Invalid MCP server details. Required: name, transport (streamable_http|sse|stdio); endpoint for remote transports; command for stdio.",
-              });
-            }
-            if (parsed.endpoint) {
-              try {
-                await assertSafeRemoteUrl(parsed.endpoint, deps.secretHttp?.resolveHostname, {
-                  allowPrivateEndpoint: await actorMayUsePrivateEndpoint(
-                    deps.prisma,
-                    run.userId,
-                    deps.mcpAllowPrivateEndpoint === true,
-                  ),
-                });
-              } catch (error) {
-                return finish({
-                  error: error instanceof Error ? error.message : "Invalid MCP endpoint",
-                });
-              }
-            }
-            if (!deps.secretStore) {
-              return finish({
-                error: "Secret storage is not available in this deployment.",
-              });
-            }
-            const credentialBlob = buildMcpCredentialBlob(parsed);
-            let storedCredential: { id: string; ciphertext: string } | null = null;
-            if (credentialBlob) {
-              storedCredential = await deps.secretStore.put(credentialBlob, {
-                operationId: executionId,
-                traceId: executionId,
-                spaceId: run.spaceId,
-                userId: run.userId,
-                botId: bot.id,
-                signal: new AbortController().signal,
-              });
-            }
-            const oauthLikely = needsOAuthProbe(parsed);
-            let serverRow: McpServer;
-            let approvalEventSeq: number | undefined;
-            try {
-              const created = await deps.prisma.$transaction(async (tx) => {
-                if (storedCredential) {
-                  await tx.secret.create({
-                    data: {
-                      id: storedCredential.id,
-                      userId: run.userId,
-                      spaceId: run.spaceId,
-                      kind: "mcp",
-                      ciphertext: storedCredential.ciphertext,
-                    },
-                  });
-                }
-                const server = await tx.mcpServer.create({
-                  data: {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    slug: parsed.slug,
-                    name: parsed.name,
-                    description: parsed.description,
-                    transport: parsed.transport,
-                    endpoint: parsed.endpoint ?? null,
-                    command: parsed.command ?? null,
-                    args: parsed.args as unknown as Prisma.InputJsonValue,
-                    env: Object.fromEntries(Object.keys(parsed.env).map((key) => [key, true])),
-                    headers: Object.fromEntries(
-                      Object.keys(parsed.headers).map((key) => [key, true]),
-                    ),
-                    secretId: storedCredential?.id,
-                    enabled: true,
-                  },
-                });
-                if (!parsed.assignToSelf) return { server };
-                const blocks: MessageBlock[] = [
-                  {
-                    kind: "mcp_approval",
-                    name: server.name,
-                    serverId: server.id,
-                    transport: parsed.transport,
-                    endpoint: parsed.endpoint ?? null,
-                    needsOAuth: oauthLikely,
-                    status: "pending",
-                  },
-                ];
-                const committed = await persistMessageInTransaction(tx, run, "bot", blocks);
-                return { server, eventSeq: committed.eventSeq };
-              });
-              serverRow = created.server;
-              approvalEventSeq = created.eventSeq;
-            } catch (error) {
-              if (isUniqueViolation(error)) {
-                return finish({
-                  error: `An MCP server named "${parsed.name}" already exists. Ask the user to remove it first or pick another name.`,
-                });
-              }
-              throw error;
-            }
-            if (approvalEventSeq !== undefined) {
-              await deps.events.notify(run.threadId, approvalEventSeq).catch((error) => {
-                getLogger().error("MCP approval realtime notification", error);
-              });
-            }
-            return finish({
-              ok: true,
-              server_id: serverRow.id,
-              assigned_to_self: false,
-              next_step: parsed.assignToSelf
-                ? oauthLikely
-                  ? "An approval card was posted. The user must authorize and approve it before its tools become available."
-                  : "An approval card was posted. The user must approve it before its tools become available."
-                : "The server was registered without assigning it to this bot.",
-            });
-          }
+          if (name === "add_mcp_server") return finish(await addMcpServer(args));
           if (name === "recall_memory") {
             return semanticMemory!.recall(
               {
@@ -11851,7 +11941,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   "\n",
                 )}\nWhen the user asks to run a taught skill by name, follow that skill's playbook exactly. The full playbook is included in the user task when they invoke it.`
             : undefined;
-        const agentSkillsLine = formatSkillsCatalogInstruction(agentSkills);
+        const skillTools = skillAvailabilityFromTools(tools.map((tool) => tool.name));
+        const skillSecrets = new Set(agentSecretRows.map((row) => row.name.toLowerCase()));
+        const agentSkillsLine = formatSkillsCatalogInstruction(
+          agentSkills.map((skill) => ({
+            ...skill,
+            unavailable: missingSkillRequirement(skillRequirements(skill.content), {
+              ...skillTools,
+              secrets: skillSecrets,
+            }),
+          })),
+        );
         const missingImagesInstruction = missingTurnImagesInstruction(
           turnBlocks,
           currentTurnImages,
@@ -14047,6 +14147,17 @@ async function runNotice(
   };
 }
 
+/** A routine announces that it finished only when its own notify setting is on. */
+export async function routineNotifies(prisma: PrismaClient, runId: string): Promise<boolean> {
+  const run = await prisma.run
+    .findUnique({ where: { id: runId }, select: { routine: { select: { notify: true } } } })
+    .catch((error) => {
+      getLogger().error("routine notification lookup", error);
+      return null;
+    });
+  return run?.routine?.notify ?? true;
+}
+
 async function notifyRun(
   deps: ExecutorDeps,
   run: {
@@ -14069,6 +14180,12 @@ async function notifyRun(
     return null;
   });
   if (!notice?.enabled) return;
+  if (
+    message.kind === "completion" &&
+    run.trigger === "routine" &&
+    !(await routineNotifies(deps.prisma, run.id))
+  )
+    return;
   await deps.notifications
     .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
       operationId: "notify",

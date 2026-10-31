@@ -100,6 +100,22 @@ it("requires approval for an exact tool and keeps failed edits retryable without
       matchKind: "category",
       matchValue: "purchase",
     });
+    await fill("mcp__service__send_email");
+    await act(async () => button("Block").click());
+    expect(api.set).toHaveBeenLastCalledWith({
+      effect: "block",
+      matchKind: "tool",
+      matchValue: "mcp__service__send_email",
+    });
+    expect(container.textContent).toContain("Block mcp__service__send_email");
+    await fill("mcp__service__delete_record");
+    await act(async () => button("Hide").click());
+    expect(api.set).toHaveBeenLastCalledWith({
+      effect: "hide",
+      matchKind: "tool",
+      matchValue: "mcp__service__delete_record",
+    });
+    expect(container.textContent).toContain("Hide mcp__service__delete_record");
   } finally {
     await act(async () => root.unmount());
     container.remove();

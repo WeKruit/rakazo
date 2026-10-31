@@ -1303,7 +1303,7 @@ export const appContract = {
     set: oc
       .input(
         z.object({
-          effect: z.enum(["always_allow", "require_approval"]),
+          effect: z.enum(["always_allow", "require_approval", "block", "hide"]),
           matchKind: z.enum(["tool", "connector", "category"]),
           matchValue: z.string().min(1),
         }),
