@@ -8446,6 +8446,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   throw new Error(
                     "Recurring cancellation requires separate verified booking scope",
                   );
+                // Two runs answering one ask would show two cards for the same booking change.
+                if (
+                  await calendarChangeAlreadyWaiting(deps.prisma, {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    effect: applied!.effect,
+                    bookingUid: args.bookingUid,
+                  })
+                ) {
+                  const result = {
+                    error:
+                      "A card for this exact change to this booking is already waiting for the recruiter. Do not request another; tell them it is waiting for their decision.",
+                    code: "CALENDAR_CHANGE_ALREADY_WAITING",
+                    dispatched: false,
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
                 let saved = applied!.effect.result;
                 if (saved == null) {
                   const snapshot = await readCalBookingSnapshot({
@@ -14891,6 +14910,36 @@ export function legacyPiToolCallId(executionId: string): string | undefined {
     // Other runtimes keep their existing opaque execution IDs.
   }
   return undefined;
+}
+
+/**
+ * Whether another run of this thread already shows an unanswered card for the same change
+ * (same tool) to the same calendar booking. Only a paused run's card counts, so a card left by a
+ * run that ended never blocks a new request.
+ */
+export async function calendarChangeAlreadyWaiting(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  input: {
+    spaceId: string;
+    threadId: string;
+    effect: { id: string; runId: string; kind: string };
+    bookingUid: string;
+  },
+): Promise<boolean> {
+  const waiting = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: input.spaceId,
+      kind: input.effect.kind,
+      status: "intended",
+      id: { not: input.effect.id },
+      runId: { not: input.effect.runId },
+      run: { threadId: input.threadId, status: "waiting_input" },
+    },
+    select: { request: true },
+    take: 20,
+  });
+  const uid = `"bookingUid":${JSON.stringify(input.bookingUid)}`;
+  return waiting.some((effect) => JSON.stringify(effect.request).includes(uid));
 }
 
 export async function recordEffect(
