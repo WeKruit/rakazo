@@ -1161,6 +1161,9 @@ const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
+/** Model-facing: a turn that recorded its round leaves a newer request to the turn answering it. */
+export const newerRequestElsewhere = (text: string) =>
+  `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of it; do not act on the newer message.`;
 /** Model-facing: a backgrounded turn must not question the person after they moved on. */
 export const askAfterNewerMessage = (text: string) =>
   `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user and end the turn.`;
@@ -6230,6 +6233,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
+          // Once this turn has recorded its round, a newer request that another turn is answering
+          // belongs to that turn: this one neither searches for it nor hands it on again.
+          if (
+            (name.endsWith("agent_run") ||
+              name.endsWith("web_search_advanced_exa") ||
+              name === "web_search" ||
+              name === "handoff_to_bot") &&
+            (await roundRecordedThisRun())
+          ) {
+            const moved = await newerMessageAnsweredElsewhere();
+            if (moved !== undefined) return { error: newerRequestElsewhere(moved) };
+          }
           // Before the first picks, one step's extra searches are refused once: the model picks
           // from the planned rows first, and may search again only if the answer changed the role.
           const refusedEarly = () => {

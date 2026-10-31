@@ -55,6 +55,7 @@ import {
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
+  newerRequestElsewhere,
   pastedJobTitle,
   REVISIONED_RESEARCH_OPERATIONS,
   resumeBriefForRun,
@@ -1031,6 +1032,33 @@ describe("questions after the person moved on", () => {
     expect(answer).toEqual({
       instead: expect.stringContaining("找 100 个类似的人"),
     });
+  });
+});
+
+describe("newer request after the round", () => {
+  it("leaves a newer request to the turn answering it once this turn recorded its round", async () => {
+    const f = fixture("newer-request-after-round");
+    Object.assign(f.runData, { createdAt: new Date(0) });
+    f.effects.push({
+      id: "round",
+      runId: f.runData.id,
+      spaceId: f.runData.spaceId,
+      kind: "recruiting_research",
+      idempotencyKey: "round",
+      status: "completed",
+      request: { operation: "calibration_round" },
+      result: { ok: true },
+    });
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { where?: { OR?: unknown } }) =>
+      query?.where?.OR
+        ? { blocks: [{ kind: "text", text: "找 100 个类似的人" }] }
+        : null) as unknown as typeof findFirst);
+    f.setCalls([
+      { name: "handoff_to_bot", args: { bot: "Sourcer", request: "scale" }, executionId: "h" },
+    ]);
+    await f.run();
+    expect(f.results[0]).toEqual({ error: newerRequestElsewhere("找 100 个类似的人") });
   });
 });
 
