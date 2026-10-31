@@ -330,12 +330,11 @@ export async function refreshRecruitingCorrespondence(
           const args =
             tool === "get_bookings"
               ? { take: 100, skip }
-              : {
-                  calendarId: "primary",
-                  timeMin: from,
-                  timeMax: to,
-                  maxResults: 200,
-                  singleEvents: true,
+              : // Google Calendar MCP's list_events: primary calendar by default, events in `events`.
+                {
+                  startTime: from,
+                  endTime: to,
+                  pageSize: 250,
                   orderBy: "startTime",
                   ...(pageToken ? { pageToken } : {}),
                 };
@@ -343,7 +342,7 @@ export async function refreshRecruitingCorrespondence(
           const body = record(raw);
           if (tool === "get_bookings" && body?.status !== "success")
             throw new Error("Calendar read failed");
-          const rows = tool === "get_bookings" ? body?.data : body?.items;
+          const rows = tool === "get_bookings" ? body?.data : (body?.events ?? []);
           if (!Array.isArray(rows)) throw new Error("Invalid calendar page");
           let newEvents = 0;
           for (const value of rows) {
