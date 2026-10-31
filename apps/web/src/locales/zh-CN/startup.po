@@ -196,7 +196,7 @@ msgstr "访问令牌"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Accounts"
-msgstr ""
+msgstr "账号"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
@@ -299,7 +299,7 @@ msgstr "全部状态"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "All time"
-msgstr ""
+msgstr "全部时间"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Allow writing"
@@ -2206,7 +2206,7 @@ msgstr "原发件人：{0}"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Output"
-msgstr ""
+msgstr "输出"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -3271,7 +3271,7 @@ msgstr "这个筛选属于另一个岗位。"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "This month"
-msgstr ""
+msgstr "本月"
 
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."

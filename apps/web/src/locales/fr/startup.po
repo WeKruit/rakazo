@@ -196,7 +196,7 @@ msgstr "Jeton d'accès"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Accounts"
-msgstr ""
+msgstr "Comptes"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
@@ -299,7 +299,7 @@ msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "All time"
-msgstr ""
+msgstr "Toute la période"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Allow writing"
@@ -3271,7 +3271,7 @@ msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "This month"
-msgstr ""
+msgstr "Ce mois-ci"
 
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."

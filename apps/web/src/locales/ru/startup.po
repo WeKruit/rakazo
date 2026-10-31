@@ -196,7 +196,7 @@ msgstr "Токен доступа"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Accounts"
-msgstr ""
+msgstr "Аккаунты"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
