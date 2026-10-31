@@ -111,6 +111,7 @@ async function rpc(route, json) {
   return body.json;
 }
 
+const children = new Set();
 // Sign-in is rate limited, so scripts that accept a session token reuse this run's one sign-in.
 const TOKEN_SCRIPTS = new Set([
   "recruiting-latency.mjs",
@@ -133,6 +134,8 @@ async function run(name, script, scriptArgs) {
     stdio: ["ignore", logFile, logFile],
     env: await scriptEnv(script),
   });
+  children.add(child);
+  child.on("exit", () => children.delete(child));
   return new Promise((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
 }
 
@@ -421,6 +424,8 @@ async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {})
 
 const results = [];
 async function stage(name, body) {
+  // A stopped run starts no further case; the signal handler is archiving its copies.
+  if (cleaning) return;
   const failures = [];
   const at = Date.now();
   log(`${name}: start`);
@@ -489,6 +494,8 @@ let cleaning;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {
     log(`${signal}: archiving this run's test copies before exiting`);
+    // Running cases stop first, so none keeps sending to a copy or starts a new one.
+    for (const child of children) child.kill("SIGTERM");
     cleaning ??= cleanUp().finally(() => process.exit(1));
   });
 async function cleanUp() {
