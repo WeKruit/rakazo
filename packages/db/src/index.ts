@@ -29,6 +29,7 @@ export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";
 export * from "./recruiting-candidate-notes.js";
 export * from "./recruiting-crm-sync.js";
+export * from "./recruiting-history-import.js";
 export * from "./recruiting-reminders.js";
 export * from "./recruiting-saved-profiles.js";
 export * from "./recruiting-scheduling.js";

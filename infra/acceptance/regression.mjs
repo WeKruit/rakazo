@@ -24,6 +24,8 @@
 //                  (--t5-group <id> --t5-say <text>), and answering a question card whose wait
 //                  expired (--expired-group <id>, a test chat with a question left unanswered for a day)
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
+//   --paid         required for any case that searches (first10, progress, t1, t3, contacts, cards,
+//                  dispatch, ambiguous); without it only the free checks may run
 //   RAKAZO_EXPECT_SHA  passed to smoke.mjs so /ready must serve the released revision
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every case passes.
 
@@ -408,6 +410,26 @@ const wanted = new Set(
         ]
       : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3", "contacts"]),
 );
+
+// Cases that start a people search pay for it, its grading and any contact lookups. They run only
+// with --paid: after a change to search, grading or contact code, with small targets. Every other
+// check is free.
+const PAID_CASES = [
+  "first10",
+  "first10-long",
+  "progress",
+  "t1",
+  "t3",
+  "contacts",
+  "cards",
+  "dispatch",
+  "ambiguous",
+];
+const paid = PAID_CASES.filter((name) => wanted.has(name));
+if (paid.length && !args.includes("--paid"))
+  throw new Error(
+    `${paid.join(", ")} spend on people search; pass --paid only after a search, grading or contact change`,
+  );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
 // or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that

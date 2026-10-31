@@ -236,9 +236,15 @@ msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "जोड़ें"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr ""
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "सर्वर का नाम दर्ज करें।"
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "एक stdio कमांड दर्ज करें।"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -411,6 +421,10 @@ msgstr ""
 msgid "All tools"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -441,6 +455,10 @@ msgstr "खरीद कार्रवाइयों को बिना प�
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "एक बार अनुमति दी गई"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -969,6 +987,10 @@ msgstr ""
 msgid "Check availability in role chat"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr ""
@@ -1194,6 +1216,20 @@ msgstr ""
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "कंप्यूटर"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1428,6 +1464,10 @@ msgstr "जारी रखें"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -3453,6 +3493,10 @@ msgstr "मासिक"
 msgid "More"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr ""
@@ -4039,6 +4083,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -4643,6 +4691,10 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -5478,10 +5530,18 @@ msgstr "सेटअप सहायता"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "साझा"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6305,7 +6365,17 @@ msgstr "यह बॉट किस लिए है"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx

@@ -1,7 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ChevronDown, Mail, Reply, UserRound } from "lucide-react";
-import { useEffect, useId, useRef } from "react";
+import { Fragment, useEffect, useId, useRef } from "react";
+import { ArtifactFileCard } from "../../components/ArtifactFileCard";
+import type { ArtifactTarget } from "../../lib/artifact-open";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { ProfileImage } from "./ProfileImage";
 import { initials } from "./profile";
@@ -11,6 +13,7 @@ import { formatDate } from "./shared";
 export type EmailConversationItem = RecruitingInboxEmail["email"] & { candidateId?: string };
 
 export type EmailConversationProps = {
+  artifactTarget?: ArtifactTarget;
   /** Caller owns the source read, message order, and any real thread scope. */
   items: readonly EmailConversationItem[];
   candidateId?: string;
@@ -36,7 +39,13 @@ function MessageTime({ date }: { date: string | null }) {
   );
 }
 
-function MessageBody({ email }: { email: EmailConversationItem }) {
+function MessageBody({
+  email,
+  artifactTarget,
+}: {
+  email: EmailConversationItem;
+  artifactTarget?: ArtifactTarget;
+}) {
   const { t } = useLingui();
   return (
     <div className="space-y-4 px-4 pb-4">
@@ -51,6 +60,17 @@ function MessageBody({ email }: { email: EmailConversationItem }) {
         <dd className="break-words">
           {email.recipients.length ? email.recipients.join(", ") : t`Recipients unavailable`}
         </dd>
+        {[
+          { label: t`Cc`, addresses: email.cc },
+          { label: t`Bcc`, addresses: email.bcc },
+        ]
+          .filter((header) => header.addresses?.length)
+          .map((header) => (
+            <Fragment key={header.label}>
+              <dt className="text-muted-foreground">{header.label}</dt>
+              <dd className="break-words">{header.addresses!.join(", ")}</dd>
+            </Fragment>
+          ))}
       </dl>
       {email.partial ? (
         <p className="text-xs text-muted-foreground">
@@ -60,6 +80,18 @@ function MessageBody({ email }: { email: EmailConversationItem }) {
       <div className="break-words whitespace-pre-wrap text-sm leading-relaxed">
         {email.body || t`Message body unavailable`}
       </div>
+      {artifactTarget
+        ? email.attachments?.map((file) => (
+            <ArtifactFileCard
+              key={file.id}
+              target={artifactTarget}
+              artifactId={file.id}
+              name={file.name}
+              mimeType={file.mimeType}
+              size={file.size}
+            />
+          ))
+        : null}
     </div>
   );
 }
@@ -95,6 +127,7 @@ function MessageHeading({ email }: { email: EmailConversationItem }) {
  * unrelated subjects into a thread, or claim delivery/read status beyond the saved direction.
  */
 export function EmailConversation({
+  artifactTarget,
   items,
   candidateId,
   selectedId,
@@ -222,7 +255,7 @@ export function EmailConversation({
                   <div className="flex gap-3 p-4">
                     <MessageHeading email={email} />
                   </div>
-                  <MessageBody email={email} />
+                  <MessageBody email={email} artifactTarget={artifactTarget} />
                 </article>
               ) : (
                 <details
@@ -242,7 +275,7 @@ export function EmailConversation({
                       className="mt-0.5 shrink-0 text-muted-foreground group-open:rotate-180"
                     />
                   </summary>
-                  <MessageBody email={email} />
+                  <MessageBody email={email} artifactTarget={artifactTarget} />
                 </details>
               )}
             </li>

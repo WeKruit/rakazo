@@ -236,9 +236,15 @@ msgstr "未记录操作人"
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "添加"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr "请输入名称和指令。"
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr "添加定时、Webhook、GitHub 或消息触发器来运行这个自动任务。"
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr "添加定时、Webhook、GitHub 或消息触发器来运行这个自动任务。"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "请填写服务器名称。"
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "请填写 stdio 命令。"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -411,6 +421,10 @@ msgstr "全部时间"
 msgid "All tools"
 msgstr "全部工具"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr "允许"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -441,6 +455,10 @@ msgstr "允许购买操作，无需询问"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "已允许一次"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr "允许的网站"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -969,6 +987,10 @@ msgstr "查看空闲时间"
 msgid "Check availability in role chat"
 msgstr "在岗位对话中查看空闲时间"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr "查看收件箱"
@@ -1194,6 +1216,20 @@ msgstr "已完成"
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "电脑"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr "电脑可以访问 {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr "电脑不能访问 {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr "电脑只能访问允许的网站"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1429,6 +1465,10 @@ msgstr "继续"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
 msgstr "在后台继续"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Conversation"
@@ -3453,6 +3493,10 @@ msgstr "每月"
 msgid "More"
 msgstr "更多"
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr "可能还有更多结果。这不是完整的邮箱或日历。"
@@ -4040,6 +4084,10 @@ msgstr "只获取到部分已保存的空闲时间。"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
 msgstr "仅显示最近保存的记录，更早的安排可能未显示。"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -4644,6 +4692,10 @@ msgstr "移除 Git 事件"
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
 msgstr "移除消息触发器"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove schedule"
@@ -5478,10 +5530,18 @@ msgstr "设置帮助"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr "在对话中提供岗位要求，以生成这份职位需求。"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "共享"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6305,8 +6365,18 @@ msgstr "这个 Bot 是做什么的"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
 msgstr "当 Webhook 触发时"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "When to run"

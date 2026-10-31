@@ -439,6 +439,10 @@ msgstr "Background tasks"
 msgid "Base URL"
 msgstr "Base URL"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Bcc"
+msgstr "Bcc"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "Bearer token"
@@ -583,6 +587,10 @@ msgstr "Candidates"
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Cards"
 msgstr "Cards"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Cc"
+msgstr "Cc"
 
 #: src/pages/shell/Composer.tsx
 msgid "Chat Settings"

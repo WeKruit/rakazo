@@ -82,6 +82,7 @@ import {
   ServerUpdateRequestSchema,
   ServerUpdateRunSchema,
   ServerUpdateStatusSchema,
+  SharedRoutineSchema,
   SkillPlaybookSchema,
   SpaceMemoryConfigSchema,
   SpaceNavigationSchema,
@@ -205,6 +206,12 @@ const recruitingWorkspace = z.strictObject({
   role: RecruitingRoleSchema,
   revision: RecruitingRoleRevisionSchema,
 });
+const CompanySiteAnswer = z.object({
+  host: z.string().nullable(),
+  icon: z.string().optional(),
+  retry: z.boolean().optional(),
+});
+
 export const RecruitingAssessmentSnapshotSchema = z
   .strictObject({
     assessment: RecruitingAssessmentSchema,
@@ -974,6 +981,12 @@ export const appContract = {
     create: oc.input(CreateRoutineInput).output(RoutineSchema),
     update: oc.input(UpdateRoutineInput).output(RoutineSchema),
     remove: oc.input(z.object({ routineId: Id })).output(z.object({ ok: z.literal(true) })),
+    /** Routines other members of this Space chose to share; `added` when the caller has a copy. */
+    shared: oc.input(z.object({}).nullish()).output(z.array(SharedRoutineSchema)),
+    /** Copy a shared routine to one of the caller's bots; it runs as the caller. */
+    addShared: oc
+      .input(z.object({ routineId: Id, botId: Id, active: z.boolean().default(true) }))
+      .output(RoutineSchema),
     testRun: oc
       .input(
         z.object({
@@ -1290,7 +1303,7 @@ export const appContract = {
       .input(
         z.object({
           effect: z.enum(["always_allow", "require_approval", "block", "hide"]),
-          matchKind: z.enum(["tool", "connector", "category"]),
+          matchKind: z.enum(["tool", "connector", "category", "egress"]),
           matchValue: z.string().min(1),
         }),
       )
@@ -1398,13 +1411,11 @@ export const appContract = {
      * could be confirmed; `icon` is its logo as a small data URL when one was found with it.
      * `retry` means the server was too busy to look.
      */
-    companySite: oc.input(z.object({ name: z.string().max(200) })).output(
-      z.object({
-        host: z.string().nullable(),
-        icon: z.string().optional(),
-        retry: z.boolean().optional(),
-      }),
-    ),
+    companySite: oc.input(z.object({ name: z.string().max(200) })).output(CompanySiteAnswer),
+    /** `companySite` for a page's organizations in one request; answers follow `names`' order. */
+    companySites: oc
+      .input(z.object({ names: z.array(z.string().max(200)).min(1).max(50) }))
+      .output(z.object({ sites: z.array(CompanySiteAnswer) })),
   },
   runs: {
     trace: oc

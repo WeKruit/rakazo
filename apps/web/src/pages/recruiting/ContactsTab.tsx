@@ -102,7 +102,9 @@ export function ContactsTab(
     : list.total;
   const unmatched = filter
     ? []
-    : lookups.filter((contact) => !rows.some((row) => lookupsFor(row).includes(contact)));
+    : lookups.filter(
+        (contact) => !contact.imported && !rows.some((row) => lookupsFor(row).includes(contact)),
+      );
   const failures = [
     list.autumn?.failed ? (
       <RetryNotice key="autumn" onRetry={list.autumn.retry}>
@@ -342,14 +344,16 @@ export function ContactsTab(
                 key={`${contact.candidateKey}:${index}`}
                 className="rounded-lg border border-border p-3"
               >
-                <a
-                  href={contact.linkedinUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
-                  <Trans>LinkedIn</Trans>
-                </a>
+                {contact.linkedinUrl ? (
+                  <a
+                    href={contact.linkedinUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    <Trans>LinkedIn</Trans>
+                  </a>
+                ) : null}
                 <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   {contact.emails.map((email, emailIndex) => (
                     <li key={`${email.address}:${emailIndex}`}>

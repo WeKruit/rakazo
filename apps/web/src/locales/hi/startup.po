@@ -439,6 +439,10 @@ msgstr ""
 msgid "Base URL"
 msgstr "बेस URL"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Bcc"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "बियरर टोकन"
@@ -583,6 +587,10 @@ msgstr ""
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Cards"
 msgstr "कार्ड"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Cc"
+msgstr ""
 
 #: src/pages/shell/Composer.tsx
 msgid "Chat Settings"

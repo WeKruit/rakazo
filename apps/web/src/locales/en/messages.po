@@ -236,9 +236,15 @@ msgstr "Actor not recorded"
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "Add"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr "Add {0}"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr "Add a name and prompt."
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "Add a server name."
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "Add a stdio command."
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr "Add a trigger to run this routine."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -411,6 +421,10 @@ msgstr "All time"
 msgid "All tools"
 msgstr "All tools"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr "Allow"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -441,6 +455,10 @@ msgstr "Allow purchase actions without asking"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "Allowed once"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr "Allowed site"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -969,6 +987,10 @@ msgstr "Check availability"
 msgid "Check availability in role chat"
 msgstr "Check availability in role chat"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr "Check command"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr "Check inbox"
@@ -1194,6 +1216,20 @@ msgstr "Completed"
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "Computer"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr "Computer may reach {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr "Computer never reaches {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr "Computer reaches only allowed sites"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1429,6 +1465,10 @@ msgstr "Continue"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
 msgstr "Continue in Background"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
+msgstr "Continue the conversation each run"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Conversation"
@@ -3453,6 +3493,10 @@ msgstr "Monthly"
 msgid "More"
 msgstr "More"
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr "More options"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr "More results may be available. This is not the complete mailbox or calendar."
@@ -4040,6 +4084,10 @@ msgstr "Only part of the saved availability is available."
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
 msgstr "Only recent saved records are shown. Earlier plans may be missing."
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
+msgstr "Only run when"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -4644,6 +4692,10 @@ msgstr "Remove Git event"
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
 msgstr "Remove message trigger"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
+msgstr "Remove record trigger"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove schedule"
@@ -5478,10 +5530,18 @@ msgstr "Setup help"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr "Share the role requirements in the conversation to build this brief."
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr "Share with my team"
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "Shared"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr "Shared by your team"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6305,8 +6365,18 @@ msgstr "What this bot is for"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr "When a role changes"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
 msgstr "When a webhook fires"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
+msgstr "When people are saved"
 
 #: src/pages/RoutineEditor.tsx
 msgid "When to run"

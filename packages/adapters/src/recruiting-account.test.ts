@@ -313,6 +313,7 @@ describe("account recruiting reads", () => {
       actor,
       expect.objectContaining({ threadId: "thread-a" }),
       expect.objectContaining({ cursor: "saved-candidate-cursor", shortlistedOnly: true }),
+      { summary: false },
     );
     await expect(
       readRecruitingAccountView(deps, actor, {
@@ -342,6 +343,7 @@ describe("account recruiting reads", () => {
       actor,
       expect.anything(),
       { threadId: "thread-a", limit: 50 },
+      { summary: true },
     );
     expect(reads.getRecruitingCorrespondence).toHaveBeenCalledWith(
       deps.prisma,
@@ -350,7 +352,7 @@ describe("account recruiting reads", () => {
       "inbox",
       undefined,
       undefined,
-      { limit: 200, cursor: "200" },
+      { limit: 50, cursor: "200" },
       expect.anything(),
     );
   });
@@ -401,6 +403,7 @@ describe("account recruiting reads", () => {
       actor,
       expect.anything(),
       expect.objectContaining({ shortlistedSince: "2026-10-01T00:00:00Z" }),
+      { summary: true },
     );
   });
   it("includes roleless reminders in global Tasks without leaking them into a filtered role", async () => {

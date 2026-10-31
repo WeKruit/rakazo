@@ -25,7 +25,9 @@ const allows = (permission: Source["assignments"][number], tool: string) =>
   permission.allowAllTools ||
   (Array.isArray(permission.allowedTools) && permission.allowedTools.includes(tool));
 // ponytail: a 30-second in-process cache bounds provider reads; permissions are checked before and after every use.
-const calendarCache = new Map<string, { expires: number; value: unknown }>();
+// The calendar is the account's, so every role of the account shares one read (and one failure)
+// instead of reading the same calendar again for each role.
+const calendarCache = new Map<string, { expires: number; value: Promise<unknown> }>();
 
 export async function refreshRecruitingCorrespondence(
   deps: {
@@ -92,7 +94,6 @@ export async function refreshRecruitingCorrespondence(
     const cacheKey = JSON.stringify([
       actor.userId,
       actor.spaceId,
-      permission.botId,
       source.id,
       source.revision,
       tool,
@@ -100,48 +101,60 @@ export async function refreshRecruitingCorrespondence(
     ]);
     const cached = scope.view === "interview" ? calendarCache.get(cacheKey) : undefined;
     if (cached && cached.expires > Date.now()) {
+      const value = await cached.value;
       await fence();
-      return cached.value;
+      return value;
     }
-    const context: AdapterContext = {
-      operationId: randomUUID(),
-      traceId: randomUUID(),
-      userId: actor.userId,
-      spaceId: actor.spaceId,
-      botId: permission.botId,
-      signal: deps.signal ?? AbortSignal.timeout(30_000),
-    };
-    let result: unknown;
-    for await (const event of deps.connectors.execute(
-      {
-        tool,
-        route: {
-          connectorId: "mcp",
-          resourceId: source.id,
-          resourceRevision: source.revision,
-          toolName: tool,
+    const read = async () => {
+      const context: AdapterContext = {
+        operationId: randomUUID(),
+        traceId: randomUUID(),
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        botId: permission.botId,
+        signal: deps.signal ?? AbortSignal.timeout(30_000),
+      };
+      let result: unknown;
+      for await (const event of deps.connectors.execute(
+        {
+          tool,
+          route: {
+            connectorId: "mcp",
+            resourceId: source.id,
+            resourceRevision: source.revision,
+            toolName: tool,
+          },
+          args,
+          executionId: randomUUID(),
         },
-        args,
-        executionId: randomUUID(),
-      },
-      context,
-    )) {
-      if (event.type === "error") throw new Error("Provider read failed");
-      if (event.type === "result") {
-        const raw = record(event.data);
-        if (raw?.isError || raw?.error) throw new Error("Provider read failed");
-        const structured = record(raw?.structuredContent);
-        result = structured?.result ?? mcpObject(event.data) ?? structured;
+        context,
+      )) {
+        if (event.type === "error") throw new Error("Provider read failed");
+        if (event.type === "result") {
+          const raw = record(event.data);
+          if (raw?.isError || raw?.error) throw new Error("Provider read failed");
+          const structured = record(raw?.structuredContent);
+          result = structured?.result ?? mcpObject(event.data) ?? structured;
+        }
       }
-    }
-    if (result === undefined) throw new Error("Provider returned no records");
-    await fence();
+      if (result === undefined) throw new Error("Provider returned no records");
+      return result;
+    };
+    const value = read();
     if (scope.view === "interview") {
-      for (const [key, value] of calendarCache)
-        if (value.expires <= Date.now()) calendarCache.delete(key);
+      for (const [key, entry] of calendarCache)
+        if (entry.expires <= Date.now()) calendarCache.delete(key);
       if (calendarCache.size >= 500) calendarCache.delete(calendarCache.keys().next().value!);
-      calendarCache.set(cacheKey, { expires: Date.now() + 30_000, value: result });
+      const entry = { expires: Date.now() + 30_000, value };
+      // A request that was closed must not hand its cancelled read to other requests.
+      value.catch(() => {
+        if (deps.signal?.aborted && calendarCache.get(cacheKey) === entry)
+          calendarCache.delete(cacheKey);
+      });
+      calendarCache.set(cacheKey, entry);
     }
+    const result = await value;
+    await fence();
     return result;
   };
   const emails = new Map(output.emails.map((email) => [email.id, email]));

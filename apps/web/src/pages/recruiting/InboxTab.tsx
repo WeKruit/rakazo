@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
+import type { RecruitingCorrespondence, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Badge, Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowLeft, BriefcaseBusiness, MapPin } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -40,6 +40,10 @@ export type RecruitingInboxEmail = Omit<CrmReplyDraftContext, "threadId" | "emai
     body: string;
     direction: Direction;
     partial: boolean;
+    imported?: true;
+    attachments?: RecruitingCorrespondence["emails"][number]["attachments"];
+    cc?: string[];
+    bcc?: string[];
     /** The provider email thread, distinct from the native chat thread. */
     threadId?: string | null;
     sourceId?: string;

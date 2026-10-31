@@ -20,7 +20,7 @@ import {
   listRoutinesDto,
 } from "@rakazo/db";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
-import type { RecruitingThreadTarget } from "./recruiting-reads.js";
+import type { CrmMembershipReads, RecruitingThreadTarget } from "./recruiting-reads.js";
 import {
   authenticated,
   getRecruitingCorrespondence,
@@ -67,10 +67,7 @@ export async function readRecruitingAccountView(
     };
     if (input.roleId && input.groupId) throw new ORPCError("BAD_REQUEST");
     if (input.groupId) {
-      const group = await createGroupRepos(deps.prisma).getGroupTarget(
-        actor,
-        input.groupId,
-      );
+      const group = await createGroupRepos(deps.prisma).getGroupTarget(actor, input.groupId);
       if (!group.thread) throw new ORPCError("NOT_FOUND");
       const role = await deps.prisma.recruitingRole.findFirst({
         where: {
@@ -103,19 +100,14 @@ export async function readRecruitingAccountView(
       throw new ORPCError("BAD_REQUEST");
     if (
       input.campaignLeadCursor &&
-      (!input.roleId ||
-        !input.campaignId ||
-        !input.campaignServerId ||
-        input.view !== "sequence")
+      (!input.roleId || !input.campaignId || !input.campaignServerId || input.view !== "sequence")
     )
       throw new ORPCError("BAD_REQUEST");
     const rows = await deps.prisma.recruitingRole.findMany({
       where: {
         ...scope,
         ...(input.roleId ? { id: input.roleId } : {}),
-        ...(input.cursor && input.view !== "routines"
-          ? { id: { gt: input.cursor } }
-          : {}),
+        ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
       },
       orderBy: { id: "asc" },
       take: input.limit + 1,
@@ -171,10 +163,10 @@ export async function readRecruitingAccountView(
         roles,
         items: [],
         routines,
-        nextCursor:
-          rows.length > input.limit ? (routines.at(-1)?.id ?? null) : null,
+        nextCursor: rows.length > input.limit ? (routines.at(-1)?.id ?? null) : null,
       });
     }
+    const crmMemberships: CrmMembershipReads = new Map();
     const readItem = async (
       row: (typeof page)[number],
     ): Promise<RecruitingAccountViewOutput["items"][number]> => {
@@ -183,10 +175,7 @@ export async function readRecruitingAccountView(
         throw new ORPCError("NOT_FOUND");
       const authorize = async (): Promise<RecruitingThreadTarget> => {
         if (thread.groupId) {
-          const group = await createGroupRepos(deps.prisma).getGroupTarget(
-            actor,
-            thread.groupId,
-          );
+          const group = await createGroupRepos(deps.prisma).getGroupTarget(actor, thread.groupId);
           if (group.thread?.id !== thread.id) throw new ORPCError("NOT_FOUND");
           return {
             kind: "group",
@@ -222,18 +211,14 @@ export async function readRecruitingAccountView(
           : null;
       const reads = {
         ...deps,
-        firstPartyMcpUrl:
-          deps.firstPartyMcpUrl ?? crmServer?.endpoint ?? undefined,
+        crmMemberships,
+        firstPartyMcpUrl: deps.firstPartyMcpUrl ?? crmServer?.endpoint ?? undefined,
         reauthorize: authorize,
       };
       const item: RecruitingAccountViewOutput["items"][number] = {
         roleId: row.id,
       };
-      if (
-        ["brief", "sequence", "inbox", "interview", "contacts"].includes(
-          input.view,
-        )
-      )
+      if (["brief", "sequence", "inbox", "interview", "contacts"].includes(input.view))
         item.workspace = {
           role: workspace.role,
           revision: workspace.revision,
@@ -259,9 +244,7 @@ export async function readRecruitingAccountView(
           {
             threadId: thread.id,
             limit: 50,
-            ...(input.itemCursor && input.view !== "inbox"
-              ? { cursor: input.itemCursor }
-              : {}),
+            ...(input.itemCursor && input.view !== "inbox" ? { cursor: input.itemCursor } : {}),
             ...(input.view === "shortlist"
               ? {
                   shortlistedOnly: true,
@@ -269,6 +252,8 @@ export async function readRecruitingAccountView(
                 }
               : {}),
           },
+          // These pages list names only, so a role's first CRM page is enough until "Load more".
+          { summary: !input.itemCursor || input.view === "inbox" },
         );
       if (input.view === "sequence" && input.campaignLeadCursor) {
         const campaign = await getRecruitingRoleCampaign(reads, actor, target, {
@@ -296,8 +281,7 @@ export async function readRecruitingAccountView(
               limit: 50,
               offset,
             });
-            if (campaigns.operation !== "roleCampaigns")
-              throw new ORPCError("SERVICE_UNAVAILABLE");
+            if (campaigns.operation !== "roleCampaigns") throw new ORPCError("SERVICE_UNAVAILABLE");
             for (const campaign of campaigns.items)
               item.campaigns.push(
                 await getRecruitingRoleCampaign(reads, actor, target, {
@@ -306,8 +290,7 @@ export async function readRecruitingAccountView(
                 }),
               );
             if (campaigns.nextOffset === null) break;
-            if (campaigns.nextOffset <= offset)
-              throw new ORPCError("SERVICE_UNAVAILABLE");
+            if (campaigns.nextOffset <= offset) throw new ORPCError("SERVICE_UNAVAILABLE");
             offset = campaigns.nextOffset;
           }
         } else if (item.campaign.campaign) item.campaigns.push(item.campaign);
@@ -333,21 +316,16 @@ export async function readRecruitingAccountView(
             typeof result.campaignId !== "string"
           )
             continue;
-          const serverId = key.slice(
-            "instantly-role-campaign:".length,
-            -`:${row.id}`.length,
-          );
+          const serverId = key.slice("instantly-role-campaign:".length, -`:${row.id}`.length);
           if (
             item.campaigns.some(
               (campaign) =>
-                campaign.serverId === serverId &&
-                campaign.campaign?.id === result.campaignId,
+                campaign.serverId === serverId && campaign.campaign?.id === result.campaignId,
             )
           )
             continue;
           const campaign =
-            serverId === item.campaign.serverId &&
-            result.campaignId === item.campaign.campaign?.id
+            serverId === item.campaign.serverId && result.campaignId === item.campaign.campaign?.id
               ? item.campaign
               : await getRecruitingRoleCampaign(reads, actor, target, {
                   serverId,
@@ -372,9 +350,9 @@ export async function readRecruitingAccountView(
               : undefined),
           deps.oauth,
           {
-            limit: 200,
-            ...(input.itemCursor &&
-            (input.view === "inbox" || input.view === "interview")
+            // The inbox shows its newest mail first and pages the rest.
+            limit: input.view === "inbox" ? 50 : 200,
+            ...(input.itemCursor && (input.view === "inbox" || input.view === "interview")
               ? { cursor: input.itemCursor }
               : {}),
           },
@@ -391,13 +369,9 @@ export async function readRecruitingAccountView(
         }
       }
       if (input.view === "interview")
-        item.scheduling = await listRecruitingSchedulingPlans(
-          deps.prisma,
-          actor,
-          {
-            threadId: thread.id,
-          },
-        );
+        item.scheduling = await listRecruitingSchedulingPlans(deps.prisma, actor, {
+          threadId: thread.id,
+        });
       if (input.view === "tasks")
         item.reminders = await listRecruitingReminders(deps.prisma, actor, {
           roleId: row.id,
@@ -409,30 +383,24 @@ export async function readRecruitingAccountView(
     const items: RecruitingAccountViewOutput["items"] = new Array(page.length);
     let next = 0;
     await Promise.all(
-      Array.from(
-        { length: Math.min(ROLE_READ_CONCURRENCY, page.length) },
-        async () => {
-          while (next < page.length) {
-            deps.signal?.throwIfAborted();
-            const index = next++;
-            items[index] = await readItem(page[index]!);
-          }
-        },
-      ),
+      Array.from({ length: Math.min(ROLE_READ_CONCURRENCY, page.length) }, async () => {
+        while (next < page.length) {
+          deps.signal?.throwIfAborted();
+          const index = next++;
+          items[index] = await readItem(page[index]!);
+        }
+      }),
     );
     const unassigned =
       input.view === "tasks" && !input.roleId
         ? await listRecruitingReminders(deps.prisma, actor, {})
         : undefined;
-    const unassignedItems = unassigned?.items.filter(
-      (item) => item.roleId === null,
-    );
+    const unassignedItems = unassigned?.items.filter((item) => item.roleId === null);
     const unassignedReminders = unassignedItems
       ? {
           items: unassignedItems,
           overdueCount: unassignedItems.filter(
-            (item) =>
-              item.status === "open" && Date.parse(item.dueAt) < Date.now(),
+            (item) => item.status === "open" && Date.parse(item.dueAt) < Date.now(),
           ).length,
         }
       : undefined;

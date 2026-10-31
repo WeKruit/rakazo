@@ -150,6 +150,59 @@ it("does not infer an empty candidate pool from a missing CRM binding", async ()
   expect(crmData).not.toHaveBeenCalled();
 });
 
+it("keeps imported candidate contact details out of lookup-only cards", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  const contact = {
+    candidateKey: "offscreen",
+    linkedinUrl: "https://linkedin.com/in/offscreen",
+    emails: [{ address: "imported@example.test", status: null }],
+    phones: [],
+    source: "Contact history",
+    checkedAt,
+    imported: true,
+  };
+  correspondence.mockResolvedValue({
+    ...savedCorrespondence,
+    contacts: [
+      contact,
+      {
+        ...contact,
+        candidateKey: "lookup-only",
+        imported: undefined,
+        linkedinUrl: "https://linkedin.com/in/lookup-only",
+        emails: [{ address: "lookup@example.test", status: null }],
+      },
+    ],
+  });
+  const view = await mount(<ContactsTab {...props} />);
+  expect(view.textContent).not.toContain("imported@example.test");
+  expect(view.textContent).toContain("lookup@example.test");
+});
+
+it("loads saved contacts beyond the first correspondence page", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  correspondence.mockImplementation(async ({ cursor }: { cursor?: string }) => ({
+    ...savedCorrespondence,
+    nextCursor: cursor ? null : "200",
+    partial: !cursor,
+    contacts: cursor
+      ? [
+          {
+            candidateKey: "later-person",
+            linkedinUrl: "https://linkedin.com/in/later-person",
+            emails: [{ address: "ada-later@example.test", status: null }],
+            phones: [],
+            source: "Contact history",
+            checkedAt,
+          },
+        ]
+      : [],
+  }));
+  const view = await mount(<ContactsTab {...props} />);
+  expect(correspondence).toHaveBeenCalledWith(expect.objectContaining({ cursor: "200" }));
+  expect(view.textContent).toContain("ada-later@example.test");
+});
+
 it("lists the role's CRM contacts with stage and saved email status", async () => {
   crmData.mockResolvedValue(candidatesPage);
   correspondence.mockResolvedValue({

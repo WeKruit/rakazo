@@ -8,6 +8,11 @@
       "types": "./src/index.ts",
       "development": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./test-support": {
+      "types": "./src/latest-rows.test-support.ts",
+      "development": "./src/latest-rows.test-support.ts",
+      "default": "./src/latest-rows.test-support.ts"
     }
   },
   "scripts": {

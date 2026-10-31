@@ -56,7 +56,10 @@ describe("people-search agent runs", () => {
         ),
       },
       run: {
-        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId } })),
+        findFirst: vi.fn(async () => ({
+          threadId: "thread-1",
+          thread: { activeRecruitingRoleId: roleId },
+        })),
       },
       recruitingCandidate: {
         findMany: vi.fn(async () => [
@@ -166,6 +169,56 @@ describe("people-search agent runs", () => {
       "Partial",
       "Uncertain",
     ]);
+  });
+
+  it("reads an earlier grading run of the same people instead of paying again", async () => {
+    const people = [
+      { name: "A", linkedin_url: "https://www.linkedin.com/in/a/" },
+      { name: "B", linkedin_url: "https://linkedin.com/in/b" },
+    ];
+    const effect = (args: Record<string, unknown>, body: Record<string, unknown>) => ({
+      request: ["__rakazoCatalogTool", "direct", { route, args }],
+      result: { content: [{ type: "text", text: JSON.stringify(body) }] },
+    });
+    const graded = effect(
+      { query: "Grade", input: { data: [...people].reverse() } },
+      { id: "agent_run_graded", status: "running" },
+    );
+    const db = fixture();
+    db.externalEffect.findMany.mockImplementation(async () => [graded] as never);
+    await expect(
+      prepare(db, {
+        query: "Grade again",
+        input: {
+          data: [
+            { name: "B", linkedin_url: "https://www.linkedin.com/in/b" },
+            { name: "A", linkedin_url: "https://www.linkedin.com/in/a" },
+          ],
+        },
+      }),
+    ).resolves.toEqual({ runId: "agent_run_graded" });
+    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          run: { spaceId: "space", userId: "owner", threadId: "thread-1" },
+          createdAt: { gte: expect.any(Date) },
+        }),
+      }),
+    );
+    // Other people, or a run that failed, are graded anew.
+    await expect(
+      prepare(db, { query: "Grade", input: { data: people.slice(0, 1) } }),
+    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
+    db.externalEffect.findMany.mockImplementation(
+      async () =>
+        [
+          graded,
+          effect({ runId: "agent_run_graded" }, { id: "agent_run_graded", status: "failed" }),
+        ] as never,
+    );
+    await expect(prepare(db, { query: "Grade", input: { data: people } })).resolves.toMatchObject({
+      outputSchema: AGENT_RUN_GRADE_SCHEMA,
+    });
   });
 
   it("reads a finished grading run's rows as a page", () => {

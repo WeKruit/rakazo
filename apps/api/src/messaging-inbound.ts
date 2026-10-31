@@ -29,6 +29,7 @@ import {
   inboundEventName,
   loadMessageRoutineDelivery,
   messagingWakeIdempotencyKey,
+  routinesMatchingEvent,
 } from "./webhook-inbound.js";
 
 export interface MessagingInboundDeps {
@@ -199,7 +200,7 @@ export async function wakeMessageRoutines(
   const saved = options?.externalMessageId
     ? await loadMessageRoutineDelivery(deps.prisma, nativeTarget, key)
     : null;
-  const routines = await deps.prisma.routine.findMany({
+  const candidates = await deps.prisma.routine.findMany({
     where: {
       botId: target.botId,
       spaceId: target.spaceId,
@@ -216,9 +217,24 @@ export async function wakeMessageRoutines(
       modelProvider: true,
       modelId: true,
       thinkingLevel: true,
+      condition: true,
     },
     orderBy: { updatedAt: "desc" },
   });
+  // A saved delivery already chose its routines; a new one keeps those whose condition holds.
+  const routines = saved
+    ? candidates
+    : routinesMatchingEvent(candidates, {
+        source: "message",
+        event: {
+          provider: event.provider,
+          kind: event.isDirect ? "direct" : "channel",
+          from: event.from,
+          fromLabel: event.fromLabel,
+          channelName: event.channelName,
+          content: event.content,
+        },
+      });
   if (routines.length === 0 && !saved) return false;
 
   const provider = inboundEventName(event.provider);

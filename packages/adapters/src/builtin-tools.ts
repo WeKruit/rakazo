@@ -333,7 +333,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "shell",
     description:
-      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python.",
+      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python. A replacement computer keeps your files but not installed packages; put install commands in .rakazo/setup.sh at the workspace root and they run again on every new computer.",
     inputSchema: {
       type: "object",
       properties: {
@@ -447,6 +447,17 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       "Make an authenticated HTTPS request using a saved credential name. The backend injects authentication only at its saved origin. Redirects are rejected; response echoes of the credential are redacted. Use normal request URLs and bodies without secret placeholders.",
     inputSchema: z.toJSONSchema(SecretHttpRequest, { io: "input" }),
+  },
+  {
+    name: "allow_computer_site",
+    description:
+      "Ask the person to let your computer reach one more site. Your computer can reach only the sites they allowed; use this after a command or page on your computer could not connect to a site the work needs. Name the site and why.",
+    inputSchema: z.toJSONSchema(
+      z.object({
+        site: z.string().min(1).max(253).describe("Host name, for example pypi.org"),
+        reason: z.string().min(1).max(300),
+      }),
+    ),
   },
   {
     name: "forget_secret",
@@ -592,6 +603,7 @@ export const builtinAgentTools: ConnectorTool[] = [
       'Record the exact ten saved people a calibration round shows the recruiter: {operation:"calibration_round",expectedRoleRevision,candidateKeys:[10 saved candidateKeys]}. Call it right before presenting the round, then end the turn with one ask_user card offering the next step (find 150 similar people, prepare the email campaign, adjust another round). After the first round every person must be new (returned after the previous round and never shown); otherwise it is refused and you run a new, differently worded quick search. Internal record keeping, no approval. ' +
       'When fewer than ten saved people fit and you are about to search again, show the ones that fit in chat first: {operation:"show_picks",candidateKeys:[1-9 saved candidateKeys, best first]}, in the same step as the new searches; it records nothing, and the later calibration_round starts with the same people in the same order. ' +
       'Save the people this run\'s people searches returned (search previews or fetched records) as one unassessed page on the current role: {operation:"save_search",expectedRoleRevision}. It reads only completed connector calls of this same run, keeps people with a name and LinkedIn profile, dedups by LinkedIn and returns candidateRows with candidateKey, name, title, company, location and alreadyInPool. Use it for calibration rounds right after the search, then pick ten for calibration_round. Internal record keeping, no approval. ' +
+      'Save your own grades for people already saved in the current role, judged from each person\'s full public profile: {operation:"save_grades",expectedRoleRevision,rows:[{name,linkedin_url,current_title?,current_company?,location?,education?,match_score 0-100,match_tier Strong|Promising|Partial|Uncertain,fit_reasons,concerns[],requirements_assessment:[{requirement,status met|not_met|unknown,evidence}]}]} (up to 20 rows). Only people already in Results; anyone else is refused. Internal record keeping, no approval. ' +
       'Import a recruiter-supplied candidate list (a text/csv artifact) into the current role pool: {operation:"import_csv",roleId,expectedRoleRevision,artifactId,mapping:{name:<column>,linkedinUrl?,company?,title?,location?,resumeUrl?}} using exact header names from artifact_read csv:true. Rows are saved unassessed with LinkedIn dedup; rows with neither name nor LinkedIn are skipped and reported; truncated is reported. Internal record keeping, no approval. ' +
       'Optionally save a real native candidate page to the current role Dashboard after get_rows: {operation:"save_results",expectedRoleRevision,providerTaskId,cursor:null} (or the exact cursor used). It uses the latest matching completed get_rows receipt in the same run and takes the connection from that receipt; no internal connection ID is required. Optional mcpServerId narrows to a specific known connection. It never starts or continues research. Saving reads the complete retained provider receipt, even when its model-facing excerpt is contextTruncated; do not reconstruct or omit rows from that excerpt. Use the returned outputArtifact with artifact_read jsonPath to read exact candidate evidence strings from the retained response shape, including a cell value key when present. Embedded JD text is not candidate evidence; provider reports remain provider_report. Return candidate columns name, linkedin_url, current_title, current_company, location, resume_url and evidence_urls from Autumn; keep missing values null and additional evidence columns unchanged. Company/JD evidence is not a candidate page. Saving preserves every row, including unassessed or incomplete people, and returns candidateRows with stable candidateKey and rowIndex plus the full source outputArtifact for artifact_read. Use those exact identities for subsequent assessment; never fabricate people or sources. ' +
       'Research itself uses the research provider\'s own research and reply tools directly. status and rows read an older saved research task by its local taskId: {operation:"status",taskId} or {operation:"rows",taskId,limit?,cursor?}; pass returned cursors unchanged. Queued or accepted does not mean completed.',

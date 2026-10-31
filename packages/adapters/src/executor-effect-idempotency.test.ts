@@ -5430,6 +5430,7 @@ describe("native recruiting assessment effect delivery", () => {
     expect([...REVISIONED_RESEARCH_OPERATIONS].sort()).toEqual([
       "calibration_round",
       "import_csv",
+      "save_grades",
       "save_results",
       "save_search",
     ]);

@@ -22,6 +22,7 @@ export type ActivityItem = {
   | { kind: "sent" | "received" | "email" | "scheduled"; subject: string | null }
   | { kind: "queued" | "failed"; preview: string }
   | { kind: "status"; status: Workflow }
+  | { kind: "change"; label: string; before: string | null; after: string | null }
   | { kind: "highSignal" }
   | { kind: "review"; result: ReviewResult | null; notes: string | null }
 );
@@ -48,6 +49,8 @@ export function buildActivity({
   crmRoleId,
   saved,
   views,
+  candidateKey,
+  history,
 }: {
   email?: string | null;
   mail?: MailPage;
@@ -57,6 +60,8 @@ export function buildActivity({
   crmRoleId?: string | null;
   saved?: readonly SavedEmail[];
   views?: readonly RecruitingProfileView[];
+  candidateKey?: string;
+  history?: RecruitingCorrespondence["history"];
 }): ActivityItem[] {
   const address = email?.trim().toLowerCase() ?? "";
   const items: ActivityItem[] = (views ?? []).map((view) => ({
@@ -68,6 +73,19 @@ export function buildActivity({
     kind: "viewed",
   }));
   const messages = new Set<string>();
+  for (const change of history ?? []) {
+    if (!candidateKey || change.candidateKey !== candidateKey) continue;
+    items.push({
+      id: `import:${change.id}`,
+      at: change.at,
+      actor: null,
+      source: "status",
+      kind: "change",
+      label: change.label,
+      before: change.before,
+      after: change.after,
+    });
+  }
   const addEmail = (
     providerMessageId: string | null,
     item: Extract<ActivityItem, { subject: string | null }>,
@@ -113,9 +131,11 @@ export function buildActivity({
         item.direction === "sent" ? "sent" : item.direction === "received" ? "received" : "email",
     });
   for (const item of saved ?? []) {
-    const kind = direction(item.sender, item.recipients);
-    // A saved mailbox read belongs to this person only when it names their address.
-    if (kind === "email") continue;
+    let kind = direction(item.sender, item.recipients);
+    if (item.imported && item.candidateKey) {
+      if (item.candidateKey !== candidateKey) continue;
+      kind = item.direction === "sent" || item.direction === "received" ? item.direction : "email";
+    } else if (kind === "email") continue;
     addEmail(item.providerMessageId, {
       id: `saved:${item.id}`,
       at: date(item.date),
