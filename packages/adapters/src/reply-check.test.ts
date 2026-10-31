@@ -144,6 +144,17 @@ describe("every message gets a reply", () => {
       },
     ],
     [
+      "the person stopped this turn only",
+      {
+        latest: {
+          role: "user",
+          sourceRuns: [
+            { botId: "main", trigger: "user", status: "cancelled", error: "turn_stopped" },
+          ],
+        },
+      },
+    ],
+    [
       "the person stopped the turn that took their message",
       {
         latest: {
