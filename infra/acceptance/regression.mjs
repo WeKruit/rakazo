@@ -428,12 +428,32 @@ async function stage(name, body) {
   if (cleaning) return;
   const failures = [];
   const at = Date.now();
+  const before = ownCopies();
   log(`${name}: start`);
   try {
     await body(failures);
   } catch (error) {
     failures.push(`error: ${error.message}`);
   }
+  // Archived copies cannot be read back, so a failed case keeps its chat and events for diagnosis.
+  if (failures.length)
+    for (const groupId of ownCopies().difference(before)) {
+      try {
+        const chat = (await messagesOf(groupId))
+          .map(
+            (message) =>
+              `#${message.seq} ${message.createdAt} [${message.role}] ${botText(message)}`,
+          )
+          .join("\n\n");
+        fs.writeFileSync(path.join(OUT, `${name}-${groupId}.chat.txt`), `${chat}\n`);
+        fs.writeFileSync(
+          path.join(OUT, `${name}-${groupId}.events.json`),
+          JSON.stringify(await readEvents(groupId), null, 1),
+        );
+      } catch (error) {
+        log(`${name}: could not save the chat of ${groupId}: ${error.message}`);
+      }
+    }
   const result = {
     name,
     pass: failures.length === 0,
