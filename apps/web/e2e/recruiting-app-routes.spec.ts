@@ -413,3 +413,40 @@ for (const width of [1440, 390]) {
     expect(fixture.unknown).toEqual([]);
   });
 }
+
+test("candidate detail takes the chat pane and keeps the unsent draft", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
+  const fixture = await mockRecruitingApp(page);
+  await page.goto(`/app/g/${appGroupId}?view=contacts`);
+  await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
+  const chat = page.getByRole("region", { name: "Role conversation", exact: true });
+  const composer = chat.locator('textarea[name="chat-message"]');
+  const draft = "Keep this unsent note.";
+  await composer.fill(draft);
+  await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
+  await capture(page, testInfo, "three-pane-chat");
+
+  const panel = page.getByTestId("recruiting-detail-panel");
+  const person = page.getByRole("button", { name: "Avery Example", exact: true }).first();
+  await person.click();
+  await expect(panel.getByRole("heading", { name: "Avery Example", exact: true })).toBeVisible();
+  await expect(chat).toBeHidden();
+  await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
+  await capture(page, testInfo, "three-pane-detail");
+
+  await panel.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(chat).toBeVisible();
+  await expect(composer).toHaveValue(draft);
+
+  await person.click();
+  await expect(panel).toBeVisible();
+  await page.getByRole("button", { name: "Open role chat", exact: true }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(chat).toBeVisible();
+  await expect(composer).toHaveValue(draft);
+  expect(fixture.unknown).toEqual([]);
+});

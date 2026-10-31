@@ -194,6 +194,10 @@ msgstr "已确认，正在扩大搜索。"
 msgid "Access token"
 msgstr "访问令牌"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Accounts"
+msgstr "账号"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr "操作"
@@ -261,6 +265,14 @@ msgstr "Agent"
 msgid "Agent computer"
 msgstr "Agent 电脑"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All account totals"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All accounts"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All internal assessments"
 msgstr "全部内部评估"
@@ -284,6 +296,10 @@ msgstr "全部轮次"
 #: src/pages/recruiting/InboxTab.tsx
 msgid "All statuses"
 msgstr "全部状态"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All time"
+msgstr "全部时间"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Allow writing"
@@ -372,6 +388,15 @@ msgstr "可用时间"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Avatar Studio"
 msgstr "头像工作室"
+
+#. placeholder {0}: model.unit
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / {0}"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / 1M tokens"
+msgstr ""
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Avg tenure"
@@ -465,6 +490,22 @@ msgstr "大脑名称"
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Browser"
 msgstr "浏览器"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "By vendor"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache read"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write (1h)"
+msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Calibration round"
@@ -799,6 +840,10 @@ msgstr "复制"
 msgid "Copy .env example"
 msgstr "复制 .env 示例"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cost"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
 msgstr "无法检查已存储的凭据。"
@@ -889,6 +934,10 @@ msgstr "无法加载联系方式"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "无法加载集成"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Could not load internal costs"
+msgstr ""
 
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Could not load notes."
@@ -1050,6 +1099,14 @@ msgstr "创建提醒"
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
 msgstr "创建你的 WeKruit Headhunter 账号"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "credits"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Credits"
+msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1512,6 +1569,10 @@ msgstr "审核中"
 msgid "Inbox"
 msgstr "收件箱"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Input"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "输入"
@@ -1645,6 +1706,10 @@ msgstr "加载更早的消息"
 #: src/pages/recruiting/shared.tsx
 msgid "Load more"
 msgstr "加载更多"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Loading costs…"
+msgstr ""
 
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
@@ -1884,6 +1949,10 @@ msgstr "新岗位"
 msgid "Next: {0}"
 msgstr "下一步：{0}"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No accounts"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No apps found"
 msgstr "未找到应用"
@@ -1903,10 +1972,6 @@ msgstr "暂无助手"
 #: src/pages/shell/bot-picker.tsx
 msgid "No bots match"
 msgstr "没有匹配的助手"
-
-#: src/pages/recruiting/shared.tsx
-msgid "No candidate records for this role yet."
-msgstr "这个岗位还没有候选人记录。"
 
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InboxTab.tsx
@@ -1937,6 +2002,10 @@ msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr "没有已加载的候选人符合这个日期筛选。"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No matching accounts"
+msgstr ""
 
 #: src/components/StageTranscript.tsx
 msgid "No messages yet."
@@ -1999,6 +2068,10 @@ msgstr "无主题"
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No supporting detail in the saved profile."
 msgstr "已保存的档案中没有支持该技能的详细信息。"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No usage yet"
+msgstr ""
 
 #: src/lib/ticket-priority.ts
 msgid "Normal"
@@ -2130,6 +2203,10 @@ msgstr "原收件人：{0}"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Original sender: {0}"
 msgstr "原发件人：{0}"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Output"
+msgstr "输出"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -2283,6 +2360,10 @@ msgstr "原因"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason: {name}"
 msgstr "原因：{name}"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Reasoning"
+msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Recall and write"
@@ -2556,6 +2637,7 @@ msgstr "简历：{0}"
 #: src/components/BackgroundTasks.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
 msgstr "重试"
@@ -2705,6 +2787,10 @@ msgstr "已安排"
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Search"
 msgstr "搜索"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Search accounts"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search apps"
@@ -3183,6 +3269,10 @@ msgstr "这个文件不是有效的 UTF-8 文本。"
 msgid "This filter belongs to another role."
 msgstr "这个筛选属于另一个岗位。"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "This month"
+msgstr "本月"
+
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."
 msgstr "此操作将永久删除您的账户和数据。"
@@ -3232,9 +3322,17 @@ msgstr "至:"
 msgid "Today"
 msgstr "今天"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Tokens"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
 msgstr "总工作年限"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Total tokens"
+msgstr ""
 
 #: src/components/RunTrace.tsx
 msgid "Trace unavailable"
@@ -3286,6 +3384,10 @@ msgstr "取消静音"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Unnamed candidate"
 msgstr "未命名候选人"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Unpriced usage"
+msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
@@ -3350,6 +3452,7 @@ msgstr "上传"
 msgid "Urgent"
 msgstr "紧急"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Usage"
 msgstr "用量"

@@ -194,6 +194,10 @@ msgstr ""
 msgid "Access token"
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Accounts"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr ""
@@ -261,6 +265,14 @@ msgstr ""
 msgid "Agent computer"
 msgstr "Computador do agente"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All account totals"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All accounts"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All internal assessments"
 msgstr ""
@@ -283,6 +295,10 @@ msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "All statuses"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All time"
 msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -372,6 +388,15 @@ msgstr ""
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Avatar Studio"
 msgstr "Estúdio de avatar"
+
+#. placeholder {0}: model.unit
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / {0}"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / 1M tokens"
+msgstr ""
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Avg tenure"
@@ -464,6 +489,22 @@ msgstr ""
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Browser"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "By vendor"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache read"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write (1h)"
 msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -799,6 +840,10 @@ msgstr "Copiar"
 msgid "Copy .env example"
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cost"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
 msgstr "Não foi possível verificar as credenciais armazenadas."
@@ -889,6 +934,10 @@ msgstr ""
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "Não foi possível carregar as integrações"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Could not load internal costs"
+msgstr ""
 
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Could not load notes."
@@ -1049,6 +1098,14 @@ msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "credits"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Credits"
 msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
@@ -1512,6 +1569,10 @@ msgstr ""
 msgid "Inbox"
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Input"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "Entradas"
@@ -1644,6 +1705,10 @@ msgstr "Carregar mensagens anteriores..."
 
 #: src/pages/recruiting/shared.tsx
 msgid "Load more"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Loading costs…"
 msgstr ""
 
 #: src/components/ArtifactFileCard.tsx
@@ -1884,6 +1949,10 @@ msgstr ""
 msgid "Next: {0}"
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No accounts"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No apps found"
 msgstr ""
@@ -1902,10 +1971,6 @@ msgstr ""
 
 #: src/pages/shell/bot-picker.tsx
 msgid "No bots match"
-msgstr ""
-
-#: src/pages/recruiting/shared.tsx
-msgid "No candidate records for this role yet."
 msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
@@ -1936,6 +2001,10 @@ msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No matching accounts"
 msgstr ""
 
 #: src/components/StageTranscript.tsx
@@ -1998,6 +2067,10 @@ msgstr ""
 
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No supporting detail in the saved profile."
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No usage yet"
 msgstr ""
 
 #: src/lib/ticket-priority.ts
@@ -2129,6 +2202,10 @@ msgstr ""
 #. placeholder {0}: draft.email.sender
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Original sender: {0}"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Output"
 msgstr ""
 
 #: src/pages/recruiting/CrmWorkbench.tsx
@@ -2282,6 +2359,10 @@ msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason: {name}"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Reasoning"
 msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -2556,6 +2637,7 @@ msgstr ""
 #: src/components/BackgroundTasks.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
 msgstr "Tentar novamente"
@@ -2705,6 +2787,10 @@ msgstr ""
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Search"
 msgstr "Pesquisar"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Search accounts"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search apps"
@@ -3183,6 +3269,10 @@ msgstr ""
 msgid "This filter belongs to another role."
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "This month"
+msgstr ""
+
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."
 msgstr "Isso exclui permanentemente sua conta e seus dados."
@@ -3232,8 +3322,16 @@ msgstr "Para:"
 msgid "Today"
 msgstr "Hoje"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Tokens"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Total tokens"
 msgstr ""
 
 #: src/components/RunTrace.tsx
@@ -3285,6 +3383,10 @@ msgstr "Reativar som"
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Unnamed candidate"
+msgstr ""
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Unpriced usage"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -3350,6 +3452,7 @@ msgstr "Enviar"
 msgid "Urgent"
 msgstr ""
 
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Usage"
 msgstr "Uso"

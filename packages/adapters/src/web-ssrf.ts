@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { readBoundedResponseBytes } from "@rakazo/core";
+import { getLogger } from "@rakazo/logging";
 import { Agent } from "undici";
 import {
   createAddressCheckedLookup,
@@ -170,22 +171,30 @@ async function followRedirects(
   if (state.signal.aborted) {
     throw abortError(state.signal);
   }
-  const validated = await assertSafeWebUrl(rawUrl, state.resolve, state.signal, state.allowedPorts);
+  let validated: URL;
+  try {
+    validated = await assertSafeWebUrl(rawUrl, state.resolve, state.signal, state.allowedPorts);
+  } catch (error) {
+    if (!state.signal.aborted) auditEgressDenied(rawUrl, error);
+    throw error;
+  }
+  const headers = {
+    "user-agent": state.userAgent,
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+    ...state.headers,
+  };
   // Race fetch against the deadline — injected fetch may ignore init.signal.
   const response = await withAbort(
     state.baseFetch(validated.href, {
       method: "GET",
       redirect: "manual",
       signal: state.signal,
-      headers: {
-        "user-agent": state.userAgent,
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
-        ...state.headers,
-      },
+      headers,
       dispatcher: state.dispatcher,
     } as RequestInit & { dispatcher: Agent }),
     state.signal,
   );
+  auditEgress(validated, "GET", Object.keys(headers), response.status);
 
   if (response.status >= 300 && response.status < 400) {
     if (state.redirectsRemaining <= 0) {
@@ -224,6 +233,33 @@ async function followRedirects(
     : await readBodyCapped(response, state.maxBytes, state.signal);
 
   return { url: validated.href, body, contentType: response.headers.get("content-type") };
+}
+
+/**
+ * One audit line per outbound hop: host, method, status and the names of the headers sent.
+ * Header values, paths and query strings never reach the log, since they can carry credentials.
+ */
+export function auditEgress(url: URL, method: string, headerNames: string[], status: number) {
+  getLogger().info("egress.request", {
+    host: url.host,
+    method,
+    status,
+    headerNames: [...new Set(headerNames.map((name) => name.toLowerCase()))].sort(),
+  });
+}
+
+/** A refused outbound request, counted for the security view; the reason names no secret. */
+export function auditEgressDenied(rawUrl: string, error: unknown) {
+  let host = "invalid";
+  try {
+    host = new URL(rawUrl).host || "invalid";
+  } catch {
+    // An unparsable URL is logged as "invalid".
+  }
+  getLogger().warn("egress.denied", {
+    host,
+    reason: error instanceof Error ? error.message : "refused",
+  });
 }
 
 async function cancelResponseBody(response: Response, signal: AbortSignal): Promise<void> {

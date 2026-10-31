@@ -28,9 +28,11 @@ import {
   finalizeRun,
   followSidebar,
   followThreadEvents,
+  MAX_PENDING_TRANSIENTS,
   pauseRunForInput,
   pauseRunForTakeover,
   publishTransientThreadEvent,
+  queueTransient,
   sendUserMessage,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
@@ -1167,6 +1169,44 @@ describe("finalizeRun", () => {
       where: { id: { in: ["steer-channel"] }, runId: null },
       data: { runId: "run-reply", claimedAt: null },
     });
+  });
+});
+
+describe("queueTransient", () => {
+  const progress = (payload: Record<string, unknown>) => ({
+    id: "live",
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+    seq: 0,
+    type: "thread.progress" as const,
+    createdAt: new Date(0).toISOString(),
+    payload,
+  });
+
+  it("stays bounded for a slow reader and keeps streamed text whole", () => {
+    const queue = [progress({ text: "Hel", streaming: true })];
+    for (let index = 2; index < MAX_PENDING_TRANSIENTS; index += 1) {
+      queue.push(progress({ text: "Searching", activity: true }));
+    }
+    queue.push(progress({ text: "Saved", streaming: true }));
+    queueTransient(queue, progress({ delta: "lo", streaming: true }));
+    queueTransient(queue, progress({ delta: "!", streaming: true }));
+
+    expect(queue).toHaveLength(MAX_PENDING_TRANSIENTS);
+    expect(queue.at(-1)?.payload.text).toBe("Savedlo!");
+  });
+
+  it("replaces the oldest preview when the new event cannot be merged", () => {
+    const queue = Array.from({ length: MAX_PENDING_TRANSIENTS }, (_, index) =>
+      progress({ text: `step ${index}`, activity: true }),
+    );
+    queueTransient(queue, progress({ text: "latest", activity: true }));
+
+    expect(queue).toHaveLength(MAX_PENDING_TRANSIENTS);
+    expect(queue[0]?.payload.text).toBe("step 1");
+    expect(queue.at(-1)?.payload.text).toBe("latest");
   });
 });
 
@@ -5276,6 +5316,21 @@ describe("appendEventsInTransaction", () => {
       ]),
     ).rejects.toThrow(/one thread/);
     expect(await appendEventsInTransaction(tx as never, [])).toEqual([]);
+  });
+
+  it("raises an alert when a seq collides, then still fails the write", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    const { tx } = countingTx();
+    const conflict = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    tx.event.createMany.mockRejectedValueOnce(conflict);
+    await expect(
+      appendEventsInTransaction(tx as never, [
+        { ...base, type: "thread.progress", payload: {} },
+        { ...base, type: "run.completed", payload: {} },
+      ]),
+    ).rejects.toBe(conflict);
+    expect(sink.events.map((entry) => entry.message)).toContain("event.seq.conflict");
   });
 
   it.each([false, true])(

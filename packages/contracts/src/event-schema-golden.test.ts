@@ -1,12 +1,22 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { MessageBlock, ProductEventType } from "./events.js";
+import {
+  EVENT_FORMAT_VERSION,
+  MessageBlock,
+  PRODUCT_EVENT_PAYLOAD_SCHEMAS,
+  ProductEventType,
+} from "./events.js";
 
 // Messages and events are stored forever and replayed into every later run. A change to their
-// shape must keep old rows readable: when this hash changes, check that rows written before the
-// change still parse (add them to OLD_ROWS), then update the hash.
-const GOLDEN = "085f3288cbb63090f3a066df1cd15d1abb091e18b9a6096b26e5a0fe7be0cc12";
+// shape must keep old rows readable: when the hash changes, check that rows written before the
+// change still parse (add them to OLD_ROWS), bump EVENT_FORMAT_VERSION and add its hash here.
+// Earlier versions stay listed so a hash can never be reused under a new number.
+const GOLDEN_BY_VERSION: Record<number, string> = {
+  1: "086577d14d7f578e997849d69416dfb8f7d0282c59cfbcf192e2a77c28f047fa",
+  // The stop line's meta block gained an optional resume flag.
+  2: "5c0f6351cc16f64ca7fc0d7cabd44b8de5527e091acb0ab7b22f5a94b3c7bf5f",
+};
 
 const OLD_ROWS: unknown[] = [
   { kind: "text", text: "Found ten people for the role." },
@@ -27,12 +37,22 @@ const OLD_ROWS: unknown[] = [
 ];
 
 describe("stored event shapes", () => {
-  it("match the reviewed schema", () => {
+  it("match the reviewed schema of the current format version", () => {
+    const payloads = Object.fromEntries(
+      Object.entries(PRODUCT_EVENT_PAYLOAD_SCHEMAS)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([type, schema]) => [type, z.toJSONSchema(schema, { io: "input" })]),
+    );
     const schema = JSON.stringify({
       blocks: z.toJSONSchema(MessageBlock, { io: "input" }),
       events: ProductEventType.options,
+      payloads,
     });
-    expect(createHash("sha256").update(schema).digest("hex")).toBe(GOLDEN);
+    const hash = createHash("sha256").update(schema).digest("hex");
+    expect(Math.max(...Object.keys(GOLDEN_BY_VERSION).map(Number))).toBe(EVENT_FORMAT_VERSION);
+    expect(hash, "event format changed: bump EVENT_FORMAT_VERSION").toBe(
+      GOLDEN_BY_VERSION[EVENT_FORMAT_VERSION],
+    );
   });
 
   it.each(OLD_ROWS)("still read a row written before the last change: %j", (row) => {

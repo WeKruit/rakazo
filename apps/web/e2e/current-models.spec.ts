@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
+
+// Models, Voice and Updates settings are only shown to the deployment owner.
+test.beforeEach(({ page }) => setDeploymentOwner(page, true));
 
 test("current subscription models appear in the picker", async ({ page }, testInfo) => {
   await signup(page, `current-models-${Date.now()}@rakazo.test`, "password12", "Model Picker");

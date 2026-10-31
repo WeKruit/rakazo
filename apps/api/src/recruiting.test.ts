@@ -5844,6 +5844,46 @@ describe("live CRM browser reads", () => {
     await expect(page({ limit: 51 })).rejects.toThrow();
     await expect(page({ cursor: "01" })).rejects.toThrow();
   });
+  it("reads every candidate page of a role while checking the role binding once", async () => {
+    const f = browserFixture();
+    const row = f.results.list_crm_candidates.rows[0]!;
+    const ids = [1, 2, 3, 4, 5].map((n) => `${String(n).repeat(8)}-1111-4111-8111-111111111111`);
+    f.execute.mockImplementation(async function* (call) {
+      const data =
+        call.route?.toolName === "list_crm_candidates"
+          ? {
+              total: ids.length,
+              rows: ids
+                .slice(
+                  call.args.p_offset as number,
+                  (call.args.p_offset as number) + (call.args.p_limit as number),
+                )
+                .map((candidate_id) => ({ ...row, candidate_id })),
+            }
+          : f.results[call.route!.toolName];
+      yield { type: "result" as const, data: { structuredContent: { data } } };
+    });
+    const all = await api.getRecruitingCrmData(
+      f.deps,
+      actor,
+      target,
+      {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId: roleId,
+        limit: 2,
+      },
+      { allPages: true },
+    );
+    expect(all).toMatchObject({ total: 5, offset: 0, nextOffset: null });
+    expect("items" in all && all.items.map((item) => item.candidateId)).toEqual(ids);
+    const tools = f.execute.mock.calls.map(([call]) => call.route!.toolName);
+    expect(tools.filter((tool) => tool === "list_crm_candidates")).toHaveLength(3);
+    for (const tool of ["list_crm_memberships", "list_crm_roles", "get_crm_role"])
+      expect(tools.filter((name) => name === tool)).toHaveLength(1);
+  });
   it("discovers only assigned first-party sources and returns actual stored correspondence identities", async () => {
     const f = browserFixture();
     expect(
