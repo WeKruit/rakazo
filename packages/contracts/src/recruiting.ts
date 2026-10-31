@@ -1070,7 +1070,15 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
           });
       }),
     unverified: z
-      .record(RecruitingId, z.string().trim().min(1).max(160))
+      .record(
+        RecruitingId,
+        // A long note keeps its start instead of refusing the round.
+        z
+          .string()
+          .trim()
+          .min(1)
+          .transform((text) => (text.length > 160 ? `${text.slice(0, 159).trimEnd()}…` : text)),
+      )
       .optional()
       .describe(
         "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
