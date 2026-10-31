@@ -1166,7 +1166,11 @@ export const newerRequestElsewhere = (text: string) =>
   `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of what it did; do not act on, mention or answer the newer message, and do not say that anything was not run.`;
 /** Model-facing: a backgrounded turn must not question the person after they moved on. */
 export const askAfterNewerMessage = (text: string) =>
-  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user and end the turn.`;
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user, without mentioning or answering that message, then end the turn with an empty reply.`;
+
+/** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
+export const STEERING_ACK =
+  "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it.";
 
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
@@ -3704,6 +3708,14 @@ export async function appendUsageTimingAudit(
   } catch {
     getLogger().warn("model timing audit append failed");
   }
+}
+
+/** The chat a run belongs to was deleted or archived, so no retry can find it again. */
+async function chatGone(prisma: Pick<PrismaClient, "thread">, threadId: string): Promise<boolean> {
+  const thread = await prisma.thread
+    .findFirst({ where: { id: threadId }, select: { group: { select: { archivedAt: true } } } })
+    .catch(() => undefined);
+  return thread === null || Boolean(thread?.group?.archivedAt);
 }
 
 export async function appendToolCompletionAudit(
@@ -13434,6 +13446,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                 )
                                   ? nativeMessageSourceInstruction(item.messageId, item.blocks)
                                   : undefined,
+                                item === humanSteering ? STEERING_ACK : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
@@ -14497,7 +14510,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         // A thread, role or member that is gone (an archived chat) never comes back on a retry,
         // so the turn ends instead of staying queued and retried forever.
-        if (!retryForever && leaseValid && setupError instanceof IsolationError) {
+        if (
+          !retryForever &&
+          leaseValid &&
+          setupError instanceof IsolationError &&
+          (await chatGone(deps.prisma, run.threadId))
+        ) {
           await deps.events.finalizeRun({
             spaceId: run.spaceId,
             threadId: run.threadId,

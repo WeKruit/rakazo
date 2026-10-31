@@ -60,6 +60,7 @@ import {
   pastedJobTitle,
   REVISIONED_RESEARCH_OPERATIONS,
   resumeBriefForRun,
+  STEERING_ACK,
   savedCandidateKeyForm,
   selectBuiltinToolsForRun,
   shortQuestion,
@@ -1125,8 +1126,25 @@ describe("computer that will not start", () => {
       { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
     ]);
     vi.mocked(provisionComputer).mockRejectedValueOnce(new IsolationError());
+    Object.assign(f.prisma.thread, {
+      findFirst: vi.fn(async () => ({ group: { archivedAt: new Date() } })),
+    });
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
+  });
+
+  it("retries a setup lookup that fails while its chat is still open", async () => {
+    const f = fixture("setup-lookup-live-chat");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+    ]);
+    Object.assign(f.prisma.attempt, { count: vi.fn(async () => 0) });
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new IsolationError());
+    Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => ({ group: null })) });
+    await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+      "Run setup failed; retrying",
+    );
+    expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 
   it("retries an early failed start instead of ending the turn", async () => {
@@ -1260,6 +1278,8 @@ describe("explicit artifact workspace writes", () => {
       const [steering] = await request.claimSteering!([]);
       expect(steering!.text).toContain(`"artifactId":"${original.id}"`);
       expect(steering!.text).not.toContain("available on your computer");
+      // A message sent mid-turn is acknowledged before the work goes on.
+      expect(steering!.text).toContain(STEERING_ACK);
       yield { type: "done" as const, text: "Reference retained." };
     });
     await f.run();
