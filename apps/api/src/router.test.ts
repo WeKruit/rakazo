@@ -183,6 +183,27 @@ describe("account preferences", () => {
     expect(bootstrap.thread?.botId).toBe("bot-999");
   });
 
+  it("leaves archived rows out of a first-paint bootstrap and out of navigation paging", async () => {
+    const f = bootstrapDeps();
+    const base = await f.target();
+    const archived = Array.from({ length: 500 }, (_, index) => ({
+      ...base,
+      id: `archived-${index}`,
+      archivedAt: new Date(),
+    }));
+    vi.mocked(f.deps.prisma.bot.findMany).mockImplementation(async (input) =>
+      input!.select ? [] : input!.where!.archivedAt === null ? [base] : archived.slice(0, 200),
+    );
+    vi.mocked(f.deps.prisma.bot.count).mockImplementation(async (input) =>
+      input?.where?.archivedAt === null ? 1 : 501,
+    );
+    const first = await f.client.bootstrap({ activeOnly: true });
+    expect(first.archivedBots).toEqual([]);
+    expect(first.nextOffset).toBeNull();
+    expect((await f.client.spaces.list({ offset: 0 })).nextOffset).toBeNull();
+    expect((await f.client.bootstrap({})).archivedBots).toHaveLength(200);
+  });
+
   it("returns bootstrap without waiting for the computer pre-warm", async () => {
     const f = bootstrapDeps();
     f.prewarmLookup.mockImplementation(() => new Promise(() => {}));

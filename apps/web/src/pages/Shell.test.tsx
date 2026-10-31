@@ -1844,7 +1844,10 @@ it("uses the authorized group bootstrap without fetching the same thread again",
     openFeedback: false,
     bootstrapGroup: true,
   });
-  expect(shellApi.bootstrap).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
+  expect(shellApi.bootstrap).toHaveBeenCalledExactlyOnceWith({
+    activeOnly: true,
+    groupId: "group-1",
+  });
   expect(shellApi.get).not.toHaveBeenCalled();
   expect(container?.textContent).toContain("Choose the role location");
   await view.click("Remote");
@@ -2281,8 +2284,8 @@ it.each(["success", "error"] as const)(
     });
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
-    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
-    expect(shellApi.listArchivedBots).toHaveBeenCalledOnce();
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
+    expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(2);
     await act(async () => vi.advanceTimersByTimeAsync(6_000));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     const updated = structuredClone(view.navigation);
@@ -2297,7 +2300,7 @@ it.each(["success", "error"] as const)(
     expect(shellApi.answer).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTimeAsync(15_000));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(3);
-    expect(shellApi.listArchivedGroups).toHaveBeenCalledOnce();
+    expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -2383,8 +2386,8 @@ it.each(["archive", "order"] as const)(
     await act(async () => resolveNavigation(view.navigation));
     expect(shellApi.listSpaces).toHaveBeenCalledTimes(2);
     if (operation === "archive") {
-      expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(2);
-      expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(2);
+      expect(shellApi.listArchivedGroups).toHaveBeenCalledTimes(3);
+      expect(shellApi.listArchivedBots).toHaveBeenCalledTimes(3);
       expect(container?.querySelector('fieldset[aria-label="Recruiting crew"]')).toBeNull();
       expect(
         container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,

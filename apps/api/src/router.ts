@@ -1428,8 +1428,16 @@ export function createRouter(deps: RouterDeps) {
         [
           meDto(deps, actor),
           spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
-          repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
-          groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : groupRepos.listGroups(actor, {
+                archived: true,
+                limit: 200,
+                offset: input.offset ?? 0,
+              }),
           input.groupId
             ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
                 threadSnapshot(deps, target),
@@ -7112,10 +7120,11 @@ async function spaceNavigationDto(
   const staleClaimBefore = new Date(Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS);
 
   // Counts include filtered-out groups; an empty mapped page must still advance.
+  // Archived bots and roles are not in these pages, so they must not add empty ones.
   const scope = { userId: actor.userId, spaceId: { in: spaceIds } };
   const totals = await Promise.all([
-    deps.prisma.bot.count({ where: scope }),
-    deps.prisma.chatGroup.count({ where: scope }),
+    deps.prisma.bot.count({ where: { ...scope, archivedAt: null } }),
+    deps.prisma.chatGroup.count({ where: { ...scope, archivedAt: null } }),
     deps.prisma.botSection.count({ where: scope }),
     deps.prisma.externalConversation.count({ where: scope }),
   ]);

@@ -73,14 +73,17 @@ export function takeInitialBootstrap(botId?: string, groupId?: string) {
 function requestBootstrap(botId?: string, groupId?: string) {
   const generation = bootstrapGeneration;
   markOnce("rk:renderer:bootstrap-request-start");
-  return rpc
-    .bootstrap({ ...(botId ? { botId } : {}), ...(groupId ? { groupId } : {}) })
-    .then((bootstrap) => {
-      markOnce("rk:renderer:bootstrap-response");
-      if (generation === bootstrapGeneration) {
-        ticketBoardEnabled = bootstrap.me.ticketBoardEnabled;
-        for (const listener of capabilityListeners) listener();
-      }
-      return bootstrap;
-    });
+  return (
+    rpc
+      // Archived bots and roles load after first paint (see useShellRoster).
+      .bootstrap({ activeOnly: true, ...(botId ? { botId } : {}), ...(groupId ? { groupId } : {}) })
+      .then((bootstrap) => {
+        markOnce("rk:renderer:bootstrap-response");
+        if (generation === bootstrapGeneration) {
+          ticketBoardEnabled = bootstrap.me.ticketBoardEnabled;
+          for (const listener of capabilityListeners) listener();
+        }
+        return bootstrap;
+      })
+  );
 }
