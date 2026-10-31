@@ -37,6 +37,7 @@ export async function listRunToolResults(
   actor: Actor,
   runId: string,
   limit = 40,
+  skip = 0,
 ): Promise<RunToolResult[]> {
   const run = await prisma.run.findFirst({
     where: { id: runId, spaceId: actor.spaceId, userId: actor.userId },
@@ -51,6 +52,7 @@ export async function listRunToolResults(
       request: { path: ["0"], equals: "__rakazoCatalogTool" },
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip,
     take: limit,
   });
   const routes = effects.flatMap((effect) => {
