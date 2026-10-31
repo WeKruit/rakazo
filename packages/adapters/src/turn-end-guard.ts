@@ -709,6 +709,8 @@ export async function planDeclineRetry(
     tools: readonly { name: string }[];
     /** The turn did consequential work. */
     worked?: boolean;
+    /** A tool call returned this turn. */
+    read?: boolean;
     /** The turn showed or recorded the round's ten. */
     presentedRound?: boolean;
     /** A teammate handed this turn the request. */
@@ -796,6 +798,7 @@ export async function planDeclineRetry(
     request: input.request,
     tools: input.tools,
     worked: input.worked,
+    read: input.read,
     personRequest: input.personRequest,
     teammates: members.map(({ bot }) => ({
       id: bot.id,

@@ -244,6 +244,13 @@ export class TurnReportLedger {
     );
   }
 
+  /** A tool call in this attempt that returned, read-only or not. */
+  read(): boolean {
+    return this.entries.some(
+      (entry) => entry.kind === "tool" && this.settled.get(entry.id)?.ok === true,
+    );
+  }
+
   /** Any consequential work in this attempt. */
   worked(): boolean {
     return this.entries.some((entry) => this.workOf(entry) !== undefined);
@@ -472,6 +479,8 @@ export function declineRetry(input: {
   teammates: readonly Teammate[];
   /** The turn did consequential work (see TurnReportLedger.worked). */
   worked?: boolean;
+  /** A tool call returned this turn (see TurnReportLedger.read). */
+  read?: boolean;
   /** The recruiter's own latest words, when a teammate's brief is the request. */
   personRequest?: string;
 }): DeclineRetry | undefined {
@@ -486,6 +495,9 @@ export function declineRetry(input: {
   // or booking that ended without its card is retried, since no card means nothing was asked.
   const cardOwed = asked.includes("send") || asksBooking(input.request);
   if (input.worked && !(declined.kind === "decline" && cardOwed)) return undefined;
+  // A question that asks for nothing to be done ("what interviews do I have") is answered by its
+  // reads; a coverage aside in that answer is no refusal.
+  if (input.read && !cardOwed && asked.every((kind) => kind === "schedule")) return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
     return {
