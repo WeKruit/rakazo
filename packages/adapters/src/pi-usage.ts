@@ -492,6 +492,13 @@ export function observedPiStream(
           cacheReadCount: normalized?.cacheReadTokens ?? null,
           cacheWriteCount: normalized?.cacheWriteTokens ?? null,
           outputCount: normalized?.outputTokens ?? null,
+          // Reasoning the provider reported, and whether it streamed any: tells an empty thinking
+          // timer (no reasoning) from a broken one.
+          reasoningCount: normalized?.reasoningTokens ?? null,
+          thinkingStreamedMs:
+            thinkingStartedAt === undefined
+              ? null
+              : Math.max(0, (thinkingEndedAt ?? streamEndedAt!) - thinkingStartedAt),
           costUsd: normalized?.costUsd ?? null,
           cacheHitRatio: normalized ? cacheHitRatio(normalized) : null,
         });
