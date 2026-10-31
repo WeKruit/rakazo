@@ -767,11 +767,15 @@ export async function listRecruitingSchedulingPlans(
           }),
         );
       else if (row.run.initialRecruitingRoleRevisionId === workspace.role.currentRevisionId) {
+        // Most of a role's effects are other tools; only an availability read with slots needs
+        // its grant checked, so the rest never open a transaction.
+        const found = slots(row);
+        if (!found.length) continue;
         await prisma.$transaction((tx) =>
           grant(tx, actor, row, ["get_availability", "create_booking", "get_booking"]),
         );
         available.push(
-          ...slots(row).map((slot) => ({ ...slot, observedAt: row.updatedAt.toISOString() })),
+          ...found.map((slot) => ({ ...slot, observedAt: row.updatedAt.toISOString() })),
         );
       }
     } catch (error) {
