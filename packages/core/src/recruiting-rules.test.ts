@@ -1076,6 +1076,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: 'The skill had Scheduling ask "approve moving it?" before every booking change.',
   },
   {
+    rule: "Google Calendar books too",
+    in: "Scheduling",
+    phrase: "call create_event once with the named start and end and the candidate as an attendee",
+    why: "Scheduling only knew Cal.com, so a recruiter with Google Calendar could not book.",
+  },
+  {
     rule: "length only for multi-length events",
     in: "Scheduling",
     phrase:
