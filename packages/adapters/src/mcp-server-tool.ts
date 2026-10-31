@@ -108,3 +108,43 @@ export function needsOAuthProbe(parsed: {
   const headers = parsed.headers ?? {};
   return !parsed.secret && Object.keys(env).length === 0 && Object.keys(headers).length === 0;
 }
+
+/** A workspace file that adds MCP servers when written: `.mcp.json` or `mcp.json`. */
+export function isMcpConfigPath(filePath: string): boolean {
+  return /(^|\/)\.?mcp\.json$/i.test(filePath.trim());
+}
+
+/**
+ * Map the common `.mcp.json` shape (`{ "mcpServers": { name: { command, args, env } |
+ * { type, url, headers } } }`) to add_mcp_server arguments, so writing the file goes through the
+ * same checks, secret storage and approval card as the tool.
+ */
+export function mcpConfigFileServers(
+  content: string,
+): Array<Record<string, unknown>> | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { error: "MCP config is not valid JSON." };
+  }
+  const servers =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as { mcpServers?: unknown }).mcpServers
+      : undefined;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers))
+    return { error: 'MCP config needs an "mcpServers" object.' };
+  const entries = Object.entries(servers as Record<string, unknown>).slice(0, 16);
+  return entries.map(([name, raw]) => {
+    const server = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const url = typeof server.url === "string" ? server.url : undefined;
+    const type = typeof server.type === "string" ? server.type.toLowerCase() : "";
+    return {
+      name,
+      ...(typeof server.description === "string" ? { description: server.description } : {}),
+      transport: url ? (type === "sse" ? "sse" : "streamable_http") : "stdio",
+      ...(url ? { endpoint: url, headers: server.headers } : {}),
+      ...(url ? {} : { command: server.command, args: server.args, env: server.env }),
+    };
+  });
+}

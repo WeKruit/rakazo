@@ -3568,6 +3568,10 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Next campaigns"
 msgstr ""
@@ -3953,6 +3957,10 @@ msgstr "अभी तक कुछ याद नहीं किया गया
 #: src/pages/shell/bot-panel.tsx
 msgid "Notifications"
 msgstr "सूचनाएं"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Now"
@@ -6044,6 +6052,7 @@ msgstr "अपना उत्तर लिखें"
 msgid "Unassigned"
 msgstr "असाइन नहीं किया गया"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr ""

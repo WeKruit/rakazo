@@ -359,6 +359,9 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Finish connecting in the browser, then refresh this page.":
     "在浏览器中完成连接，然后刷新此页面。",
   "Finish signing in in your browser:": "请在浏览器中完成登录：",
+  "Next in {minutes}m": "下次：{minutes} 分钟后",
+  "Next in {hours}h": "下次：{hours} 小时后",
+  "Next {when}": "下次：{when}",
   "Git event": "Git 事件",
   "Slack message": "Slack 消息",
   "Message event": "消息事件",

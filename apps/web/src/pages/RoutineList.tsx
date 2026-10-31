@@ -4,7 +4,7 @@ import type { Routine } from "@rakazo/contracts";
 import { formatCron } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { Clock, Pause, Plus } from "lucide-react";
-import { routineNextRun } from "./routine-next-run";
+import { formatTimeUntil } from "../lib/relative-time";
 
 export {
   draftFromRoutine,
@@ -12,7 +12,6 @@ export {
   type RoutineDraftState,
   routineNeedsOneShotArm,
 } from "./routine-draft";
-export { routineNextRun } from "./routine-next-run";
 
 export function routineTriggerSummary(routine: Routine): string {
   if (!routine.active) return t`Paused`;
@@ -23,6 +22,10 @@ export function routineTriggerSummary(routine: Routine): string {
   else if (routine.messageProvider === "teams") parts.push(t`Teams message`);
   else if (routine.messageProvider) parts.push(t`Message event`);
   for (const cron of routine.crons) parts.push(formatCron(cron));
+  if (routine.nextRunAt) {
+    const next = formatTimeUntil(routine.nextRunAt);
+    if (next) parts.push(t`Next ${next}`);
+  }
   return parts.length > 0 ? parts.join(" · ") : t`No trigger`;
 }
 
@@ -76,9 +79,15 @@ export function RoutineListRow({
           <span className="block truncate text-[14.5px] font-medium text-foreground" dir="auto">
             {routine.name}
           </span>
-          <span className="block truncate text-[12.5px] text-muted-foreground/80">
+          <span
+            className="block truncate text-[12.5px] text-muted-foreground/80"
+            title={
+              routine.active && routine.nextRunAt
+                ? new Date(routine.nextRunAt).toLocaleString()
+                : undefined
+            }
+          >
             {routineTriggerSummary(routine)}
-            {routineNextRun(routine) ? ` · ${routineNextRun(routine)}` : ""}
             {routine.modelProvider && routine.modelId ? ` · ${routine.modelId}` : ""}
           </span>
         </span>

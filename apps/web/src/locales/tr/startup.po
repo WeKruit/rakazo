@@ -1564,6 +1564,18 @@ msgstr "Bitirdim"
 msgid "Image upload area"
 msgstr "Görüntü yükleme alanı"
 
+#: src/lib/relative-time.ts
+msgid "in {hours}h"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in {minutes}m"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in a minute"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
@@ -1958,8 +1970,8 @@ msgid "New Role"
 msgstr ""
 
 #: src/pages/routine-next-run.ts
-msgid "Next {when}"
-msgstr ""
+#~ msgid "Next {when}"
+#~ msgstr ""
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx

@@ -10,7 +10,8 @@
 // first Overview numbers. Then opens Contacts, Sequence, Inbox and Interview for all roles, the
 // way the left nav does, and fails if one keeps loading, shows a load error or the sidebar's
 // roles never appear there. Run it on an account with many roles; that is where Home got slow.
-// Exit 0 = within budget, 1 = too slow or broken, 2 = usage, 3 = could not sign in (auth's
+// Exit 0 = within budget, 1 = Home too slow or broken, 4 = only a left-nav page failed, 2 = usage,
+// 3 = could not sign in (auth's
 // rate limit after recent sign-ins; not a product failure). Read-only; secrets are never printed.
 // RAKAZO_SESSION_FILE keeps the signed-in session between runs (keep it outside the repo), so
 // releases reuse one sign-in instead of tripping auth's rate limit.
@@ -140,6 +141,7 @@ try {
     failed = true;
     console.log("FAIL home overview shows an error");
   }
+  const homeFailed = failed;
   for (const view of views) {
     const opened = Date.now();
     await page.goto(`${origin}/app?view=${view}&role=all`, {
@@ -179,7 +181,7 @@ try {
   }
   if (errors.length)
     console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
-  process.exitCode = failed ? 1 : 0;
+  process.exitCode = homeFailed ? 1 : failed ? 4 : 0;
 } finally {
   await browser.close();
 }

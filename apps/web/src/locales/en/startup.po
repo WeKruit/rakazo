@@ -1564,6 +1564,18 @@ msgstr "I’m done"
 msgid "Image upload area"
 msgstr "Image upload area"
 
+#: src/lib/relative-time.ts
+msgid "in {hours}h"
+msgstr "in {hours}h"
+
+#: src/lib/relative-time.ts
+msgid "in {minutes}m"
+msgstr "in {minutes}m"
+
+#: src/lib/relative-time.ts
+msgid "in a minute"
+msgstr "in a minute"
+
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
@@ -1958,8 +1970,8 @@ msgid "New Role"
 msgstr "New Role"
 
 #: src/pages/routine-next-run.ts
-msgid "Next {when}"
-msgstr "Next {when}"
+#~ msgid "Next {when}"
+#~ msgstr "Next {when}"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx

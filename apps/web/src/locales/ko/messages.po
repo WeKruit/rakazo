@@ -3568,6 +3568,10 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Next campaigns"
 msgstr ""
@@ -3953,6 +3957,10 @@ msgstr "아직 기억한 내용이 없습니다"
 #: src/pages/shell/bot-panel.tsx
 msgid "Notifications"
 msgstr "알림"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Now"
@@ -6044,6 +6052,7 @@ msgstr "답변을 입력하세요"
 msgid "Unassigned"
 msgstr "섹션 없음"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr "사용할 수 없음"

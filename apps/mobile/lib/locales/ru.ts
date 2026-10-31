@@ -378,6 +378,9 @@ export const RU_MESSAGES: Record<string, string> = {
   "Finish connecting in the browser, then refresh this page.":
     "Завершите подключение в браузере, а затем обновите эту страницу.",
   "Finish signing in in your browser:": "Завершите вход в браузере:",
+  "Next in {minutes}m": "Следующий запуск через {minutes} мин",
+  "Next in {hours}h": "Следующий запуск через {hours} ч",
+  "Next {when}": "Следующий запуск {when}",
   "Git event": "Git-событие",
   "Slack message": "Сообщение Slack",
   "Message event": "Событие сообщения",

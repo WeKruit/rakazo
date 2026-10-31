@@ -319,6 +319,9 @@ export const DE_MESSAGES: Record<string, string> = {
   // app/routine.tsx
   Active: "Aktiv",
   "Could not load routine": "Routine konnte nicht geladen werden",
+  "Next in {minutes}m": "Nächster Lauf in {minutes} Min.",
+  "Next in {hours}h": "Nächster Lauf in {hours} Std.",
+  "Next {when}": "Nächster Lauf {when}",
   "Git event": "Git-Ereignis",
   "Message event": "Nachrichtenereignis",
   "Open conversation": "Unterhaltung öffnen",

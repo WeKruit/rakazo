@@ -298,7 +298,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "write_file",
     description:
-      "Write a UTF-8 file with path and content, or copy the verified original bytes of one saved artifact version with artifactId. Supply exactly one of content or artifactId. Use the exact version ID from native attachment/history references or artifact_read; never substitute a family ID or infer one from a filename. For artifactId, path is optional and defaults to attachments/<artifactId> with the original MIME extension. Attachments are saved originals, not automatic computer copies; use this before a workspace tool needs their bytes. On a Team Computer, relative paths use the bot folder; use shared/... only for intentionally shared work.",
+      "Write a UTF-8 file with path and content, or copy the verified original bytes of one saved artifact version with artifactId. Supply exactly one of content or artifactId. Use the exact version ID from native attachment/history references or artifact_read; never substitute a family ID or infer one from a filename. For artifactId, path is optional and defaults to attachments/<artifactId> with the original MIME extension. Attachments are saved originals, not automatic computer copies; use this before a workspace tool needs their bytes. On a Team Computer, relative paths use the bot folder; use shared/... only for intentionally shared work. Writing a SKILL.md also saves it as a skill right away; writing .mcp.json adds its mcpServers as MCP servers, each through the usual approval card.",
     inputSchema: {
       oneOf: [
         {

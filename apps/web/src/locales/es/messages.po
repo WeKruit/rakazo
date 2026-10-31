@@ -3568,6 +3568,10 @@ msgstr ""
 msgid "Next"
 msgstr ""
 
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Next campaigns"
 msgstr ""
@@ -3953,6 +3957,10 @@ msgstr "Aún no hay recuerdos"
 #: src/pages/shell/bot-panel.tsx
 msgid "Notifications"
 msgstr "Notificaciones"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Now"
@@ -6044,6 +6052,7 @@ msgstr "Escribe tu respuesta"
 msgid "Unassigned"
 msgstr "Sin asignar"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr "No disponible"
