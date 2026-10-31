@@ -1,5 +1,6 @@
 import { withSandboxedArtifactCsp } from "@rakazo/core";
 import { StyleSheet, View } from "react-native";
+import type { WebViewMessageEvent } from "react-native-webview";
 import { WebView } from "react-native-webview";
 
 /**
@@ -13,7 +14,14 @@ function isPreviewDocument(url: string): boolean {
   return url === "about:blank" || url === "about:blank/";
 }
 
-export function SandboxedHtmlPreview({ html }: { html: string }) {
+export function SandboxedHtmlPreview({
+  html,
+  onMessage,
+}: {
+  html: string;
+  /** Messages the page posts through window.ReactNativeWebView. */
+  onMessage?: (data: string) => void;
+}) {
   return (
     <View style={styles.container}>
       <WebView
@@ -30,6 +38,7 @@ export function SandboxedHtmlPreview({ html }: { html: string }) {
         mixedContentMode="never"
         cacheEnabled={false}
         onShouldStartLoadWithRequest={({ url }) => isPreviewDocument(url)}
+        onMessage={(event: WebViewMessageEvent) => onMessage?.(event.nativeEvent.data)}
       />
     </View>
   );

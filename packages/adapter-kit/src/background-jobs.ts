@@ -40,6 +40,7 @@ const payloadSchemas = {
     agentRunId: z.string().min(1),
   }),
   "thread.reply_check": z.object({ threadId: z.string().min(1) }),
+  "poll.close": z.object({ messageId: z.string().min(1), pollId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -243,5 +244,18 @@ export function threadReplyCheckJob(
     payload,
     replaceKey: `thread.reply_check:${payload.threadId}`,
     availableAt,
+  };
+}
+
+/** One pending close per poll; an early close replaces the deadline job. */
+export function pollCloseJob(
+  payload: BackgroundJobPayloads["poll.close"],
+  availableAt?: Date,
+): BackgroundJob {
+  return {
+    name: "poll.close",
+    payload,
+    replaceKey: `poll.close:${payload.pollId}`,
+    ...(availableAt ? { availableAt } : {}),
   };
 }

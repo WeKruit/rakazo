@@ -2755,11 +2755,18 @@ export async function authorizeRecruitingMemoryCommit(
     request.sourceRunId !== run.id ||
     request.sourceThreadId !== run.threadId ||
     (context.botId !== undefined && context.botId !== run.botId) ||
-    (request.scope === "bot" && request.botId !== run.botId)
+    (request.scope === "bot" && request.botId !== run.botId) ||
+    (request.scope === "group" &&
+      (request.recruiting !== undefined ||
+        request.botId !== undefined ||
+        !thread.groupId ||
+        request.groupId !== thread.groupId))
   )
     throw new IsolationError();
   if (!request.recruiting) {
-    const botNote = request.scope === "bot" && request.botId === run.botId;
+    // A group note stays inside this conversation; preferences still go through feedback.
+    const botNote =
+      (request.scope === "bot" && request.botId === run.botId) || request.scope === "group";
     const preferenceDocument =
       existing &&
       (await tx.event.findFirst({

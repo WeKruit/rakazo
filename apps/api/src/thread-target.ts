@@ -60,6 +60,7 @@ import {
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
+  waitingAskTakesText,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
@@ -202,6 +203,26 @@ async function declineConnectionAsks(
       }))
     )
       run.status = "queued";
+}
+
+/**
+ * A message written while an approval, secret or form card waits cannot answer it, so it is
+ * queued behind the card, as a follow-up is, instead of being refused.
+ */
+async function queueBehindCards(
+  tx: Prisma.TransactionClient,
+  threadId: string,
+  runs: Array<{ id: string; status: string }>,
+  requested: "steer" | "follow_up" | undefined,
+): Promise<"steer" | "follow_up" | undefined> {
+  if (requested === "follow_up") return requested;
+  for (const run of runs)
+    if (
+      run.status === "waiting_input" &&
+      !(await waitingAskTakesText(tx, { threadId, runId: run.id }))
+    )
+      return "follow_up";
+  return requested;
 }
 
 type YieldedWake = { threadId: string; botId: string; agentRunId: string };
@@ -989,11 +1010,17 @@ export async function sendThreadMessage(
             yielded,
             target.botId,
           );
-          if (input.queueMode !== "follow_up")
+          const queueMode = await queueBehindCards(
+            tx,
+            target.threadId,
+            activeRuns,
+            input.queueMode,
+          );
+          if (queueMode !== "follow_up")
             await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (
-            input.queueMode !== "follow_up" &&
+            queueMode !== "follow_up" &&
             waitingRuns.length &&
             !activeRuns.some(steersUserMessage)
           ) {
@@ -1054,7 +1081,7 @@ export async function sendThreadMessage(
           if (active) {
             const steers = steersUserMessage(active);
             const queued =
-              input.queueMode === "follow_up" ||
+              queueMode === "follow_up" ||
               !(await answerStatusQuestion(
                 tx,
                 actor,
@@ -1070,7 +1097,7 @@ export async function sendThreadMessage(
                   botId: target.botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(input.queueMode === "follow_up"
+                  ...(queueMode === "follow_up"
                     ? { originTrigger: "follow_up" }
                     : steers && input.interrupt
                       ? { originTrigger: "interrupt" }
@@ -1237,7 +1264,8 @@ export async function sendThreadMessage(
           },
         });
         const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
-        if (input.queueMode !== "follow_up")
+        const queueMode = await queueBehindCards(tx, target.threadId, activeRuns, input.queueMode);
+        if (queueMode !== "follow_up")
           await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
@@ -1247,7 +1275,7 @@ export async function sendThreadMessage(
         for (const run of activeRuns) {
           if (run.status === "waiting_input") {
             if (conversationalBotIds.has(run.botId)) continue;
-            if (input.queueMode === "follow_up") {
+            if (queueMode === "follow_up") {
               activeByBotId.set(run.botId, run);
               continue;
             }
@@ -1299,7 +1327,7 @@ export async function sendThreadMessage(
           if (active) {
             const steers = steersUserMessage(active);
             if (
-              input.queueMode === "follow_up" ||
+              queueMode === "follow_up" ||
               !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
             ) {
               steeredCount += 1;
@@ -1309,7 +1337,7 @@ export async function sendThreadMessage(
                   botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(input.queueMode === "follow_up"
+                  ...(queueMode === "follow_up"
                     ? { originTrigger: "follow_up" }
                     : steers && input.interrupt
                       ? { originTrigger: "interrupt" }

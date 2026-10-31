@@ -35,11 +35,13 @@ export class MarkdownMemoryStore implements MemoryStore {
   async read(request: MemoryReadRequest, context: AdapterContext): Promise<MemorySnapshot> {
     // Bot-private memory is addressed by bot; without one it would span sibling bots.
     if (request.scope === "bot" && !request.botId) return { documents: [] };
+    const scope = storedScope(request);
+    if (!scope) return { documents: [] };
     const documents = await this.prisma.memoryDocument.findMany({
       where: {
         spaceId: context.spaceId,
         userId: context.userId,
-        scope: request.scope,
+        scope,
         ...(request.botId ? { botId: request.botId } : {}),
         ...(request.path ? { path: request.path } : {}),
       },
@@ -83,6 +85,8 @@ export class MarkdownMemoryStore implements MemoryStore {
     if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
       throw new Error("expectedRevision must be a nonnegative integer");
     }
+    const scope = storedScope(request);
+    if (!scope) throw new Error("Group memory needs a group conversation");
     // A save replaces the current content and appends its history atomically.
     // Conflicts retry the whole transaction so revision numbers use fresh state.
     return withTransactionRetry(() =>
@@ -92,7 +96,7 @@ export class MarkdownMemoryStore implements MemoryStore {
             where: {
               spaceId: context.spaceId,
               userId: context.userId,
-              scope: request.scope,
+              scope,
               botId: request.botId ?? null,
               path: request.path,
             },
@@ -110,7 +114,7 @@ export class MarkdownMemoryStore implements MemoryStore {
                   spaceId: context.spaceId,
                   userId: context.userId,
                   botId: request.botId,
-                  scope: request.scope,
+                  scope,
                   path: request.path,
                   content: request.content,
                 },
@@ -183,6 +187,12 @@ export class MarkdownMemoryStore implements MemoryStore {
     if (!last) throw new Error("No memory files to import");
     return last;
   }
+}
+
+/** Group documents are stored per group; the row stays owned by the same user. */
+function storedScope(request: MemoryReadRequest | MemoryCommitRequest): string | undefined {
+  if (request.scope !== "group") return request.scope;
+  return request.groupId ? `group:${request.groupId}` : undefined;
 }
 
 function snippet(content: string, q: string): string {

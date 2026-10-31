@@ -1,10 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { MessageBlock } from "@rakazo/contracts";
-import { abortableDelay } from "@rakazo/core";
+import type { CanvasJson, MessageBlock } from "@rakazo/contracts";
+import { abortableDelay, canvasDocument, formatWorkDuration, pollTally } from "@rakazo/core";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BuiCard, SuccessPop } from "../../components/ai/primitives";
+import { SandboxedHtmlViewer } from "../../components/SandboxedHtmlViewer";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { chartViewport } from "../../lib/chart-viewport";
 import { connectMcpOauth } from "../../lib/mcp-connect";
@@ -587,6 +588,290 @@ export function ArtifactImage({
           </DialogContent>
         </Dialog>
       ) : null}
+    </div>
+  );
+}
+
+/** A vote that does not pause the asker: live counts, a countdown, and the person's own pick. */
+export function PollCard({
+  target,
+  block,
+}: {
+  target: ArtifactTarget;
+  block: Extract<MessageBlock, { kind: "poll" }>;
+}) {
+  const { t } = useLingui();
+  const [now, setNow] = useState(Date.now);
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remaining = Math.max(0, Date.parse(block.closesAt) - now);
+  const open = block.status === "open" && remaining > 0;
+  useEffect(() => {
+    if (!open) return;
+    const timer = setInterval(() => setNow(Date.now()), remaining > 3_600_000 ? 30_000 : 1_000);
+    return () => clearInterval(timer);
+  }, [open, remaining > 3_600_000]);
+  const mine = block.votes.find((vote) => vote.voter === "user")?.optionIds ?? [];
+  const selected = picked ?? mine;
+  const tally = pollTally(block);
+  const total = block.votes.length;
+
+  async function submit(optionIds: string[]) {
+    if (busy || optionIds.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const scope = "botId" in target ? { botId: target.botId } : { groupId: target.groupId };
+      await rpc.threads.votePoll({ ...scope, pollId: block.pollId, optionIds });
+      setPicked(null);
+    } catch (err) {
+      setError(errorText(err, t`Could not record your vote`));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function choose(id: string) {
+    if (!open || busy) return;
+    if (!block.multiple) {
+      setPicked([id]);
+      void submit([id]);
+      return;
+    }
+    setPicked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+
+  const time = formatWorkDuration(remaining);
+  const changed =
+    picked !== null && (picked.length !== mine.length || picked.some((id) => !mine.includes(id)));
+  return (
+    <BuiCard data-testid="poll-card" className="max-w-[74%] p-4">
+      <p className="text-[14.5px] font-medium text-foreground" dir="auto">
+        {block.question}
+      </p>
+      <ul className="mt-3 grid gap-1.5">
+        {tally.map((row) => {
+          const share = total ? Math.round((row.count / total) * 100) : 0;
+          const chosen = selected.includes(row.id);
+          return (
+            <li key={row.id}>
+              <button
+                type="button"
+                aria-pressed={chosen}
+                disabled={!open || busy}
+                title={row.voters.join(", ") || undefined}
+                onClick={() => choose(row.id)}
+                className={`relative flex w-full items-center justify-between overflow-hidden rounded-lg border px-3 py-2 text-left text-[13.5px] ${
+                  chosen ? "border-primary" : "border-border"
+                } disabled:cursor-default`}
+              >
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 bg-muted"
+                  style={{ width: `${share}%` }}
+                />
+                <span className="relative text-foreground" dir="auto">
+                  {row.label}
+                </span>
+                <span className="relative tabular-nums text-muted-foreground">{row.count}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {block.multiple && open && changed ? (
+        <Button
+          className="mt-3 rounded-full"
+          disabled={busy || selected.length === 0}
+          onClick={() => void submit(selected)}
+        >
+          <Trans>Vote</Trans>
+        </Button>
+      ) : null}
+      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+      <time dateTime={block.closesAt} className="mt-2 block text-xs text-muted-foreground">
+        {open ? t`Closes in ${time}` : t`Closed`}
+      </time>
+    </BuiCard>
+  );
+}
+
+/**
+ * An agent-written app in the sandboxed frame. Its saved data is read once per revision, so
+ * the app's own saves never reload it; a new revision from the agent does.
+ */
+export function CanvasCard({
+  target,
+  block,
+}: {
+  target: ArtifactTarget;
+  block: Extract<MessageBlock, { kind: "canvas" }>;
+}) {
+  const { t } = useLingui();
+  const [expanded, setExpanded] = useState(false);
+  const [document] = useState(() => canvasDocument(block.html, block.state));
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<{ state: CanvasJson } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const save = useCallback(
+    (state: CanvasJson) => {
+      pending.current = { state };
+      clearTimeout(timer.current);
+      // An app may save on every keystroke; the latest data wins.
+      timer.current = setTimeout(() => {
+        const next = pending.current;
+        pending.current = null;
+        if (!next) return;
+        const scope = "botId" in target ? { botId: target.botId } : { groupId: target.groupId };
+        rpc.threads
+          .saveCanvasState({ ...scope, canvasId: block.canvasId, state: next.state })
+          .then(() => setError(null))
+          .catch((err) => setError(errorText(err, t`Could not save`)));
+      }, 600);
+    },
+    [target, block.canvasId, t],
+  );
+  return (
+    <>
+      <BuiCard data-testid="canvas-card" className="w-[min(640px,74%)] overflow-hidden p-0">
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+          <span className="truncate text-[14px] font-medium text-foreground" dir="auto">
+            {block.title}
+          </span>
+          <Button variant="ghost" size="xs" onClick={() => setExpanded(true)}>
+            <Trans>Expand</Trans>
+          </Button>
+        </div>
+        <div className="h-[420px] border-t border-border">
+          {expanded ? null : (
+            <SandboxedHtmlViewer html={document} title={block.title} onCanvasSave={save} />
+          )}
+        </div>
+        {error ? <p className="px-4 py-2 text-xs text-destructive">{error}</p> : null}
+      </BuiCard>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent
+          showCloseButton={false}
+          className="flex h-[92vh] w-[min(1320px,94vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        >
+          <div className="flex items-center justify-between px-4 py-2">
+            <DialogTitle className="text-[13px] font-normal text-muted-foreground">
+              {block.title}
+            </DialogTitle>
+            <DialogClose aria-label={t`Close`} render={<Button variant="ghost" size="icon-sm" />}>
+              <X />
+            </DialogClose>
+          </div>
+          <div className="min-h-0 flex-1">
+            <SandboxedHtmlViewer html={document} title={block.title} onCanvasSave={save} />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** Records laid out by an agent: a table, a board with one lane per value, or metric cards. */
+export function ViewBlockView({ block }: { block: Extract<MessageBlock, { kind: "view" }> }) {
+  const cell = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+  const title = block.title ? (
+    <p className="mb-2 text-[14px] font-medium text-foreground" dir="auto">
+      {block.title}
+    </p>
+  ) : null;
+  if (block.layout === "metrics")
+    return (
+      <div data-testid="view-block" className="max-w-[74%]">
+        {title}
+        <div className="flex flex-wrap gap-2">
+          {block.metrics.map((metric) => (
+            <div key={metric.label} className="min-w-32 rounded-xl bg-muted px-3.5 py-2.5">
+              <p className="text-[12px] text-muted-foreground" dir="auto">
+                {metric.label}
+              </p>
+              <p className="text-[20px] font-semibold tabular-nums text-foreground" dir="auto">
+                {metric.value}
+              </p>
+              {metric.detail ? (
+                <p className="text-[12px] text-muted-foreground" dir="auto">
+                  {metric.detail}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  const columns = block.columns.length
+    ? block.columns
+    : Object.keys(block.rows[0] ?? {}).map((key) => ({ key, label: key }));
+  if (block.layout === "board") {
+    const groupBy = block.groupBy ?? "";
+    const lanes = [...new Set(block.rows.map((row) => cell(row[groupBy])))];
+    const shown = columns.filter((column) => column.key !== groupBy);
+    return (
+      <div data-testid="view-block" className="max-w-full">
+        {title}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {lanes.map((lane) => {
+            const rows = block.rows.filter((row) => cell(row[groupBy]) === lane);
+            return (
+              <section key={lane} className="w-60 shrink-0 rounded-xl bg-muted p-2">
+                <h4 className="mb-1.5 flex justify-between px-1 text-[12.5px] font-medium text-foreground">
+                  <span className="truncate" dir="auto">
+                    {lane || "—"}
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">{rows.length}</span>
+                </h4>
+                <ul className="grid gap-1.5">
+                  {rows.map((row, index) => (
+                    <li key={index} className="rounded-lg bg-background px-2.5 py-2 text-[12.5px]">
+                      {shown.map((column, at) => (
+                        <p
+                          key={column.key}
+                          dir="auto"
+                          className={at ? "text-muted-foreground" : "font-medium text-foreground"}
+                        >
+                          {cell(row[column.key])}
+                        </p>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="view-block" className="max-w-full overflow-x-auto">
+      {title}
+      <table className="w-full border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            {columns.map((column) => (
+              <th key={column.key} className="px-2 py-1.5 font-medium" dir="auto">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, index) => (
+            <tr key={index} className="border-b border-border last:border-0">
+              {columns.map((column) => (
+                <td key={column.key} className="px-2 py-1.5 text-foreground" dir="auto">
+                  {cell(row[column.key])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

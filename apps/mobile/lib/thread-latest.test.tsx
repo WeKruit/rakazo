@@ -138,6 +138,8 @@ it.each(["pending", "answered", "plain ask", "attachments"])(
           {name}
         </button>
       ),
+      isLiveCardBlock: () => false,
+      LiveCards: () => null,
     };
     const bubbleSource = source.slice(
       source.indexOf("const MessageBubble = memo(function MessageBubble("),

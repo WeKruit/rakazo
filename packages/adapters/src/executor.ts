@@ -32,6 +32,7 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  pollCloseJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
@@ -50,6 +51,7 @@ import {
   BOT_TITLE_MAX_LENGTH,
   BotSecretName,
   botSecretSubmissionSchema,
+  CANVAS_HTML_MAX_BYTES,
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
   disabledBuiltinToolSet,
@@ -75,6 +77,7 @@ import {
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
   UsageRecordedPayloadSchema,
+  ViewBlockSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -132,7 +135,11 @@ import {
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
   parseSkillMd,
+  POLL_DEFAULT_MINUTES,
+  POLL_MAX_MINUTES,
+  POLL_MIN_MINUTES,
   planActionGate,
+  pollResultLines,
   promptInvokesSkill,
   RateWindow,
   RECRUITER_INSTRUCTED_SEND_TOOLS,
@@ -201,6 +208,8 @@ import {
   backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
+  canvasOf,
+  changeCanvas,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   claimRecruitingResearchReadEffect,
@@ -230,6 +239,7 @@ import {
   loadVerifiedRecruitingSchedulingPlan,
   Prisma,
   parseComputerMode,
+  pollOf,
   prepareNativeRecruitingCandidateDecision,
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
@@ -253,6 +263,7 @@ import {
   saveRecruitingCalibrationRound,
   searchHistory,
   skipRateLimitedRun,
+  votePoll,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -1224,6 +1235,7 @@ const NO_RECRUITING_ROLE_CONTEXT =
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
+  "canvas_read",
   "computer_observe",
   "list_files",
   "read_file",
@@ -4744,8 +4756,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "memoryContext",
           messagingChannelRun
             ? Promise.resolve({ text: undefined, documents: [] })
-            : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
-                redactSecrets(text, runSecrets),
+            : loadAgentMemoryContext(
+                deps.memory,
+                bot.id,
+                context,
+                undefined,
+                (text) => redactSecrets(text, runSecrets),
+                thread.groupId,
               ),
         );
         // What the frozen prompt was built from, read beside the setup loads; later turn
@@ -4874,6 +4891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context,
             undefined,
             (text) => redactSecrets(text, runSecrets),
+            thread.groupId,
           );
         };
         const adoptRecruitingContext = async (
@@ -10462,15 +10480,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {
-            if (args.scope !== "bot" && args.scope !== "user") {
-              return finish({ error: "scope must be bot or user" });
+            if (args.scope !== "bot" && args.scope !== "user" && args.scope !== "group") {
+              return finish({ error: "scope must be bot, user or group" });
+            }
+            if (args.scope === "group" && !thread.groupId) {
+              return finish({ error: "Group memory exists only in a group conversation." });
             }
             if (typeof args.path !== "string" || !args.path.trim()) {
               return finish({ error: "path is required" });
             }
             const path = args.path.trim();
             const snapshot = await deps.memory.read(
-              { scope: args.scope, botId: args.scope === "bot" ? bot.id : undefined, path },
+              {
+                scope: args.scope,
+                botId: args.scope === "bot" ? bot.id : undefined,
+                groupId: args.scope === "group" ? (thread.groupId ?? undefined) : undefined,
+                path,
+              },
               context,
             );
             const document = snapshot.documents[0];
@@ -10481,18 +10507,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               revision: document?.revision ?? 0,
             });
           }
-          if (name === "remember" || name === "save_shared_memory") {
-            const shared = name === "save_shared_memory";
+          if (
+            name === "remember" ||
+            name === "save_shared_memory" ||
+            name === "save_group_memory"
+          ) {
+            const shared = name !== "remember";
+            const groupId =
+              name === "save_group_memory" ? (thread.groupId ?? undefined) : undefined;
+            if (name === "save_group_memory" && !groupId)
+              return finish({ error: "Group memory exists only in a group conversation." });
             const invalid =
               (shared ? sharedMemorySaveError(args) : undefined) ?? nativeMemorySaveError(args);
             if (invalid) return finish({ error: invalid });
             const path = typeof args.path === "string" ? args.path.trim() : "MEMORY.md";
-            const scope = shared ? "user" : "bot";
+            const scope = groupId ? "group" : shared ? "user" : "bot";
             const botId = shared ? undefined : bot.id;
             let content = args.content as string;
             if (args.edit !== undefined) {
               // Partial edit: merge into the loaded document; commit still checks expectedRevision.
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               const merged = applyMemoryEdit(
                 current.documents[0]?.content ?? "",
                 args.edit as { find: string; replace: string },
@@ -10513,6 +10547,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 {
                   scope,
                   ...(botId ? { botId } : {}),
+                  ...(groupId ? { groupId } : {}),
                   path,
                   content,
                   expectedRevision: args.expectedRevision as number,
@@ -10526,7 +10561,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               const message = error instanceof Error ? error.message : "Could not save memory";
               if (message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               return finish({
                 error: message,
                 currentRevision: current.documents[0]?.revision ?? 0,
@@ -11507,6 +11542,153 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   }
                 : { ok: true },
             );
+          }
+          if (name === "render_view") {
+            const parsed = ViewBlockSchema.safeParse({ ...args, kind: "view" });
+            if (!parsed.success)
+              return finish({
+                error: `Invalid view: ${parsed.error.issues[0]?.message ?? "check the fields"}`,
+              });
+            const view = parsed.data;
+            if (view.layout === "metrics" ? !view.metrics.length : !view.rows.length)
+              return finish({
+                error: view.layout === "metrics" ? "metrics are required" : "rows are required",
+              });
+            if (view.layout === "board" && !view.groupBy)
+              return finish({ error: "groupBy is required for a board" });
+            if (JSON.stringify(view).length > 200_000)
+              return finish({ error: "This view is too large; show fewer rows or columns." });
+            const message = await publishMessage(deps, run, "bot", [view]);
+            return finish(
+              message ? { ok: true } : { error: "Views cannot be shown from this kind of run." },
+            );
+          }
+          if (name === "canvas_write") {
+            const html = String(args.html ?? "");
+            const title = visible(String(args.title ?? "")).trim() || "Canvas";
+            if (!html.trim()) return finish({ error: "html is required" });
+            if (new TextEncoder().encode(html).length > CANVAS_HTML_MAX_BYTES)
+              return finish({
+                error: `A canvas is limited to ${CANVAS_HTML_MAX_BYTES} bytes of HTML.`,
+              });
+            const existing = args.canvasId ? String(args.canvasId) : undefined;
+            if (existing) {
+              const changed = await changeCanvas(deps.prisma, {
+                threadId: run.threadId,
+                canvasId: existing,
+                change: { html, title },
+              });
+              if (!changed.ok) return finish({ error: changed.error });
+              await deps.events.notify(changed.threadId, changed.eventSeq).catch((error) => {
+                getLogger().error("canvas realtime notification", error);
+              });
+              return finish({ ok: true, canvasId: existing, revision: changed.block.revision });
+            }
+            const canvasId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const message = await publishMessage(deps, run, "bot", [
+              { kind: "canvas", canvasId, title, html, revision: 1 },
+            ]);
+            if (!message)
+              return finish({ error: "Canvases cannot be posted from this kind of run." });
+            return finish({ ok: true, canvasId, revision: 1 });
+          }
+          if (name === "canvas_read") {
+            const canvasId = String(args.canvasId ?? "");
+            const found = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "canvas", canvasId }] },
+              },
+              select: { blocks: true },
+            });
+            const canvas = found ? canvasOf(found.blocks as MessageBlock[], canvasId) : undefined;
+            if (!canvas) return finish({ error: "No canvas with that id in this conversation." });
+            return finish({
+              canvasId,
+              title: canvas.title,
+              revision: canvas.revision,
+              state: canvas.state ?? null,
+            });
+          }
+          if (name === "create_poll") {
+            const options = Array.isArray(args.options)
+              ? [...new Set(args.options.map((option) => visible(String(option)).trim()))].filter(
+                  Boolean,
+                )
+              : [];
+            const question = visible(redactSecrets(String(args.question ?? ""), runSecrets)).trim();
+            if (!question) return finish({ error: "question is required" });
+            if (options.length < 2 || options.length > 6)
+              return finish({ error: "Give two to six different options." });
+            const minutes = Math.min(
+              POLL_MAX_MINUTES,
+              Math.max(
+                POLL_MIN_MINUTES,
+                Math.round(Number(args.closesInMinutes) || POLL_DEFAULT_MINUTES),
+              ),
+            );
+            const pollId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const closesAt = new Date(Date.now() + minutes * 60_000);
+            const message = await publishMessage(deps, run, "bot", [
+              {
+                kind: "poll",
+                pollId,
+                question,
+                options: options.map((label, index) => ({ id: String(index + 1), label })),
+                multiple: args.multiple === true,
+                includeTeam: args.includeTeam === true,
+                closesAt: closesAt.toISOString(),
+                status: "open",
+                votes: [],
+              },
+            ]);
+            if (!message) return finish({ error: "Polls cannot be posted from this kind of run." });
+            await deps.jobs.enqueue(pollCloseJob({ messageId: message.id, pollId }, closesAt));
+            return finish({
+              ok: true,
+              pollId,
+              closesAt: closesAt.toISOString(),
+              note: "The poll is posted. Keep working; you are woken here with the result when it closes. Do not wait for it or ask the same question again.",
+            });
+          }
+          if (name === "vote_poll") {
+            const pollId = String(args.pollId ?? "");
+            const message = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "poll", pollId }] },
+              },
+              select: { blocks: true },
+            });
+            const poll = message ? pollOf(message.blocks as MessageBlock[], pollId) : undefined;
+            if (!poll) return finish({ error: "No open poll with that id in this conversation." });
+            const wanted = (Array.isArray(args.options) ? args.options : []).map((option) =>
+              String(option).trim().toLowerCase(),
+            );
+            const optionIds = poll.options
+              .filter(
+                (option) =>
+                  wanted.includes(option.label.trim().toLowerCase()) || wanted.includes(option.id),
+              )
+              .map((option) => option.id);
+            const voted = await votePoll(deps.prisma, {
+              threadId: run.threadId,
+              pollId,
+              vote: { voter: "bot", voterId: bot.id, name: bot.name, optionIds },
+            });
+            if (!voted.ok) return finish({ error: voted.error });
+            await deps.events.notify(voted.threadId, voted.eventSeq).catch((error) => {
+              getLogger().error("poll vote realtime notification", error);
+            });
+            if (voted.complete)
+              await deps.jobs.enqueue(pollCloseJob({ messageId: voted.messageId, pollId }));
+            return finish({ ok: true, result: pollResultLines(voted.block) });
           }
           if (name === "message_bot") {
             const sent = await messageBot(
@@ -14257,7 +14439,16 @@ export function selectBuiltinToolsForRun(options: {
       (options.ticketBoardEnabled ||
         (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
       (!isBackgroundRunTrigger(options.trigger) ||
-        !["message_user", "message_bot", "handoff_to_bot", "message_agent"].includes(tool.name)) &&
+        ![
+          "message_user",
+          "message_bot",
+          "handoff_to_bot",
+          "message_agent",
+          "create_poll",
+          "vote_poll",
+          "render_view",
+          "canvas_write",
+        ].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.historyRetrievalEnabled ||
         !["search_history", "read_history"].includes(tool.name)) &&
@@ -14275,11 +14466,17 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_crm_import",
           "read_memory",
           "save_shared_memory",
+          "save_group_memory",
           "save_memory",
           "recall_memory",
           "forget_memory",
           "task_catalog",
           "board_tickets",
+          "create_poll",
+          "vote_poll",
+          "render_view",
+          "canvas_write",
+          "canvas_read",
         ].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_") &&
           !tool.name.startsWith("ticket_"))),

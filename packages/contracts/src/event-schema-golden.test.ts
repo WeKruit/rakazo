@@ -14,6 +14,7 @@ import {
 // Earlier versions stay listed so a hash can never be reused under a new number.
 const GOLDEN_BY_VERSION: Record<number, string> = {
   1: "086577d14d7f578e997849d69416dfb8f7d0282c59cfbcf192e2a77c28f047fa",
+  2: "531ad276e3d4642ccb095e1d219940e85021bb4946c73eac42a3a2afc49c7152",
 };
 
 const OLD_ROWS: unknown[] = [
