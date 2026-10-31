@@ -488,8 +488,11 @@ if (wanted.has("contacts"))
       "--out",
       path.join(OUT, "contacts.json"),
     ]);
-    if (code !== 0) return failures.push("first ten did not pass; see contacts.log");
-    const groupId = reportOf("contacts").groupId;
+    // The first ten's own timing is the first10 case's; here it only has to leave people to contact.
+    const report = fs.existsSync(path.join(OUT, "contacts.json")) ? reportOf("contacts") : {};
+    if (!report.groupId || !report.rounds?.[0]?.count)
+      return failures.push(`no first ten to contact (exit ${code}); see contacts.log`);
+    const groupId = report.groupId;
     await settled(groupId);
     await contactsAndSend(groupId, failures, "contacts");
     const transcript = (await messagesOf(groupId))

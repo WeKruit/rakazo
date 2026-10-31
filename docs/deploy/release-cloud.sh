@@ -196,7 +196,7 @@ else
     [ "$code" = 200 ] || rollback "custom domain $p returned $code"
   done
 fi
-# Contact lookup and the send card on a fresh first ten (about 5 minutes; the card is never
+# Contact lookup and the send card on a fresh first ten (about 10 minutes; the card is never
 # answered, so nothing is sent). Needs the private JD fixtures in RELEASE_CASES and the test account
 # in RAKAZO_EMAIL/RAKAZO_PASSWORD; a red result rolls the release back. Skipped on a rollback.
 if [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
