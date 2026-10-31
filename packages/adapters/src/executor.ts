@@ -646,6 +646,7 @@ import {
   startWorkEstimate,
   withWorkNote,
   workEstimateAfterAgentRun,
+  workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
 
@@ -11471,7 +11472,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 result !== null && typeof result === "object" && !Array.isArray(result)
                   ? (result as Record<string, unknown>)
                   : { providerResult: result };
-              return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
+              // Research runs in the background like an agent run: it gets the same countdown.
+              const countdown =
+                run.trigger === "recruiting_grade"
+                  ? null
+                  : await workEstimateForResearch(
+                      deps.prisma,
+                      run,
+                      followed,
+                      connectorCall.args,
+                    ).catch(() => null);
+              return finish({
+                ...body,
+                background: RECRUITING_RESEARCH_DIRECT_NOTICE,
+                ...(countdown ? { countdown } : {}),
+              });
             }
             const finished = await finish(result);
             // A people search still working when its call window closes is collected later by
