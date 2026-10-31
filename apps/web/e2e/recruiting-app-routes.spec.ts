@@ -281,9 +281,7 @@ for (const width of [1440, 390]) {
         });
         await eventLink.scrollIntoViewIfNeeded();
         await expect(eventLink).toBeInViewport();
-        await expect(page.getByRole("button", { name: "Open role chat", exact: true })).toHaveCount(
-          0,
-        );
+        await eventLink.click({ trial: true });
       }
       await capture(page, testInfo, `app-interview-details-${width}`);
       await calendar
