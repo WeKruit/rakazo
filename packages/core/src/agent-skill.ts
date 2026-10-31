@@ -25,7 +25,83 @@ export type SkillCatalogEntry = {
   description: string;
   source: SkillSource;
   readOnly: boolean;
+  /** Set when a declared requirement is missing for this run, e.g. "needs mcp autumn". */
+  unavailable?: string;
 };
+
+/**
+ * What a skill declares it needs in its frontmatter, for example
+ * `requires:` with nested `tools: [web_search]`, `mcp: [autumn]` and `secrets: [GITHUB_TOKEN]`.
+ * A bare list (`requires: [web_search]`) names tools.
+ */
+export type SkillRequirements = { tools: string[]; mcp: string[]; secrets: string[] };
+
+const SKILL_REQUIREMENT_KINDS = ["tools", "mcp", "secrets"] as const;
+
+function requirementNames(value: unknown): string[] {
+  const items = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.replace(/^\[|\]$/g, "").split(",")
+      : [];
+  return [...new Set(items.map((item) => String(item).trim()).filter(Boolean))].slice(0, 20);
+}
+
+export function skillRequirements(content: string): SkillRequirements {
+  const parsed = parseSkillMd(content);
+  const requires = "error" in parsed ? undefined : parsed.frontmatter.requires;
+  if (!requires || typeof requires !== "object" || Array.isArray(requires))
+    return { tools: requirementNames(requires), mcp: [], secrets: [] };
+  const map = requires as Record<string, unknown>;
+  return {
+    tools: requirementNames(map.tools),
+    mcp: requirementNames(map.mcp),
+    secrets: requirementNames(map.secrets),
+  };
+}
+
+/**
+ * The first missing requirement as a short reason, or undefined when everything known is present.
+ * A kind is only checked when its available set is given, so callers check what they can see.
+ */
+export function missingSkillRequirement(
+  requirements: SkillRequirements,
+  available: {
+    tools?: ReadonlySet<string>;
+    mcp?: ReadonlySet<string>;
+    secrets?: ReadonlySet<string>;
+  },
+): string | undefined {
+  for (const kind of SKILL_REQUIREMENT_KINDS) {
+    const have = available[kind];
+    if (!have) continue;
+    const missing = requirements[kind].filter((name) => !have.has(name.toLowerCase()));
+    if (missing.length > 0) {
+      const label = kind === "tools" ? "tool" : kind === "mcp" ? "connection" : "secret";
+      return `needs ${label}${missing.length > 1 ? "s" : ""} ${missing.join(", ")}`;
+    }
+  }
+  return undefined;
+}
+
+/** Lowercased names a run can satisfy from its tool list: full names and MCP server slugs. */
+export function skillAvailabilityFromTools(toolNames: Iterable<string>): {
+  tools: Set<string>;
+  mcp: Set<string>;
+} {
+  const tools = new Set<string>();
+  const mcp = new Set<string>();
+  for (const raw of toolNames) {
+    const name = raw.toLowerCase();
+    tools.add(name);
+    const parts = name.split("__");
+    if (parts.length >= 3) {
+      mcp.add(parts[1]!);
+      tools.add(parts.slice(2).join("__"));
+    }
+  }
+  return { tools, mcp };
+}
 
 export type SkillRecord = SkillCatalogEntry & {
   id?: string;
@@ -52,6 +128,11 @@ const ROUTINE_SKILL_STOP = new Set([
 /** Fallback when no catalog is available: @Token with optional Title-case words. */
 const ROUTINE_SKILL_MENTION =
   /(?:^|[\s(,])@([A-Za-z][\w-]*(?:[ ]+[A-Za-z][\w-]*){0,5})(?=[\s,.)]|$)/g;
+
+/** A workspace path that holds one skill: `SKILL.md`, usually as `skills/<name>/SKILL.md`. */
+export function isSkillFilePath(filePath: string): boolean {
+  return /(^|\/)SKILL\.md$/.test(filePath.trim());
+}
 
 export function isSkillReadOnly(source: SkillSource): boolean {
   return source === "builtin" || source === "plugin";
@@ -117,17 +198,37 @@ export function buildSkillMd(input: {
   return `---\n${lines.join("\n")}\n---\n${body.startsWith("\n") ? body : `\n${body}`}`;
 }
 
-export function skillCatalogLine(entry: Pick<SkillCatalogEntry, "name" | "description">): string {
-  return `- ${entry.name}: ${entry.description}`;
+/** Catalog descriptions are cut to this length; skill_read returns the full text. */
+export const SKILL_CATALOG_DESCRIPTION_MAX = 200;
+const SKILL_CATALOG_MAX = 50;
+
+export function skillCatalogLine(
+  entry: Pick<SkillCatalogEntry, "name" | "description" | "unavailable">,
+): string {
+  const flat = entry.description.replace(/\s+/g, " ").trim();
+  const description =
+    flat.length > SKILL_CATALOG_DESCRIPTION_MAX
+      ? `${flat.slice(0, SKILL_CATALOG_DESCRIPTION_MAX - 1).trimEnd()}…`
+      : flat;
+  const status = entry.unavailable ? ` (unavailable: ${entry.unavailable})` : "";
+  return `- ${entry.name}${status}: ${description}`;
 }
 
 export function formatSkillsCatalogInstruction(entries: SkillCatalogEntry[]): string | undefined {
   if (entries.length === 0) return undefined;
-  const lines = entries.slice(0, 50).map(skillCatalogLine).join("\n");
+  // Every line is paid on every turn, so the catalog stays a short index.
+  const lines = entries.slice(0, SKILL_CATALOG_MAX).map(skillCatalogLine);
+  const hidden = entries.length - SKILL_CATALOG_MAX;
+  if (hidden > 0) lines.push(`- …and ${hidden} more; call skill_read with a name to open one.`);
   return [
     "Available Claude Agent Skills (SKILL.md recipes shared across assistants; generic how-tos, not account-specific routines). The Pi runtime already understands this format; we persist and inject them:",
-    lines,
+    lines.join("\n"),
     "When a skill matches the user's request, call skill_read for that name and follow it immediately. Prefer matching skills over improvising multi-step recipes.",
+    ...(entries.some((entry) => entry.unavailable)
+      ? [
+          "A skill marked unavailable is missing something it declares it needs. Do not run it; tell the user what to connect or add.",
+        ]
+      : []),
     "Users can force a skill with /Name in the composer. Routines may mention a skill as @Name — that loads the skill at fire time.",
     "Create a skill with skill_create when a multi-step task is worth repeating (or when asked). After creating one, mention /Name so the user can open it.",
     "Only skill_update / skill_delete user-created skills (not builtin or plugin).",
