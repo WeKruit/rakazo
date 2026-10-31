@@ -25,13 +25,13 @@ import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isActive,
-  isBackgroundRunTrigger,
   isConversationalRun,
   isStatusQuestion,
   ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
+  runsBesidePerson,
   statusAnswer,
   typicalDurationMs,
   workActivityForTool,
@@ -202,8 +202,8 @@ type YieldedWake = { threadId: string; botId: string; agentRunId: string };
  * The recruiter's message comes first, as an interject does: a background follow-up on a
  * still-running people search in this conversation stops at once and never takes the
  * message. The search keeps running at the provider; its follow-up is scheduled again.
- * Background work that posts nothing to the chat (grading) keeps going beside the
- * recruiter's own turn instead of holding the message until it ends.
+ * Other non-conversation work (grading, check-ins, teammates' reports, routines) keeps going
+ * beside the recruiter's own turn instead of holding the message until it ends.
  */
 async function yieldBackgroundWakes<
   Run extends {
@@ -223,7 +223,7 @@ async function yieldBackgroundWakes<
   botId?: string,
 ): Promise<Run[]> {
   const beside = (run: Run) =>
-    isBackgroundRunTrigger(run.trigger) && STEERABLE_RUN_STATUSES.has(run.status);
+    runsBesidePerson(run.trigger) && STEERABLE_RUN_STATUSES.has(run.status);
   const wakes = live.filter((run) => agentRunWaitTarget(run.clientNonce ?? null));
   if (!wakes.length) return live.filter((run) => !beside(run));
   await cancelRunsInTransaction(tx, wakes, new Date());

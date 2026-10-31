@@ -22,11 +22,11 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   isApprovalAskBlock,
-  isBackgroundRunTrigger,
   isConversationalRun,
   isSecretAskBlock,
   messagingChannelId,
   resolveAskChoice,
+  runsBesidePerson,
   sanitizeJsonValue,
   type WorkActivity,
   workActivityForTool,
@@ -637,10 +637,12 @@ export async function sendUserMessage(
               select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
             })
           : [];
-      // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds
-      // the queue. Background work that posts nothing to the chat (grading) never holds it.
+      // Steer a conversational run when there is one. A person's message is never held behind
+      // other work (grading, check-ins, reports, routines): it starts its own turn beside it.
+      // Server input and inbound apps still wait their turn behind it.
+      const person = !input.internal && (input.trigger === "user" || input.trigger === "follow_up");
       const holding = activeRuns.filter(
-        (run) => !isBackgroundRunTrigger(run.trigger) || run.status === "waiting_input",
+        (run) => !person || !runsBesidePerson(run.trigger) || run.status === "waiting_input",
       );
       const busy = holding.find(takesMessages) ?? holding[0] ?? null;
       let task = null;
