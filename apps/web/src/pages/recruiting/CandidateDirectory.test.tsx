@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { RecruitingCandidateReport } from "@rakazo/contracts";
+import { projectRecruitingCandidateReport } from "@rakazo/core";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -282,4 +283,45 @@ it("shows the Fit column only once someone in the list has an assessment", async
     <CandidateDirectory rows={[row("a"), row("b", [field("Grade", "A")])]} onOpen={vi.fn()} />,
   );
   expect(headers()).toContain("Fit");
+});
+
+it("shows education from a graded row and from the saved profile when the newest row has none", async () => {
+  const graded = projectRecruitingCandidateReport({
+    name: "Candidate graded",
+    linkedin_url: "https://www.linkedin.com/in/graded",
+    current_title: "Site Leader",
+    current_company: "Example Fulfillment",
+    education: ["Example State University | BS, Supply Chain | 2010 – 2014"],
+    match_score: 97,
+    match_tier: "Strong",
+  });
+  const saved = row(
+    "saved",
+    graded.fields.filter((item) => item.label !== "Education"),
+  );
+  saved.autumn!.savedProfile = {
+    personKey: "linkedin:/in/saved",
+    provider: "people_search",
+    fetchedAt: "2026-10-30T10:00:00.000Z",
+    headline: null,
+    profileImageUrl: null,
+    experience: [],
+    education: [
+      {
+        school_name: "Example Institute of Technology",
+        degree: "MS, Operations",
+        field_of_study: null,
+        school_url: null,
+        school_logo_url: null,
+        start_date: "2015",
+        end_date: "2017",
+      },
+    ],
+  };
+  const { view } = await mount(
+    <CandidateDirectory rows={[row("graded", graded.fields), saved]} onOpen={vi.fn()} />,
+  );
+  const cells = [...view.querySelectorAll("tbody tr")].map((item) => item.textContent ?? "");
+  expect(cells[0]).toContain("Example State University");
+  expect(cells[1]).toContain("Example Institute of Technology");
 });

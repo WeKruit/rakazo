@@ -1,8 +1,16 @@
-import { Trans, useLingui } from "@lingui/react/macro";
-import type { WorkActivity, WorkSession, WorkStage, WorkStageKind, WorkStep } from "@rakazo/core";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import type {
+  WorkActivity,
+  WorkEstimate,
+  WorkSession,
+  WorkStage,
+  WorkStageKind,
+  WorkStep,
+} from "@rakazo/core";
 import {
   formatWorkClock,
   formatWorkDuration,
+  workCountdownLeftMs,
   workProgressLabel,
   workSessionElapsedMs,
   workSessionStages,
@@ -119,15 +127,81 @@ function WorkStageEntry({
 
 /** Seconds since the turn began; only the clock re-renders. */
 function WorkClock({ session }: { session: WorkSession }) {
+  const now = useNow();
+  return (
+    <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+      {formatWorkClock(workSessionElapsedMs(session, now))}
+    </span>
+  );
+}
+
+function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  return now;
+}
+
+/**
+ * Big work counts down from its estimate and starts over if it runs past; small work counts up
+ * from its start. The note says once, under a countdown, that this one takes longer.
+ */
+function EstimateClock({ estimate }: { estimate: WorkEstimate }) {
+  const now = useNow();
+  const left = workCountdownLeftMs(estimate, now);
   return (
-    <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-      {formatWorkClock(workSessionElapsedMs(session, now))}
+    <span
+      data-testid="work-countdown"
+      data-counting={left === null ? "up" : "down"}
+      className="font-mono text-[12px] tabular-nums text-muted-foreground"
+    >
+      {left === null ? (
+        formatWorkClock(now - Date.parse(estimate.startedAt))
+      ) : (
+        <Trans>{formatWorkClock(left)} left</Trans>
+      )}
     </span>
+  );
+}
+
+function EstimateNote({ estimate }: { estimate: WorkEstimate }) {
+  if (!estimate.estimateMs) return null;
+  const minutes = Math.round(estimate.estimateMs / 60_000);
+  return (
+    <p data-testid="work-countdown-note" className="text-[12px] text-muted-foreground">
+      <Plural
+        value={minutes}
+        one="This one takes longer, about # minute. You can keep chatting or come back later."
+        other="This one takes longer, about # minutes. You can keep chatting or come back later."
+      />
+    </p>
+  );
+}
+
+/** Work still going after its turn ended: a search waiting at the provider. */
+export function BackgroundWork({ estimate }: { estimate: WorkEstimate }) {
+  const { t } = useLingui();
+  const headline =
+    estimate.kind === "emails"
+      ? t`Looking up emails`
+      : estimate.estimateMs
+        ? t`Finding about ${estimate.people} people`
+        : t`Finding people`;
+  return (
+    <div data-testid="background-work" className="space-y-0.5">
+      <LoadingState
+        label={headline}
+        indicator={
+          <span aria-hidden className="flex min-w-0 flex-wrap items-center gap-2">
+            <Shimmer>{headline}</Shimmer>
+            <EstimateClock estimate={estimate} />
+          </span>
+        }
+      />
+      <EstimateNote estimate={estimate} />
+    </div>
   );
 }
 
@@ -142,6 +216,7 @@ export function LiveWork({
   detail,
   showSteps = true,
   stageKind = () => "other",
+  estimate,
 }: {
   session: WorkSession | null;
   live: boolean;
@@ -153,6 +228,8 @@ export function LiveWork({
   detail?: ReactNode;
   /** What each handed-off stage is for, from the member doing it. */
   stageKind?: (botId: string) => WorkStageKind;
+  /** Big work this turn is part of: its countdown replaces the turn's clock. */
+  estimate?: WorkEstimate | null;
 }) {
   const labels = useWorkActivityLabels();
   const stageLabels = useWorkStageLabels();
@@ -193,10 +270,15 @@ export function LiveWork({
                   {detail}
                 </span>
               ) : null}
-              {session ? <WorkClock session={session} /> : null}
+              {estimate ? (
+                <EstimateClock estimate={estimate} />
+              ) : session ? (
+                <WorkClock session={session} />
+              ) : null}
             </span>
           }
         />
+        {estimate ? <EstimateNote estimate={estimate} /> : null}
       </div>
     );
   }

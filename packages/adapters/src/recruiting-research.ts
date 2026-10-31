@@ -159,6 +159,13 @@ export async function requireQuickSearchBeforeResearch(
   );
 }
 
+/** Schools on the public profile, so Results can show education without another lookup. */
+const EDUCATION_SCHEMA = {
+  type: ["array", "null"],
+  description: 'One entry per degree, "School | Degree, field of study | Start – End"',
+  items: { type: "string" },
+} as const;
+
 /** Output shape a people-search agent run returns when the request names none. */
 export const AGENT_RUN_PEOPLE_SCHEMA = {
   type: "object",
@@ -174,7 +181,9 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
           name: { type: "string" },
           linkedin_url: { type: ["string", "null"], format: "uri" },
           current_role: { type: ["string", "null"] },
+          current_company: { type: ["string", "null"] },
           location: { type: ["string", "null"] },
+          education: EDUCATION_SCHEMA,
           evidence: { type: "string" },
         },
       },
@@ -183,7 +192,7 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
 } as const;
 /**
  * A grading run's rows: one per person given in input.data, in the research service's own row
- * format (canonical person columns, match_score 0–100, match_tier Strong / Promising / Partial /
+ * format (canonical person columns, education, match_score 0–100, match_tier Strong / Promising / Partial /
  * Uncertain, fit_reasons, concerns, requirements_assessment), so Results reads them unchanged.
  */
 export const AGENT_RUN_GRADE_SCHEMA = {
@@ -201,6 +210,7 @@ export const AGENT_RUN_GRADE_SCHEMA = {
           "current_title",
           "current_company",
           "location",
+          "education",
           "evidence_urls",
           "match_score",
           "match_tier",
@@ -214,6 +224,7 @@ export const AGENT_RUN_GRADE_SCHEMA = {
           current_title: { type: ["string", "null"] },
           current_company: { type: ["string", "null"] },
           location: { type: ["string", "null"] },
+          education: EDUCATION_SCHEMA,
           evidence_urls: { type: ["array", "null"], items: { type: "string" } },
           match_score: { type: "integer", minimum: 0, maximum: 100 },
           match_tier: { type: "string", enum: ["Strong", "Promising", "Partial", "Uncertain"] },

@@ -119,8 +119,15 @@ export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./railway-sandbox.js";
 export * from "./realtime.js";
+export {
+  agentRunWaitTarget,
+  RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
+} from "./recruiting-agent-run-wait.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
-export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
+export {
+  fillAllRecruitingRoleProfiles,
+  fillRecruitingRoleProfiles,
+} from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
@@ -162,3 +169,4 @@ export * from "./web-limits.js";
 export * from "./web-provider-factory.js";
 export * from "./web-ssrf.js";
 export * from "./web-tools.js";
+export { currentWorkEstimate } from "./work-estimate.js";

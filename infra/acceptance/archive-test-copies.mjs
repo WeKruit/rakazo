@@ -3,8 +3,8 @@
 // idle for a while. Archiving uses the product's own archive (restorable); nothing is deleted.
 // Real roles never match the copy prefix. A copy with a run still working is skipped.
 //
-//   RAKAZO_URL=… RAKAZO_ORIGIN=… RAKAZO_TOKEN=… node infra/acceptance/archive-test-copies.mjs \
-//     [--idle-hours 2] [--keep <groupId>,<groupId>] [--dry-run]
+//   RAKAZO_URL=… RAKAZO_ORIGIN=… (RAKAZO_TOKEN=… | RAKAZO_EMAIL=… RAKAZO_PASSWORD=…) \
+//     node infra/acceptance/archive-test-copies.mjs [--idle-hours 2] [--keep <groupId>,<groupId>] [--dry-run]
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
   const index = args.indexOf(name);
@@ -13,9 +13,24 @@ const option = (name, fallback) => {
 const BASE = (process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
 const ORIGIN = (process.env.RAKAZO_ORIGIN ?? BASE).replace(/\/$/, "");
 const TOKEN = process.env.RAKAZO_TOKEN;
-if (!BASE || !TOKEN) {
-  console.error("RAKAZO_URL and RAKAZO_TOKEN are required");
+const { RAKAZO_EMAIL: EMAIL, RAKAZO_PASSWORD: PASSWORD } = process.env;
+if (!BASE || !(TOKEN || (EMAIL && PASSWORD))) {
+  console.error("RAKAZO_URL and RAKAZO_TOKEN (or RAKAZO_EMAIL and RAKAZO_PASSWORD) are required");
   process.exit(2);
+}
+// The harness signs in with a password as often as with a token; both sweep the same copies.
+let cookie = "";
+if (EMAIL && PASSWORD) {
+  const response = await fetch(`${BASE}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: ORIGIN },
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+  });
+  if (!response.ok) {
+    console.error(`sign-in ${response.status}`);
+    process.exit(2);
+  }
+  cookie = (response.headers.getSetCookie?.() ?? []).map((line) => line.split(";")[0]).join("; ");
 }
 const IDLE_MS = Number(option("--idle-hours", "2")) * 3_600_000;
 const KEEP = new Set((option("--keep", "") ?? "").split(",").filter(Boolean));
@@ -28,7 +43,7 @@ async function rpc(route, json) {
     headers: {
       "content-type": "application/json",
       origin: ORIGIN,
-      authorization: `Bearer ${TOKEN}`,
+      ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
     },
     body: JSON.stringify({ json }),
   });

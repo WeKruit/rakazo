@@ -32,6 +32,7 @@ import {
   DISCOVERY_PREWARM_REFRESH_MS,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
+  fillAllRecruitingRoleProfiles,
   firstPartyMcpUrl,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
@@ -64,6 +65,7 @@ import {
 import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
 import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
+  backfillRecruitingCrews,
   closePoolSessions,
   createBoardEvents,
   createDb,
@@ -77,6 +79,9 @@ import {
 import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
 import { MarkdownMemoryStore } from "@rakazo/memory";
+
+/** The one-time profile fill waits for boot and the first queued jobs to settle. */
+const PROFILE_FILL_DELAY_MS = 60_000;
 
 const staging = hostedStagingConfig(process.env);
 const logger = createRootLogger(
@@ -370,6 +375,14 @@ async function main() {
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
   });
   reconciler.start();
+  // Education and work history the saved searches already returned reach existing people too.
+  setTimeout(() => {
+    void fillAllRecruitingRoleProfiles(prisma, shutdown.signal)
+      .then((result) => logger.info("recruiting.profiles.fill_all", result))
+      .catch((error) =>
+        logger.warn("recruiting.profiles.fill_all failed", { error: String(error) }),
+      );
+  }, PROFILE_FILL_DELAY_MS).unref();
 
   const drain = createWorkerDrain({
     stopJobs: () => jobHost.stop(),
@@ -449,6 +462,15 @@ async function main() {
 
   logger.info("boot.phase", { phase: "ready", "boot.elapsed_ms": Math.round(performance.now()) });
   logger.info("worker ready", { degraded: secrets.describe().capabilities.degraded ?? false });
+  // Every account with a recruiting crew gets the current defaults (its Reviewer in every
+  // conversation, the tools it grades with) on each release, not only when the person signs in.
+  void backfillRecruitingCrews(
+    prisma,
+    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint },
+    (error) => logger.error("recruiting crew backfill", error),
+  )
+    .then((accounts) => logger.info("recruiting crew backfill done", { accounts }))
+    .catch((error) => logger.error("recruiting crew backfill", error));
 }
 
 main().catch(async (error) => {

@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  agentRunWaitTarget,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   runningAgentRunId,
   waitForRecruitingAgentRun,
@@ -16,23 +17,20 @@ const answer = (id: string, status: string, runId = "agent_run_1") => ({
 function fixture(options: {
   answers: Array<ReturnType<typeof answer>>;
   busy?: boolean;
-  woken?: boolean;
+  woken?: boolean | "yielded";
   member?: boolean;
   talking?: boolean;
+  /** The recruiter's countdown for this search, started this long before now. */
+  countdown?: { startedMsAgo: number; estimateMs: number; reported?: number };
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "wake" }));
   const taskCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "task" }));
   const tx = {
     thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
     run: {
-      findFirst: vi.fn(async (args: { where: { clientNonce?: string } }) =>
-        args.where.clientNonce
-          ? options.woken
-            ? { id: "earlier-wake" }
-            : null
-          : options.busy
-            ? { id: "busy" }
-            : null,
+      findFirst: vi.fn(async () => (options.busy ? { id: "busy" } : null)),
+      findMany: vi.fn(async () =>
+        options.woken ? [{ status: options.woken === "yielded" ? "cancelled" : "completed" }] : [],
       ),
       create: runCreate,
     },
@@ -51,12 +49,36 @@ function fixture(options: {
     chatGroupMember: {
       findFirst: vi.fn(async () => (options.member === false ? null : { botId: "sourcer" })),
     },
-    externalEffect: { findMany: vi.fn(async () => options.answers) },
+    externalEffect: {
+      findMany: vi.fn(async () => options.answers),
+      findFirst: vi.fn(async () =>
+        options.countdown
+          ? {
+              id: "estimate",
+              request: {
+                threadId: "thread",
+                kind: "search",
+                people: 500,
+                estimateMs: options.countdown.estimateMs,
+              },
+              result: options.countdown.reported ? { reported: options.countdown.reported } : null,
+              createdAt: new Date(now - options.countdown.startedMsAgo),
+            }
+          : null,
+      ),
+      updateMany: vi.fn(async (_args: unknown) => ({ count: 1 })),
+    },
     message: { findFirst: vi.fn(async () => (options.talking ? { id: "message" } : null)) },
     $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
   };
   const jobs = { enqueue: vi.fn(async () => undefined) };
-  return { prisma: prisma as unknown as PrismaClient, jobs, runCreate, taskCreate };
+  return {
+    prisma: prisma as unknown as PrismaClient,
+    jobs,
+    runCreate,
+    taskCreate,
+    effectUpdate: prisma.externalEffect.updateMany,
+  };
 }
 
 describe("people-search agent runs that outlive their turn", () => {
@@ -130,9 +152,67 @@ describe("people-search agent runs that outlive their turn", () => {
     expect(test.jobs.enqueue).not.toHaveBeenCalled();
   });
 
+  it("wakes again after a wake gave way to the recruiter", async () => {
+    const test = fixture({ answers: [answer("newest", "running")], woken: "yielded" });
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(test.runCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        clientNonce: `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}agent_run_1:newest:1`,
+      }),
+    });
+    expect(
+      agentRunWaitTarget(`${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}agent_run_1:newest:1`),
+    ).toBe("agent_run_1");
+    expect(agentRunWaitTarget("recruiting-research-wake:task:x")).toBeUndefined();
+  });
+
   it("leaves the run alone when its agent left the conversation", async () => {
     const test = fixture({ answers: [answer("newest", "running")], member: false });
     await waitForRecruitingAgentRun(test, payload, now);
     expect(test.runCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports progress once when the recruiter's countdown runs out", async () => {
+    const countdown = { startedMsAgo: 11 * 60_000, estimateMs: 10 * 60_000 };
+    const test = fixture({ answers: [answer("newest", "running")], countdown });
+    await waitForRecruitingAgentRun(test, payload, now);
+    const prompt = String(test.taskCreate.mock.calls[0]?.[0].data.prompt);
+    expect(prompt).toContain("estimated 10 minutes are up");
+    expect(prompt).toContain("tell the recruiter in one line");
+    expect(prompt).not.toContain("end the turn with an empty reply");
+    expect(test.effectUpdate).toHaveBeenCalledWith({
+      where: { id: "estimate", status: "running" },
+      data: { result: { reported: 1 } },
+    });
+
+    const reported = fixture({
+      answers: [answer("newest", "running")],
+      countdown: { ...countdown, reported: 1 },
+    });
+    await waitForRecruitingAgentRun(reported, payload, now);
+    expect(String(reported.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
+      "end the turn with an empty reply",
+    );
+  });
+
+  it("stays quiet while the countdown is still running", async () => {
+    const test = fixture({
+      answers: [answer("newest", "running")],
+      countdown: { startedMsAgo: 3 * 60_000, estimateMs: 10 * 60_000 },
+    });
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(String(test.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
+      "end the turn with an empty reply",
+    );
+    expect(test.effectUpdate).not.toHaveBeenCalled();
+  });
+
+  it("ends the countdown when the run finished", async () => {
+    const test = fixture({ answers: [answer("newest", "completed")] });
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(test.effectUpdate).toHaveBeenCalledWith({
+      where: { idempotencyKey: "work_estimate:agent_run_1", spaceId: "space", status: "running" },
+      data: { status: "done" },
+    });
   });
 });

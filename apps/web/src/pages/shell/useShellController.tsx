@@ -91,6 +91,7 @@ import {
   userHoldsComputerControl,
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
+import { useWorkEstimate } from "../../lib/work-estimate";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { RoutineDraftState } from "../routine-draft";
 import { draftFromRoutine, emptyRoutineDraft } from "../routine-draft";
@@ -801,6 +802,10 @@ export function useShellController() {
     running: transcriptRunning,
     refreshSignal: recruitingRefresh,
   });
+  const workEstimate = useWorkEstimate({
+    target: groupId ? { groupId } : active?.id ? { botId: active.id } : undefined,
+    refreshSignal: `${workingRunsKey}:${recruitingRefresh}`,
+  });
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   useEffect(() => {
     setPreloadRecoveryActiveWork(composerRunning);
@@ -1447,6 +1452,7 @@ export function useShellController() {
     workingRuns,
     transcriptRunning,
     peopleAdded,
+    workEstimate,
     composerRunning,
     resuming,
     runError,

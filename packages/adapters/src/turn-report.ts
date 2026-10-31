@@ -298,9 +298,10 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
   draft: /\bdraft|草稿|写.{0,8}(?:邮件|email)/i,
   search: /\bfind\b|\bsearch|\bmore (?:people|candidates)|再找|找\d|找更多/i,
 };
-// "Do not send anything" or 先不要发 rules a send out; it is not a send request.
+// "Do not send anything", "No emails will be sent", "before anything is sent" or 先不要发 rule a
+// send out; they are not a send request.
 const NEGATED =
-  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|(?:不要|别|先不|不用)(?:发|约)/gi;
+  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|\b(?:no|nothing)\b(?:\s+\w+){0,4}?\s+(?:sent|send(?:ing)?)\b|\b(?:before|until)\s+(?:\w+\s+){0,3}?(?:send(?:ing)?|sent)\b|(?:不要|别|先不|不用|不)(?:发|约)/gi;
 
 function requests(kind: Capability, request: string): boolean {
   return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
@@ -386,10 +387,18 @@ const CARD_WORK = /\b(?:sen[dt]|e-?mail|draft|book|invit|interview|schedul)|发|
  * booking request ended without its card while the reply talks about that work ("I haven't sent
  * anything; please save the draft"), which leaves the request undone however it is worded.
  */
-export function retryReason(reply: string, request: string): Declined | undefined {
+export function retryReason(
+  reply: string,
+  request: string,
+  /** The recruiter's own latest words, when a teammate's brief is the request. */
+  person?: string,
+): Declined | undefined {
   const declined = declinedSentence(reply);
   if (declined) return declined;
-  if (!requests("send", request) && !requests("schedule", request)) return undefined;
+  // A brief's wording ("no emails will be sent yet") is no send request unless the recruiter's
+  // own message asked for one.
+  const asksCard = (text: string) => requests("send", text) || requests("schedule", text);
+  if (!asksCard(request) || (person !== undefined && !asksCard(person))) return undefined;
   if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
   const sentence = reply
     .split(/(?<=[.!?。！？\n])/)
@@ -456,8 +465,10 @@ export function declineRetry(input: {
   teammates: readonly Teammate[];
   /** The turn did consequential work (see TurnReportLedger.worked). */
   worked?: boolean;
+  /** The recruiter's own latest words, when a teammate's brief is the request. */
+  personRequest?: string;
 }): DeclineRetry | undefined {
-  const declined = retryReason(input.reply, input.request);
+  const declined = retryReason(input.reply, input.request, input.personRequest);
   // A reply that shows a drafted email delivered the work; holding it back would lose the draft.
   if (!declined || (DRAFT_START.test(input.reply) && declined.keep === undefined)) return undefined;
   const { sentence } = declined;

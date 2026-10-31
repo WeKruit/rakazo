@@ -87,6 +87,15 @@ export function isTerminal(status: RunStatus): boolean {
   return TERMINAL.includes(status);
 }
 
+/**
+ * Work that never holds a person's message: grading, check-ins, teammates' reports, routines
+ * and other automation run beside the person's own turn instead of making them wait. Only the
+ * creation intro still holds it (a second run would overlap it on a dedicated computer).
+ */
+export function runsBesidePerson(trigger: string | null | undefined): boolean {
+  return !isConversationalRun(trigger) && trigger !== "created";
+}
+
 /** Whether a run's turn is part of the thread's conversation and may take user steering. */
 export function isConversationalRun(trigger: string | null | undefined): boolean {
   return !NON_CONVERSATIONAL_RUN_TRIGGERS.has(trigger ?? "");

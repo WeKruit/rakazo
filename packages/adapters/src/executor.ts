@@ -529,6 +529,7 @@ import {
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
+import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
@@ -637,6 +638,14 @@ import {
 } from "./user-progress.js";
 import { createWebProvider } from "./web-provider-factory.js";
 import { webFetchFromTool, webSearchFromTool } from "./web-tools.js";
+import {
+  contactLookupCountdownNote,
+  finishWorkEstimate,
+  startWorkEstimate,
+  withWorkNote,
+  workEstimateAfterAgentRun,
+  workStartNote,
+} from "./work-estimate.js";
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -5879,6 +5888,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : rawArgs;
           // A lookup for the first N people of the role: the server picks the next batch in Results
           // order, so the agent never pages the list or decides the order itself.
+          // The estimate the agent tells the recruiter about, said once with the tool's result.
+          let workNote: string | null = null;
           if (name.endsWith("__find_emails") && typeof args.next_from_role === "number") {
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId)
@@ -5898,6 +5909,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             contactLookupOwed = batch.remaining
               ? { target, remaining: batch.remaining }
               : undefined;
+            // A big lookup shows the recruiter a countdown while this turn works through it.
+            if (batch.remaining) {
+              const started = await startWorkEstimate(deps.prisma, run, {
+                ref: `emails:${run.id}`,
+                kind: "emails",
+                people: batch.remaining + batch.people.length,
+              }).catch(() => null);
+              if (started?.estimateMs) workNote = workStartNote("emails", started.estimateMs);
+            } else
+              await finishWorkEstimate(deps.prisma, run.spaceId, `emails:${run.id}`).catch(
+                () => undefined,
+              );
             if (!batch.people.length)
               return {
                 summary: {
@@ -11457,6 +11480,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .catch((error) => {
                   getLogger().warn("agent run follow-up not scheduled", { error: String(error) });
                 });
+            // The recruiter sees a countdown for a big search (a clock for a small one); the agent
+            // hears the estimate once so it can tell them. Bookkeeping never fails the search.
+            const countdown =
+              connectorCall.route?.toolName === "agent_run" && run.trigger !== "recruiting_grade"
+                ? await workEstimateAfterAgentRun(deps.prisma, run, finished, connectorCall.args)
+                : null;
             // The save sits between the search and the model's pick, so its cost is logged apart.
             const saveStartedAt = performance.now();
             const saved = await savePeopleSearchAsItReturns(finished);
@@ -11466,7 +11495,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 durationMs: Math.round(performance.now() - saveStartedAt),
                 people: Array.isArray(saved.people) ? saved.people.length : 0,
               });
-            return saved ?? finished;
+            const returned = saved ?? finished;
+            const note =
+              countdown ??
+              workNote ??
+              (name.endsWith("__find_emails")
+                ? await contactLookupCountdownNote(deps.prisma, run).catch(() => null)
+                : null);
+            return note ? withWorkNote(returned, note) : returned;
           }
           return finish({ error: `unknown tool ${name}` });
         };
@@ -13183,6 +13219,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   worked: turnReport.worked(),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
+                  ...(handedIn
+                    ? {
+                        personRequest: turnRequestText(
+                          historyMessages.findLast((message) => message.role === "user"),
+                          undefined,
+                          bot.id,
+                        ),
+                      }
+                    : {}),
                   ...(contactLookupOwed
                     ? {
                         owedWork: `Continue the contact lookup: ${contactLookupOwed.remaining} of the first ${contactLookupOwed.target} people are still to look up. Call find_emails with next_from_role ${contactLookupOwed.target} again now and keep calling until none are left, then report how many have an email. Do not stop, decline or ask before that.`,
@@ -13279,6 +13324,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Every message a person writes gets a reply: once the conversation goes quiet, check
+          // that its newest message was answered.
+          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
+            getLogger().error("reply check enqueue", error),
+          );
           let recruitingContinued = false;
           let retryRunId: string | null = null;
           if (completed.continuationRunId) {

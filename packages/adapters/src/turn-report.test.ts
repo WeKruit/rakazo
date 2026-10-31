@@ -243,7 +243,25 @@ describe("declineRetry", () => {
       retryReason(reply, "Look up emails for the first 10 people. Do not send anything."),
     ).toBeUndefined();
     expect(retryReason(reply, "找邮箱，先不要发")).toBeUndefined();
+    // A coordinator's handoff words its limit in other ways.
+    for (const request of [
+      "Goal: find contacts for the ten. No emails will be sent yet.",
+      "Look up contact details; nothing should be sent.",
+      "Find their emails before anything is sent.",
+      "Get contacts. No outreach or sending.",
+      "找联系方式，不发邮件",
+    ])
+      expect(retryReason(reply, request)).toBeUndefined();
     expect(retryReason(reply, "send them the email")?.kind).toBe("decline");
+    expect(retryReason(reply, "Find contacts, then send them the email")?.kind).toBe("decline");
+    // A teammate's brief that mentions sending is read against the recruiter's own words.
+    const brief = "Goal: find contacts for the ten so we can send outreach after review.";
+    expect(
+      retryReason("Found 7 emails. No messages were sent.", brief, "找contact"),
+    ).toBeUndefined();
+    expect(retryReason("Found 7 emails. No messages were sent.", brief, "发20个人")?.kind).toBe(
+      "decline",
+    );
   });
 
   it("catches a past-tense refusal of a send", () => {

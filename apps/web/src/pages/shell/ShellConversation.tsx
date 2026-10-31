@@ -86,7 +86,7 @@ export function ShellConversation({
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
-  const { setReplyTarget, setReplyQuote, peopleAdded } = model;
+  const { setReplyTarget, setReplyQuote, peopleAdded, workEstimate } = model;
   // Stable handlers keep the memoized transcript from re-rendering when a panel changes.
   const replyTo = useCallback(
     (message: ThreadMessage) => {
@@ -827,6 +827,7 @@ export function ShellConversation({
                   onSpeak={speakMessage}
                   onOpenComputer={onOpenComputer}
                   liveDetail={liveDetail}
+                  workEstimate={workEstimate}
                 />
               )}
               {showToolActivity && inGroup && composerRunning ? (
