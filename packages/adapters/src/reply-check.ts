@@ -14,8 +14,11 @@ import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
 export const REPLY_CHECK_DELAY_MS = 5_000;
 /** Older unanswered messages are left alone: the person has moved on. */
 const MAX_AGE_MS = 60 * 60_000;
-/** A person's message reaches an agent as a turn of its own or as steering of a busy one. */
-const PERSON_TRIGGERS = ["user", "follow_up"];
+/**
+ * A person's message reaches an agent as a turn of its own or as steering of a busy one. A
+ * person's turn whose slow tool moved to the background keeps its message as the person's.
+ */
+const PERSON_TRIGGERS = ["user", "follow_up", "tool_background"];
 
 export function replyNudgeNonce(messageId: string): string {
   return `${AUTOCONTINUE_NONCE_PREFIX}reply:${messageId}`;

@@ -66,6 +66,14 @@ describe("every message gets a reply", () => {
     expect(test.events.sendUserMessage).toHaveBeenCalledOnce();
   });
 
+  it("answers a message whose turn moved its slow tool to the background", async () => {
+    const test = fixture({
+      latest: { role: "user", sourceRuns: [{ botId: "main", trigger: "tool_background" }] },
+    });
+    await checkThreadReplied(test, { threadId: "thread" }, now);
+    expect(test.events.sendUserMessage).toHaveBeenCalledOnce();
+  });
+
   it("answers a new message after an earlier turn was stopped", async () => {
     const test = fixture({
       latest: {
