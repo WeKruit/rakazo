@@ -38,8 +38,7 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     description: "Platform recruiting research",
     endpoint: "https://api.autumn.ai/mcp",
     // Retired: people search scales and Reviewer grades. Crews keep the connection, which marks
-    // them as recruiting crews, with no tools, so nothing spends its credits; a grant the user
-    // set themselves stays.
+    // them as recruiting crews, with no tools, so nothing spends its credits.
     bots: ["main", "sourcer", "reviewer"],
     tools: [],
   },
@@ -1066,6 +1065,24 @@ export async function ensurePlatformServices(
   for (const slug of ["people-search", "fullenrich"])
     await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
+  await retireResearchTools(prisma, actor);
+}
+
+/**
+ * The research service is retired for every account: each of the account's grants to it keeps
+ * its row, which marks a recruiting crew, with no tools, whoever last set it.
+ */
+async function retireResearchTools(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
+  await prisma.botMcpServer.updateMany({
+    where: {
+      ...scope,
+      server: { ...scope, endpoint: research.endpoint },
+      NOT: { allowAllTools: false, allowedTools: { equals: [] } },
+    },
+    data: { allowAllTools: false, allowedTools: [] },
+  });
 }
 
 /**
