@@ -54,7 +54,7 @@ import {
   listThreadBackgroundWork,
   loadQueuedMessageIds,
   lockOwnedGroup,
-  type Prisma,
+  Prisma,
   QueuedMessageError,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   STOPPED_TURN,
@@ -540,10 +540,11 @@ export async function threadSnapshot(
   deps: { prisma: PrismaClient },
   target: ThreadTarget,
 ): Promise<ThreadSnapshot> {
-  // Lock the thread row so messages, the event cursor, active runs, and live
-  // progress are read from one consistent commit. A torn Promise.all can
-  // otherwise advance the client cursor past thread.message.created while the
-  // ask message page still omits it — leaving waiting_input with no AskCard.
+  // Read messages, the event cursor, active runs, and live progress from one
+  // snapshot. A torn Promise.all can otherwise advance the client cursor past
+  // thread.message.created while the ask message page still omits it — leaving
+  // waiting_input with no AskCard. A snapshot, not a row lock: a share lock made
+  // every open of a busy thread wait behind its writers, and made them wait too.
   if (target.kind === "bot") {
     const [busyBotName, core] = await Promise.all([
       resolveBusyBotName(deps.prisma, {
@@ -553,7 +554,6 @@ export async function threadSnapshot(
       }),
       deps.prisma.$transaction(
         async (tx) => {
-          await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
           const [
             messagePage,
             last,
@@ -651,7 +651,11 @@ export async function threadSnapshot(
             backgroundTasks,
           };
         },
-        { timeout: 15_000, maxWait: 5_000 },
+        {
+          timeout: 15_000,
+          maxWait: 5_000,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
       ),
     ]);
     return {
@@ -671,7 +675,6 @@ export async function threadSnapshot(
 
   const core = await deps.prisma.$transaction(
     async (tx) => {
-      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
       const [
         messagePage,
         last,
@@ -746,7 +749,11 @@ export async function threadSnapshot(
         backgroundTasks,
       };
     },
-    { timeout: 15_000, maxWait: 5_000 },
+    {
+      timeout: 15_000,
+      maxWait: 5_000,
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    },
   );
   const primaryActiveRun = pickPrimaryActiveRun(core.activeRuns);
   return {
