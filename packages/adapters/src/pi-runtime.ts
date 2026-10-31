@@ -58,6 +58,12 @@ import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
 import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
+import {
+  RECORD_TOOL_DEADLINE_MS,
+  RECORD_TOOL_LATE_TEXT,
+  RECORD_TOOLS,
+  withinDeadline,
+} from "./deadline.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -1875,12 +1881,22 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (host.request.executeTool) {
+            const call = host.request.executeTool(tool.name, args, executionId, tool.route, {
+              onShellStillRunning: (completion) => {
+                host.pendingShells.push(completion);
+              },
+            });
             const result = await untilStopped(
-              host.request.executeTool(tool.name, args, executionId, tool.route, {
-                onShellStillRunning: (completion) => {
-                  host.pendingShells.push(completion);
-                },
-              }),
+              RECORD_TOOLS.has(tool.name)
+                ? withinDeadline(call, RECORD_TOOL_DEADLINE_MS, () => {
+                    getLogger().warn("run.tool.late", {
+                      runId: host.request.runId,
+                      tool: tool.name,
+                      executionId,
+                    });
+                    return { error: RECORD_TOOL_LATE_TEXT };
+                  })
+                : call,
               host.signal,
               () =>
                 getLogger().warn("run.tool.abandoned", {

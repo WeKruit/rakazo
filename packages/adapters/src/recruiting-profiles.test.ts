@@ -11,6 +11,7 @@ vi.mock("@rakazo/db", () => db);
 import {
   executeRecruitingProfilesTool,
   fillRecruitingRoleProfiles,
+  keepSearchHistory,
   linkedinPersonKey,
   peopleFromSearch,
   profileFromLookup,
@@ -202,7 +203,7 @@ describe("executeRecruitingProfilesTool", () => {
 });
 
 describe("peopleFromSearch", () => {
-  it("reads the people a finished agent run returned", () => {
+  it("reads the people a finished agent run returned, with their education", () => {
     const body = {
       success: true,
       id: "agent_run_1",
@@ -214,8 +215,10 @@ describe("peopleFromSearch", () => {
             {
               name: "Ada Example",
               linkedin_url: "https://linkedin.com/in/ada-example?trk=x",
-              current_role: "Payments Engineer, Acme",
+              current_role: "Payments Engineer",
+              current_company: "Acme",
               location: "New York, NY",
+              education: ["State University | BS, Computer Science | 2012 – 2016"],
               evidence: "Built the ledger service in Go.",
             },
             { name: "No Link", linkedin_url: null, evidence: "n/a" },
@@ -228,9 +231,11 @@ describe("peopleFromSearch", () => {
       {
         name: "Ada Example",
         linkedin_url: "https://www.linkedin.com/in/ada-example",
-        current_title: "Payments Engineer, Acme",
+        current_title: "Payments Engineer",
+        current_company: "Acme",
         location: "New York, NY",
         snippet: "Built the ledger service in Go.",
+        education: "State University | BS, Computer Science | 2012 – 2016",
       },
     ]);
     const running = { id: "agent_run_1", status: "running", outputReady: false };
@@ -533,9 +538,22 @@ describe("fillRecruitingRoleProfiles", () => {
       personKeys: ["linkedin:/in/cara", "linkedin:/in/dan", "linkedin:/in/zed"],
       runIds: ["run1"],
     });
-    db.listRecruitingSavedProfiles.mockResolvedValue(
-      new Map([["linkedin:/in/dan", { experience: [{ title: "x" }] }]]),
-    );
+    const danSaved = {
+      personKey: "linkedin:/in/dan",
+      provider: "people_search",
+      fetchedAt: "2026-10-26T10:00:00.000Z",
+      headline: null,
+      profileImageUrl: null,
+      experience: [{ title: "x" }],
+      education: [],
+    };
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map([["linkedin:/in/dan", danSaved]]));
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => ({
+      ...input.profile,
+      personKey: input.personKey,
+      provider: input.provider,
+      fetchedAt: input.fetchedAt.toISOString(),
+    }));
     db.listRunToolResults.mockResolvedValue([
       {
         effectId: "e1",
@@ -551,8 +569,18 @@ describe("fillRecruitingRoleProfiles", () => {
         .png()
         .toBuffer();
     });
-    expect(result).toEqual({ people: 3, filled: 1, photos: 1, missing: 1 });
-    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ people: 3, filled: 2, photos: 1, missing: 1 });
+    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(2);
+    // A saved work history stays; the search only adds the missing education.
+    expect(db.saveRecruitingSavedProfile.mock.calls[1]![3]).toMatchObject({
+      personKey: "linkedin:/in/dan",
+      provider: "people_search",
+      fetchedAt: new Date(danSaved.fetchedAt),
+      profile: {
+        experience: [{ title: "x" }],
+        education: [{ school_name: "State U", degree: "BS" }],
+      },
+    });
     const [, , runId, input] = db.saveRecruitingSavedProfile.mock.calls[0]!;
     expect(runId).toBe("run1");
     expect(input).toMatchObject({
@@ -579,6 +607,76 @@ describe("fillRecruitingRoleProfiles", () => {
           },
         ],
         education: [{ school_name: "State U", degree: "BS", start_date: null, end_date: null }],
+      },
+    });
+  });
+});
+
+describe("keepSearchHistory", () => {
+  const actor = {
+    spaceId: "s1",
+    userId: "u1",
+    email: "owner@example.com",
+    isDeploymentOwner: false,
+  };
+  beforeEach(() => vi.resetAllMocks());
+
+  it("keeps a search's education on the saved profile so a later grading row cannot hide it", async () => {
+    const complete = {
+      personKey: "linkedin:/in/kim",
+      provider: "people_search",
+      fetchedAt: "2026-10-26T10:00:00.000Z",
+      headline: null,
+      profileImageUrl: null,
+      experience: [{ title: "Lead" }],
+      education: [{ school_name: "Old U" }],
+    };
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map([["linkedin:/in/kim", complete]]));
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => input.profile);
+    const createdAt = new Date("2026-10-30T10:00:00Z");
+    const result = await keepSearchHistory({} as never, actor, "run1", [
+      {
+        row: {
+          name: "Joe Example",
+          linkedin_url: "https://www.linkedin.com/in/joe-example",
+          experience: "Site Leader | Amazon |  | Jan 2020 – Present",
+          education: "Rutgers University | BS, Supply Chain | 2010 – 2014",
+        },
+        effectId: "e1",
+        createdAt,
+      },
+      {
+        row: {
+          name: "Kim Example",
+          linkedin_url: "https://www.linkedin.com/in/kim",
+          education: "New U | MBA",
+        },
+        effectId: "e1",
+        createdAt,
+      },
+      {
+        row: { name: "No History", linkedin_url: "https://www.linkedin.com/in/none" },
+        effectId: "e1",
+        createdAt,
+      },
+    ]);
+    expect(result.filled).toEqual(new Set(["linkedin:/in/joe-example"]));
+    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(1);
+    expect(db.saveRecruitingSavedProfile.mock.calls[0]![3]).toMatchObject({
+      personKey: "linkedin:/in/joe-example",
+      provider: "people_search",
+      sourceEffectId: "e1",
+      fetchedAt: createdAt,
+      profile: {
+        experience: [{ title: "Site Leader", company_name: "Amazon", is_current: true }],
+        education: [
+          {
+            school_name: "Rutgers University",
+            degree: "BS, Supply Chain",
+            start_date: "2010",
+            end_date: "2014",
+          },
+        ],
       },
     });
   });

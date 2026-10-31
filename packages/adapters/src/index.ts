@@ -105,6 +105,7 @@ export * from "./model-vision.js";
 export * from "./none-sandbox.js";
 export * from "./openai-compatible-url.js";
 export * from "./openai-voice.js";
+export * from "./organization-logos.js";
 export * from "./page-browser-session.js";
 export * from "./pi-catalog-availability.js";
 export * from "./pi-codex-catalog.js";
@@ -124,7 +125,10 @@ export {
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
-export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
+export {
+  fillAllRecruitingRoleProfiles,
+  fillRecruitingRoleProfiles,
+} from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,

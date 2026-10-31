@@ -17,6 +17,15 @@ import {
   savedContactLookups,
 } from "./recruiting-research.js";
 
+describe("agent run output schemas", () => {
+  it("ask for education, so Results can show it for found and graded people", () => {
+    expect(AGENT_RUN_PEOPLE_SCHEMA.properties.people.items.properties.education.items).toEqual({
+      type: "string",
+    });
+    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.required).toContain("education");
+  });
+});
+
 describe("people-search agent runs", () => {
   const actor = { userId: "owner", spaceId: "space", runId: "run-1" };
   const server = {

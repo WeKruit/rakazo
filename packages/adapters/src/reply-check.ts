@@ -2,6 +2,7 @@ import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
 import { runContinueJob, threadReplyCheckJob } from "@rakazo/adapter-kit";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
 
@@ -14,8 +15,11 @@ import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
 export const REPLY_CHECK_DELAY_MS = 5_000;
 /** Older unanswered messages are left alone: the person has moved on. */
 const MAX_AGE_MS = 60 * 60_000;
-/** A person's message reaches an agent as a turn of its own or as steering of a busy one. */
-const PERSON_TRIGGERS = ["user", "follow_up"];
+/**
+ * A person's message reaches an agent as a turn of its own or as steering of a busy one. A
+ * person's turn whose slow tool moved to the background keeps its message as the person's.
+ */
+const PERSON_TRIGGERS = ["user", "follow_up", "tool_background"];
 
 export function replyNudgeNonce(messageId: string): string {
   return `${AUTOCONTINUE_NONCE_PREFIX}reply:${messageId}`;
@@ -75,8 +79,10 @@ export async function checkThreadReplied(
       role: true,
       blocks: true,
       createdAt: true,
-      sourceRuns: { select: { botId: true, trigger: true }, take: 1 },
-      steeringMessages: { select: { botId: true, claimedAt: true } },
+      sourceRuns: { select: { botId: true, trigger: true, status: true, error: true }, take: 1 },
+      steeringMessages: {
+        select: { botId: true, claimedAt: true, run: { select: { status: true, error: true } } },
+      },
     },
   });
   if (latest?.role !== "user") return skipped("replied");
@@ -87,6 +93,13 @@ export async function checkThreadReplied(
   // Still being worked on: a turn is running, queued or waiting on a card, or the message waits
   // to be picked up. That turn ending schedules this check again.
   if (latest.steeringMessages.some((row) => !row.claimedAt)) return skipped("pending");
+  // The person stopped the turn that had their message: answering anyway would undo the stop.
+  // A person's Stop leaves no error or "turn_stopped"; a stuck turn the server cancelled carries
+  // another error and is still answered.
+  const stopped = (run: { status: string; error: string | null } | null | undefined) =>
+    run?.status === "cancelled" && (!run.error || run.error === STOPPED_TURN);
+  if (stopped(source) || latest.steeringMessages.some((row) => stopped(row.run)))
+    return skipped("stopped");
   const busy = await deps.prisma.run.findFirst({
     where: { threadId: thread.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
     select: { id: true },

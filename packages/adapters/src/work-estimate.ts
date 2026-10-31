@@ -64,6 +64,43 @@ export async function startWorkEstimate(
     : null;
 }
 
+/** Whether the recruiter stopped this work; a stopped search is not followed any more. */
+export async function workEstimateCancelled(prisma: PrismaClient, spaceId: string, ref: string) {
+  const row = await prisma.externalEffect.findFirst({
+    where: { idempotencyKey: key(ref), spaceId, status: "cancelled" },
+    select: { id: true },
+  });
+  return Boolean(row);
+}
+
+/**
+ * Searches still running at the provider, for the reconciler to re-arm their follow-up: a
+ * follow-up chain that broke (a worker restart, a lost job) would otherwise leave the countdown
+ * running with nobody checking when it ends.
+ */
+export async function runningSearchEstimates(
+  prisma: PrismaClient,
+  now: Date,
+  batchSize: number,
+): Promise<Array<{ threadId: string; botId: string; agentRunId: string }>> {
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      kind: WORK_ESTIMATE_KIND,
+      status: "running",
+      createdAt: { gte: new Date(now.getTime() - MAX_AGE_MS) },
+      idempotencyKey: { startsWith: `${WORK_ESTIMATE_KIND}:agent_run_` },
+    },
+    orderBy: { createdAt: "desc" },
+    take: batchSize,
+    select: { idempotencyKey: true, run: { select: { threadId: true, botId: true } } },
+  });
+  return rows.map((row) => ({
+    threadId: row.run.threadId,
+    botId: row.run.botId,
+    agentRunId: row.idempotencyKey.slice(WORK_ESTIMATE_KIND.length + 1),
+  }));
+}
+
 export async function finishWorkEstimate(prisma: PrismaClient, spaceId: string, ref: string) {
   await prisma.externalEffect.updateMany({
     where: { idempotencyKey: key(ref), spaceId, status: "running" },
@@ -174,7 +211,7 @@ export function workStartNote(kind: WorkEstimateKind, estimateMs: number): strin
   return [
     `This is a big ${what}: about ${minutes(estimateMs)} minutes. The recruiter sees a countdown.`,
     `Tell them in one line that it takes about ${minutes(estimateMs)} minutes and they can keep chatting or leave; you report when the time is up.`,
-    `If you have ${COMPLETION_EMAIL_TOOL} and they were not asked yet in this conversation, offer the email when it finishes.`,
+    `If you have ${COMPLETION_EMAIL_TOOL} and they were not offered it yet in this conversation, add "Want an email when it finishes? Just say so." to that line. Never use an ask_user card here and never wait for an answer: no click is needed for the work or the countdown to go on.`,
     ...(kind === "search" ? [SHORTFALL_RULE] : []),
   ].join(" ");
 }

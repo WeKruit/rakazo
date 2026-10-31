@@ -713,6 +713,8 @@ export async function planDeclineRetry(
     presentedRound?: boolean;
     /** A teammate handed this turn the request. */
     handedIn?: boolean;
+    /** The recruiter's own latest words, when a teammate's brief is the request. */
+    personRequest?: string;
     /** The role's playbook stage, read only when an offer or pick question needs it. */
     stage?: () => Promise<string | undefined>;
     /** Work the turn left unfinished by the server's own count (e.g. people still to look up). */
@@ -741,7 +743,9 @@ export async function planDeclineRetry(
       ? { sentence: "", note: input.owedWork }
       : undefined;
   const variables = draftVariables(input.reply);
-  const declined = input.request.trim() ? retryReason(input.reply, input.request) : undefined;
+  const declined = input.request.trim()
+    ? retryReason(input.reply, input.request, input.personRequest)
+    : undefined;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
   // After the asked work, a closing question or offer stands, on a card rather than in text.
@@ -792,6 +796,7 @@ export async function planDeclineRetry(
     request: input.request,
     tools: input.tools,
     worked: input.worked,
+    personRequest: input.personRequest,
     teammates: members.map(({ bot }) => ({
       id: bot.id,
       name: bot.name,

@@ -57,7 +57,12 @@ import { getLogger } from "@rakazo/logging";
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
 import { inlineProfilePhotos } from "./profile-photo.js";
-import { isPeopleSearchEndpoint, peopleFromSearch } from "./recruiting-profiles.js";
+import type { PeopleSearchRow } from "./recruiting-profiles.js";
+import {
+  isPeopleSearchEndpoint,
+  keepSearchHistory,
+  peopleFromSearch,
+} from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
@@ -934,6 +939,20 @@ export async function saveRecruitingPeopleSearch(
       },
     },
   );
+  // Results reads education and work history from the saved profile, since a later grading
+  // result becomes the person's newest row and does not repeat them. It runs beside the reply
+  // and never fails the save.
+  const searchedAt = new Map(calls.map((call) => [call.effectId, call.createdAt]));
+  void keepSearchHistory(
+    deps.prisma,
+    trusted.actor,
+    trusted.runId,
+    rows.map((entry) => ({
+      row: entry.row as PeopleSearchRow,
+      effectId: entry.sourceEffectId,
+      createdAt: searchedAt.get(entry.sourceEffectId) ?? new Date(),
+    })),
+  ).catch((error) => getLogger().warn("recruiting.profiles.keep_failed", { error: String(error) }));
   if (!reused.size) return saved;
   const fresh = savedRows(saved).filter((row) => !reused.has(row.candidateKey));
   const candidateRows = [...reused.values(), ...fresh];

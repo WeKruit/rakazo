@@ -62,6 +62,7 @@ import {
   createCompanySiteResolver,
   createExaOrganizationSearch,
   createFaviconResolver,
+  createPrismaOrganizationLogoStore,
   createTicket,
   createVoiceProvider,
   currentWorkEstimate,
@@ -923,7 +924,10 @@ export function createRouter(deps: RouterDeps) {
   const favicons = deps.favicons ?? createFaviconResolver();
   const companySites =
     deps.companySites ??
-    createCompanySiteResolver({ searchOrganizations: createExaOrganizationSearch() });
+    createCompanySiteResolver({
+      searchOrganizations: createExaOrganizationSearch(),
+      store: createPrismaOrganizationLogoStore(deps.prisma),
+    });
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>
@@ -1424,17 +1428,25 @@ export function createRouter(deps: RouterDeps) {
       // returns, and a failure must not block sign-in.
       const platformServices = input.offset
         ? Promise.resolve()
-        : ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
-            getLogger().error("platform service setup failed", error),
-          );
+        : ensurePlatformServices(deps.prisma, actor, {
+            sandboxKind: deps.env.sandboxProvider,
+          }).catch((error: unknown) => getLogger().error("platform service setup failed", error));
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread, active] = await Promise.all(
         [
           meDto(deps, actor),
           spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
-          repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
-          groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.activeOnly
+            ? []
+            : groupRepos.listGroups(actor, {
+                archived: true,
+                limit: 200,
+                offset: input.offset ?? 0,
+              }),
           input.groupId
             ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
                 threadSnapshot(deps, target),
@@ -7150,10 +7162,11 @@ async function spaceNavigationDto(
   const staleClaimBefore = new Date(Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS);
 
   // Counts include filtered-out groups; an empty mapped page must still advance.
+  // Archived bots and roles are not in these pages, so they must not add empty ones.
   const scope = { userId: actor.userId, spaceId: { in: spaceIds } };
   const totals = await Promise.all([
-    deps.prisma.bot.count({ where: scope }),
-    deps.prisma.chatGroup.count({ where: scope }),
+    deps.prisma.bot.count({ where: { ...scope, archivedAt: null } }),
+    deps.prisma.chatGroup.count({ where: { ...scope, archivedAt: null } }),
     deps.prisma.botSection.count({ where: scope }),
     deps.prisma.externalConversation.count({ where: scope }),
   ]);

@@ -1023,10 +1023,132 @@ export async function ensureRecruitingWorkspace(
  * already uses it, skips a disabled one, and adds only missing links. It does not wait for runs,
  * because adding a tool changes nothing an active run already holds.
  */
-export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor): Promise<void> {
+export async function ensurePlatformServices(
+  prisma: PrismaClient,
+  actor: Actor,
+  options: { sandboxKind?: string } = {},
+): Promise<void> {
+  await ensureReviewer(prisma, actor, options.sandboxKind);
   for (const slug of ["people-search", "fullenrich"])
     await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
+}
+
+/**
+ * Every recruiting crew has the quality check: the account's Reviewer exists and belongs to each
+ * conversation its Main is in, so grading never falls to the coordinator. Additive only.
+ */
+async function ensureReviewer(
+  prisma: PrismaClient,
+  actor: Actor,
+  sandboxKind: string | undefined,
+): Promise<void> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
+  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "reviewer");
+  if (!role) return;
+  const lead = {
+    ...scope,
+    archivedAt: null,
+    OR: [{ spawnKey: `recruiting:${actor.userId}:main` }, { name: "Main" }],
+    mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
+  };
+  if (!(await prisma.bot.count({ where: lead }))) return;
+  const reviewerWhere = {
+    ...scope,
+    archivedAt: null,
+    OR: [{ spawnKey: `recruiting:${actor.userId}:reviewer` }, { name: role.name }],
+  };
+  await prisma.$transaction(async (tx) => {
+    await lockSpaceForContentCreation(tx, actor);
+    let reviewer = await tx.bot.findFirst({ where: reviewerWhere, select: { id: true } });
+    if (!reviewer) {
+      if (!sandboxKind) return;
+      const count = await tx.bot.count({ where: scope });
+      reviewer = await createBotInTransaction(
+        tx,
+        actor,
+        {
+          name: role.name,
+          title: role.title,
+          description: role.description,
+          instructions: role.instructions,
+          color: BOT_COLORS[count % BOT_COLORS.length] ?? BOT_COLORS[0],
+          notifyOnFinish: true,
+          spawnKey: `recruiting:${actor.userId}:reviewer`,
+          disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
+        },
+        await recruitingComputerKind(tx, sandboxKind),
+      );
+    }
+    const groups = await tx.chatGroup.findMany({
+      where: {
+        ...scope,
+        archivedAt: null,
+        members: { some: { bot: lead }, none: { botId: reviewer.id } },
+      },
+      select: { id: true, _count: { select: { members: true } } },
+    });
+    const open = groups.filter((group) => group._count.members < GROUP_MEMBER_MAX);
+    if (open.length)
+      await tx.chatGroupMember.createMany({
+        data: open.map((group) => ({ groupId: group.id, botId: reviewer.id })),
+        skipDuplicates: true,
+      });
+  });
+}
+
+/**
+ * Bring every account with a recruiting crew to the current defaults now, as signing in would,
+ * instead of waiting for each person to open the app. Each account is independent: one that
+ * fails is logged by the caller's handler and the rest continue.
+ */
+export async function backfillRecruitingCrews(
+  prisma: PrismaClient,
+  options: { sandboxKind: string; firstPartyMcpUrl?: string },
+  onError: (error: unknown) => void,
+): Promise<number> {
+  // Every account with a recruiting lead, including crews set up before recruiting spawn keys
+  // (their Main is found by name and its research grant, as ensureReviewer does).
+  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
+  const leads = await prisma.bot.findMany({
+    where: {
+      archivedAt: null,
+      OR: [
+        { spawnKey: { startsWith: "recruiting:", endsWith: ":main" } },
+        { name: "Main", mcpServers: { some: { server: { endpoint: research.endpoint } } } },
+      ],
+    },
+    distinct: ["spaceId", "userId"],
+    select: { spaceId: true, userId: true },
+  });
+  const emails = new Map(
+    (
+      await prisma.user.findMany({
+        where: { id: { in: [...new Set(leads.map((lead) => lead.userId))] } },
+        select: { id: true, email: true },
+      })
+    ).map((user) => [user.id, user.email]),
+  );
+  let done = 0;
+  for (const lead of leads) {
+    const email = emails.get(lead.userId);
+    if (!email) continue;
+    const actor: Actor = {
+      spaceId: lead.spaceId,
+      userId: lead.userId,
+      email,
+      isDeploymentOwner: false,
+    };
+    try {
+      await upgradeRecruitingWorkspace(prisma, actor, options);
+      await ensurePlatformServices(prisma, actor, options);
+      done += 1;
+    } catch (error) {
+      onError(error);
+    }
+  }
+  return done;
 }
 
 /**
@@ -1037,7 +1159,8 @@ export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor)
 const ADDED_TOOLS: ReadonlyArray<{
   roles: readonly string[];
   endpoint: string;
-  requires: string;
+  /** Only a grant that already has this tool gains the new ones; none means any grant does. */
+  requires?: string;
   add: readonly string[];
 }> = [
   // Scheduling can book on a connected Cal.com calendar, so it can also move or cancel bookings.
@@ -1052,6 +1175,12 @@ const ADDED_TOOLS: ReadonlyArray<{
     roles: ["main", "sourcer"],
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     requires: "web_search_advanced_exa",
+    add: ["agent_run"],
+  },
+  // The quality check grades each batch with one people-search agent run.
+  {
+    roles: ["reviewer"],
+    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     add: ["agent_run"],
   },
 ];
@@ -1081,7 +1210,7 @@ async function ensureAddedTools(prisma: PrismaClient, actor: Actor): Promise<voi
         ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
         : [];
       const missing = added.add.filter((tool) => !tools.includes(tool));
-      if (!tools.includes(added.requires) || !missing.length) continue;
+      if ((added.requires && !tools.includes(added.requires)) || !missing.length) continue;
       await prisma.botMcpServer.updateMany({
         where: {
           id: grant.id,

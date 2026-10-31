@@ -254,6 +254,35 @@ describe("declineRetry", () => {
       expect(retryReason(reply, request)).toBeUndefined();
     expect(retryReason(reply, "send them the email")?.kind).toBe("decline");
     expect(retryReason(reply, "Find contacts, then send them the email")?.kind).toBe("decline");
+    // A teammate's brief that mentions sending is read against the recruiter's own words.
+    const brief = "Goal: find contacts for the ten so we can send outreach after review.";
+    expect(
+      retryReason("Found 7 emails. No messages were sent.", brief, "找contact"),
+    ).toBeUndefined();
+    expect(retryReason("Found 7 emails. No messages were sent.", brief, "发20个人")?.kind).toBe(
+      "decline",
+    );
+  });
+
+  it("does not read a question about interviews as a booking request", () => {
+    const reply =
+      "Two interviews are coming up: Ana on Tuesday at 10:00 and Li on Thursday at 14:00. No invitation is sent.";
+    for (const request of [
+      "what interviews are coming up",
+      "When is she available?",
+      "show me my calendar this week",
+      "下周有哪些面试",
+    ])
+      expect(retryReason(reply, request)).toBeUndefined();
+    for (const request of [
+      "schedule an interview with Ana",
+      "cancel the interview",
+      "reschedule Li to Friday",
+      "book Ana for Tuesday",
+      "帮我约她下周面试",
+      "取消这个面试",
+    ])
+      expect(retryReason(reply, request)?.kind).toBe("decline");
   });
 
   it("catches a past-tense refusal of a send", () => {
