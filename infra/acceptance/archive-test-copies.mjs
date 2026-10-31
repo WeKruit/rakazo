@@ -77,15 +77,22 @@ async function closeCards(groupId) {
 }
 
 async function rpc(route, json) {
-  const response = await fetch(`${BASE}/rpc/${route}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      origin: ORIGIN,
-      ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
-    },
-    body: JSON.stringify({ json }),
-  });
+  // A read that failed on the server side is safe to ask again; a write is not.
+  const read = /\/(get|messages|list|page)$/.test(route);
+  let response;
+  for (let attempt = 0; ; attempt += 1) {
+    response = await fetch(`${BASE}/rpc/${route}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: ORIGIN,
+        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+      },
+      body: JSON.stringify({ json }),
+    });
+    if (!read || attempt >= 5 || ![500, 502, 503, 504].includes(response.status)) break;
+    await sleep(8_000);
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${route} ${response.status}`);
   return body.json;
