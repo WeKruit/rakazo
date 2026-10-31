@@ -97,7 +97,7 @@ async function signIn() {
 
 async function rpc(route, json) {
   if (EMAIL && !cookie) await signIn();
-  // A read that the edge answered with a gateway error is safe to ask again; a write is not.
+  // A read that failed on the server side is safe to ask again; a write is not.
   const read = /\/(get|messages|list)$/.test(route);
   let response;
   for (let attempt = 0; ; attempt += 1) {
@@ -110,8 +110,9 @@ async function rpc(route, json) {
       },
       body: JSON.stringify({ json }),
     });
-    if (!read || attempt >= 2 || ![502, 503, 504].includes(response.status)) break;
-    await sleep(3_000);
+    // A stalled database answers reads with a 500 or 503 for up to about half a minute.
+    if (!read || attempt >= 5 || ![500, 502, 503, 504].includes(response.status)) break;
+    await sleep(8_000);
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${route} ${response.status}`);

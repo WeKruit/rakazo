@@ -269,7 +269,13 @@ export function parseAskFormResponse(
 /** People-search queries planned on the last recruiting question, run the moment it is answered. */
 export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).max(4);
 const askQuestion = {
-  question: z.string().min(1).max(240),
+  question: z
+    .string()
+    .min(1)
+    .max(240)
+    .describe(
+      "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
+    ),
   plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
     "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
   ),
