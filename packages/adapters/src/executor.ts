@@ -13219,6 +13219,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   worked: turnReport.worked(),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
+                  ...(handedIn
+                    ? {
+                        personRequest: turnRequestText(
+                          historyMessages.findLast((message) => message.role === "user"),
+                          undefined,
+                          bot.id,
+                        ),
+                      }
+                    : {}),
                   ...(contactLookupOwed
                     ? {
                         owedWork: `Continue the contact lookup: ${contactLookupOwed.remaining} of the first ${contactLookupOwed.target} people are still to look up. Call find_emails with next_from_role ${contactLookupOwed.target} again now and keep calling until none are left, then report how many have an email. Do not stop, decline or ask before that.`,
