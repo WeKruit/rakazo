@@ -1,4 +1,5 @@
 import type { WebProvider } from "@rakazo/adapter-kit";
+import { createExaPageReader } from "./exa-page-reader.js";
 import { FakeWebProvider } from "./fake-web.js";
 import { KeylessHttpWebProvider } from "./keyless-http-web.js";
 
@@ -27,7 +28,9 @@ export function createWebProvider(
     case "keyless-http":
     case "keyless":
     case "":
-      return new KeylessHttpWebProvider(options);
+      // A page that refuses a plain request (a LinkedIn profile) is read by the platform
+      // people-search provider's page reader instead.
+      return new KeylessHttpWebProvider({ pageReader: createExaPageReader(), ...options });
     default:
       throw new Error(`Unknown web provider "${kind}"`);
   }

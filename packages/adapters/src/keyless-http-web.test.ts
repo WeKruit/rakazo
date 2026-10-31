@@ -1,5 +1,6 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import { describe, expect, it } from "vitest";
+import { readerPage } from "./exa-page-reader.js";
 import { FakeWebProvider } from "./fake-web.js";
 import {
   extractReadableText,
@@ -90,6 +91,61 @@ describe("keyless HTTP web provider", () => {
     expect(result.truncated).toBe(true);
     expect(result.text.endsWith("[Content truncated]")).toBe(true);
     expect(result.text.length).toBeLessThanOrEqual(120 + "\n\n[Content truncated]".length);
+  });
+
+  it("reads a page the site refuses through the page reader, and only that page", async () => {
+    const refused: typeof fetch = async () => new Response("", { status: 403 });
+    const reads: string[] = [];
+    const provider = new KeylessHttpWebProvider({
+      fetch: refused,
+      resolveHostname: publicResolver,
+      pageReader: async (url) => {
+        reads.push(url);
+        return { url, title: "Example Person", text: "# Example Person\nStaff engineer" };
+      },
+    });
+    const result = await provider.fetch({ url: "https://www.linkedin.com/in/example" }, ctx);
+    expect(result).toMatchObject({ title: "Example Person", truncated: false });
+    expect(result.text).toContain("Staff engineer");
+    // A private address is refused before any request and never reaches the reader.
+    const privateHost = new KeylessHttpWebProvider({
+      fetch: refused,
+      resolveHostname: async () => [{ address: "10.0.0.1", family: 4 as const }],
+      pageReader: async (url) => {
+        reads.push(url);
+        return { url, title: "", text: "x" };
+      },
+    });
+    await expect(privateHost.fetch({ url: "https://internal.test/" }, ctx)).rejects.toThrow();
+    const missing = new KeylessHttpWebProvider({
+      fetch: async () => new Response("", { status: 404 }),
+      resolveHostname: publicResolver,
+      pageReader: async (url) => {
+        reads.push(url);
+        return { url, title: "", text: "x" };
+      },
+    });
+    await expect(missing.fetch({ url: "https://example.test/gone" }, ctx)).rejects.toThrow(
+      "HTTP 404",
+    );
+    expect(reads).toEqual(["https://www.linkedin.com/in/example"]);
+  });
+
+  it("parses the page reader's answer and its errors", () => {
+    const ok = `event: message\ndata: ${JSON.stringify({ result: { content: [{ type: "text", text: "# Example Person\nURL: https://www.linkedin.com/in/example/\n\nStaff engineer" }] } })}`;
+    expect(readerPage(ok, "https://www.linkedin.com/in/example")).toMatchObject({
+      title: "Example Person",
+      url: "https://www.linkedin.com/in/example/",
+    });
+    const missing = JSON.stringify({
+      result: {
+        isError: true,
+        content: [{ type: "text", text: "Error fetching URL(s): ENTITY_NOT_FOUND" }],
+      },
+    });
+    expect(() => readerPage(missing, "https://www.linkedin.com/in/none")).toThrow(
+      "ENTITY_NOT_FOUND",
+    );
   });
 
   it("falls back to HTML strip when Readability finds nothing", () => {

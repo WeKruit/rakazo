@@ -34,7 +34,7 @@ EXCLUDE:
 - {wrong-fit profiles named by the brief or feedback}
 - everyone already returned or contacted for this role: list their LinkedIn URLs when this is a new task
 
-POSITIVE EXAMPLES (when a round was accepted): {accepted people, each with the concrete detail that made them fit}. Find more like these on that detail, not on their employer alone.
+POSITIVE EXAMPLES (the brief's reference people and people from an accepted round): {each person with the concrete detail that makes them fit}. Find more like these on that detail, not on their employer alone.
 
 GRADE every person: A = verbatim core-work evidence (numbers such as quota %, deal size or volume preferred) and every hard limit met; B = related experience with thinner evidence, or a preferred item missing. A hard limit that is not met or not visible is named in the reason, never silently passed. Title-only matches are not returned.
 
@@ -64,6 +64,13 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
  * Delivered through the role context, tool results and the playbook step, because accounts with
  * customized bots or skills keep their old instructions.
  */
+/**
+ * How any teammate takes material the recruiter steers the search with: a profile, file, saved
+ * person, company or changed requirement. One rule for every kind, saved to the brief that the
+ * searches and the quality check both read. Delivered through the role context.
+ */
+export const RECRUITING_REFERENCE_MATERIAL = `The recruiter may steer the search with material instead of criteria, at any stage: a link or file about someone they want more of (a LinkedIn or other profile, a resume, a portfolio, a past hire), someone already in Results ("more like her", "not like him"), companies or teams to aim at or avoid (a list, "people from places like X", "nobody from agencies"), a job post or article that shows the work, or a plain change to a requirement. Each is feedback on the same role, never a new role. Read it first: web_fetch for any link, LinkedIn profiles included; artifact_read for a file; recruiting_candidates resolve for someone already saved. Take the concrete signals it shows (titles, the core work in the profile's own words, company type, seniority, years, location, skills) and save them with one recruiting_role update citing the recruiter's message: someone to find more of goes in the brief field "Reference people" as name, profile link and the details that make them a fit; someone or a company to avoid becomes an exclude search filter or a wrong-fit profile in the exclusions; a stated change updates that requirement at the strength the recruiter gave. A reference shows direction: what it shows stays a preference unless the recruiter calls it required. Then say in one or two lines what you took from it and what changed, ask only when it conflicts with a confirmed requirement, and carry on with the current step; later searches and the quality check read the same brief. The reference person is never a result and never contacted. When a link can't be read, say so and ask for the text or a file; never guess a profile from a name or link.`;
+
 export const RECRUITING_ROUND_NEXT_STEP = `The ten are already listed in chat, each with its profile passage, the moment calibration_round records them: never list them again. Never ask a clarifying question after the ten. Your very next step saves the brief, with no text beside it: one recruiting_role update with the round's expectedRevision and brief.fields only, each with a short label in English as its key, filled from the JD and the recruiter's answers (origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years of experience, every other must-have (past industry, past title, company type), location and work mode, language, pay, work authorization and exclusions, including people in their current role under six months; no role read, criteria or confirmation. The step after it is only one native question card (ask_user) offering the next step, with no text or other call beside it, in English, for example "Find 150 similar people", "Draft the outreach emails" and "Run another round" (the card already has a custom answer). Never end a round on a bare list or a generic "any feedback?".`;
 
 /**
