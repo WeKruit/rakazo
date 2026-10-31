@@ -15,7 +15,10 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 const read = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/rpc", () => ({ rpc: { recruiting: { accountView: read } } }));
+const updateReminder = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/rpc", () => ({
+  rpc: { recruiting: { accountView: read, reminders: { update: updateReminder } } },
+}));
 vi.mock("./RecruitingRoutines", () => ({ RecruitingRoutines: () => null }));
 
 import { AccountRecruitingView } from "./AccountRecruitingView";
@@ -281,6 +284,348 @@ it("reports an unavailable campaign read without claiming that there is no campa
     );
     expect(container.textContent).toContain("Could not read this campaign.");
     expect(container.textContent).not.toContain("No campaign yet.");
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it.each(["missing", "failed", "unsupported", "not_checked"])(
+  "shows a true calendar %s state and the connection action only when needed",
+  async (state) => {
+    read.mockResolvedValue({
+      roles,
+      items: [
+        {
+          roleId: "one",
+          correspondence: {
+            ...correspondence("one"),
+            events: [],
+            status: state === "missing" ? "not_checked" : state,
+            connections: [
+              {
+                name: "Calendar",
+                status: state === "missing" ? "needs_connection" : "configured",
+                checkIssue: null,
+              },
+            ],
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+    const container = document.createElement("div");
+    const pageRoot = createRoot(container);
+    const connect = vi.fn();
+    try {
+      await act(async () =>
+        pageRoot.render(
+          <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
+            <AccountRecruitingView
+              accountKey="user-space"
+              groups={[]}
+              bots={[]}
+              refreshSignal={0}
+              onOpenNavigation={() => {}}
+              onOpenConnections={connect}
+            />
+          </MemoryRouter>,
+        ),
+      );
+      const action = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Connect calendar",
+      );
+      expect(Boolean(action)).toBe(state === "missing");
+      if (action) {
+        await act(async () => action.click());
+        expect(connect).toHaveBeenCalledOnce();
+      }
+      expect(container.textContent?.includes("Could not load calendar records.")).toBe(
+        state !== "missing",
+      );
+      expect(container.querySelector('[aria-label="Calendar"]')).toBeNull();
+    } finally {
+      await act(async () => pageRoot.unmount());
+    }
+  },
+);
+
+it("loads the next interview page into the calendar without losing previous events or sibling roles", async () => {
+  const event = correspondence("one").events[0]!;
+  read.mockImplementation(async (input: { itemCursor?: string }) => ({
+    roles,
+    items: input.itemCursor
+      ? [
+          {
+            roleId: "one",
+            correspondence: {
+              ...correspondence("one"),
+              events: [event, { ...event, id: "next-event", title: "Next candidate interview" }],
+            },
+          },
+        ]
+      : [
+          {
+            roleId: "one",
+            correspondence: {
+              ...correspondence("one"),
+              nextCursor: "calendar-page-two",
+              partial: true,
+            },
+          },
+          {
+            roleId: "two",
+            correspondence: {
+              ...correspondence("two"),
+              events: [{ ...event, id: "sibling-event", title: "Other role interview" }],
+            },
+          },
+        ],
+    nextCursor: null,
+  }));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).not.toContain("Could not load calendar records.");
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Load more")!
+        .click(),
+    );
+    expect(read).toHaveBeenLastCalledWith({
+      view: "interview",
+      roleId: "one",
+      itemCursor: "calendar-page-two",
+      limit: 20,
+    });
+    expect(container.textContent).toContain("Next candidate interview");
+    expect(container.textContent).toContain("Other role interview");
+    expect(container.textContent).toContain("Candidate interview");
+    expect(
+      [...container.querySelectorAll("button")].some(
+        (button) => button.textContent === "Load more",
+      ),
+    ).toBe(false);
+  } finally {
+    await act(async () => pageRoot.unmount());
+    vi.useRealTimers();
+  }
+});
+
+it("does not invent zero replies from an email whose direction is unknown", async () => {
+  read.mockResolvedValue({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        correspondence: {
+          ...correspondence("one"),
+          emails: [
+            {
+              id: "unknown-direction",
+              direction: null,
+              sender: "candidate@example.test",
+              subject: "Saved email",
+              body: "Saved correspondence",
+              recipients: [],
+              date: null,
+              sourceName: "Mailbox",
+              sourceId: "mail",
+              providerMessageId: "message",
+              savedRead: null,
+              snippet: false,
+              url: null,
+            },
+          ],
+        },
+      },
+    ],
+    nextCursor: null,
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).toContain("Could not load replies.");
+    expect(container.textContent).not.toContain("0 replies");
+    expect(container.textContent).not.toContain("No replies yet.");
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("continues feedback through the account read and keeps already displayed records", async () => {
+  const feedback = (id: string) => ({ id, feedback: { summary: `Feedback ${id}` } });
+  read.mockImplementation(async (input: { itemCursor?: string }) => ({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        feedback: input.itemCursor
+          ? { feedback: [feedback("first"), feedback("older")], nextCursor: null }
+          : { feedback: [feedback("first")], nextCursor: "feedback-before" },
+      },
+    ],
+    nextCursor: null,
+  }));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=feedback&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Load more")!
+        .click(),
+    );
+    expect(read).toHaveBeenLastCalledWith({
+      view: "feedback",
+      roleId: "one",
+      itemCursor: "feedback-before",
+      limit: 20,
+    });
+    expect(container.textContent?.match(/Feedback first/g)).toHaveLength(1);
+    expect(container.textContent).toContain("Feedback older");
+    expect(container.textContent).not.toContain("Load more");
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+it("does not claim zero people when candidate records could not be read", async () => {
+  read.mockResolvedValue({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        candidates: {
+          items: [],
+          total: 0,
+          counts: { shortlisted: 0, replied: 0 },
+          crmStatus: "unavailable",
+          nextCursor: null,
+        },
+      },
+    ],
+    nextCursor: null,
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=contacts&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).toContain("Could not load recruiting records.");
+    expect(container.textContent).not.toContain("0 people");
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("completes an open native reminder and does not offer Done on already completed work", async () => {
+  let done = false;
+  const reminder = (id: string, status: string) => ({
+    id,
+    title: `Task ${id}`,
+    dueAt: "2026-10-31T12:00:00Z",
+    status,
+  });
+  read.mockImplementation(async () => ({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        reminders: {
+          items: [reminder("open", done ? "done" : "open"), reminder("already-done", "done")],
+          overdueCount: 0,
+        },
+      },
+    ],
+    nextCursor: null,
+  }));
+  updateReminder.mockImplementation(async () => {
+    done = true;
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=tasks&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).toContain("Task open");
+    expect(container.textContent).not.toContain("Task already-done");
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Done")!
+        .click(),
+    );
+    expect(updateReminder).toHaveBeenCalledWith({ id: "open", status: "done" });
+    expect(container.textContent).not.toContain("Task open");
+    expect(container.textContent).toContain("No open tasks.");
+    expect(
+      [...container.querySelectorAll("button")].some((button) => button.textContent === "Done"),
+    ).toBe(false);
   } finally {
     await act(async () => pageRoot.unmount());
   }

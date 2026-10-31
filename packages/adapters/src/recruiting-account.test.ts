@@ -44,6 +44,35 @@ const rows = [
   role("foreign", "user-b"),
   role("other-space", actor.userId, "space-b"),
 ];
+const routine = (id: string, threadId: string, userId = actor.userId, spaceId = actor.spaceId) => ({
+  id,
+  threadId,
+  botId: `main-${threadId}`,
+  userId,
+  spaceId,
+  name: "Saved routine",
+  prompt: "Review saved replies",
+  crons: ["0 9 * * *"],
+  timezone: "UTC",
+  active: true,
+  notify: true,
+  webhookEnabled: false,
+  githubEnabled: false,
+  messageProvider: null,
+  modelProvider: null,
+  modelId: null,
+  thinkingLevel: null,
+  lastRunAt: null,
+  nextRunAt: null,
+  createdAt: new Date("2026-10-30T00:00:00Z"),
+});
+const routines = [
+  routine("routine-a", "thread-a"),
+  routine("routine-b", "thread-b"),
+  routine("routine-global", "global-main"),
+  routine("routine-foreign", "thread-foreign", "user-b"),
+  routine("routine-other-space", "thread-other-space", actor.userId, "space-b"),
+];
 const match = (row: ReturnType<typeof role>, where: Record<string, unknown>) =>
   row.userId === where.userId &&
   row.spaceId === where.spaceId &&
@@ -53,6 +82,19 @@ const match = (row: ReturnType<typeof role>, where: Record<string, unknown>) =>
       : row.id > (where.id as { gt: string }).gt));
 function fixture() {
   const prisma = {
+    routine: {
+      findMany: vi.fn(async ({ where, take }) =>
+        routines
+          .filter(
+            (row) =>
+              row.userId === where.userId &&
+              row.spaceId === where.spaceId &&
+              (!where.threadId || row.threadId === where.threadId) &&
+              (!where.id?.gt || row.id > where.id.gt),
+          )
+          .slice(0, take),
+      ),
+    },
     externalEffect: { findMany: vi.fn(async () => []) },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }) => rows.find((row) => match(row, where)) ?? null),
@@ -128,6 +170,70 @@ beforeEach(() => {
   });
 });
 describe("account recruiting reads", () => {
+  it("pages all native recruiting routines across distinct bots including global Main in one owned query", async () => {
+    const { deps, prisma } = fixture();
+    const first = await readRecruitingAccountView(deps, actor, { view: "routines", limit: 2 });
+    expect(first.roles.map((role) => role.id)).toEqual(["a", "b", "c"]);
+    expect(first.routines?.map((item) => item.id)).toEqual(["routine-a", "routine-b"]);
+    expect(first.nextCursor).toBe("routine-b");
+    expect(first.routines?.[0]).toMatchObject({
+      threadId: "thread-a",
+      createdAt: "2026-10-30T00:00:00.000Z",
+    });
+    expect(prisma.routine.findMany).toHaveBeenCalledExactlyOnceWith({
+      take: 3,
+      skip: 0,
+      orderBy: { id: "asc" },
+      where: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        bot: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+        thread: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          group: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+        },
+      },
+    });
+    const second = await readRecruitingAccountView(deps, actor, {
+      view: "routines",
+      cursor: first.nextCursor!,
+      limit: 2,
+    });
+    expect(second.routines?.map((item) => item.id)).toEqual(["routine-global"]);
+    expect(second.nextCursor).toBeNull();
+    expect(db.getRecruitingWorkspace).not.toHaveBeenCalled();
+  });
+  it("filters routine reads by canonical role identity and refuses foreign roles before listing routines", async () => {
+    const { deps, prisma } = fixture();
+    const selected = await readRecruitingAccountView(deps, actor, {
+      view: "routines",
+      roleId: "a",
+      limit: 20,
+    });
+    expect(selected.routines?.map((item) => item.threadId)).toEqual(["thread-a"]);
+    expect(
+      (
+        await readRecruitingAccountView(deps, actor, {
+          view: "routines",
+          roleId: "a",
+          cursor: "routine-a",
+          limit: 20,
+        })
+      ).routines,
+    ).toEqual([]);
+    vi.mocked(prisma.routine.findMany).mockClear();
+    await expect(
+      readRecruitingAccountView(deps, actor, { view: "routines", roleId: "foreign", limit: 20 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(prisma.routine.findMany).not.toHaveBeenCalled();
+    const other = await readRecruitingAccountView(
+      deps,
+      { ...actor, userId: "user-b" },
+      { view: "routines", limit: 20 },
+    );
+    expect(other.routines?.map((item) => item.id)).toEqual(["routine-foreign"]);
+  });
   it("paginates active roles while retaining a full owned role picker", async () => {
     const { deps } = fixture();
     const first = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
@@ -248,6 +354,40 @@ describe("account recruiting reads", () => {
       expect.anything(),
     );
   });
+  it("passes an interview event cursor to the shared correspondence read", async () => {
+    const { deps } = fixture();
+    await readRecruitingAccountView(deps, actor, {
+      view: "interview",
+      roleId: "a",
+      itemCursor: "200",
+      limit: 20,
+    });
+    expect(reads.getRecruitingCorrespondence).toHaveBeenCalledWith(
+      deps.prisma,
+      actor,
+      expect.anything(),
+      "interview",
+      undefined,
+      undefined,
+      { limit: 200, cursor: "200" },
+      expect.anything(),
+    );
+    expect(reads.getRecruitingRoleCandidates).not.toHaveBeenCalled();
+  });
+  it("passes the selected role's feedback cursor to the native feedback list", async () => {
+    const { deps } = fixture();
+    await readRecruitingAccountView(deps, actor, {
+      view: "feedback",
+      roleId: "a",
+      itemCursor: "feedback-next",
+      limit: 20,
+    });
+    expect(db.listRecruitingFeedback).toHaveBeenCalledExactlyOnceWith(deps.prisma, actor, {
+      roleId: "a",
+      limit: 50,
+      before: "feedback-next",
+    });
+  });
   it("filters shortlist dates before paging instead of hiding rows after the page", async () => {
     const { deps } = fixture();
     await readRecruitingAccountView(deps, actor, {
@@ -293,43 +433,64 @@ describe("account recruiting reads", () => {
     });
     expect(filtered.unassignedReminders).toBeUndefined();
   });
-  it("reads every saved campaign source through the canonical live campaign reader", async () => {
-    const { deps, prisma } = fixture();
-    vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([
-      { idempotencyKey: "instantly-role-campaign:one:a" },
-      { idempotencyKey: "instantly-role-campaign:two:a" },
-    ] as never);
-    vi.mocked(reads.getRecruitingRoleCampaign).mockImplementation(
-      async (_deps, _actor, _target, selection) => ({
-        status: "ready",
-        serverId: selection?.serverId ?? "one",
-        campaign: {
-          id: selection?.serverId ?? "one",
-          name: "Outreach",
-          eaccount: null,
-          status: 1,
-          stopOnReply: true,
-        },
-        leads: [],
-        stats: { sent: 3, opened: 2, replied: 1 },
-      }),
-    );
-    const output = await readRecruitingAccountView(deps, actor, {
-      view: "sequence",
-      roleId: "a",
-      limit: 20,
-    });
-    expect(output.items[0]?.campaigns?.map((campaign) => campaign.serverId)).toEqual([
-      "one",
-      "two",
-    ]);
-    expect(reads.getRecruitingRoleCampaign).toHaveBeenCalledWith(
-      expect.anything(),
-      actor,
-      expect.anything(),
-      { serverId: "two" },
-    );
-  });
+  it.each([false, true])(
+    "merges every saved product campaign source with CRM campaigns when bound=%s",
+    async (bound) => {
+      const { deps, prisma } = fixture();
+      if (bound) {
+        const workspace = await db.getRecruitingWorkspace(prisma, actor, { threadId: "thread-a" });
+        vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+          ...workspace,
+          crmTarget: {
+            bindingEffectId: null,
+            target: {
+              mcpServerId: "crm",
+              serverRevision: 1,
+              organizationId: "00000000-0000-4000-8000-000000000001",
+              crmRoleId: "00000000-0000-4000-8000-000000000002",
+              crmClientId: "00000000-0000-4000-8000-000000000003",
+              clientLabel: "Client",
+              roleLabel: "Role a",
+            },
+          },
+        } as never);
+        Object.assign(deps, { firstPartyMcpUrl: "https://crm.example.test/mcp" });
+      }
+      vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([
+        { idempotencyKey: "instantly-role-campaign:one:a", result: { campaignId: "one" } },
+        { idempotencyKey: "instantly-role-campaign:two:a", result: { campaignId: "two" } },
+      ] as never);
+      vi.mocked(reads.getRecruitingRoleCampaign).mockImplementation(
+        async (_deps, _actor, _target, selection) => ({
+          status: "ready",
+          serverId: selection?.serverId ?? (bound ? "crm-mail" : "one"),
+          campaign: {
+            id: selection?.serverId ?? (bound ? "crm-mail" : "one"),
+            name: "Outreach",
+            eaccount: null,
+            status: 1,
+            stopOnReply: true,
+          },
+          leads: [],
+          stats: { sent: 3, opened: 2, replied: 1 },
+        }),
+      );
+      const output = await readRecruitingAccountView(deps, actor, {
+        view: "sequence",
+        roleId: "a",
+        limit: 20,
+      });
+      expect(output.items[0]?.campaigns?.map((campaign) => campaign.serverId)).toEqual(
+        bound ? ["crm-mail", "one", "two"] : ["one", "two"],
+      );
+      expect(reads.getRecruitingRoleCampaign).toHaveBeenCalledWith(
+        expect.anything(),
+        actor,
+        expect.anything(),
+        { serverId: "two", campaignId: "two" },
+      );
+    },
+  );
   it("fences a revoked account before returning data", async () => {
     const { deps } = fixture();
     const stillAuthorized = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);

@@ -527,9 +527,23 @@ export async function getRecruitingRoleCampaign(
       threadId: target.threadId,
     });
     if (!workspace) return none;
+    const selectedNative =
+      workspace.crmTarget?.bindingEffectId === null && selection.serverId && selection.campaignId
+        ? await deps.prisma.externalEffect.findUnique({
+            where: {
+              idempotencyKey: `instantly-role-campaign:${selection.serverId}:${workspace.role.id}`,
+            },
+            select: { spaceId: true, status: true, result: true },
+          })
+        : null;
+    const nativeSelected =
+      selectedNative?.spaceId === actor.spaceId &&
+      selectedNative.status === "completed" &&
+      correspondenceRecord(selectedNative.result)?.campaignId === selection.campaignId &&
+      typeof correspondenceRecord(selectedNative.result)?.campaignName === "string";
     let recheckImported: (() => Promise<void>) | undefined;
     let imported: { id: string; name: string } | null = null;
-    if (workspace.crmTarget && workspace.crmTarget.bindingEffectId === null) {
+    if (workspace.crmTarget && workspace.crmTarget.bindingEffectId === null && !nativeSelected) {
       if (!deps.reauthorize)
         throw new ORPCError("FORBIDDEN", {
           message: "Current CRM role authorization is required.",
@@ -654,12 +668,14 @@ export async function getRecruitingRoleCampaign(
     if (imported) {
       binding = { campaignId: imported.id, campaignName: imported.name };
     } else {
-      const effect = await deps.prisma.externalEffect.findUnique({
-        where: {
-          idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
-        },
-        select: { spaceId: true, status: true, result: true },
-      });
+      const effect = nativeSelected
+        ? selectedNative
+        : await deps.prisma.externalEffect.findUnique({
+            where: {
+              idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
+            },
+            select: { spaceId: true, status: true, result: true },
+          });
       const nativeBinding = correspondenceRecord(effect?.result);
       if (
         !effect ||
@@ -1159,6 +1175,13 @@ export async function getRecruitingCorrespondence(
   crmReads?: Omit<RecruitingCrmReadDeps, "prisma">,
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
+    if (
+      page.cursor !== undefined &&
+      (!/^\d+$/.test(page.cursor) ||
+        !Number.isSafeInteger(Number(page.cursor)) ||
+        Number(page.cursor) > Number.MAX_SAFE_INTEGER - 200)
+    )
+      throw new ORPCError("BAD_REQUEST");
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
       threadId: target.threadId,
     });
@@ -1235,6 +1258,57 @@ export async function getRecruitingCorrespondence(
     };
     let assertCalendarLineageCurrent: (() => Promise<void>) | undefined;
     const finish = async () => {
+      const contactEmails: string[] = [];
+      if (workspace && crmReads && view === "interview") {
+        let cursor: string | null = null;
+        do {
+          const saved = await getRecruitingCorrespondence(
+            prisma,
+            actor,
+            target,
+            "contacts",
+            productIdentity,
+            oauth,
+            { limit: 200, ...(cursor ? { cursor } : {}) },
+            crmReads,
+          );
+          output.contacts.push(...saved.contacts);
+          if (!saved.nextCursor) output.partial ||= saved.partial;
+          cursor = saved.nextCursor;
+        } while (cursor);
+        if (workspace.crmTarget) {
+          const bound = workspace.crmTarget.target;
+          let offset = 0;
+          try {
+            for (;;) {
+              const saved = await getRecruitingCrmData(
+                { prisma, ...crmReads },
+                actor,
+                target,
+                {
+                  operation: "candidates",
+                  serverId: bound.mcpServerId,
+                  serverRevision: bound.serverRevision,
+                  organizationId: bound.organizationId,
+                  crmRoleId: bound.crmRoleId,
+                  limit: 50,
+                  offset,
+                },
+                { source: "projection" },
+              );
+              if (saved.operation !== "candidates") throw new ORPCError("SERVICE_UNAVAILABLE");
+              for (const candidate of saved.items)
+                if (candidate.email) contactEmails.push(candidate.email);
+              if (saved.nextOffset === null) break;
+              if (saved.nextOffset <= offset) throw new ORPCError("SERVICE_UNAVAILABLE");
+              offset = saved.nextOffset;
+            }
+          } catch (error) {
+            if (!(error instanceof ORPCError) || error.code !== "SERVICE_UNAVAILABLE") throw error;
+            output.partial = true;
+          }
+        }
+      }
       if (workspace && crmReads)
         await refreshRecruitingCorrespondence(
           { prisma, ...crmReads },
@@ -1243,6 +1317,7 @@ export async function getRecruitingCorrespondence(
             threadId: target.threadId,
             roleId: workspace.role.id,
             view,
+            contactEmails,
             pageEnd: Number(page.cursor ?? 0) + Math.min(200, Math.max(1, page.limit ?? 50)),
           },
           sourceRows,
@@ -1401,10 +1476,16 @@ export async function getRecruitingCorrespondence(
       }
       output.emails = [...uniqueMail.values()];
       // Offset over the merged inbox order; refresh from page one after new mail.
-      const rows = view === "contacts" ? output.contacts : output.emails;
+      const rows =
+        view === "contacts"
+          ? output.contacts
+          : view === "interview"
+            ? output.events
+            : output.emails;
       output.nextCursor = rows.length > end ? String(end) : null;
       output.partial ||= output.nextCursor !== null;
       if (view === "contacts") output.contacts = output.contacts.slice(start, end);
+      else if (view === "interview") output.events = output.events.slice(start, end);
       else output.emails = output.emails.slice(start, end);
       return output;
     };
@@ -2477,9 +2558,8 @@ export async function getRecruitingCorrespondence(
       }
     }
     output.emails = [...emails.values()];
-    // ponytail: bound retained calendar display to 200 entries; full receipts remain in native history.
-    output.events = [...events.values()].slice(0, 200);
-    output.partial ||= events.size > 200 || unsupported || failed;
+    output.events = [...events.values()];
+    output.partial ||= unsupported || failed;
     output.status =
       output.emails.length || output.events.length || output.contacts.length
         ? "ready"

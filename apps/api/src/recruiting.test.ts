@@ -2573,6 +2573,7 @@ describe("saved recruiting correspondence", () => {
     previous?: { args: Record<string, unknown>; body: unknown },
     proofs: unknown[] = [],
     lateChange?: "grant" | "revision" | "role",
+    page: { limit?: number; cursor?: string } = {},
   ) {
     const { client, prisma, retained } = fixture();
     const calendarSource = {
@@ -2625,7 +2626,15 @@ describe("saved recruiting correspondence", () => {
       .mockResolvedValueOnce(retainedRows)
       .mockResolvedValueOnce(resultRows)
       .mockResolvedValueOnce(proofs);
-    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+    const result = await api.getRecruitingCorrespondence(
+      prisma,
+      actor,
+      target,
+      "interview",
+      undefined,
+      undefined,
+      page,
+    );
     if (tool !== "get_availability") {
       expect(client.externalEffect.findMany.mock.calls[2]?.[0]).toMatchObject({
         where: {
@@ -2641,6 +2650,53 @@ describe("saved recruiting correspondence", () => {
     }
     return result;
   }
+  it("pages merged interview events with a resumable cursor instead of silently truncating calendar rows", async () => {
+    const body = {
+      status: "success",
+      data: {
+        day: Array.from({ length: 205 }, (_, index) => ({
+          start: new Date(Date.parse("2026-10-23T13:00:00Z") + index * 60_000).toISOString(),
+          end: new Date(Date.parse("2026-10-23T13:00:00Z") + (index + 1) * 60_000).toISOString(),
+        })),
+      },
+    };
+    const first = await calObservation(
+      "get_availability",
+      { timeZone: "UTC" },
+      body,
+      undefined,
+      [],
+      undefined,
+      { limit: 200 },
+    );
+    expect(first.events).toHaveLength(200);
+    expect(first.nextCursor).toBe("200");
+    const second = await calObservation(
+      "get_availability",
+      { timeZone: "UTC" },
+      body,
+      undefined,
+      [],
+      undefined,
+      { limit: 200, cursor: first.nextCursor! },
+    );
+    expect(second.events).toHaveLength(5);
+    expect(new Set([...first.events, ...second.events].map((event) => event.id)).size).toBe(205);
+    expect(second.nextCursor).toBeNull();
+  });
+  it.each(["not-a-cursor", "-1", "1.5", "9007199254740992"])(
+    "refuses malformed correspondence cursor %s before reading data",
+    async (cursor) => {
+      const { prisma } = fixture();
+      vi.mocked(db.getRecruitingWorkspace).mockClear();
+      await expect(
+        api.getRecruitingCorrespondence(prisma, actor, target, "interview", undefined, undefined, {
+          cursor,
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(db.getRecruitingWorkspace).not.toHaveBeenCalled();
+    },
+  );
   it("replaces an earlier availability window with the latest empty observation for that event type", async () => {
     const result = await calObservation(
       "get_availability",
@@ -2902,6 +2958,88 @@ describe("saved recruiting correspondence", () => {
       work_emails: [{ email: "person@example.test", status: "HIGH_PROBABILITY" }],
     },
   };
+  it("associates a live calendar event using saved Contacts without requiring a campaign or another lookup", async () => {
+    const f = contactFixture({ status: "FINISHED", results: [contactRow] });
+    const fullenrich = {
+      id: "mail",
+      name: "FullEnrich",
+      endpoint: "https://mcp.fullenrich.com/mcp",
+      transport: "streamable_http",
+      secretId: "saved-reference",
+      revision: 1,
+      enabled: true,
+      assignments: [
+        { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+      ],
+    };
+    const calendar = {
+      id: "calendar-saved-contact",
+      name: "Calendar",
+      endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+      transport: "streamable_http",
+      secretId: "saved-reference",
+      revision: 1,
+      enabled: true,
+      assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_events"] }],
+    };
+    f.client.mcpServer.findMany.mockReset().mockResolvedValue([fullenrich, calendar]);
+    f.client.externalEffect.findMany.mockReset().mockImplementation(async (input: any) => {
+      if (input.select?.request && JSON.stringify(input.where).includes("get_enrichment_results"))
+        return [f.retained];
+      if (input.select?.result && input.where?.id?.in?.includes("effect"))
+        return [{ id: "effect", result: f.result }];
+      return [];
+    });
+    Object.assign(f.client, {
+      botMcpServer: { findFirst: vi.fn(async () => calendar.assignments[0]) },
+    });
+    const plans = vi
+      .spyOn(db, "listRecruitingSchedulingPlans")
+      .mockResolvedValue({ plans: [], slots: [], partial: false });
+    const execute = vi.fn(async function* (_call: ConnectorCall) {
+      yield {
+        type: "result",
+        data: {
+          structuredContent: {
+            items: [
+              {
+                id: "saved-contact-interview",
+                summary: "Interview",
+                start: { dateTime: "2026-10-31T12:00:00Z" },
+                end: { dateTime: "2026-10-31T13:00:00Z" },
+                attendees: [{ email: "person@example.test" }],
+              },
+            ],
+          },
+        },
+      } as const;
+    });
+    try {
+      const result = await api.getRecruitingCorrespondence(
+        f.prisma,
+        actor,
+        target,
+        "interview",
+        undefined,
+        undefined,
+        {},
+        {
+          connectors: { execute },
+          reauthorize: async () => target,
+        },
+      );
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          id: `${calendar.id}:saved-contact-interview`,
+          roleAssociation: "contact",
+        }),
+      ]);
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute.mock.calls[0]?.[0]).toMatchObject({ tool: "list_events" });
+    } finally {
+      plans.mockRestore();
+    }
+  });
   it("recognizes exact platform FullEnrich readiness without exposing a credential or inventing a personal connection", async () => {
     vi.stubEnv("FULLENRICH_API_KEY", "platform-service-key");
     try {
@@ -5011,6 +5149,118 @@ describe("live CRM browser reads", () => {
       "list_crm_candidates",
     );
   });
+  it("associates calendar interviews with authorized saved CRM contacts even without a campaign or native lookup", async () => {
+    const f = browserFixture();
+    const bound = {
+      mcpServerId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      crmClientId: clientId,
+      clientLabel: "Actual client",
+      roleLabel: "Actual role",
+    };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+      role: { id: "product-role" },
+      crmTarget: { bindingEffectId: null, target: bound },
+    } as never);
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(bound);
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue([
+      {
+        candidateId,
+        name: "Stored person",
+        email: "stored-person@example.test",
+        phone: null,
+        linkedinUrl: null,
+        title: null,
+        location: null,
+        stage: null,
+        contactStatus: "contact found",
+        outreachStatus: "not contacted",
+        roleSpecId: roleId,
+        legacyClientLabel: "Actual client",
+        legacyRoleLabel: "Actual role",
+      },
+    ]);
+    const calendar = {
+      id: "calendar-crm-contact",
+      name: "Calendar",
+      endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+      transport: "streamable_http",
+      secretId: "saved-reference",
+      revision: 1,
+      enabled: true,
+      assignments: [{ botId: "coordinator", allowAllTools: false, allowedTools: ["list_events"] }],
+    };
+    f.mockPrisma.mcpServer.findMany.mockResolvedValue([
+      { ...f.server, assignments: [f.assignment] },
+      calendar,
+    ] as never);
+    f.mockPrisma.botMcpServer.findFirst.mockImplementation(async ({ where }: any) =>
+      where.serverId === calendar.id ? calendar.assignments[0] : f.assignment,
+    );
+    Object.assign(f.mockPrisma, {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      thread: { findFirst: vi.fn(async () => ({ id: "thread" })) },
+    });
+    const plans = vi
+      .spyOn(db, "listRecruitingSchedulingPlans")
+      .mockResolvedValue({ plans: [], slots: [], partial: false });
+    const execute = vi.fn(async function* (call: ConnectorCall, context: AdapterContext) {
+      if (call.route?.resourceId !== calendar.id) {
+        yield* f.execute(call, context);
+        return;
+      }
+      yield {
+        type: "result",
+        data: {
+          structuredContent: {
+            items: [
+              {
+                id: "crm-contact-interview",
+                summary: "Interview",
+                start: { dateTime: "2026-10-31T12:00:00Z" },
+                end: { dateTime: "2026-10-31T13:00:00Z" },
+                attendees: [{ email: "stored-person@example.test" }],
+              },
+            ],
+          },
+        },
+      } as const;
+    });
+    try {
+      const result = await api.getRecruitingCorrespondence(
+        f.deps.prisma,
+        actor,
+        target,
+        "interview",
+        { endpoint: f.server.endpoint, connected: true },
+        undefined,
+        {},
+        { ...f.deps, connectors: { execute } },
+      );
+      expect(result.events).toEqual([
+        expect.objectContaining({
+          id: `${calendar.id}:crm-contact-interview`,
+          roleAssociation: "contact",
+        }),
+      ]);
+      expect(db.listSyncedRecruitingCrmRoleContacts).toHaveBeenCalledWith(
+        f.deps.prisma,
+        actor,
+        { mcpServerId: "crm", organizationId: org },
+        roleId,
+      );
+      expect(
+        execute.mock.calls.some(([call]) => call.route?.toolName === "list_crm_candidates"),
+      ).toBe(false);
+      expect(
+        execute.mock.calls.every(([call]) => !/create|send|ensure/.test(call.route!.toolName)),
+      ).toBe(true);
+    } finally {
+      plans.mockRestore();
+    }
+  });
 
   it("reads people's sequence numbers and no-role sequences live from the CRM", async () => {
     const f = browserFixture();
@@ -6730,6 +6980,29 @@ describe("role campaign read", () => {
       api.getRecruitingRoleCampaign(f.deps, actor, target, { campaignId: "other" }),
     ).rejects.toThrow();
     expect(f.calls).toEqual([]);
+  });
+  it("reads a selected product-created campaign on a CRM-bound role through its exact native binding", async () => {
+    const f = fixture({
+      spaceId: actor.spaceId,
+      status: "completed",
+      result: {
+        campaignId: CAMPAIGN,
+        campaignName: "Product campaign",
+        leads: {},
+      },
+    });
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+      role: { id: "role" },
+      crmTarget: { bindingEffectId: null },
+    } as never);
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockClear();
+    const result = await api.getRecruitingRoleCampaign(f.deps, actor, target, {
+      serverId: "instantly",
+      campaignId: CAMPAIGN,
+    });
+    expect(result.campaign?.id).toBe(CAMPAIGN);
+    expect(f.calls).toHaveLength(3);
+    expect(db.getRecruitingWorkspaceCrmTarget).not.toHaveBeenCalled();
   });
 
   it.each(["failed", "malformed", "full-page", "cursor", "empty"])(

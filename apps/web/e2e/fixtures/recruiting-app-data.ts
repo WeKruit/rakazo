@@ -441,6 +441,39 @@ export async function mockRecruitingApp(
     let method = url.pathname.slice(5);
     let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
+    if (method === "recruiting/overview") {
+      const role = accountRolesData()[0]!;
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: `${[
+          {
+            kind: "role",
+            role: {
+              groupId: role.groupId,
+              roleId: role.id,
+              shortlisted: 1,
+              shortlistedDates: [checkedAt],
+              contacted: 3,
+              replied: 1,
+              interested: 1,
+              interestedPartial: false,
+              incomplete: false,
+              bookings: options.emptyCalendar
+                ? []
+                : accountItem(role, 0).correspondence!.events.map((event) => ({
+                    ...event,
+                    title: "Avery · Platform interview",
+                    status: options.calendarStatus ?? "confirmed",
+                  })),
+              bookingUnknown: false,
+            },
+          },
+          { kind: "done" },
+        ]
+          .map((event) => `event: message\ndata: ${JSON.stringify({ json: event })}\n\n`)
+          .join("")}event: done\ndata: {}\n\n`,
+      });
+    }
     if (method === "threads/subscribe") {
       await new Promise<void>((resolve) => page.once("close", () => resolve()));
       return;

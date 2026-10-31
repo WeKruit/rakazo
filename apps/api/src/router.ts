@@ -155,7 +155,6 @@ import type {
   Me,
   ProductEvent,
   RecruitingCrmRoleReference,
-  Routine,
   SidebarBotState,
   SpaceNavigation,
 } from "@rakazo/contracts";
@@ -226,9 +225,11 @@ import {
   IsolationError,
   issueMessagingLinkCode,
   listBoards,
+  listRoutinesDto,
   listSpaceBackupModels,
   listTicketComments,
   lockOwnedGroup,
+  mapRoutine,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   openVerifiedRecruitingCrmWorkspace,
@@ -1474,7 +1475,7 @@ export function createRouter(deps: RouterDeps) {
               resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
                 threadSnapshot(deps, target),
               ),
-              listRoutinesDto(deps, actor, active.id, input.offset ?? 0),
+              listRoutinesDto(deps.prisma, actor, { botId: active.id, offset: input.offset ?? 0 }),
             ])
           : [null, []];
       await platformServices;
@@ -4326,14 +4327,12 @@ export function createRouter(deps: RouterDeps) {
       list: authed.routines.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
         if (input.allConversations && input.threadId) throw new ORPCError("BAD_REQUEST");
-        return listRoutinesDto(
-          deps,
-          context.actor,
-          input.botId,
-          input.offset ?? 0,
-          input.threadId,
-          input.allConversations,
-        );
+        return listRoutinesDto(deps.prisma, context.actor, {
+          botId: input.botId,
+          offset: input.offset ?? 0,
+          threadId: input.threadId,
+          allConversations: input.allConversations,
+        });
       }),
       create: authed.routines.create.handler(async ({ context, input }) => {
         if (hasMixedOneShotSchedule(input.crons)) {
@@ -7922,76 +7921,6 @@ function nextRoutineDate(crons: string[], timezone: string): Date {
   } catch {
     throw new ORPCError("BAD_REQUEST", { message: "Enter a valid cron expression." });
   }
-}
-
-function mapRoutine(row: {
-  id: string;
-  botId: string;
-  threadId?: string | null;
-  name: string;
-  prompt: string;
-  crons: string[];
-  timezone: string;
-  active: boolean;
-  notify: boolean;
-  webhookEnabled: boolean;
-  githubEnabled: boolean;
-  messageProvider: string | null;
-  modelProvider: string | null;
-  modelId: string | null;
-  thinkingLevel: string | null;
-  lastRunAt: Date | null;
-  nextRunAt: Date | null;
-  createdAt: Date;
-}): Routine {
-  return {
-    id: row.id,
-    botId: row.botId,
-    threadId: row.threadId ?? null,
-    name: row.name,
-    prompt: row.prompt,
-    crons: row.crons,
-    timezone: row.timezone,
-    active: row.active,
-    notify: row.notify,
-    webhookEnabled: row.webhookEnabled,
-    githubEnabled: row.githubEnabled,
-    messageProvider: row.messageProvider,
-    modelProvider: row.modelProvider ?? null,
-    modelId: row.modelId ?? null,
-    thinkingLevel: (row.thinkingLevel as Routine["thinkingLevel"]) ?? null,
-    lastRunAt: row.lastRunAt?.toISOString() ?? null,
-    nextRunAt: row.nextRunAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-async function listRoutinesDto(
-  deps: RouterDeps,
-  actor: Actor,
-  botId: string,
-  offset?: number,
-  threadId?: string,
-  allConversations = false,
-) {
-  const rows = await deps.prisma.routine.findMany({
-    ...(offset === undefined ? {} : { take: 200, skip: offset, orderBy: { id: "asc" as const } }),
-    where: {
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      ...(allConversations
-        ? {
-            bot: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
-            thread: {
-              userId: actor.userId,
-              spaceId: actor.spaceId,
-              group: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
-            },
-          }
-        : { botId, ...(threadId ? { threadId } : {}) }),
-    },
-  });
-  return rows.map(mapRoutine);
 }
 
 /**

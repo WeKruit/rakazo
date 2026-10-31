@@ -22,20 +22,33 @@ export function RecruitingRoutines({
   accountKey,
   groups,
   bots,
-  groupId,
 }: {
   accountKey: string;
   groups: readonly Group[];
   bots: readonly Bot[];
-  groupId?: string;
 }) {
   const { t } = useLingui();
   const global = groups.find((group) => group.id.startsWith("recruiting-global-"));
   const [params, setParams] = useSearchParams();
-  const selected = params.get("role") ?? groupId ?? "all";
-  const target = groups.find((group) => group.id === selected) ?? global;
+  const selected = params.get("role") ?? "all";
+  const [reload, setReload] = useState(0);
+  const pageKey = JSON.stringify([accountKey, selected]);
+  const [pagination, setPagination] = useState<{ key: string; cursor: string }>();
+  const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
+  const readKey = JSON.stringify([pageKey, cursor, reload]);
+  const [read, setRead] = useState<{
+    key: string;
+    accountKey: string;
+    data: Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
+  }>();
+  const page = read?.key === readKey ? read.data : undefined;
+  const roles = read?.accountKey === accountKey ? read.data.roles : [];
+  const target =
+    selected === "all"
+      ? global
+      : groups.find((group) => group.id === roles.find((role) => role.id === selected)?.groupId);
   const targetBotId = target?.members.find((member) => member.name === "Main")?.botId;
-  const [items, setItems] = useState<Routine[]>([]);
+  const items = page?.routines ?? [];
   const [editing, setEditing] = useState<Routine | null>(null);
   const botId = editing?.botId ?? targetBotId;
   const [draft, setDraft] = useState(emptyRoutineDraft);
@@ -52,22 +65,21 @@ export function RecruitingRoutines({
     }
   };
   const [error, setError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
   useEffect(() => {
     setOpen(false);
     setSecret(null);
-    setItems([]);
-    if (!targetBotId || !target) return;
     let cancelled = false;
     setLoading(true);
     setFailed(false);
-    void rpc.routines
-      .list({
-        botId: targetBotId,
-        ...(selected === "all" ? { allConversations: true } : { threadId: target.threadId }),
+    void rpc.recruiting
+      .accountView({
+        view: "routines",
+        ...(selected === "all" ? {} : { roleId: selected }),
+        cursor,
+        limit: 20,
       })
       .then((result) => {
-        if (!cancelled) setItems(result);
+        if (!cancelled) setRead({ key: readKey, accountKey, data: result });
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -78,7 +90,7 @@ export function RecruitingRoutines({
     return () => {
       cancelled = true;
     };
-  }, [accountKey, targetBotId, target?.threadId, selected, reload]);
+  }, [accountKey, selected, cursor, reload, readKey]);
   const mutate = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
@@ -147,9 +159,9 @@ export function RecruitingRoutines({
         }}
       >
         <NativeSelectOption value="all">{t`All roles`}</NativeSelectOption>
-        {groups.map((group) => (
-          <NativeSelectOption key={group.id} value={group.id}>
-            {group.name}
+        {roles.map((role) => (
+          <NativeSelectOption key={role.id} value={role.id}>
+            {role.title}
           </NativeSelectOption>
         ))}
       </NativeSelect>
@@ -158,7 +170,7 @@ export function RecruitingRoutines({
           {error}
         </p>
       ) : null}
-      {!target ? (
+      {page && !target ? (
         <p>
           <Trans>No conversation yet.</Trans>
         </p>
@@ -198,15 +210,17 @@ export function RecruitingRoutines({
         />
       ) : (
         <>
-          <RoutineListHeader
-            onCreate={() => {
-              setSecret(null);
-              setEditing(null);
-              setDraft(emptyRoutineDraft());
-              setError(null);
-              setOpen(true);
-            }}
-          />
+          {target && page ? (
+            <RoutineListHeader
+              onCreate={() => {
+                setSecret(null);
+                setEditing(null);
+                setDraft(emptyRoutineDraft());
+                setError(null);
+                setOpen(true);
+              }}
+            />
+          ) : null}
           {items.map((routine) => (
             <div key={routine.id} className="rounded-lg border border-border p-2">
               {selected === "all" ? (
@@ -248,6 +262,14 @@ export function RecruitingRoutines({
               </Button>
             </div>
           ))}
+          {page?.nextCursor ? (
+            <Button
+              variant="outline"
+              onClick={() => setPagination({ key: pageKey, cursor: page.nextCursor! })}
+            >
+              <Trans>Next page</Trans>
+            </Button>
+          ) : null}
         </>
       )}
     </section>

@@ -32,6 +32,7 @@ export * from "./recruiting-reminders.js";
 export * from "./recruiting-saved-profiles.js";
 export * from "./recruiting-scheduling.js";
 export * from "./repos.js";
+export * from "./routines-read.js";
 export * from "./scope.js";
 export * from "./session-admission.js";
 export * from "./sessions.js";

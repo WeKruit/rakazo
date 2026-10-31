@@ -2760,6 +2760,18 @@ it("keeps the same role chat widget, draft and native card across direct role pa
     openFeedback: false,
     initialPath: "/app/g/group-1?view=results",
   });
+  shellApi.recruiting.correspondence.mockResolvedValue({
+    roleId: "internal-role",
+    status: "ready",
+    checkedAt: "2026-10-30T12:00:00Z",
+    connectionChanged: false,
+    connections: [{ name: "Calendar", status: "configured", checkIssue: null }],
+    emails: [],
+    events: [],
+    contacts: [],
+    partial: false,
+    nextCursor: null,
+  });
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
   const card = document.body.querySelector('[data-message-id="pending-main"]');

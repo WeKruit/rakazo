@@ -687,11 +687,46 @@ export class RecruitingGlobalJourneyFixture implements AgentRuntime {
               tools: tools.map((name) => ({
                 name,
                 description: name,
-                inputSchema: { type: "object", properties: {}, additionalProperties: true },
+                inputSchema: {
+                  type: "object",
+                  properties:
+                    name === "list_emails"
+                      ? {
+                          campaign_id: { type: "string" },
+                          limit: { type: "number" },
+                          starting_after: { type: "string" },
+                        }
+                      : {},
+                  additionalProperties: true,
+                },
                 annotations: { readOnlyHint: name !== "create_booking" },
               })),
             },
           });
+        if (url.hostname === "mcp.instantly.ai") {
+          const name = body.params?.name;
+          const args = body.params?.arguments ?? {};
+          const campaign = [...this.campaigns.values()].find((row) =>
+            name === "list_emails"
+              ? row.id === args.campaign_id
+              : row.leadId === (args.id ?? args.email_id),
+          );
+          if (!campaign || (name !== "get_email" && name !== "list_emails"))
+            throw new Error("Unexpected offline mail request");
+          this.records.push({ kind: "mail", operation: name });
+          const result =
+            name === "list_emails"
+              ? { items: [this.email(campaign)], next_starting_after: null }
+              : this.email(campaign);
+          return Response.json({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              structuredContent: result,
+              content: [{ type: "text", text: JSON.stringify(result) }],
+            },
+          });
+        }
         this.records.push({ kind: "calendar", operation: body.params?.name ?? "unknown" });
         const data = [...this.campaigns.values()].map((campaign) => ({
           uid: campaign.bookingUid,
@@ -748,7 +783,7 @@ type FixtureRequest = {
   campaign?: string;
   id?: string | number;
   method?: string;
-  params?: { protocolVersion?: string; name?: string };
+  params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> };
 };
 function parseBody(body: RequestInit["body"] | undefined): FixtureRequest {
   if (body instanceof ArrayBuffer)

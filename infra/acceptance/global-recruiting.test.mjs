@@ -30,6 +30,12 @@ function rpcFor(options = {}) {
       input.roleId && !options.leak ? roles.filter((role) => role.id === input.roleId) : roles;
     return {
       roles,
+      routines: options.noRoutines
+        ? []
+        : selected.map((role) => ({
+            id: `routine-${role.id}`,
+            threadId: options.foreignRoutine ? "other-thread" : role.threadId,
+          })),
       nextCursor: null,
       items: selected.map((role) => ({
         roleId: role.id,
@@ -91,7 +97,7 @@ test("checks real records and matching global/filtered projections for product a
     routes.push(route);
     return delegate(route, input);
   }, fixture);
-  assert.equal(result.evidence.length, 16);
+  assert.equal(result.evidence.length, 18);
   assert.deepEqual(result.groups, ["group-product", "group-crm"]);
   assert.ok(
     routes.every((route) =>
@@ -141,6 +147,8 @@ for (const [option, message] of Object.entries({
   noFeedback: /actual records/,
   noTasks: /actual reminders/,
   noBooking: /completed scheduling booking/,
+  noRoutines: /actual native records/,
+  foreignRoutine: /Routine filter leaked/,
 }))
   test(`refuses false-positive acceptance for ${option}`, async () => {
     await assert.rejects(verifyGlobalRecruiting(rpcFor({ [option]: true }), fixture), message);

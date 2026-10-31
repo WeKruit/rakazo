@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { RoutineSchema } from "./domain.js";
 import { Id, IsoDate } from "./ids.js";
 import {
   ListRecruitingCandidatesOutput,
@@ -26,6 +27,7 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
     "inbox",
     "interview",
     "tasks",
+    "routines",
   ]),
   campaignId: Id.optional(),
   campaignServerId: Id.optional(),
@@ -45,6 +47,7 @@ export const RecruitingAccountRoleSchema = z.strictObject({
   stage: z.string(),
 });
 export const RecruitingAccountViewOutputSchema = z.strictObject({
+  routines: z.array(RoutineSchema).optional(),
   unassignedReminders: ListRecruitingRemindersOutput.optional(),
   roles: z.array(RecruitingAccountRoleSchema),
   items: z.array(

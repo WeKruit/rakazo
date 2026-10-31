@@ -30,6 +30,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertFollowUpDelivery, replyAfterInput } from "./follow-up.mjs";
+import {
+  assertGlobalRecruitingCopiesArchived,
+  verifyGlobalRecruiting,
+} from "./global-recruiting.mjs";
+import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { checkReviewerGrading } from "./reviewer-grading.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
@@ -47,10 +52,6 @@ import {
   assertStopKeepsBackground,
   assertTestCopy,
 } from "./workloop-task-controls.mjs";
-import {
-  assertGlobalRecruitingCopiesArchived,
-  verifyGlobalRecruiting,
-} from "./global-recruiting.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -240,6 +241,55 @@ function scaleReportChecks(messages, failures, scale) {
 const sendCard = (message) =>
   (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
 
+/** Every event of a thread so far, from the replay of its event stream. */
+async function readEvents(groupId, { limitMs = 15_000 } = {}) {
+  const controller = new AbortController();
+  // A busy stream must not keep replay open beyond a latency assertion's budget.
+  const replayLimit = setTimeout(() => controller.abort(), limitMs);
+  let idle = setTimeout(() => controller.abort(), 15_000);
+  const events = [];
+  try {
+    if (EMAIL && !cookie) await signIn();
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        origin: ORIGIN,
+        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+      },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // The replay arrives at once; a quiet stream means it has caught up.
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 3_000);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const data = JSON.parse(line.slice(5));
+          events.push(data.json ?? data);
+        } catch {}
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    clearTimeout(idle);
+    clearTimeout(replayLimit);
+  }
+  return events;
+}
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
   await assertTestCopy(rpc, groupId);
@@ -390,6 +440,12 @@ try {
             groups = ids;
           },
         });
+        result.nativeChat = args.includes("--global-chat")
+          ? await verifyGlobalRecruitingChat(rpc, fixture, { say, readEvents })
+          : {
+              tested: false,
+              reason: "not tested: native chat requires approved model calls and --global-chat",
+            };
         fs.writeFileSync(path.join(OUT, "global-recruiting.json"), JSON.stringify(result, null, 2));
       } finally {
         // The existing archive flow independently refuses real roles and skips working runs.
@@ -745,55 +801,6 @@ try {
     { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
     { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
   ];
-  /** Every event of a thread so far, from the replay of its event stream. */
-  async function readEvents(groupId, { limitMs = 15_000 } = {}) {
-    const controller = new AbortController();
-    // A busy stream must not keep replay open beyond a latency assertion's budget.
-    const replayLimit = setTimeout(() => controller.abort(), limitMs);
-    let idle = setTimeout(() => controller.abort(), 15_000);
-    const events = [];
-    try {
-      if (EMAIL && !cookie) await signIn();
-      const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "text/event-stream",
-          origin: ORIGIN,
-          ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
-        },
-        body: JSON.stringify({ json: { groupId, cursor: 0 } }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // The replay arrives at once; a quiet stream means it has caught up.
-        clearTimeout(idle);
-        idle = setTimeout(() => controller.abort(), 3_000);
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          try {
-            const data = JSON.parse(line.slice(5));
-            events.push(data.json ?? data);
-          } catch {}
-        }
-      }
-    } catch (error) {
-      if (error.name !== "AbortError") throw error;
-    } finally {
-      clearTimeout(idle);
-      clearTimeout(replayLimit);
-    }
-    return events;
-  }
   const DECLINED =
     /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
   // Offering the work back instead of doing it; the server retries these once, so one left in a

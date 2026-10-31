@@ -205,7 +205,14 @@ export async function executeRecruitingCandidatesTool(
                 unknownReplyDirections === 0 &&
                 result.items.every(
                   (item) =>
-                    item.correspondence?.partial !== true && !item.correspondence?.nextCursor,
+                    (item.correspondence?.status === "ready" ||
+                      item.correspondence?.status === "empty") &&
+                    !item.correspondence.connectionChanged &&
+                    item.correspondence.connections.every(
+                      (connection) => connection.status === "configured" && !connection.checkIssue,
+                    ) &&
+                    !item.correspondence.partial &&
+                    !item.correspondence.nextCursor,
                 ),
             },
           }

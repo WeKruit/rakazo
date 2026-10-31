@@ -24,6 +24,34 @@ async function send(page: Page, text: string, mode: "enter" | "button" = "enter"
   await expect(composer).toHaveValue("");
   await expect(page.getByTestId("transcript").getByText(text, { exact: true })).toBeVisible();
 }
+async function assertPageFacts(page: Page, view: string) {
+  const main = page.getByTestId("account-recruiting-view");
+  if (["shortlist", "contacts", "sequence", "inbox"].includes(view)) {
+    const role = main.getByRole("region", { name: "Fixture Engineer", exact: true });
+    if (view === "sequence") {
+      for (const [label, count] of [
+        ["Sent", "4"],
+        ["Opened", "3"],
+        ["Replied", "1"],
+      ])
+        await expect(
+          role
+            .locator("dt")
+            .filter({ hasText: new RegExp(`^${label}$`) })
+            .locator("..")
+            .locator("dd"),
+        ).toHaveText(count);
+      await expect(
+        role.getByText("morgan.reed@example.test", { exact: true }).first(),
+      ).toBeVisible();
+    } else if (view === "inbox") {
+      await expect(role.getByText("1 replies", { exact: true })).toBeVisible();
+    } else {
+      await expect(role.getByText("1 people", { exact: true })).toBeVisible();
+    }
+  }
+}
+
 async function newRole(page: Page, title: string) {
   await page
     .getByTestId("recruiting-navigation")
@@ -63,6 +91,11 @@ test("fresh ordinary chat creates two product roles and all global pages share t
     "Run through the dedicated deterministic offline fixture harness",
   );
   test.setTimeout(240000);
+  const answeredCards: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/rpc/threads/answer")
+      answeredCards.push(request.url());
+  });
   await page.goto("/sign-up");
   await expect(
     page.getByRole("heading", { name: "Create your WeKruit Headhunter account" }),
@@ -108,19 +141,20 @@ test("fresh ordinary chat creates two product roles and all global pages share t
     await expect(
       page.getByText(row, { exact: false }).filter({ visible: true }).first(),
     ).toBeVisible();
+    await assertPageFacts(page, view);
     await captureScreenshot(page, testInfo, `journey-${view}-global-desktop`);
-    await picker.selectOption(view === "routines" ? engineer.groupId : engineer.id);
-    await expect(page).toHaveURL(
-      new RegExp(`role=${view === "routines" ? engineer.groupId : engineer.id}`),
-    );
+    await picker.selectOption(engineer.id);
+    await expect(page).toHaveURL(new RegExp(`role=${engineer.id}`));
     await expect(
       page.getByText(row, { exact: false }).filter({ visible: true }).first(),
     ).toBeVisible();
+    await assertPageFacts(page, view);
     await captureScreenshot(page, testInfo, `journey-${view}-role-desktop`);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(
       page.getByText(row, { exact: false }).filter({ visible: true }).first(),
     ).toBeVisible();
+    await assertPageFacts(page, view);
     await captureScreenshot(page, testInfo, `journey-${view}-role-mobile`);
     if (view === "interview") {
       const event = page
@@ -135,6 +169,7 @@ test("fresh ordinary chat creates two product roles and all global pages share t
     await expect(
       page.getByText(row, { exact: false }).filter({ visible: true }).first(),
     ).toBeVisible();
+    await assertPageFacts(page, view);
     await captureScreenshot(page, testInfo, `journey-${view}-global-mobile`);
     if (view === "interview") {
       const event = page
@@ -219,5 +254,8 @@ test("fresh ordinary chat creates two product roles and all global pages share t
       .getByTestId("recruiting-navigation")
       .getByText("Could not read candidate records.", { exact: true }),
   ).toHaveCount(0);
+  expect(records.some((row: { kind: string }) => row.kind === "calendar")).toBe(true);
+  expect(records.some((row: { kind: string }) => row.kind === "mail")).toBe(true);
+  expect(answeredCards).toEqual([]);
   await captureScreenshot(page, testInfo, "journey-global-Main-actual-tool-answers");
 });

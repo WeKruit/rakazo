@@ -40,6 +40,7 @@ export async function refreshRecruitingCorrespondence(
     roleId: string;
     view: "inbox" | "interview" | "contacts";
     pageEnd?: number;
+    contactEmails?: readonly string[];
   },
   sources: Source[],
   output: RecruitingCorrespondence,
@@ -146,9 +147,12 @@ export async function refreshRecruitingCorrespondence(
   const emails = new Map(output.emails.map((email) => [email.id, email]));
   const events = new Map(output.events.map((event) => [event.id, event]));
   const contactEmails = new Set(
-    output.contacts.flatMap((contact) =>
-      contact.emails.map((email) => email.address.toLowerCase()),
-    ),
+    [
+      ...(scope.contactEmails ?? []),
+      ...output.contacts.flatMap((contact) =>
+        contact.emails.map((email) => email.address.toLowerCase()),
+      ),
+    ].map((email) => email.toLowerCase()),
   );
   const campaignBindings = await deps.prisma.externalEffect.findMany({
     where: {
@@ -295,58 +299,82 @@ export async function refreshRecruitingCorrespondence(
         const day = Math.floor(Date.now() / 86400000) * 86400000;
         const from = new Date(day - 30 * 86400000).toISOString();
         const to = new Date(day + 90 * 86400000).toISOString();
-        const args =
-          tool === "get_bookings"
-            ? { take: 100, skip: 0 }
-            : {
-                calendarId: "primary",
-                timeMin: from,
-                timeMax: to,
-                maxResults: 200,
-                singleEvents: true,
-                orderBy: "startTime",
-              };
-        const raw = await execute(source, tool, args);
-        const body = record(raw);
-        if (tool === "get_bookings" && body?.status !== "success")
-          throw new Error("Calendar read failed");
-        const rows = tool === "get_bookings" ? body?.data : body?.items;
-        if (!Array.isArray(rows)) throw new Error("Invalid calendar page");
-        for (const value of rows) {
-          const row = record(value);
-          const google = tool === "list_events";
-          const providerId = google ? row?.id : row?.uid;
-          if (!row || typeof providerId !== "string" || !providerId.trim()) {
-            output.partial = true;
-            continue;
+        let skip = 0;
+        let pageToken: string | undefined;
+        const seenTokens = new Set<string>();
+        const seenEvents = new Set<string>();
+        for (;;) {
+          const args =
+            tool === "get_bookings"
+              ? { take: 100, skip }
+              : {
+                  calendarId: "primary",
+                  timeMin: from,
+                  timeMax: to,
+                  maxResults: 200,
+                  singleEvents: true,
+                  orderBy: "startTime",
+                  ...(pageToken ? { pageToken } : {}),
+                };
+          const raw = await execute(source, tool, args);
+          const body = record(raw);
+          if (tool === "get_bookings" && body?.status !== "success")
+            throw new Error("Calendar read failed");
+          const rows = tool === "get_bookings" ? body?.data : body?.items;
+          if (!Array.isArray(rows)) throw new Error("Invalid calendar page");
+          let newEvents = 0;
+          for (const value of rows) {
+            const row = record(value);
+            const google = tool === "list_events";
+            const providerId = google ? row?.id : row?.uid;
+            if (!row || typeof providerId !== "string" || !providerId.trim()) {
+              output.partial = true;
+              continue;
+            }
+            const id = google ? `${source.id}:${providerId}` : `${source.id}:booking:${providerId}`;
+            if (!seenEvents.has(id)) newEvents += 1;
+            seenEvents.add(id);
+            const attendees = Array.isArray(row.attendees)
+              ? row.attendees.flatMap((value) =>
+                  typeof record(value)?.email === "string" ? [record(value)!.email as string] : [],
+                )
+              : [];
+            if (!attendees.some((email) => contactEmails.has(email.toLowerCase()))) continue;
+            const start = google ? record(row.start)?.dateTime : row.start;
+            const end = google ? record(row.end)?.dateTime : row.end;
+            const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
+              id,
+              roleAssociation: !google && bookingIds.has(id) ? "booking" : "contact",
+              kind: "event",
+              title: google ? (row.summary ?? null) : (row.title ?? null),
+              start,
+              end: end ?? null,
+              timeZone: google ? (record(row.start)?.timeZone ?? null) : null,
+              attendees,
+              status: row.status ?? null,
+              location: typeof row.location === "string" ? row.location : null,
+              url: google ? (row.htmlLink ?? null) : null,
+            });
+            if (event.success) events.set(event.data.id, event.data);
+            else output.partial = true;
           }
-          const id = google ? `${source.id}:${providerId}` : `${source.id}:booking:${providerId}`;
-          const attendees = Array.isArray(row.attendees)
-            ? row.attendees.flatMap((value) =>
-                typeof record(value)?.email === "string" ? [record(value)!.email as string] : [],
-              )
-            : [];
-          if (!attendees.some((email) => contactEmails.has(email.toLowerCase()))) continue;
-          const start = google ? record(row.start)?.dateTime : row.start;
-          const end = google ? record(row.end)?.dateTime : row.end;
-          const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
-            id,
-            roleAssociation: !google && bookingIds.has(id) ? "booking" : "contact",
-            kind: "event",
-            title: google ? (row.summary ?? null) : (row.title ?? null),
-            start,
-            end: end ?? null,
-            timeZone: google ? (record(row.start)?.timeZone ?? null) : null,
-            attendees,
-            status: row.status ?? null,
-            location: typeof row.location === "string" ? row.location : null,
-            url: google ? (row.htmlLink ?? null) : null,
-          });
-          if (event.success) events.set(event.data.id, event.data);
-          else output.partial = true;
+          if (tool === "get_bookings") {
+            const more = record(body?.pagination)?.hasNextPage;
+            if (more !== true) {
+              output.partial ||= more !== false;
+              break;
+            }
+            if (!rows.length || !newEvents) throw new Error("Invalid calendar continuation");
+            skip += rows.length;
+          } else {
+            const next = body?.nextPageToken;
+            if (next === undefined || next === null) break;
+            if (typeof next !== "string" || !next || seenTokens.has(next))
+              throw new Error("Invalid calendar continuation");
+            seenTokens.add(next);
+            pageToken = next;
+          }
         }
-        output.partial ||=
-          Boolean(body?.nextPageToken) || record(body?.pagination)?.hasNextPage === true;
         output.status = "ready";
       }
       output.checkedAt = new Date().toISOString();

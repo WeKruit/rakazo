@@ -1124,6 +1124,73 @@ describe("native cross-role recruiting reads", () => {
     expect(overview.read.mock.calls.at(-1)![2].roleId).toBe("selected");
   });
 
+  it.each([
+    { status: "not_checked" },
+    { status: "failed" },
+    { status: "unsupported" },
+    { connectionChanged: true },
+    { connections: [{ status: "needs_connection", checkIssue: null }] },
+    { connections: [{ status: "configured", checkIssue: { status: "failed" } }] },
+    { partial: true },
+    { nextCursor: "next-mail" },
+  ])(
+    "does not present unavailable or incomplete replies as a complete zero (%j)",
+    async (unknown) => {
+      const f = fixture();
+      overview.read.mockResolvedValue({
+        roles: [{ id: "role", title: "Engineer" }],
+        items: [
+          {
+            roleId: "role",
+            correspondence: {
+              status: "empty",
+              connectionChanged: false,
+              connections: [],
+              partial: false,
+              nextCursor: null,
+              emails: [],
+              ...unknown,
+            },
+          },
+        ],
+        nextCursor: null,
+      });
+      const deps = { ...f.deps, connector: { execute: vi.fn() } };
+      expect(
+        await executeRecruitingCandidatesTool(deps, trusted, { operation: "replies" }, context),
+      ).toMatchObject({ counts: { messages: 0, complete: false } });
+    },
+  );
+
+  it("reports a verified complete empty inbox as zero", async () => {
+    const f = fixture();
+    overview.read.mockResolvedValue({
+      roles: [{ id: "role", title: "Engineer" }],
+      items: [
+        {
+          roleId: "role",
+          correspondence: {
+            status: "empty",
+            connectionChanged: false,
+            connections: [{ status: "configured", checkIssue: null }],
+            partial: false,
+            nextCursor: null,
+            emails: [],
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+    expect(
+      await executeRecruitingCandidatesTool(
+        { ...f.deps, connector: { execute: vi.fn() } },
+        trusted,
+        { operation: "replies" },
+        context,
+      ),
+    ).toMatchObject({ counts: { messages: 0, complete: true } });
+  });
+
   it("counts only received mail and keeps page completeness explicit", async () => {
     const f = fixture();
     overview.read.mockResolvedValue({

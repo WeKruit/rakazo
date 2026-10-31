@@ -84,6 +84,27 @@ async function groupsPage(rpc, archived) {
   return groups;
 }
 
+async function routineRows(rpc, roleId) {
+  const rows = [];
+  const cursors = new Set();
+  for (let cursor; ; ) {
+    if (cursor) {
+      assert.ok(!cursors.has(cursor), "Routine pagination must advance");
+      cursors.add(cursor);
+    }
+    const page = await rpc("recruiting/accountView", {
+      view: "routines",
+      limit: 50,
+      ...(roleId ? { roleId } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
+    assert.ok(Array.isArray(page.routines), "Routine view has no native routine records");
+    rows.push(...page.routines);
+    if (!page.nextCursor) return rows;
+    cursor = page.nextCursor;
+  }
+}
+
 /** Read-only checks; the callback exposes cleanup targets only after account and copy validation. */
 export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups = () => {} } = {}) {
   assert.equal(
@@ -154,6 +175,7 @@ export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups =
     }
     globalItems.set(view, items);
   }
+  const globalRoutines = await routineRows(rpc);
   const evidence = [];
   const kinds = new Set();
   for (const expected of fixture.roles) {
@@ -161,6 +183,24 @@ export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups =
     const workspace = await rpc("recruiting/getWorkspace", { threadId: role.threadId });
     const kind = workspace.crmTarget ? "crm" : "product";
     kinds.add(kind);
+    const routines = await routineRows(rpc, role.id);
+    assert.ok(
+      routines.length >= Math.max(1, expected.routines ?? 1),
+      "Routines has no actual native records",
+    );
+    assert.ok(
+      routines.every((routine) => routine.threadId === role.threadId),
+      "Routine filter leaked another role",
+    );
+    assert.deepEqual(
+      sort(
+        globalRoutines.filter((routine) => routine.threadId === role.threadId),
+        (routine) => routine.id,
+      ),
+      sort(routines, (routine) => routine.id),
+      "Routines global data differs from the filtered role",
+    );
+    evidence.push({ roleId: role.id, view: "routines", filtered: true, global: true });
     for (const view of VIEWS) {
       const filtered = await rpc("recruiting/accountView", { view, roleId: role.id, limit: 50 });
       assert.deepEqual(

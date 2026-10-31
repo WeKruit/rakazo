@@ -39,14 +39,15 @@ export function AccountRecruitingView({
   const [params, setParams] = useSearchParams();
   const requested = params.get("view");
   const view = isAccountRecruitingView(requested) ? requested : "shortlist";
-  const role = params.get("role") || (groupId ? `group:${groupId}` : "all");
+  const role = params.get("role") ?? "all";
+  const scopedGroupId = params.has("role") ? undefined : groupId;
   const [read, setRead] = useState<{ key: string; data: AccountPage }>();
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState<string>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
-  const pageKey = JSON.stringify([accountKey, view, role]);
+  const pageKey = JSON.stringify([accountKey, view, role, scopedGroupId]);
   const [pagination, setPagination] = useState<{ key: string; cursor: string }>();
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
   const readKey = JSON.stringify([pageKey, cursor, reload, refreshSignal]);
@@ -59,11 +60,7 @@ export function AccountRecruitingView({
     void rpc.recruiting
       .accountView({
         view,
-        ...(role.startsWith("group:")
-          ? { groupId: role.slice(6) }
-          : role !== "all"
-            ? { roleId: role }
-            : {}),
+        ...(scopedGroupId ? { groupId: scopedGroupId } : role !== "all" ? { roleId: role } : {}),
         cursor,
         limit: 20,
       })
@@ -79,7 +76,7 @@ export function AccountRecruitingView({
     return () => {
       cancelled = true;
     };
-  }, [accountKey, view, role, cursor, reload, refreshSignal, readKey]);
+  }, [accountKey, view, role, scopedGroupId, cursor, reload, refreshSignal, readKey]);
   const loadMore = async (roleId: string, itemCursor: string) => {
     if (!page || view === "routines" || loadingMore) return;
     setLoadingMore(roleId);
@@ -108,10 +105,32 @@ export function AccountRecruitingView({
                                 },
                               }
                             : {}),
+                          ...(item.feedback && update.feedback
+                            ? {
+                                feedback: {
+                                  ...update.feedback,
+                                  feedback: [
+                                    ...new Map(
+                                      [...item.feedback.feedback, ...update.feedback.feedback].map(
+                                        (feedback) => [feedback.id, feedback],
+                                      ),
+                                    ).values(),
+                                  ],
+                                },
+                              }
+                            : {}),
                           ...(item.correspondence && update.correspondence
                             ? {
                                 correspondence: {
                                   ...update.correspondence,
+                                  events: [
+                                    ...new Map(
+                                      [
+                                        ...item.correspondence.events,
+                                        ...update.correspondence.events,
+                                      ].map((event) => [event.id, event]),
+                                    ).values(),
+                                  ],
                                   emails: [
                                     ...item.correspondence.emails,
                                     ...update.correspondence.emails,
@@ -212,15 +231,27 @@ export function AccountRecruitingView({
   }
   const events = [...calendarRows.values()].map(({ event, roles }) => ({
     ...event,
-    title: role === "all" ? `${[...roles].join(" / ")} · ${event.title ?? ""}` : event.title,
+    title:
+      role === "all" && !scopedGroupId
+        ? `${[...roles].join(" / ")} · ${event.title ?? ""}`
+        : event.title,
   }));
-  const calendarFailed = page?.items.some(
-    (item) =>
-      item.correspondence?.status === "failed" ||
-      item.correspondence?.connections.some(
-        (connection) => connection.checkIssue?.status === "failed",
-      ),
-  );
+  const calendarFailed = page?.items.some((item) => {
+    const correspondence = item.correspondence;
+    const missing = correspondence?.connections.every(
+      (connection) => connection.status === "needs_connection",
+    );
+    return (
+      !missing &&
+      (!["ready", "empty"].includes(correspondence?.status ?? "not_checked") ||
+        (correspondence?.partial && !correspondence.nextCursor) ||
+        correspondence?.connections.some(
+          (connection) =>
+            connection.checkIssue?.status === "failed" ||
+            !["configured", "needs_connection"].includes(connection.status),
+        ))
+    );
+  });
   const calendarConnected = page?.items.some((item) =>
     item.correspondence?.connections.some((connection) => connection.status !== "needs_connection"),
   );
@@ -255,8 +286,8 @@ export function AccountRecruitingView({
           <NativeSelect
             aria-label={t`Role`}
             value={
-              role.startsWith("group:")
-                ? (page?.roles.find((item) => item.groupId === groupId)?.id ?? "all")
+              scopedGroupId
+                ? (page?.roles.find((item) => item.groupId === scopedGroupId)?.id ?? "all")
                 : role
             }
             onChange={(event) => {
@@ -275,7 +306,7 @@ export function AccountRecruitingView({
         ) : null}
       </header>
       {view === "routines" ? (
-        <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} groupId={groupId} />
+        <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} />
       ) : (
         <>
           {loading ? <TabLoading /> : null}
@@ -289,14 +320,15 @@ export function AccountRecruitingView({
               <Trans>Could not load recruiting records.</Trans>
             </RetryNotice>
           ) : null}
-          {page?.items.length === 0 ? (
+          {page?.items.length === 0 &&
+          !page.unassignedReminders?.items.some((reminder) => reminder.status === "open") ? (
             <p className="text-sm text-muted-foreground">
-              <Trans>No roles yet.</Trans>
+              {view === "tasks" ? <Trans>No open tasks.</Trans> : <Trans>No roles yet.</Trans>}
             </p>
           ) : null}
           {view === "interview" && page ? (
             <>
-              {!calendarConnected ? (
+              {!calendarConnected && !calendarFailed ? (
                 <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
                   <Trans>Connect calendar</Trans>
                 </Button>
@@ -306,10 +338,33 @@ export function AccountRecruitingView({
                   <Trans>Could not load calendar records.</Trans>
                 </RetryNotice>
               ) : null}
-              <InterviewCalendar events={events} />
+              {(calendarConnected || events.length > 0) &&
+              (!calendarFailed || events.length > 0) ? (
+                <InterviewCalendar events={events} />
+              ) : null}
+              {!renderCorrespondence
+                ? page.items
+                    .filter((item) => item.correspondence?.nextCursor)
+                    .map((item) => (
+                      <div key={item.roleId} className="mt-3 flex items-center gap-3 text-sm">
+                        <span>{page.roles.find((entry) => entry.id === item.roleId)?.title}</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(loadingMore)}
+                          onClick={() =>
+                            void loadMore(item.roleId, item.correspondence!.nextCursor!)
+                          }
+                        >
+                          <Trans>Load more</Trans>
+                        </Button>
+                      </div>
+                    ))
+                : null}
             </>
           ) : null}
-          {view === "tasks" && page?.unassignedReminders?.items.length ? (
+          {view === "tasks" &&
+          page?.unassignedReminders?.items.some((reminder) => reminder.status === "open") ? (
             <section
               aria-label={t`Tasks`}
               className="mb-6 space-y-3 rounded-xl border border-border p-4"
@@ -317,31 +372,39 @@ export function AccountRecruitingView({
               <h2 className="font-semibold">
                 <Trans>Tasks</Trans>
               </h2>
-              {page.unassignedReminders.items.map((reminder) => (
-                <div key={reminder.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span>
-                    {reminder.title}
-                    <time className="block text-xs text-muted-foreground" dateTime={reminder.dueAt}>
-                      {formatDate(reminder.dueAt)}
-                    </time>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      void rpc.recruiting.reminders
-                        .update({ id: reminder.id, status: "done" })
-                        .then(() => {
-                          setTaskError(false);
-                          setReload((value) => value + 1);
-                        })
-                        .catch(() => setTaskError(true))
-                    }
+              {page.unassignedReminders.items
+                .filter((reminder) => reminder.status === "open")
+                .map((reminder) => (
+                  <div
+                    key={reminder.id}
+                    className="flex items-center justify-between gap-3 text-sm"
                   >
-                    <Trans>Done</Trans>
-                  </Button>
-                </div>
-              ))}
+                    <span>
+                      {reminder.title}
+                      <time
+                        className="block text-xs text-muted-foreground"
+                        dateTime={reminder.dueAt}
+                      >
+                        {formatDate(reminder.dueAt)}
+                      </time>
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        void rpc.recruiting.reminders
+                          .update({ id: reminder.id, status: "done" })
+                          .then(() => {
+                            setTaskError(false);
+                            setReload((value) => value + 1);
+                          })
+                          .catch(() => setTaskError(true))
+                      }
+                    >
+                      <Trans>Done</Trans>
+                    </Button>
+                  </div>
+                ))}
             </section>
           ) : null}
           <div className="space-y-6">
@@ -352,14 +415,23 @@ export function AccountRecruitingView({
                   item.correspondence?.emails.filter(
                     (email) => (email.direction ?? email.crm?.direction) === "received",
                   ) ?? [];
+                const unknownDirections = item.correspondence?.emails.some(
+                  (email) => !(email.direction ?? email.crm?.direction),
+                );
+                const repliesNotChecked = !["ready", "empty"].includes(
+                  item.correspondence?.status ?? "not_checked",
+                );
                 const repliesIncomplete = Boolean(
-                  item.correspondence?.partial || item.correspondence?.nextCursor,
+                  repliesNotChecked ||
+                    unknownDirections ||
+                    item.correspondence?.partial ||
+                    item.correspondence?.nextCursor,
                 );
                 const repliesUnknown =
-                  item.correspondence?.status === "failed" ||
-                  (!replies.length &&
-                    item.correspondence?.partial &&
-                    !item.correspondence.nextCursor);
+                  !replies.length &&
+                  (repliesNotChecked ||
+                    unknownDirections ||
+                    (item.correspondence?.partial && !item.correspondence.nextCursor));
                 return (
                   <section
                     key={item.roleId}
@@ -397,9 +469,10 @@ export function AccountRecruitingView({
                         <Trans>No job brief yet.</Trans>
                       </p>
                     ) : null}
-                    {view === "tasks" && !item.reminders?.items.length ? (
+                    {view === "tasks" &&
+                    !item.reminders?.items.some((reminder) => reminder.status === "open") ? (
                       <p className="text-sm text-muted-foreground">
-                        <Trans>No tasks yet.</Trans>
+                        <Trans>No open tasks.</Trans>
                       </p>
                     ) : null}
                     {view === "feedback" ? (
@@ -415,7 +488,13 @@ export function AccountRecruitingView({
                     ) : null}
                     {view === "shortlist" || view === "contacts" ? (
                       <>
-                        <p className="text-sm text-muted-foreground">{t`${item.candidates?.total ?? 0} people`}</p>
+                        {item.candidates?.crmStatus === "unavailable" ? (
+                          <RetryNotice onRetry={() => setReload((value) => value + 1)}>
+                            <Trans>Could not load recruiting records.</Trans>
+                          </RetryNotice>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">{t`${item.candidates?.total ?? 0} people`}</p>
+                        )}
                         <ul className="divide-y divide-border">
                           {item.candidates?.items.map((candidate) => (
                             <li
@@ -453,6 +532,11 @@ export function AccountRecruitingView({
                           (item.campaigns ?? [item.campaign!]).map((campaign) => (
                             <div key={campaign.campaign?.id} className="space-y-2">
                               <h3 className="text-sm font-medium">{campaign.campaign?.name}</h3>
+                              {campaign.status === "unavailable" ? (
+                                <RetryNotice onRetry={() => setReload((value) => value + 1)}>
+                                  <Trans>Could not read this campaign.</Trans>
+                                </RetryNotice>
+                              ) : null}
                               <dl className="flex flex-wrap gap-4 text-sm">
                                 <div>
                                   <dt className="text-muted-foreground">
@@ -541,6 +625,16 @@ export function AccountRecruitingView({
                         )}
                       </>
                     ) : null}
+                    {view === "feedback" && item.feedback?.nextCursor ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={Boolean(loadingMore)}
+                        onClick={() => void loadMore(item.roleId, item.feedback!.nextCursor!)}
+                      >
+                        <Trans>Load more</Trans>
+                      </Button>
+                    ) : null}
                     {(view === "shortlist" || view === "contacts") &&
                     item.candidates?.nextCursor ? (
                       <Button
@@ -552,7 +646,8 @@ export function AccountRecruitingView({
                         <Trans>Load more</Trans>
                       </Button>
                     ) : null}
-                    {view === "inbox" && item.correspondence?.nextCursor ? (
+                    {(view === "inbox" || view === "interview") &&
+                    item.correspondence?.nextCursor ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -564,37 +659,39 @@ export function AccountRecruitingView({
                     ) : null}
                     {view === "tasks" ? (
                       <ul className="divide-y divide-border">
-                        {item.reminders?.items.map((reminder) => (
-                          <li
-                            key={reminder.id}
-                            className="flex items-center justify-between gap-3 py-3 text-sm"
-                          >
-                            <span>
-                              {reminder.title}
-                              <time
-                                className="block text-xs text-muted-foreground"
-                                dateTime={reminder.dueAt}
-                              >
-                                {formatDate(reminder.dueAt)}
-                              </time>
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void rpc.recruiting.reminders
-                                  .update({ id: reminder.id, status: "done" })
-                                  .then(() => {
-                                    setTaskError(false);
-                                    setReload((value) => value + 1);
-                                  })
-                                  .catch(() => setTaskError(true))
-                              }
+                        {item.reminders?.items
+                          .filter((reminder) => reminder.status === "open")
+                          .map((reminder) => (
+                            <li
+                              key={reminder.id}
+                              className="flex items-center justify-between gap-3 py-3 text-sm"
                             >
-                              <Trans>Done</Trans>
-                            </Button>
-                          </li>
-                        ))}
+                              <span>
+                                {reminder.title}
+                                <time
+                                  className="block text-xs text-muted-foreground"
+                                  dateTime={reminder.dueAt}
+                                >
+                                  {formatDate(reminder.dueAt)}
+                                </time>
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void rpc.recruiting.reminders
+                                    .update({ id: reminder.id, status: "done" })
+                                    .then(() => {
+                                      setTaskError(false);
+                                      setReload((value) => value + 1);
+                                    })
+                                    .catch(() => setTaskError(true))
+                                }
+                              >
+                                <Trans>Done</Trans>
+                              </Button>
+                            </li>
+                          ))}
                       </ul>
                     ) : null}
                   </section>

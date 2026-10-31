@@ -106,6 +106,15 @@ describe("live role correspondence", () => {
     );
     expect(execute).toHaveBeenCalledTimes(1);
     expect(second.events).toEqual(first.events);
+    vi.advanceTimersByTime(30_000);
+    await refreshRecruitingCorrespondence(
+      deps,
+      actor,
+      { roleId: "role", threadId: "thread", view: "interview" },
+      [source("calendar")],
+      empty(),
+    );
+    expect(execute).toHaveBeenCalledTimes(2);
     assignment.mockResolvedValueOnce(null as never);
     await expect(
       refreshRecruitingCorrespondence(
@@ -116,7 +125,7 @@ describe("live role correspondence", () => {
         empty(),
       ),
     ).rejects.toBeInstanceOf(IsolationError);
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(2);
   });
   it("does not share cached personal calendars across accounts", async () => {
     const { prisma } = fixture();
@@ -140,6 +149,52 @@ describe("live role correspondence", () => {
     );
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it.each(["calendar", "cal"] as const)(
+    "follows %s calendar continuation when the role's interview is on a later provider page",
+    async (kind) => {
+      const { prisma } = fixture();
+      const execute = vi.fn(async function* (call: { args: Record<string, unknown> }) {
+        const later = kind === "calendar" ? call.args.pageToken === "next" : call.args.skip === 1;
+        const row = {
+          id: later ? "interview" : "unrelated",
+          uid: later ? "interview" : "unrelated",
+          summary: "Interview",
+          title: "Interview",
+          start:
+            kind === "calendar" ? { dateTime: "2026-10-31T12:00:00Z" } : "2026-10-31T12:00:00Z",
+          end: kind === "calendar" ? { dateTime: "2026-10-31T13:00:00Z" } : "2026-10-31T13:00:00Z",
+          attendees: [{ email: later ? "candidate@example.test" : "unrelated@example.test" }],
+        };
+        yield {
+          type: "result",
+          data: {
+            structuredContent:
+              kind === "calendar"
+                ? { items: later ? [row] : [], ...(later ? {} : { nextPageToken: "next" }) }
+                : { status: "success", data: [row], pagination: { hasNextPage: !later } },
+          },
+        } as const;
+      });
+      const output = empty();
+      const calendar = {
+        ...source("calendar"),
+        id: `pagination-${kind}`,
+        provider: { kind, tools: [] },
+      };
+      await refreshRecruitingCorrespondence(
+        { prisma, connectors: { execute } },
+        actor,
+        { roleId: "role", threadId: "thread", view: "interview" },
+        [calendar],
+        output,
+      );
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(output.events.map((event) => event.id)).toEqual([
+        kind === "calendar" ? `${calendar.id}:interview` : `${calendar.id}:booking:interview`,
+      ]);
+      expect(output.partial).toBe(false);
+    },
+  );
   it("follows campaign mail pagination and keeps definitive received direction", async () => {
     const { prisma } = fixture();
     const email = (index: number) => ({
