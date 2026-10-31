@@ -16,7 +16,7 @@ import {
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
-import { finishWorkEstimate, wakeForResearchCountdown } from "./work-estimate.js";
+import { finishWorkEstimate, SHORTFALL_RULE, wakeForResearchCountdown } from "./work-estimate.js";
 
 /** How long a foreground status read waits at the provider before the turn moves on. */
 export const RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS = 10;
@@ -390,8 +390,8 @@ export async function pollRecruitingResearch(
     const summary = grading
       ? `The research service's grades for people already in Results on recruiting role ${task.roleId} are ${state}. Read them with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results. Do not start new research and do not ask anything. Then end the turn.`
       : direct
-        ? `Research for recruiting role ${task.roleId} is ${state}. Read the people not saved yet with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results, so all returned people are kept, including unassessed people. Do not start new research. Then report how many new people were added in total and the highlights, and offer the next step in one question card.`
-        : `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback.`;
+        ? `Research for recruiting role ${task.roleId} is ${state}. Read the people not saved yet with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results, so all returned people are kept, including unassessed people. Do not start new research. Then report how many new people were added in total and the highlights, and offer the next step in one question card. ${SHORTFALL_RULE}`
+        : `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback. ${SHORTFALL_RULE}`;
     const wakeTask = await tx.task.create({
       data: {
         spaceId: run.spaceId,
