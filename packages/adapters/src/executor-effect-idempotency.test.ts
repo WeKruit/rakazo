@@ -5501,6 +5501,18 @@ describe("native recruiting assessment effect delivery", () => {
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Build simulation for robots.");
     expect(prompt).toContain("Do not read the file again");
+    // Both server-side steps show live, like the model's own calls.
+    const append = f.executorDeps.events.append as unknown as ReturnType<typeof vi.fn>;
+    const steps = append.mock.calls
+      .map(([event]) => event as { type: string; payload: Record<string, unknown> })
+      .filter((event) => event.type.startsWith("agent.tool."))
+      .map((event) => `${event.type} ${event.payload.name}`);
+    expect(steps).toEqual([
+      "agent.tool.called artifact_read",
+      "agent.tool.completed artifact_read",
+      "agent.tool.called recruiting_role",
+      "agent.tool.completed recruiting_role",
+    ]);
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {

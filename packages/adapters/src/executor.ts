@@ -12385,8 +12385,46 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
               );
           if (!block && !file) return undefined;
+          // These calls run before the model's first step, so they report themselves like the
+          // model's own calls: the recruiter sees the file or link being read and the role saved.
+          const step = async (
+            name: string,
+            args: Record<string, unknown>,
+            executionId: string,
+          ): Promise<unknown> => {
+            const startedAt = Date.now();
+            const target = { spaceId: run!.spaceId, threadId: thread.id, botId: bot.id, runId };
+            await deps.events
+              .append({
+                ...target,
+                type: "agent.tool.called",
+                payload: {
+                  name,
+                  executionId,
+                  startedAt: new Date(startedAt).toISOString(),
+                  category: workActivityForTool(name),
+                  argsSummary: toolArgsSummary(args, runSecrets),
+                },
+              })
+              .catch(() => getLogger().warn("job step audit append failed", { name }));
+            const done = (completion: { result?: unknown; error?: unknown }) =>
+              appendToolCompletionAudit(
+                deps,
+                target,
+                { name, executionId, durationMs: Date.now() - startedAt, ...completion },
+                runSecrets,
+              );
+            try {
+              const result = await applyTool(name, args, executionId);
+              await done({ result });
+              return result;
+            } catch (error) {
+              await done({ error: String(error) });
+              throw error;
+            }
+          };
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
-            applyTool(
+            step(
               "recruiting_role",
               {
                 operation: "create",
@@ -12409,7 +12447,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
             if (file) {
-              const read = (await applyTool(
+              const read = (await step(
                 "artifact_read",
                 { artifactId: file.artifactId, limit: 16_000 },
                 `${runId}:job-file`,
@@ -12439,7 +12477,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
             }
             const url = jobLinkIn(block.text)!;
-            const read = (await applyTool(
+            const read = (await step(
               "web_fetch",
               { url, maxChars: 24_000 },
               `${runId}:job-link`,
