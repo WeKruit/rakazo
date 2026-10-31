@@ -7090,6 +7090,9 @@ export function createRouter(deps: RouterDeps) {
       companySite: authed.links.companySite.handler(async ({ input }) =>
         companySites.companySite(input.name),
       ),
+      companySites: authed.links.companySites.handler(async ({ input }) => ({
+        sites: await companySites.companySites(input.names),
+      })),
     },
     runs: {
       trace: authed.runs.trace.handler(({ context, input }) =>

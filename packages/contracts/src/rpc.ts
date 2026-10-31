@@ -205,6 +205,12 @@ const recruitingWorkspace = z.strictObject({
   role: RecruitingRoleSchema,
   revision: RecruitingRoleRevisionSchema,
 });
+const CompanySiteAnswer = z.object({
+  host: z.string().nullable(),
+  icon: z.string().optional(),
+  retry: z.boolean().optional(),
+});
+
 export const RecruitingAssessmentSnapshotSchema = z
   .strictObject({
     assessment: RecruitingAssessmentSchema,
@@ -1398,13 +1404,11 @@ export const appContract = {
      * could be confirmed; `icon` is its logo as a small data URL when one was found with it.
      * `retry` means the server was too busy to look.
      */
-    companySite: oc.input(z.object({ name: z.string().max(200) })).output(
-      z.object({
-        host: z.string().nullable(),
-        icon: z.string().optional(),
-        retry: z.boolean().optional(),
-      }),
-    ),
+    companySite: oc.input(z.object({ name: z.string().max(200) })).output(CompanySiteAnswer),
+    /** `companySite` for a page's organizations in one request; answers follow `names`' order. */
+    companySites: oc
+      .input(z.object({ names: z.array(z.string().max(200)).min(1).max(50) }))
+      .output(z.object({ sites: z.array(CompanySiteAnswer) })),
   },
   runs: {
     trace: oc

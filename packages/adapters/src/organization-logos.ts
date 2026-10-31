@@ -3,6 +3,21 @@ import { getLogger } from "@rakazo/logging";
 import type { CompanySiteResolver, OrganizationLogoStore } from "./company-site.js";
 import { companyTokens } from "./company-site.js";
 
+function savedAnswer(row: {
+  host: string | null;
+  icon: string | null;
+  checkedAt: Date;
+  checkAgainAt: Date;
+}) {
+  const staleMiss =
+    !row.host && !row.icon && row.checkAgainAt.getTime() - row.checkedAt.getTime() > OLD_MISS_MS;
+  return {
+    host: row.host,
+    ...(row.icon ? { icon: row.icon } : {}),
+    expiresAt: staleMiss ? 0 : row.checkAgainAt.getTime(),
+  };
+}
+
 /** Logos kept in the database, shared by every user: organization names only, never a person. */
 export function createPrismaOrganizationLogoStore(
   prisma: Pick<PrismaClient, "organizationLogo">,
@@ -10,16 +25,11 @@ export function createPrismaOrganizationLogoStore(
   return {
     async get(key) {
       const row = await prisma.organizationLogo.findUnique({ where: { key } });
-      if (!row) return null;
-      const staleMiss =
-        !row.host &&
-        !row.icon &&
-        row.checkAgainAt.getTime() - row.checkedAt.getTime() > OLD_MISS_MS;
-      return {
-        host: row.host,
-        ...(row.icon ? { icon: row.icon } : {}),
-        expiresAt: staleMiss ? 0 : row.checkAgainAt.getTime(),
-      };
+      return row ? savedAnswer(row) : null;
+    },
+    async getMany(keys) {
+      const rows = await prisma.organizationLogo.findMany({ where: { key: { in: [...keys] } } });
+      return new Map(rows.map((row) => [row.key, savedAnswer(row)]));
     },
     async put(key, found, expiresAt) {
       const data = {
