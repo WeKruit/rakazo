@@ -29,6 +29,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
 import { createRouter, enqueueBotIntroRun, HEARTBEAT_MS, SESSION_RECHECK_MS } from "./router.js";
 
+// Background-work timing reads its own table; these fakes only model the thread snapshot.
+vi.mock("./thread-work-timing.js", () => ({ loadBackgroundWorkTiming: vi.fn(async () => []) }));
+
 describe("account preferences", () => {
   function preferencesDeps(avatarStyle: string) {
     const update = vi.fn().mockResolvedValue({});

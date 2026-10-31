@@ -6,6 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
 import { createRouter } from "./router.js";
 
+// Background-work timing reads its own table; these fakes only model the thread snapshot.
+vi.mock("./thread-work-timing.js", () => ({ loadBackgroundWorkTiming: vi.fn(async () => []) }));
+
 function fixture() {
   const actor = {
     userId: "user-1",
