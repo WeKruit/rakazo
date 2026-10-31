@@ -1278,31 +1278,24 @@ export async function getRecruitingCorrespondence(
         } while (cursor);
         if (workspace.crmTarget) {
           const bound = workspace.crmTarget.target;
-          let offset = 0;
           try {
-            for (;;) {
-              const saved = await getRecruitingCrmData(
-                { prisma, ...crmReads },
-                actor,
-                target,
-                {
-                  operation: "candidates",
-                  serverId: bound.mcpServerId,
-                  serverRevision: bound.serverRevision,
-                  organizationId: bound.organizationId,
-                  crmRoleId: bound.crmRoleId,
-                  limit: 50,
-                  offset,
-                },
-                { source: "projection" },
-              );
-              if (saved.operation !== "candidates") throw new ORPCError("SERVICE_UNAVAILABLE");
-              for (const candidate of saved.items)
-                if (candidate.email) contactEmails.push(candidate.email);
-              if (saved.nextOffset === null) break;
-              if (saved.nextOffset <= offset) throw new ORPCError("SERVICE_UNAVAILABLE");
-              offset = saved.nextOffset;
-            }
+            const saved = await getRecruitingCrmData(
+              { prisma, ...crmReads },
+              actor,
+              target,
+              {
+                operation: "candidates",
+                serverId: bound.mcpServerId,
+                serverRevision: bound.serverRevision,
+                organizationId: bound.organizationId,
+                crmRoleId: bound.crmRoleId,
+                limit: 50,
+              },
+              { source: "projection", allPages: true },
+            );
+            if (saved.operation !== "candidates") throw new ORPCError("SERVICE_UNAVAILABLE");
+            for (const candidate of saved.items)
+              if (candidate.email) contactEmails.push(candidate.email);
           } catch (error) {
             if (!(error instanceof ORPCError) || error.code !== "SERVICE_UNAVAILABLE") throw error;
             output.partial = true;
@@ -2926,12 +2919,17 @@ export type RecruitingCrmReadDeps = {
   reauthorize: () => Promise<ThreadTarget>;
 };
 type RecruitingCrmRoleLookup = { operation: "role"; reference: RecruitingCrmRoleReference };
+/**
+ * `allPages` returns every candidate of the role in one result: the role binding is checked once,
+ * then only the candidate pages are read, instead of re-reading memberships and the role per page.
+ */
+type CrmReadOptions = { source?: "projection"; allPages?: true };
 export function getRecruitingCrmData(
   deps: RecruitingCrmReadDeps,
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput,
-  options?: { source: "projection" },
+  options?: CrmReadOptions,
 ): Promise<RecruitingCrmDataOutput>;
 export function getRecruitingCrmData(
   deps: RecruitingCrmReadDeps,
@@ -2944,7 +2942,7 @@ export async function getRecruitingCrmData(
   actor: Actor,
   target: ThreadTarget,
   raw: RecruitingCrmDataInput | RecruitingCrmRoleLookup,
-  options?: { source: "projection" },
+  options?: CrmReadOptions,
 ): Promise<RecruitingCrmDataOutput | ReturnType<typeof RecruitingCrmRoleReadSchema.parse>> {
   return authenticated(async () => {
     const input =
@@ -3782,7 +3780,7 @@ export async function getRecruitingCrmData(
                 value?.toLocaleLowerCase().includes(query),
               )),
         );
-        const items = matching.slice(offset, offset + limit);
+        const items = matching.slice(offset, options.allPages ? undefined : offset + limit);
         return finish({
           operation: "candidates",
           scope: "stored_role",
@@ -3793,44 +3791,54 @@ export async function getRecruitingCrmData(
           nextOffset: offset + items.length < matching.length ? offset + items.length : null,
         });
       }
-      const page = parse(
-        RecruitingCrmCandidatesReadSchema,
-        await read(server, "list_crm_candidates", {
-          p_org: input.organizationId,
-          p_not_reviewed: false,
-          p_limit: limit,
-          p_offset: offset,
-          ...(input.query ? { p_q: input.query } : {}),
-          ...(input.stage ? { p_stage: input.stage } : {}),
-          ...(input.includeArchived ? { p_include_archived: true } : {}),
-          ...(selectedRole
-            ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
-            : {}),
-        }),
-      );
-      if (
-        page.rows.length > limit ||
-        (input.stage && page.rows.some((row) => row.stage !== input.stage)) ||
-        (selectedRole &&
-          page.rows.some(
-            (row) =>
-              trim(row.client_label) !== trim(selectedRole.clientLabel) ||
-              trim(row.role_label) !== trim(selectedRole.roleLabel),
-          )) ||
-        new Set(page.rows.map((row) => row.candidate_id)).size !== page.rows.length
-      )
-        throw unavailable();
+      const readPage = async (offset: number) => {
+        const page = parse(
+          RecruitingCrmCandidatesReadSchema,
+          await read(server, "list_crm_candidates", {
+            p_org: input.organizationId,
+            p_not_reviewed: false,
+            p_limit: limit,
+            p_offset: offset,
+            ...(input.query ? { p_q: input.query } : {}),
+            ...(input.stage ? { p_stage: input.stage } : {}),
+            ...(input.includeArchived ? { p_include_archived: true } : {}),
+            ...(selectedRole
+              ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
+              : {}),
+          }),
+        );
+        if (
+          page.rows.length > limit ||
+          (input.stage && page.rows.some((row) => row.stage !== input.stage)) ||
+          (selectedRole &&
+            page.rows.some(
+              (row) =>
+                trim(row.client_label) !== trim(selectedRole.clientLabel) ||
+                trim(row.role_label) !== trim(selectedRole.roleLabel),
+            )) ||
+          new Set(page.rows.map((row) => row.candidate_id)).size !== page.rows.length
+        )
+          throw unavailable();
+        return {
+          items: page.rows.map(candidate),
+          total: page.total,
+          nextOffset:
+            page.rows.length && offset + page.rows.length < page.total
+              ? offset + page.rows.length
+              : null,
+        };
+      };
+      const pages = options?.allPages
+        ? await readOffsetPages(readPage, limit, CRM_PAGE_READS, offset)
+        : [await readPage(offset)];
       return finish({
         operation: input.operation,
         scope: selectedRole ? "legacy_role_labels" : "organization",
         selectedRole,
-        items: page.rows.map(candidate),
-        total: page.total,
+        items: pages.flatMap((page) => page.items),
+        total: pages[0]!.total,
         offset,
-        nextOffset:
-          page.rows.length && offset + page.rows.length < page.total
-            ? offset + page.rows.length
-            : null,
+        nextOffset: pages.at(-1)!.nextOffset,
       });
     }
     if (input.crmRoleId) {
@@ -4170,8 +4178,8 @@ const CRM_PAGE_READS = 4;
  */
 export async function readOffsetPages<
   Page extends { items: readonly unknown[]; total: number; nextOffset: number | null },
->(read: (offset: number) => Promise<Page>, pageSize: number, concurrency: number) {
-  const first = await read(0);
+>(read: (offset: number) => Promise<Page>, pageSize: number, concurrency: number, start = 0) {
+  const first = await read(start);
   const pages = [first];
   if (first.nextOffset === null) return pages;
   if (first.items.length < pageSize) {
@@ -4238,34 +4246,31 @@ export async function getRecruitingRoleCandidates(
       try {
         // Read the role's people live from the CRM, so replies and status are current. Each page
         // is a fully authorized read; pages after the first load a few at a time.
-        const pages = await readOffsetPages(
-          async (offset) => {
-            const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
-              operation: "candidates",
-              serverId: binding.mcpServerId,
-              serverRevision: binding.serverRevision,
-              organizationId: binding.organizationId,
-              crmRoleId: binding.crmRoleId,
-              limit: CRM_PAGE,
-              offset,
-            });
-            if (page.operation !== "candidates") throw new IsolationError();
-            return page;
+        const page = await getRecruitingCrmData(
+          deps,
+          actor,
+          target,
+          {
+            operation: "candidates",
+            serverId: binding.mcpServerId,
+            serverRevision: binding.serverRevision,
+            organizationId: binding.organizationId,
+            crmRoleId: binding.crmRoleId,
+            limit: CRM_PAGE,
           },
-          CRM_PAGE,
-          CRM_PAGE_READS,
+          { allPages: true },
         );
+        if (page.operation !== "candidates") throw new IsolationError();
         const seen = new Set<string>();
-        for (const page of pages)
-          for (const item of page.items) {
-            if (seen.has(item.candidateId)) continue;
-            seen.add(item.candidateId);
-            rows.push({
-              ...item,
-              serverId: page.source.serverId,
-              organizationId: page.source.organizationId,
-            });
-          }
+        for (const item of page.items) {
+          if (seen.has(item.candidateId)) continue;
+          seen.add(item.candidateId);
+          rows.push({
+            ...item,
+            serverId: page.source.serverId,
+            organizationId: page.source.organizationId,
+          });
+        }
       } catch (error) {
         // Never substitute stored data when current source authorization cannot be verified.
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
