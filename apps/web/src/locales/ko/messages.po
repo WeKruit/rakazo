@@ -236,9 +236,15 @@ msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "추가"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr ""
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "서버 이름을 입력하세요."
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "stdio 명령을 입력하세요."
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -977,6 +987,10 @@ msgstr ""
 msgid "Check availability in role chat"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr ""
@@ -1099,6 +1113,7 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "닫기"
 
@@ -1148,6 +1163,14 @@ msgstr "계정 설정 닫기"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "음성 설정 닫기"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1450,6 +1473,10 @@ msgstr "계속"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -1804,6 +1831,10 @@ msgstr ""
 msgid "Could not read this sequence."
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "삭제하지 못했습니다."
@@ -1843,6 +1874,7 @@ msgstr "연결을 해제하지 못했습니다."
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "저장하지 못했습니다."
 
@@ -3260,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -3475,6 +3507,10 @@ msgstr "매월"
 msgid "More"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr ""
@@ -3588,6 +3624,10 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Next"
+msgstr ""
+
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -3976,6 +4016,10 @@ msgstr "아직 기억한 내용이 없습니다"
 msgid "Notifications"
 msgstr "알림"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Now"
 msgstr "지금"
@@ -4053,6 +4097,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -4657,6 +4705,10 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -5492,10 +5544,18 @@ msgstr "설정 도움말"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "함께 사용"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6066,6 +6126,7 @@ msgstr "답변을 입력하세요"
 msgid "Unassigned"
 msgstr "섹션 없음"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr "사용할 수 없음"
@@ -6266,6 +6327,14 @@ msgstr ""
 msgid "Voice"
 msgstr "음성"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Waiting for background work"
+msgstr ""
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
 msgstr ""
@@ -6314,8 +6383,18 @@ msgstr "이 Bot을 언제, 어떤 일에 사용할지 적어주세요"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
 msgstr "웹훅이 실행될 때"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "When to run"

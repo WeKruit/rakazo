@@ -108,6 +108,7 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import { outputSchema, structuredTurn } from "./structured-output.js";
 import type { SubagentSession } from "./subagent-delivery.js";
 import {
   collectSubagentResults,
@@ -568,6 +569,8 @@ export class PiAgentRuntime implements AgentRuntime {
         // continues from the partial assistant message.
         let modelStreaming = false;
         let interjected = false;
+        // The reader sees where a reply was cut off by their new message.
+        let cutMidReply = false;
         let interjectClaim: Promise<void> | undefined;
         const pollInterject = () => {
           if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
@@ -581,6 +584,7 @@ export class PiAgentRuntime implements AgentRuntime {
               host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
               if (modelStreaming && steering.some((item) => item.interrupt)) {
                 interjected = true;
+                cutMidReply ||= currentMessageStreamed.trim().length > 0;
                 agent.abort();
               }
             })
@@ -796,9 +800,15 @@ export class PiAgentRuntime implements AgentRuntime {
             interjected = false;
             await interjectClaim;
             keepInterruptedAssistantMessage(agent.state.messages);
-            if (streamed.trim() && !streamed.endsWith("\n")) {
-              queue.push({ type: "text", text: "\n\n" });
-              streamed += "\n\n";
+            const gap = cutMidReply
+              ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
+              : streamed.trim() && !streamed.endsWith("\n")
+                ? "\n\n"
+                : "";
+            cutMidReply = false;
+            if (gap) {
+              queue.push({ type: "text", text: gap });
+              streamed += gap;
             }
             host.steeredUnseen = 0;
             await agent.continue();
@@ -1994,6 +2004,8 @@ async function executeSubagent(
     );
   const handle = String(args.handle ?? "").trim();
   const task = String(args.task ?? "").trim();
+  const schema = outputSchema(args.output_schema);
+  if (typeof schema === "string") return schema;
   const working = [...host.subagents.values()].filter((existing) => existing.busy).length;
   if (working >= SUBAGENT_CONCURRENCY)
     return `${SUBAGENT_CONCURRENCY} helpers are already working. Wait for one with run_subagent wait before starting or continuing another.`;
@@ -2017,11 +2029,14 @@ async function executeSubagent(
     host.subagents.set(helper.handle, helper);
   }
   const withPrevious = (text: string) => (previous ? `${previous}\n\n${text}` : text);
+  const work = schema
+    ? structuredTurn((prompt) => helper.turn(prompt), task, args.output_schema, schema)
+    : helper.turn(task);
   if (args.background !== true) {
-    const result = await helper.turn(task);
+    const result = await work;
     return withPrevious(`${result}\n\n(helper handle: ${helper.handle})`);
   }
-  startBackgroundTurn(helper, helper.turn(task));
+  startBackgroundTurn(helper, work);
   return withPrevious(
     `Started ${helper.name} in the background (handle ${helper.handle}). Its result arrives in this conversation once, when it finishes. Reply to the user or keep working meanwhile; use run_subagent with wait to block on it, or with handle to send it more after it finishes.`,
   );
@@ -2489,6 +2504,7 @@ function builtinParameters(tool: ConnectorTool) {
       handle: Type.Optional(Type.String()),
       wait: Type.Optional(Type.Array(Type.String())),
       timeout_seconds: Type.Optional(Type.Number()),
+      output_schema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     });
   }
   if (tool.name === "spawn_bot") {
@@ -2937,6 +2953,9 @@ function messageHasToolCall(message: unknown): boolean {
 }
 
 const INTERJECT_POLL_MS = 2_000;
+
+/** Markdown rule between a reply cut off by a new message and the answer that follows. */
+export const INTERRUPTED_DIVIDER = "---";
 
 /**
  * Keep the partial text of an interrupted assistant message in context and drop

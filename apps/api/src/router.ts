@@ -2810,7 +2810,7 @@ export function createRouter(deps: RouterDeps) {
       }),
       stop: authed.threads.stop.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope);
+        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope, true);
         return { ok: true as const };
       }),
       backgroundTasks: authed.threads.backgroundTasks.handler(async ({ context, input }) => {

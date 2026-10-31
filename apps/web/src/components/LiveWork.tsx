@@ -44,6 +44,7 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     crm: t`Checking candidate records`,
     question: t`Preparing a question`,
     specialist: t`Asking a specialist`,
+    waiting: t`Waiting for background work`,
     working: t`Working on it`,
   };
 }

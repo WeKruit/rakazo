@@ -2,6 +2,7 @@ export * from "./actor-db.js";
 export * from "./artifact-versions.js";
 export * from "./automation-rate.js";
 export * from "./background-tool.js";
+export * from "./background-work.js";
 export * from "./billing.js";
 export * from "./board.js";
 export * from "./board-live.js";

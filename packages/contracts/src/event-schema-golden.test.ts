@@ -17,6 +17,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   2: "531ad276e3d4642ccb095e1d219940e85021bb4946c73eac42a3a2afc49c7152",
   // 3: bot_message_received may name the conversation its outcome returns to (role team delegation).
   3: "fa2f7a5998cb406ab33cf7a0a7c99df8eea287fc1a4a44535c82b8b095c3c910",
+  // 4: the stop line's meta block gained an optional resume flag.
+  4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -43,6 +45,7 @@ const OLD_ROWS: unknown[] = [
     returnToMessageId: "message-a",
     hop: 1,
   },
+  { kind: "meta", text: "Dana stopped the assistant" },
 ];
 
 describe("stored event shapes", () => {

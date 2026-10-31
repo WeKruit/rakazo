@@ -5,6 +5,7 @@ import type {
   ConnectorProvider,
   JobPublisher,
   MessagingSurface,
+  NotificationProvider,
   SandboxProvider,
   SecretStore,
 } from "@rakazo/adapter-kit";
@@ -17,6 +18,7 @@ import { expireComputerControl } from "./computer-control.js";
 import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
 import type { createRunExecutor } from "./executor.js";
+import { sendRunNotification } from "./executor.js";
 import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
@@ -56,6 +58,7 @@ export function createBackgroundJobHandlers(deps: {
   deploymentModelKey?: string;
   deploymentModelConfigured?: boolean;
   messaging?: MessagingSurface;
+  notifications?: NotificationProvider;
   cloudAgent?: CloudAgentConnection | null;
   /** The native MCP connector; without it research tasks are not polled in the background. */
   connector?: ConnectorProvider;
@@ -171,6 +174,17 @@ export function createBackgroundJobHandlers(deps: {
     },
     "recruiting_agent_run.wait": async (payload) => {
       await waitForRecruitingAgentRun({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+    },
+    "notification.retry": async (payload) => {
+      if (!deps.notifications) return;
+      const run = await deps.prisma.run.findUnique({
+        where: { id: payload.runId },
+        select: { id: true, spaceId: true, userId: true, botId: true, threadId: true },
+      });
+      // The message must belong to the run's own conversation; anything else is dropped.
+      if (!run || run.threadId !== payload.message.threadId) return;
+      // Throwing hands the retry back to the queue's backoff.
+      await sendRunNotification(deps.notifications, run, payload.message);
     },
     "poll.close": async (payload) => {
       await closePollAndWake(

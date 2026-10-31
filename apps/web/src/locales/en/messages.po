@@ -236,9 +236,15 @@ msgstr "Actor not recorded"
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "Add"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr "Add {0}"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr "Add a name and prompt."
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "Add a server name."
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "Add a stdio command."
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr "Add a trigger to run this routine."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -977,6 +987,10 @@ msgstr "Check availability"
 msgid "Check availability in role chat"
 msgstr "Check availability in role chat"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr "Check command"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr "Check inbox"
@@ -1099,6 +1113,7 @@ msgstr "Clock change; see source times"
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "Close"
 
@@ -1148,6 +1163,14 @@ msgstr "Close user settings"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "Close voice settings"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "Closed"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "Closes in {time}"
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1451,6 +1474,10 @@ msgstr "Continue"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
 msgstr "Continue in Background"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
+msgstr "Continue the conversation each run"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Conversation"
@@ -1804,6 +1831,10 @@ msgstr "Could not read this campaign."
 msgid "Could not read this sequence."
 msgstr "Could not read this sequence."
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "Could not record your vote"
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "Could not remove"
@@ -1843,6 +1874,7 @@ msgstr "Could not revoke connection"
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "Could not save"
 
@@ -3260,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr "Mailbox not recorded"
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr "Main"
+#~ msgid "Main"
+#~ msgstr "Main"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -3475,6 +3507,10 @@ msgstr "Monthly"
 msgid "More"
 msgstr "More"
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr "More options"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr "More results may be available. This is not the complete mailbox or calendar."
@@ -3589,6 +3625,10 @@ msgstr "New ticket"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Next"
 msgstr "Next"
+
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
+msgstr "Next {next}"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Next campaigns"
@@ -3976,6 +4016,10 @@ msgstr "Nothing remembered yet"
 msgid "Notifications"
 msgstr "Notifications"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr "Notify when done"
+
 #: src/pages/ActivityList.tsx
 msgid "Now"
 msgstr "Now"
@@ -4054,6 +4098,10 @@ msgstr "Only part of the saved availability is available."
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
 msgstr "Only recent saved records are shown. Earlier plans may be missing."
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
+msgstr "Only run when"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -4658,6 +4706,10 @@ msgstr "Remove Git event"
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
 msgstr "Remove message trigger"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
+msgstr "Remove record trigger"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove schedule"
@@ -5492,10 +5544,18 @@ msgstr "Setup help"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr "Share the role requirements in the conversation to build this brief."
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr "Share with my team"
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "Shared"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr "Shared by your team"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6066,6 +6126,7 @@ msgstr "Type your answer"
 msgid "Unassigned"
 msgstr "Unassigned"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr "Unavailable"
@@ -6266,6 +6327,14 @@ msgstr "View role records"
 msgid "Voice"
 msgstr "Voice"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "Vote"
+
+#: src/components/LiveWork.tsx
+msgid "Waiting for background work"
+msgstr "Waiting for background work"
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
 msgstr "Waiting for resume"
@@ -6314,8 +6383,18 @@ msgstr "What this bot is for"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr "When a role changes"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
 msgstr "When a webhook fires"
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
+msgstr "When people are saved"
 
 #: src/pages/RoutineEditor.tsx
 msgid "When to run"

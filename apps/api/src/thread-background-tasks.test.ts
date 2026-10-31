@@ -71,14 +71,17 @@ function fixture(owned = true) {
 
 it("lists only records sharing the already-authorized thread's owner in one snapshot query", async () => {
   const f = fixture();
+  const startedAt = new Date("2026-10-31T04:00:00.000Z");
   const rows = [
-    { id: "research", kind: "research", status: "running" },
-    { id: "cloud", kind: "cloud_agent", status: "cancelling" },
-    { id: "native-background", kind: "run", status: "running" },
-    { id: "search-effect", kind: "agent_run", status: "running" },
+    { id: "research", kind: "research", status: "running", startedAt, estimateMs: null },
+    { id: "cloud", kind: "cloud_agent", status: "cancelling", startedAt, estimateMs: null },
+    { id: "native-background", kind: "run", status: "running", startedAt, estimateMs: null },
+    { id: "search-effect", kind: "agent_run", status: "running", startedAt, estimateMs: 600_000 },
   ];
   f.tx.$queryRaw.mockResolvedValueOnce(rows);
-  expect(await listThreadBackgroundTasks(f.prisma, target)).toEqual(rows);
+  expect(await listThreadBackgroundTasks(f.prisma, target)).toEqual(
+    rows.map((row) => ({ ...row, startedAt: startedAt.toISOString() })),
+  );
   expect(f.tx.$queryRaw).toHaveBeenCalledOnce();
   const [parts, ...values] = f.tx.$queryRaw.mock.calls[0]!;
   const sql = (parts as TemplateStringsArray).join("?");
@@ -88,6 +91,7 @@ it("lists only records sharing the already-authorized thread's owner in one snap
   expect(sql).toContain('rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"');
   expect(sql).toContain('e."spaceId" = o."spaceId"');
   expect(sql).toContain("starts_with(e.\"idempotencyKey\", 'work_estimate:agent_run_')");
+  expect(sql).toContain("e.request->>'estimateMs'");
   expect(JSON.stringify(values)).toContain("recruiting_grade");
   expect(JSON.stringify(values)).toContain("tool_background");
 });

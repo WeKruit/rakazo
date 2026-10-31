@@ -32,6 +32,7 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  notificationRetryJob,
   pollCloseJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
@@ -97,6 +98,7 @@ import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
   CALL_CLIENT_NONCE_PREFIX,
+  COMPUTER_START_FAILED,
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
@@ -134,10 +136,10 @@ import {
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
-  parseSkillMd,
   POLL_DEFAULT_MINUTES,
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
+  parseSkillMd,
   planActionGate,
   pollResultLines,
   promptInvokesSkill,
@@ -318,6 +320,7 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
+import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
   loadBotMessageContext,
@@ -674,6 +677,7 @@ import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
   questionStatesWork,
+  restatesUpdate,
   TurnReportLedger,
   turnReportText,
 } from "./turn-report.js";
@@ -1149,6 +1153,10 @@ const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
+/** Model-facing: a backgrounded turn must not question the person after they moved on. */
+export const askAfterNewerMessage = (text: string) =>
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user and end the turn.`;
+
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_ENGLISH =
@@ -1263,6 +1271,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",
+  "wait_for_work",
 ]);
 /** Added to the turn prompt when the user spoke this message on a live voice call. */
 const VOICE_CALL_BASE_INSTRUCTION =
@@ -4326,6 +4335,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         deps.events.pauseRunForInput(modelRetries ? { ...input, modelRetries } : input);
       setupMark("lease");
       let leaseValid = true;
+      /** Why this run's computer would not start, if it did not. */
+      let computerStartFailure: unknown;
       let lastLeaseCheckAt = 0;
       let retainComputerLease = false;
       let screenRelease: { computer: ComputerRef; context: AdapterContext } | undefined;
@@ -5193,7 +5204,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context.signal.throwIfAborted();
             return computer;
           },
-          () => runAbortController?.abort(),
+          (error) => {
+            computerStartFailure = error;
+            runAbortController?.abort();
+          },
         );
         // This marks only the lazy handle; first-use provisioning remains deferred.
         setupMark("computerHandle");
@@ -5919,6 +5933,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ?.savedCandidates
             : undefined;
           return turnReportText(work, saved);
+        };
+        /** The person's newest message since this run began that a different run answers. */
+        const newerMessageAnsweredElsewhere = async () => {
+          if (!run.createdAt) return undefined;
+          let newer: { blocks: unknown } | null = null;
+          try {
+            newer = await deps.prisma.message.findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                createdAt: { gt: run.createdAt },
+                OR: [
+                  { sourceRuns: { some: { id: { not: runId } } } },
+                  {
+                    steeringMessages: {
+                      some: { runId: { not: runId }, claimedAt: { not: null } },
+                    },
+                  },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { blocks: true },
+            });
+          } catch {
+            // Without the check the question is asked as before.
+          }
+          if (!newer) return undefined;
+          return (Array.isArray(newer.blocks) ? (newer.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
         };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
@@ -10661,6 +10706,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             );
           }
+          if (name === "wait_for_work") {
+            return waitForBackgroundWork(deps.prisma, {
+              threadId: run.threadId,
+              selfRunId: run.id,
+              ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
+              mode: args.mode === "any" ? "any" : "all",
+              timeoutSeconds:
+                typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
+              signal: context.signal,
+            });
+          }
           if (name === "task_catalog") {
             return taskCatalogFromTool(deps, {
               spaceId: run.spaceId,
@@ -13009,6 +13065,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   onToolCallDelta: streamRoundPicks,
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                    // Workloop: work running behind the conversation never asks the person after
+                    // they moved on; a newer message another reply answers wins.
+                    const moved = await newerMessageAnsweredElsewhere();
+                    if (moved !== undefined) return { instead: askAfterNewerMessage(moved) };
                     if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                       askDeclineBounced = true;
                       return { instead: ASK_DECLINES };
@@ -13882,6 +13942,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
           }
+          // The update just sent already said it: no second, near-identical message.
+          if (
+            run.trigger !== "bot_message" &&
+            blocks.every((block) => block.kind === "text") &&
+            restatesUpdate(text, midTurnUserTexts.at(-1))
+          ) {
+            text = "";
+            blocks = [];
+          }
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -14207,6 +14276,52 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           );
         }
+        // A computer that keeps failing to start will not fix itself on the next retry: end the
+        // turn with the reset button instead of leaving it queued until the stuck-work reaper.
+        if (
+          !retryForever &&
+          leaseValid &&
+          computerStartFailure !== undefined &&
+          setupError === computerStartFailure &&
+          (await setupFailures(deps.prisma, runId)) >= COMPUTER_START_ATTEMPTS - 1
+        ) {
+          const failed = await deps.events.finalizeRun({
+            spaceId: run.spaceId,
+            threadId: run.threadId,
+            botId: run.botId,
+            runId,
+            taskId: run.taskId,
+            attemptId: attempt.id,
+            leaseOwner: workerId,
+            leaseFence: fence,
+            outcome: "failed",
+            error: COMPUTER_START_FAILED,
+          });
+          if (failed) {
+            if (failed.continuationRunId)
+              await deps.jobs
+                .enqueue(runContinueJob(failed.continuationRunId))
+                .catch((error) => getLogger().error("steering continuation enqueue", error));
+            else if (runSendsFinishNotification(run.trigger)) {
+              try {
+                const owner = await deps.prisma.bot.findUnique({
+                  where: { id: run.botId },
+                  select: { name: true },
+                });
+                await notifyRun(deps, run, {
+                  kind: "failure",
+                  title: `${owner?.name ?? "Your assistant"} failed`,
+                  body: failureNotificationBody(COMPUTER_START_FAILED),
+                  botId: run.botId,
+                  threadId: run.threadId,
+                });
+              } catch (error) {
+                getLogger().error("computer start failure notice", error);
+              }
+            }
+          }
+          return;
+        }
         const released = await writeComputerRunRequeue(
           deps,
           run,
@@ -14399,19 +14514,37 @@ async function notifyRun(
     !(await routineNotifies(deps.prisma, run.id))
   )
     return;
-  await deps.notifications
-    .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
-      operationId: "notify",
-      traceId: run.botId,
-      runId: run.id,
-      spaceId: run.spaceId,
-      userId: run.userId,
-      botId: run.botId,
-      signal: new AbortController().signal,
-    })
-    .catch((error) => {
-      getLogger().error("run notification", error);
-    });
+  const routed = notice.groupId ? { ...message, groupId: notice.groupId } : message;
+  await sendRunNotification(deps.notifications, run, routed).catch(async (error) => {
+    getLogger().error("run notification", error);
+    // A failed push is retried by the job queue instead of being lost.
+    await deps.jobs
+      .enqueue(
+        notificationRetryJob(
+          { runId: run.id, message: routed },
+          new Date(Date.now() + NOTIFICATION_RETRY_DELAY_MS),
+        ),
+      )
+      .catch((enqueueError) => getLogger().error("run notification retry", enqueueError));
+  });
+}
+
+const NOTIFICATION_RETRY_DELAY_MS = 30_000;
+
+export function sendRunNotification(
+  notifications: NotificationProvider,
+  run: { id: string; spaceId: string; userId: string; botId: string },
+  message: NotificationMessage,
+): Promise<void> {
+  return notifications.send(message, {
+    operationId: "notify",
+    traceId: run.botId,
+    runId: run.id,
+    spaceId: run.spaceId,
+    userId: run.userId,
+    botId: run.botId,
+    signal: AbortSignal.timeout(30_000),
+  });
 }
 
 async function renewRunLease(
@@ -14444,6 +14577,18 @@ function nativeMessageSourceInstruction(messageId: string, blocks: readonly Mess
 const COMPUTER_LOGIN_TOOLS: ReadonlySet<string> = new Set(RECRUITING_DISABLED_BUILTIN_TOOLS);
 export const COMPUTER_TOOLS_DISABLED_ERROR =
   "Computer and browser tools are disabled for this recruiting agent. Use the connected mail/calendar/CRM service; if it is not connected, report the exact connection that is missing.";
+/** Starts of the run's computer to try before the turn ends with the reset-the-computer button. */
+const COMPUTER_START_ATTEMPTS = 3;
+
+/** Earlier failed setups of this run; unknown counts as none, so the run retries as before. */
+async function setupFailures(prisma: ExecutorDeps["prisma"], runId: string): Promise<number> {
+  try {
+    return await prisma.attempt.count({ where: { runId, status: "setup_failed" } });
+  } catch {
+    return 0;
+  }
+}
+
 function disabledToolError(name: string): string {
   return COMPUTER_LOGIN_TOOLS.has(name)
     ? COMPUTER_TOOLS_DISABLED_ERROR

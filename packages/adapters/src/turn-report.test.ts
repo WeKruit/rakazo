@@ -5,6 +5,7 @@ import {
   declineRetry,
   questionStatesWork,
   REPORT_BEFORE_ASK,
+  restatesUpdate,
   retryReason,
   TEXT_QUESTION_NOTE,
   TurnReportLedger,
@@ -441,5 +442,32 @@ describe("declineRetry", () => {
         worked: true,
       })?.note,
     ).toContain("activate_campaign");
+  });
+});
+
+describe("restatesUpdate", () => {
+  const update =
+    "The search has brought the role’s Results pool to 122 people, above your target of 100. I included San Francisco Bay Area profiles as a preferred search segment while keeping Atlanta onsite as the role’s primary location.";
+
+  it("drops a final reply that says the same thing again", () => {
+    expect(
+      restatesUpdate(
+        "The search now has **122 people** in Results, exceeding your target of 100. I included San Francisco Bay Area profiles as a preferred search segment and kept Atlanta onsite as the primary location.",
+        update,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a reply with new content or no update before it", () => {
+    expect(
+      restatesUpdate("Here is the draft email for Ada: Hi Ada, I saw your work at DHL.", update),
+    ).toBe(false);
+    expect(
+      restatesUpdate(
+        `${update} Here is the full list of all 122 people with their titles, locations, evidence and what is still unverified for each of them.`,
+        update,
+      ),
+    ).toBe(false);
+    expect(restatesUpdate("Found 122 people.", undefined)).toBe(false);
   });
 });

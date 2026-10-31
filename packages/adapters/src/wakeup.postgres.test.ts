@@ -33,6 +33,7 @@ function handlers(overrides: Partial<BackgroundJobHandlers> = {}): BackgroundJob
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
     "thread.reply_check": vi.fn(async () => undefined),
+    "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
     ...overrides,
   };

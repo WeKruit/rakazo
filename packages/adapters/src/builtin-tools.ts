@@ -907,6 +907,29 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "wait_for_work",
+    description:
+      'Wait, without spending tokens, for work running in the background of this conversation: research, large people searches, teammates\' handed-off work, cloud agents and automations. mode "all" (default) returns when all of it is done, "any" when the first finishes. Returns done and still running, with ids, kinds and seconds waited. Use it instead of checking again and again. On a long job, wait up to 30 minutes, tell the user the progress, and wait again. New messages from the user still reach you while you wait. For helpers started with run_subagent, use run_subagent wait instead.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["all", "any"] },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1800,
+          description: "Default 600 (10 minutes), at most 1800 (30 minutes).",
+        },
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Wait only for these ids from an earlier result; default all.",
+        },
+      },
+    },
+    readOnly: true,
+  },
+  {
     name: "cloud_agent_status",
     description: "Get status, branch, and PR url for a cloud coding agent.",
     inputSchema: {
@@ -1383,6 +1406,11 @@ export const builtinAgentTools: ConnectorTool[] = [
         timeout_seconds: {
           type: "number",
           description: "With wait: stop waiting after this many seconds (default 60, at most 600).",
+        },
+        output_schema: {
+          type: "object",
+          description:
+            "Optional JSON Schema the helper's result must match. The result comes back as that JSON; a result that does not match gets one correction turn.",
         },
       },
     },

@@ -345,6 +345,7 @@ async function main() {
     deploymentModelKey,
     deploymentModelConfigured,
     messaging,
+    notifications,
     cloudAgent,
     connector: stack.connector,
     shutdownSignal: shutdown.signal,
