@@ -34,7 +34,7 @@ describe("chooseTurnModel", () => {
         userText: "x".repeat(3000),
         recruitingIntake: true,
       }),
-    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
+    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "off" });
   });
   it("keeps the bot's thinking level for an intake answer, which picks the people", () => {
     const choice = chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true });
