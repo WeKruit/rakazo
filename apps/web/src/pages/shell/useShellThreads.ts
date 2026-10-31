@@ -12,6 +12,7 @@ import type {
   ThreadSnapshot,
 } from "@rakazo/contracts";
 import {
+  isRunBoundaryEvent,
   isRunTerminalEvent,
   runThreadSubscription,
   searchHitThreadTarget,
@@ -23,6 +24,7 @@ import type { NavigateFunction } from "react-router-dom";
 import { publishComputerCommand } from "../../lib/computer-workspace";
 import { markOnce } from "../../lib/performance";
 import { rpc, selectedSpaceId } from "../../lib/rpc";
+import { SAVED_THREAD_REPLAY_EVENTS, savedThreadKey, savedThreads } from "../../lib/saved-threads";
 import {
   isComputerStatusEvent,
   isThreadSnapshotEvent,
@@ -311,6 +313,7 @@ export function useShellThreads({
     ) {
       snapTranscriptToEndAfterFrame();
     }
+    saveOpenThread({ groupId: id });
     return snap;
   }
 
@@ -352,18 +355,18 @@ export function useShellThreads({
     ) {
       snapTranscriptToEndAfterFrame();
     }
+    saveOpenThread({ botId: id });
+    refreshBotPanels(id, isCurrent);
+    return snap;
+  }
+
+  function refreshBotPanels(id: string, isCurrent: () => boolean) {
     void Promise.all([
       rpc.routines.list({ botId: id }).catch(() => null),
       rpc.skills.list({ botId: id }).catch(() => null),
       refreshComputerScreen(id).catch(() => null),
     ]).then(([routines, skills]) => {
-      if (
-        activeBotId.current !== id ||
-        epoch !== historyEpoch.current ||
-        request !== threadRefreshEpoch.current
-      ) {
-        return;
-      }
+      if (!isCurrent()) return;
       if (routines) {
         setRoutines(routines);
         setRoutinesBotId(id);
@@ -373,7 +376,60 @@ export function useShellThreads({
         setTaughtSkillsBotId(id);
       }
     });
-    return snap;
+  }
+
+  function savedKeyFor(target: { botId?: string; groupId?: string }) {
+    return userId && bootstrapMe?.spaceId
+      ? savedThreadKey(userId, bootstrapMe.spaceId, target)
+      : null;
+  }
+
+  /** Keeps the conversation on screen for the next open, unless it shows a jump or older pages. */
+  function saveOpenThread(target: { botId?: string; groupId?: string }) {
+    const key = savedKeyFor(target);
+    const current = snapshotRef.current;
+    if (
+      !key ||
+      !current ||
+      validatedThreadEpoch.current !== historyEpoch.current ||
+      pinnedAroundRef.current ||
+      expandedHistoryThread.current === current.threadId ||
+      (target.groupId ? current.groupId !== target.groupId : current.botId !== target.botId)
+    )
+      return;
+    void savedThreads.write(key, current);
+  }
+
+  /**
+   * Paints the conversation this browser saved, then asks the server only for its head. When
+   * few events are missing, the saved copy becomes current and the stream replays just those
+   * events from its cursor; otherwise the caller reads the whole conversation as before.
+   */
+  async function openSavedThread(
+    target: { botId?: string; groupId?: string },
+    epoch: number,
+    isCurrent: () => boolean,
+    signal: AbortSignal,
+  ): Promise<ThreadSnapshot | null> {
+    const key = savedKeyFor(target);
+    const saved = key ? await savedThreads.read(key) : null;
+    if (!saved || !isCurrent()) return null;
+    commitSnapshot(saved);
+    const head = await rpc.threads.head(target, { signal }).catch(() => null);
+    if (!isCurrent()) return null;
+    if (
+      !head ||
+      head.threadId !== saved.threadId ||
+      head.cursor < saved.cursor ||
+      head.cursor - saved.cursor > SAVED_THREAD_REPLAY_EVENTS
+    ) {
+      // Keep it painted, but the full read must not merge into a copy it cannot vouch for.
+      snapshotRef.current = null;
+      return null;
+    }
+    validatedThreadEpoch.current = epoch;
+    snapTranscriptToEndAfterFrame();
+    return saved;
   }
 
   async function loadOlderMessages() {
@@ -448,6 +504,14 @@ export function useShellThreads({
           validatedThreadEpoch.current = epoch;
           commitSnapshot({ ...primed });
           return primed;
+        }
+        const isCurrent = () => epoch === historyEpoch.current && activeBotId.current === active.id;
+        const saved = pendingJump
+          ? null
+          : await openSavedThread({ botId: active.id }, epoch, isCurrent, abort.signal);
+        if (saved) {
+          refreshBotPanels(active.id, isCurrent);
+          return saved;
         }
         return pendingJump
           ? readThreadSnapshot(
@@ -534,10 +598,13 @@ export function useShellThreads({
           void refreshThread(active.id).catch(() => undefined);
         } else if (isComputerStatusEvent(event)) {
           void refreshComputerScreen(active.id).catch(() => undefined);
+        } else if (isRunBoundaryEvent(event)) {
+          saveOpenThread({ botId: active.id });
         }
       },
     });
     return () => {
+      saveOpenThread({ botId: active.id });
       abort.abort();
     };
   }, [
@@ -594,6 +661,20 @@ export function useShellThreads({
           validatedThreadEpoch.current = epoch;
           commitSnapshot({ ...primed });
           return primed;
+        }
+        const saved = pendingJump
+          ? null
+          : await openSavedThread(
+              { groupId },
+              epoch,
+              () => epoch === historyEpoch.current && activeGroupId.current === groupId,
+              abort.signal,
+            );
+        if (saved) {
+          if (!computerOpenRef.current) commitComputer(null);
+          setRoutines([]);
+          setRoutinesBotId(null);
+          return saved;
         }
         return pendingJump
           ? readThreadSnapshot(
@@ -671,9 +752,11 @@ export function useShellThreads({
           void refreshBots().catch(() => undefined);
         }
         if (sync?.snapshotStale) void refreshGroupThread(groupId).catch(() => undefined);
+        else if (isRunBoundaryEvent(event)) saveOpenThread({ groupId });
       },
     });
     return () => {
+      saveOpenThread({ groupId });
       window.removeEventListener("focus", markVisibleGroupRead);
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
       abort.abort();

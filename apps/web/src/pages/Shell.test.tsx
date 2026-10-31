@@ -202,6 +202,8 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
 import * as ComputerUpdateProgressModule from "../components/ComputerUpdateProgress";
 import * as LocalTimezoneModule from "../lib/local-timezone";
 import { clearRecruitingReads } from "../lib/recruiting-read-cache";
+import { rpc } from "../lib/rpc";
+import { savedThreads } from "../lib/saved-threads";
 import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
 import * as RecruitingPanelModule from "./RecruitingPanel";
@@ -5940,6 +5942,51 @@ describe("chat open latency with 300 ms reads", () => {
     // Before: threads.get, then the role binding, then the panel's three reads (5 hops).
     // The navigation's thread id lets the binding start beside threads.get (4 hops).
     expect(elapsed).toBe(4 * LATENCY);
+  });
+
+  it("reopens a saved chat at once and replays only what it missed", async () => {
+    const view = await openSlowly();
+    vi.spyOn(savedThreads, "read").mockResolvedValue({
+      threadId: "thread-2",
+      botId: "bot-2",
+      cursor: 1,
+      olderCursor: null,
+      run: null,
+      messages: [sourcerReply],
+    });
+    vi.mocked(rpc.threads.head).mockImplementation(() =>
+      delayed(() => ({ threadId: "thread-2", cursor: 3 })),
+    );
+    await view.navigate("/app/bot-2");
+    const elapsed = await msUntil("Sourcer found two leads");
+    report("saved chat", elapsed);
+    expect(elapsed).toBe(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LATENCY * 2);
+    });
+    expect(shellApi.get).not.toHaveBeenCalled();
+    expect(rpc.threads.subscribe).toHaveBeenLastCalledWith(
+      { botId: "bot-2", cursor: 1 },
+      expect.anything(),
+    );
+  });
+
+  it("reads the whole saved chat again when too much changed", async () => {
+    const view = await openSlowly();
+    vi.spyOn(savedThreads, "read").mockResolvedValue({
+      threadId: "thread-2",
+      botId: "bot-2",
+      cursor: 1,
+      olderCursor: null,
+      run: null,
+      messages: [sourcerReply],
+    });
+    vi.mocked(rpc.threads.head).mockResolvedValue({ threadId: "thread-2", cursor: 5_000 });
+    await view.navigate("/app/bot-2");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LATENCY * 2);
+    });
+    expect(shellApi.get).toHaveBeenCalledWith({ botId: "bot-2" }, expect.anything());
   });
 
   it("shows message skeletons and the composer while an unvisited chat loads", async () => {
