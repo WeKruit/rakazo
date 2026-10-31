@@ -278,9 +278,9 @@ async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {})
   return messages;
 }
 
-// A contact lookup reply reports how many people have an address, not only that it is checking.
+// A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
 const CONTACT_REPORT =
-  /(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
+  /[\w.+-]+@[\w-]+\.\w|(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
 /** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. Never answers the card. */
 async function contactsAndSend(groupId, failures, name) {
   const startedAt = new Date().toISOString();
