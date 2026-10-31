@@ -6,6 +6,7 @@ import { getRecruitingCorrespondence } from "./recruiting.js";
 
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<Record<string, unknown>>()),
+  readRecruitingImportedCorrespondence: vi.fn(async () => null),
   getRecruitingWorkspace: vi.fn(),
 }));
 const actor: Actor = {
