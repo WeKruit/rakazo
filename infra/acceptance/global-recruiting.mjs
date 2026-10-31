@@ -139,7 +139,7 @@ export async function verifyGlobalRecruiting(rpc, fixture) {
     const role = allRoles.get(expected.roleId);
     assert.ok(role, "Test-copy role is missing");
     const group = groups.find((group) => group.id === role.groupId);
-    assert.match(group?.name ?? "", /^测试副本 · /, "Refusing a non-test role in the fixture");
+    assert.match(group?.name ?? "", /^测试固定 · /, "Refusing a non-test role in the fixture");
   }
   const globalItems = new Map();
   for (const view of VIEWS) {

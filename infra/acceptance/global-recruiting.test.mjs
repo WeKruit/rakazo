@@ -16,7 +16,7 @@ function rpcFor(options = {}) {
           input.archived === Boolean(options.archived)
             ? roles.map((role) => ({
                 id: role.groupId,
-                name: options.customer ? "Customer role" : "测试副本 · Role",
+                name: options.customer ? "Customer role" : "测试固定 · Role",
               }))
             : [],
         nextOffset: null,
