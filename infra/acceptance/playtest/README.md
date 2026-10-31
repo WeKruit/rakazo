@@ -11,8 +11,7 @@ product, scores what the recruiter saw, and fixes the instructions only for recu
    `rubric.md`, given the live instructions (`packages/core/src/recruiting-defaults.ts`), the
    scenario and the transcript, and stops at its spend cap (US$3 by default).
 4. **Fix.** For each defect that recurs across samples, `judge.mjs` drafts the smallest
-   instruction change. Apply a draft only when it holds up; the change goes through a normal PR. The change
-   must keep every bot within the 12,000-character budget and pass
+   instruction change. Apply a draft only when it holds up. The change must keep every bot within the 12,000-character budget and pass
    `pnpm exec vitest run packages/core/src/recruiting-defaults.test.ts`; ship it through a normal PR
    and release.
 5. **Stop** when every dimension averages at least 4.5 for two rounds in a row. One failed sample
