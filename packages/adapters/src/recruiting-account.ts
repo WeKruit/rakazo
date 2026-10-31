@@ -434,6 +434,13 @@ export async function readRecruitingAccountView(
         }
       }
       timer.mark("campaignsMs");
+      // Interview plans are local and independent of the calendar read, so they load meanwhile.
+      const scheduling =
+        input.view === "interview"
+          ? listRecruitingSchedulingPlans(deps.prisma, actor, { threadId: thread.id })
+          : undefined;
+      // A failed calendar read must not leave the plans read unobserved.
+      scheduling?.catch(() => undefined);
       if (["inbox", "interview", "contacts", "sequence"].includes(input.view)) {
         const view =
           input.view === "sequence"
@@ -470,10 +477,7 @@ export async function readRecruitingAccountView(
           );
         }
       }
-      if (input.view === "interview")
-        item.scheduling = await listRecruitingSchedulingPlans(deps.prisma, actor, {
-          threadId: thread.id,
-        });
+      if (scheduling) item.scheduling = await scheduling;
       timer.mark("schedulingMs");
       if (input.view === "tasks")
         item.reminders = await listRecruitingReminders(deps.prisma, actor, {
