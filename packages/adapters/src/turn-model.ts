@@ -23,7 +23,7 @@ export interface TurnModelChoice {
   routed: "fast" | "configured";
   reason: string;
   /** Overrides the bot's thinking level on the fast model. */
-  thinkingLevel?: "low";
+  thinkingLevel?: "low" | "off";
 }
 
 /**
@@ -45,8 +45,9 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
   // An answer turn picks the people, so it keeps the bot's thinking level.
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
-  // The turn that opens a role only reads the JD and asks the first question.
-  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "low" };
+  // The turn that opens a role only reads the JD and asks the first question, so it skips
+  // reasoning: the question is the first thing the recruiter waits for.
+  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "off" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")
