@@ -830,6 +830,10 @@ msgstr "Cancel new group"
 msgid "Cancel new role"
 msgstr "Cancel new role"
 
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr "Cancel task"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Canceled"
 msgstr "Canceled"
@@ -2536,6 +2540,14 @@ msgstr "Expand"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
 msgstr "Experience"
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr "Expired"
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
+msgstr "Expires in {time}"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
@@ -6200,6 +6212,10 @@ msgstr "Version"
 msgid "Version {0}"
 msgstr "Version {0}"
 
+#: src/components/LiveWork.tsx
+msgid "View"
+msgstr "View"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "View {name}"
 msgstr "View {name}"
@@ -6328,19 +6344,3 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
-
-#: src/components/LiveWork.tsx
-msgid "Cancel task"
-msgstr "Cancel task"
-
-#: src/components/AskDeadline.tsx
-msgid "Expired"
-msgstr "Expired"
-
-#: src/components/AskDeadline.tsx
-msgid "Expires in {time}"
-msgstr "Expires in {time}"
-
-#: src/components/LiveWork.tsx
-msgid "View"
-msgstr "View"

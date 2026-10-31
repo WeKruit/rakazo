@@ -830,6 +830,10 @@ msgstr "नया समूह रद्द करें"
 msgid "Cancel new role"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr ""
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Canceled"
 msgstr ""
@@ -2535,6 +2539,14 @@ msgstr "विस्तृत करें"
 
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
+msgstr ""
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr ""
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -6198,6 +6210,10 @@ msgstr ""
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Version {0}"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "View"
 msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx

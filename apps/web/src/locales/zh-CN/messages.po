@@ -830,6 +830,10 @@ msgstr "取消新建群组"
 msgid "Cancel new role"
 msgstr "取消新岗位"
 
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr "取消任务"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Canceled"
 msgstr "已取消"
@@ -2536,6 +2540,14 @@ msgstr "展开"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
 msgstr "工作经历"
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr "已过期"
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
+msgstr "将在 {time} 后过期"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
@@ -6200,6 +6212,10 @@ msgstr "版本"
 msgid "Version {0}"
 msgstr "第 {0} 版"
 
+#: src/components/LiveWork.tsx
+msgid "View"
+msgstr "查看"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "View {name}"
 msgstr "查看{name}"
@@ -6328,19 +6344,3 @@ msgstr "你的招聘工作区。"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
-
-#: src/components/LiveWork.tsx
-msgid "Cancel task"
-msgstr "取消任务"
-
-#: src/components/AskDeadline.tsx
-msgid "Expired"
-msgstr "已过期"
-
-#: src/components/AskDeadline.tsx
-msgid "Expires in {time}"
-msgstr "将在 {time} 后过期"
-
-#: src/components/LiveWork.tsx
-msgid "View"
-msgstr "查看"

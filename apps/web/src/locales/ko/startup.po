@@ -397,6 +397,15 @@ msgstr ""
 msgid "Back to sign in"
 msgstr "로그인으로 돌아가기"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Background task"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr ""
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "서버 주소"
@@ -481,9 +490,17 @@ msgstr ""
 msgid "Cancel reply"
 msgstr "답장 취소"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr ""
+
 #: src/components/CloudAgentCard.tsx
 msgid "cancelled"
 msgstr "취소됨"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate cards"
@@ -610,7 +627,9 @@ msgstr ""
 msgid "Client secret"
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
 #: src/components/LazyOverlay.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
@@ -900,6 +919,10 @@ msgstr "파일을 불러오지 못했습니다."
 msgid "Could not load this role’s candidate records."
 msgstr ""
 
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "업데이트 상태를 불러올 수 없습니다"
@@ -981,6 +1004,10 @@ msgstr ""
 #: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "반응을 업데이트할 수 없습니다"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
+msgstr ""
 
 #: src/components/computer/FilesApp.tsx
 #: src/pages/shell/useShellCreation.ts
@@ -1082,6 +1109,10 @@ msgstr ""
 #. placeholder {0}: step.delay
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay: {0} days"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+msgid "Delegated task"
 msgstr ""
 
 #: src/pages/recruiting/NotesTab.tsx
@@ -1272,7 +1303,6 @@ msgstr "올바른 이메일을 입력하세요"
 msgid "Enter an API key before testing."
 msgstr "테스트하기 전에 API 키를 입력하세요."
 
-#: src/lib/roster-status.ts
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Error"
 msgstr ""
@@ -1343,6 +1373,10 @@ msgstr ""
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
+msgid "Finding candidates"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
 msgstr "구독 로그인을 마친 뒤 다시 테스트하세요."
@@ -1366,6 +1400,10 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
 msgstr ""
 
 #: src/pages/Auth.tsx
@@ -1621,7 +1659,9 @@ msgid "Loading trace…"
 msgstr ""
 
 #: src/App.tsx
+#: src/components/BackgroundTasks.tsx
 #: src/components/markdown-link-prompt.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1698,11 +1738,6 @@ msgstr "멘션"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
-msgid "Message"
-msgstr "메시지"
-
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
 msgid "Message"
 msgstr "메시지"
 
@@ -1853,6 +1888,10 @@ msgstr ""
 msgid "No apps found"
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr ""
+
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
 msgstr "아직 봇 활동이 없습니다."
@@ -1897,6 +1936,10 @@ msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
+msgstr ""
+
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts
@@ -2200,6 +2243,11 @@ msgstr "풀 리퀘스트"
 msgid "Qualifying work"
 msgstr ""
 
+#: src/lib/roster-status.ts
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued"
+msgstr "대기 중"
+
 #: src/pages/shell/queued-messages.tsx
 msgid "Queued messages"
 msgstr ""
@@ -2254,6 +2302,14 @@ msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Reconnect"
+msgstr ""
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
 msgstr ""
 
 #: src/App.tsx
@@ -2497,6 +2553,8 @@ msgid "Resume: {0}"
 msgstr ""
 
 #: src/components/AccountAccess.tsx
+#: src/components/BackgroundTasks.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
@@ -2899,10 +2957,6 @@ msgstr "소프트웨어 업데이트"
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
-#: src/pages/shell/useShellController.tsx
-msgid "Something went wrong."
-msgstr "문제가 발생했습니다."
-
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
@@ -2959,6 +3013,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr ""
+
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr ""
@@ -2981,6 +3039,14 @@ msgstr ""
 msgid "Stop considering"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr ""
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "읽기 중지"
@@ -2988,6 +3054,10 @@ msgstr "읽기 중지"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Stop teaching"
 msgstr "가르치기 종료"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr ""
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Stopped"
@@ -3011,6 +3081,10 @@ msgstr ""
 msgid "Switch bot"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Table"
@@ -3019,6 +3093,10 @@ msgstr "표"
 #: src/pages/Shell.tsx
 msgid "Take control"
 msgstr "제어권 가져오기"
+
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr ""
 
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -3081,8 +3159,16 @@ msgstr ""
 msgid "The recruiting team is not ready yet."
 msgstr ""
 
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr ""
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
 msgstr ""
 
 #: src/pages/shell/computer-presentation.tsx
@@ -3158,6 +3244,7 @@ msgstr ""
 msgid "Transcript"
 msgstr "대화 기록"
 
+#: src/lib/roster-status.ts
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
@@ -3339,6 +3426,10 @@ msgstr "언제 사용할지"
 msgid "Won't do"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr ""
+
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "백그라운드에서 작업 중…"
@@ -3388,19 +3479,3 @@ msgstr "이메일 주소"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "이름"
-
-#: src/components/LiveWork.tsx
-msgid "Delegated task"
-msgstr ""
-
-#: src/components/LiveWork.tsx
-msgid "Finding candidates"
-msgstr ""
-
-#: src/pages/ActivityList.tsx
-msgid "Queued"
-msgstr "대기 중"
-
-#: src/pages/PluginsOverlay.tsx
-msgid "Reconnect"
-msgstr ""
