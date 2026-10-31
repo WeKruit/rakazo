@@ -78,6 +78,12 @@ async function claim(prisma: Pick<PrismaClient, "organizationLogo" | "$executeRa
   return taken === 1;
 }
 const CONCURRENCY = 2;
+/**
+ * Each name can cost several DNS lookups for guessed domains, most of which do not exist. Run
+ * flat out, that stream slowed the worker's resolver until its own database and model hosts
+ * stopped resolving; the fill is background work, so it waits between names.
+ */
+const PACE_MS = 1_000;
 
 /**
  * Looks up, once, the logo of every company and school on any saved person of any user that has
@@ -87,8 +93,9 @@ const CONCURRENCY = 2;
 export async function fillOrganizationLogos(
   prisma: Pick<PrismaClient, "organizationLogo" | "$queryRaw" | "$executeRaw">,
   resolver: CompanySiteResolver,
-  options: { signal?: AbortSignal; maxLookups: number },
+  options: { signal?: AbortSignal; maxLookups: number; paceMs?: number },
 ) {
+  const paceMs = options.paceMs ?? PACE_MS;
   const rows = await prisma.$queryRaw<Array<{ name: string }>>`
     SELECT name FROM (
       SELECT o.company AS name, max(p."observedAt") AS seen
@@ -150,6 +157,7 @@ export async function fillOrganizationLogos(
       const answer = await resolver.companySite(name).catch(() => null);
       if (!answer || answer.retry) total.failed += 1;
       else if (answer.icon || answer.host) total.logos += 1;
+      if (paceMs) await new Promise((resolve) => setTimeout(resolve, paceMs));
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, work));
