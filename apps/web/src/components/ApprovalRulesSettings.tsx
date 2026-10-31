@@ -7,6 +7,8 @@ import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
 
 function describeRule(rule: ActionApprovalRule): string {
+  if (rule.effect === "block") return t`Block ${rule.matchValue}`;
+  if (rule.effect === "hide") return t`Hide ${rule.matchValue}`;
   if (rule.effect === "require_approval") {
     if (rule.matchKind === "category") {
       if (rule.matchValue === "email") return t`Ask before email actions`;
@@ -58,13 +60,17 @@ export function ApprovalRulesSettings() {
     void refresh();
   }, []);
 
-  async function requireApproval(matchKind: "category" | "tool", value: string) {
+  async function addRule(
+    effect: ActionApprovalRule["effect"],
+    matchKind: "category" | "tool",
+    value: string,
+  ) {
     const matchValue = value.trim();
     if (loading || savingRule || !matchValue) return;
     if (
       rules.some(
         (rule) =>
-          rule.effect === "require_approval" &&
+          rule.effect === effect &&
           rule.matchKind === matchKind &&
           rule.matchValue.toLowerCase() === matchValue.toLowerCase(),
       )
@@ -75,7 +81,7 @@ export function ApprovalRulesSettings() {
     setError(null);
     try {
       const saved = await rpc.approvalRules.set({
-        effect: "require_approval",
+        effect,
         matchKind,
         matchValue,
       });
@@ -120,27 +126,27 @@ export function ApprovalRulesSettings() {
         <Button
           variant="outline"
           disabled={loading || savingRule !== null}
-          onClick={() => void requireApproval("category", "email")}
+          onClick={() => void addRule("require_approval", "category", "email")}
         >
           <Trans>Ask before sending external email</Trans>
         </Button>
         <Button
           variant="outline"
           disabled={loading || savingRule !== null}
-          onClick={() => void requireApproval("category", "purchase")}
+          onClick={() => void addRule("require_approval", "category", "purchase")}
         >
           <Trans>Ask before purchases</Trans>
         </Button>
       </div>
       <details className="mt-4 text-sm">
         <summary className="cursor-pointer text-foreground/75">
-          <Trans>Ask before a specific tool</Trans>
+          <Trans>Rules for a specific tool</Trans>
         </summary>
         <form
           className="mt-3 space-y-2"
           onSubmit={(event) => {
             event.preventDefault();
-            void requireApproval("tool", toolName);
+            void addRule("require_approval", "tool", toolName);
           }}
         >
           <Label htmlFor={toolNameId}>
@@ -162,6 +168,22 @@ export function ApprovalRulesSettings() {
               disabled={loading || savingRule !== null || !toolName.trim()}
             >
               <Trans>Ask first</Trans>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || savingRule !== null || !toolName.trim()}
+              onClick={() => void addRule("block", "tool", toolName)}
+            >
+              <Trans>Block</Trans>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || savingRule !== null || !toolName.trim()}
+              onClick={() => void addRule("hide", "tool", toolName)}
+            >
+              <Trans>Hide</Trans>
             </Button>
           </div>
         </form>

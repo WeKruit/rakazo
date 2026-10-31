@@ -144,6 +144,7 @@ import {
 import type { Auth, OidcConfig } from "@rakazo/auth";
 import { createOwnerVouchedAccount, getOidcAccountStatus, OwnerAccountError } from "@rakazo/auth";
 import type {
+  ActionApprovalRule,
   Actor,
   BoardEvent,
   Bot,
@@ -6774,7 +6775,7 @@ export function createRouter(deps: RouterDeps) {
         });
         return rows.map((row) => ({
           id: row.id,
-          effect: row.effect as "always_allow" | "require_approval",
+          effect: row.effect as ActionApprovalRule["effect"],
           matchKind: row.matchKind as "tool" | "connector" | "category",
           matchValue: row.matchValue,
           createdAt: row.createdAt.toISOString(),
@@ -6802,7 +6803,7 @@ export function createRouter(deps: RouterDeps) {
         });
         return {
           id: row.id,
-          effect: row.effect as "always_allow" | "require_approval",
+          effect: row.effect as ActionApprovalRule["effect"],
           matchKind: row.matchKind as "tool" | "connector" | "category",
           matchValue: row.matchValue,
           createdAt: row.createdAt.toISOString(),

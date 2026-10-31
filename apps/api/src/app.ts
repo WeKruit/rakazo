@@ -79,6 +79,7 @@ import {
   getOidcAccessToken,
   isBlockedAuthPath,
   loopbackTwinOrigins,
+  withoutBrowserToken,
 } from "@rakazo/auth";
 import type { Actor, AuthCapabilities } from "@rakazo/contracts";
 import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
@@ -731,7 +732,7 @@ export async function createApp(
     if (isBlockedAuthPath(path)) {
       return c.json({ error: "Not available in version 1" }, 404);
     }
-    return auth.handler(emptyAuthBodyAsJson(c.req.raw));
+    return withoutBrowserToken(c.req.raw, await auth.handler(emptyAuthBodyAsJson(c.req.raw)));
   });
   mountLocalSettings(app, { token: env.desktopStackToken, prisma, rpc });
   const requestSession = async (request: Request, recordAuthTiming = false) => {

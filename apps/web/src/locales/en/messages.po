@@ -198,7 +198,6 @@ msgstr "Account ID"
 msgid "Account label"
 msgstr "Account label"
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "Accounts"
@@ -549,10 +548,6 @@ msgid "Ask before {0} connector"
 msgstr "Ask before {0} connector"
 
 #: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before a specific tool"
-msgstr "Ask before a specific tool"
-
-#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "Ask before email actions"
 
@@ -708,6 +703,15 @@ msgstr "Bearer token"
 #: src/pages/SettingsOverlay.tsx
 msgid "Billing"
 msgstr "Billing"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block"
+msgstr "Block"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block {0}"
+msgstr "Block {0}"
 
 #: src/pages/Board.tsx
 msgid "Board"
@@ -1976,6 +1980,10 @@ msgstr "Credentials"
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Credentials are encrypted and never sent to the model."
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Credits"
+msgstr "Credits"
+
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
 msgstr "Criteria"
@@ -2466,10 +2474,6 @@ msgstr "Enter both named IANA timezones, such as America/New_York and Europe/Lon
 msgid "Error details"
 msgstr "Error details"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Estimated cost"
-msgstr "Estimated cost"
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
 msgstr "Event details"
@@ -2784,6 +2788,15 @@ msgstr "Help me revise the saved outreach drafts for this role. Keep the changes
 msgid "Hi, this is how I'll sound when I read replies out loud."
 msgstr "Hi, this is how I'll sound when I read replies out loud."
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide"
+msgstr "Hide"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide {0}"
+msgstr "Hide {0}"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "High"
@@ -2925,6 +2938,10 @@ msgstr "Interested"
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Internal assessment"
 msgstr "Internal assessment"
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Internal Costs"
+msgstr "Internal Costs"
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/CrmHistory.tsx
@@ -3409,10 +3426,6 @@ msgstr "Model id"
 msgid "Model options"
 msgstr "Model options"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Model tokens"
-msgstr "Model tokens"
-
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
 msgstr "Model updated."
@@ -3564,6 +3577,7 @@ msgid "Next contact campaigns"
 msgstr "Next contact campaigns"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Next page"
 msgstr "Next page"
 
@@ -3691,6 +3705,7 @@ msgstr "No messages with {peerBotName} yet."
 msgid "No model catalog is available."
 msgstr "No model catalog is available."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr "No open tasks."
@@ -3698,10 +3713,6 @@ msgstr "No open tasks."
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No outreach files loaded"
 msgstr "No outreach files loaded"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "No price"
-msgstr "No price"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
@@ -3838,10 +3849,6 @@ msgstr "No subject"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "No supported future interval is recorded. Check availability before choosing a time."
 msgstr "No supported future interval is recorded. Check availability before choosing a time."
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No tasks yet."
-msgstr "No tasks yet."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
@@ -4244,6 +4251,10 @@ msgstr "Paused"
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Pending approval"
 msgstr "Pending approval"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Pending usage"
+msgstr "Pending usage"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/CrmHistory.tsx
@@ -4957,6 +4968,10 @@ msgstr "Routines"
 msgid "Routines that run while you're away"
 msgstr "Routines that run while you're away"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Rules for a specific tool"
+msgstr "Rules for a specific tool"
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Run"
@@ -5252,10 +5267,6 @@ msgstr "Search candidate records"
 msgid "Search contacts"
 msgstr "Search contacts"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Search credits"
-msgstr "Search credits"
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Search Criteria"
 msgstr "Search Criteria"
@@ -5310,10 +5321,6 @@ msgstr "Search update {0}"
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr "Search: {0}"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Searches"
-msgstr "Searches"
 
 #: src/components/LiveWork.tsx
 msgid "Searching candidates"
@@ -5449,10 +5456,6 @@ msgstr "Server URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "Service connections"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Services"
-msgstr "Services"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -6124,7 +6127,6 @@ msgstr "Updating {0}’s Computer"
 msgid "Updating Team Computer"
 msgstr "Updating Team Computer"
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Usage"
 msgstr "Usage"

@@ -28,6 +28,7 @@ import {
 import type { OidcConfig } from "./oidc.js";
 import { oidcDiscovery } from "./oidc.js";
 
+export { isBrowserRequest, withoutBrowserToken } from "./browser-token.js";
 export type { OidcConfig } from "./oidc.js";
 export { getOidcAccessToken, getOidcAccountStatus, oidcConfigFromEnv } from "./oidc.js";
 export { createOwnerVouchedAccount, OwnerAccountError } from "./owner-account.js";
