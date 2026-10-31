@@ -14,6 +14,7 @@ import {
   CONNECTION_CATALOG_PAGE_SIZE,
   filterConnectionCatalogItems,
   humanizeToolName,
+  isVendorService,
 } from "@rakazo/core";
 import {
   Button,
@@ -213,6 +214,8 @@ export function PluginsOverlay({
         ? memberBotIds.includes(assignment.botId)
         : true;
   const nativeServices = servers.flatMap((server) => {
+    // Services the platform runs for the recruiter are not theirs to manage or see by brand.
+    if (!developerView && isVendorService(server)) return [];
     const access = assignments.filter(
       (assignment) => assignment.serverId === server.id && appliesToCurrentAssistant(assignment),
     );

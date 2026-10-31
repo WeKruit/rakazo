@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
+import { hideVendorNames } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { useRecruitingDetail } from "./detail";
 import { InterviewCalendar } from "./InterviewCalendar";
@@ -179,7 +180,7 @@ export function InterviewTab({
                 </span>
                 <span className="text-muted-foreground">
                   {" "}
-                  · {operation.sourceName} · {formatDate(operation.checkedAt)}
+                  · {hideVendorNames(operation.sourceName)} · {formatDate(operation.checkedAt)}
                 </span>
               </li>
             ))}

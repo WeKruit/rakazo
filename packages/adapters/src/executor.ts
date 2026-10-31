@@ -7,6 +7,7 @@ import type {
   AgentRunRequest,
   AgentRuntime,
   AgentRuntimeEvent,
+  AgentThinking,
   AgentToolCompletion,
   AgentToolExecutionObserver,
   ArtifactStore,
@@ -238,6 +239,7 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -265,6 +267,7 @@ import {
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
+  saveRunThinking,
   searchHistory,
   skipRateLimitedRun,
   unitVector,
@@ -512,7 +515,7 @@ import {
   searchChartCatalog,
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
-import { createCreditGuard } from "./provider-credits.js";
+import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -3578,6 +3581,13 @@ function isFailedToolResult(value: unknown): value is { error: unknown } {
   return error !== undefined && error !== null;
 }
 
+/** A connector result's failure as text, for matching provider refusals. */
+function connectorFailureText(result: unknown): string | undefined {
+  const failure = toolResultError(result);
+  if (failure === undefined) return undefined;
+  return typeof failure === "string" ? failure : JSON.stringify(failure);
+}
+
 /**
  * Tools can return an `error` or MCP `isError: true` instead of throwing. Pi keeps that
  * result in `details` without populating `completion.error`. Read the failure for auditing
@@ -4705,13 +4715,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           summary: threadContext.summary,
           historyCompactedUpToSeq: threadContext.historyCompactedUpToSeq,
         });
+        // This bot's own recent replies carry the reasoning behind them, for the same model only.
+        const savedThinking = await loadMessageThinking(
+          deps.prisma,
+          compactedHistory.history.flatMap((m) => (m.role === "assistant" && m.id ? [m.id] : [])),
+        ).catch(() => new Map<string, AgentThinking>());
         let history: AgentRunRequest["history"] = compactedHistory.history.map(
-          ({ id, role, content, createdAt }) => ({
-            id,
-            createdAt,
-            role,
-            content,
-          }),
+          ({ id, role, content, createdAt }) => {
+            const thinking = id ? savedThinking.get(id) : undefined;
+            return { id, createdAt, role, content, ...(thinking ? { thinking } : {}) };
+          },
         );
         const historyMessages = [
           ...messages,
@@ -5460,6 +5473,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : "This entire computer workspace is your private home. Relative file paths and shell working directories start at its root.";
 
         let assembled = "";
+        let lastThinking: AgentThinking | undefined;
         let currentTextSegment = "";
         let messageSegments: MessageBlock[] = [];
         // Terminal subagent rows are published as their own messages (not appended to
@@ -11976,44 +11990,61 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             if (viaConnector) connectorReadOnly.set(executionId, declaredReadOnly === true);
-            let result: unknown = { error: `unknown tool ${name}` };
-            for await (const event of deps.connector.execute(
-              { ...connectorCall, tool: name, args, executionId: effectKey },
-              schedulingSelection?.operation === "confirm" && applied
-                ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
-                : context,
-            )) {
-              if (event.type === "result") {
-                result = event.data;
-                const logIds = collectLogIds(event.data);
-                for (const logId of logIds) {
-                  await deps.events.append({
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId: run.id,
-                    type: "effect.recorded",
-                    payload: { tool: name, logId },
-                  });
+            // A drained balance that auto top-up refills soon is waited out with the same call,
+            // which the provider refused without doing or charging anything.
+            const connector = deps.connector;
+            const executeOnce = async (): Promise<{ result: unknown } | { settled: unknown }> => {
+              let result: unknown = { error: `unknown tool ${name}` };
+              for await (const event of connector.execute(
+                { ...connectorCall, tool: name, args, executionId: effectKey },
+                schedulingSelection?.operation === "confirm" && applied
+                  ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
+                  : context,
+              )) {
+                if (event.type === "result") {
+                  result = event.data;
+                  const logIds = collectLogIds(event.data);
+                  for (const logId of logIds) {
+                    await deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      runId: run.id,
+                      type: "effect.recorded",
+                      payload: { tool: name, logId },
+                    });
+                  }
+                }
+                if (event.type === "error") {
+                  result = { error: event.message };
+                  for (const logId of event.logIds ?? []) {
+                    await deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      runId: run.id,
+                      type: "effect.recorded",
+                      payload: { tool: name, logId },
+                    });
+                  }
+                  if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
+                    return {
+                      settled: await settleUncertainEffect(deps.prisma, applied.effect.id, name),
+                    };
+                  }
                 }
               }
-              if (event.type === "error") {
-                result = { error: event.message };
-                for (const logId of event.logIds ?? []) {
-                  await deps.events.append({
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId: run.id,
-                    type: "effect.recorded",
-                    payload: { tool: name, logId },
-                  });
-                }
-                if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
-                  return settleUncertainEffect(deps.prisma, applied.effect.id, name);
-                }
-              }
-            }
+              return { result };
+            };
+            const executed = await retryWhileOutOfCredits(executeOnce, {
+              failure: (outcome) =>
+                "result" in outcome ? connectorFailureText(outcome.result) : undefined,
+              signal: context.signal,
+              onRetry: (delayMs) =>
+                getLogger().warn("connector.out_of_credits.retry", { runId, tool: name, delayMs }),
+            });
+            if ("settled" in executed) return executed.settled;
+            const result = executed.result;
             if (researchAdmission) {
               if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
               if (!applied) throw new Error("Recruiting receipt requires its native effect");
@@ -13798,6 +13829,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
                 event,
               );
+            } else if (event.type === "thinking") {
+              const { type: _type, ...thinking } = event;
+              lastThinking = thinking;
             } else if (event.type === "done") {
               if (!assembled && event.text) {
                 if (publishedMidTurnUserMessage || discardedMidTurnNarration) {
@@ -14038,6 +14072,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
+          if (lastThinking)
+            await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
+              getLogger().warn("run thinking save failed", { reason: String(error) }),
+            );
           // Every message a person writes gets a reply: once the conversation goes quiet, check
           // that its newest message was answered.
           await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>

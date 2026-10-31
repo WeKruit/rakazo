@@ -1,6 +1,6 @@
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
-import { historyMessageText, searchableText } from "./history-retrieval.js";
+import { searchableText } from "./history-retrieval.js";
 import { recordUsage } from "./usage.js";
 
 /** Turns text into meaning vectors. Implemented by an adapter over the deployment model connection. */
@@ -16,6 +16,14 @@ export interface TextEmbedder {
 /** Longest text embedded per message; the start of a long message carries its topic. */
 const MAX_TEXT_CHARS = 6_000;
 const BATCH = 64;
+/**
+ * The searchable text of a message, cut to MAX_TEXT_CHARS in the database, so a pass never loads
+ * whole message blocks (tool output, tables) into worker memory.
+ */
+const plainText = Prisma.sql`left((SELECT string_agg(value, E'\n') FROM jsonb_array_elements_text(
+  jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')
+  || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')
+  || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result'))), ${MAX_TEXT_CHARS})`;
 /** Only messages this recent get a vector; older ones stay searchable by words. */
 const RECENT_DAYS = 30;
 
@@ -56,18 +64,18 @@ export async function embedRecentMessages(
       Array<{
         id: string;
         threadId: string;
-        blocks: Prisma.JsonValue;
+        text: string | null;
         spaceId: string;
         userId: string;
       }>
     >(Prisma.sql`
-      SELECT m.id, m."threadId", m.blocks, t."spaceId", t."userId"
+      SELECT m.id, m."threadId", ${plainText} AS text, t."spaceId", t."userId"
       FROM messages m JOIN threads t ON t.id = m."threadId"
       WHERE m."createdAt" >= ${new Date(now.getTime() - RECENT_DAYS * 86_400_000)}
         AND m.role IN ('user', 'bot')
         AND ${searchableText} <> '[][][]'
         AND NOT EXISTS (SELECT 1 FROM message_embeddings e WHERE e."messageId" = m.id)
-      ORDER BY m."createdAt" DESC LIMIT ${BATCH * 4}`);
+      ORDER BY m."createdAt" DESC LIMIT ${BATCH}`);
     if (!rows.length) break;
     // Group by owner so each person's spend is recorded on their own Space.
     const owners = new Map<string, typeof rows>();
@@ -81,9 +89,7 @@ export async function embedRecentMessages(
         const batch = group.slice(start, start + BATCH);
         try {
           const result = await embedder.embed(
-            batch.map(
-              (row) => historyMessageText(row.blocks).trim().slice(0, MAX_TEXT_CHARS) || " ",
-            ),
+            batch.map((row) => row.text?.trim() || " "),
             options.signal,
           );
           if (result.vectors.length !== batch.length) throw new Error("Embedding count mismatch");

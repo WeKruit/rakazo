@@ -3,6 +3,7 @@ import {
   createVendorNameStream,
   hideVendorBlocks,
   hideVendorNames,
+  isVendorService,
   isVendorUrl,
   recruiterConnectBlock,
   vendorNeutralServiceName,
@@ -164,5 +165,16 @@ describe("recruiterConnectBlock", () => {
     expect(isVendorUrl("https://crustdata-media.s3.us-east-2.amazonaws.com/logos/acme.png")).toBe(
       true,
     );
+  });
+});
+
+describe("isVendorService", () => {
+  it("leaves out platform-run services but keeps the recruiter's own accounts", () => {
+    expect(isVendorService({ name: "Instantly" })).toBe(true);
+    expect(isVendorService({ name: "Email", endpoint: "https://mcp.instantly.ai/mcp" })).toBe(true);
+    expect(
+      isVendorService({ name: "Gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" }),
+    ).toBe(false);
+    expect(isVendorService({ name: "Recruiting CRM", endpoint: null })).toBe(false);
   });
 });

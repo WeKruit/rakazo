@@ -2,7 +2,12 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/web-lazy";
 import type { AskAnswer, MessageReaction, ThreadMessage } from "@rakazo/contracts";
 import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
-import { isPendingUserMessage, isToolActivityBlock, specialistWorkLabel } from "@rakazo/core";
+import {
+  hideVendorNames,
+  isPendingUserMessage,
+  isToolActivityBlock,
+  specialistWorkLabel,
+} from "@rakazo/core";
 import { BotAvatar, Button, cn, resolvePersonaColorDef } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
@@ -644,7 +649,7 @@ export const MessageView = memo(function MessageView({
                     className="mt-2 border-t border-border pt-2 text-sm text-muted-foreground"
                     data-testid="message-email-reference"
                   >
-                    <span>{block.correspondenceReference.sourceName}</span>
+                    <span>{hideVendorNames(block.correspondenceReference.sourceName)}</span>
                     {block.correspondenceReference.sender ? (
                       <span> · {block.correspondenceReference.sender}</span>
                     ) : null}

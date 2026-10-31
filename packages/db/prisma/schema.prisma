@@ -33,6 +33,7 @@ model User {
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
   recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
   recruitingSavedProfiles RecruitingSavedProfile[] @relation("RecruitingSavedProfileOwner")
+  recruitingContactTags RecruitingContactTag[] @relation("RecruitingContactTagOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -229,6 +230,7 @@ model Space {
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
   recruitingSavedProfiles RecruitingSavedProfile[]
+  recruitingContactTags RecruitingContactTag[]
   recruitingCandidateNotes RecruitingCandidateNote[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
@@ -606,6 +608,7 @@ model Message {
   externalTranscriptFor  ExternalMessage?
   steeringMessages SteeringMessage[]
   embedding        MessageEmbedding?
+  thinking         MessageThinking?
   createdAt        DateTime  @default(now())
   /// Bumped on every change, so a resident history copy can tell which rows to re-read.
   updatedAt        DateTime  @default(now()) @updatedAt
@@ -615,6 +618,21 @@ model Message {
   @@index([threadId, seq])
   @@index([replyToMessageId])
   @@map("messages")
+}
+
+/// The model's own reasoning behind a bot message, kept for that model's next turn. Owner-only:
+/// never shown in the product and never sent to a different model.
+model MessageThinking {
+  messageId String   @id
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  provider  String
+  model     String
+  api       String
+  /// Pi thinking blocks: text, provider signature and the redacted flag.
+  blocks    Json
+  createdAt DateTime @default(now())
+
+  @@map("message_thinking")
 }
 
 /// Meaning vector of a message's searchable text, for history search when no words match.
@@ -2039,6 +2057,23 @@ model RecruitingSavedProfile {
 
   @@unique([spaceId, ownerUserId, personKey])
   @@map("recruiting_saved_profiles")
+}
+
+/// A recruiter's own label on one person across all roles, owner-scoped like notes.
+/// personKey is the person's account-wide key: "linkedin:/in/<handle>", a role candidate key,
+/// "em:<email>" or "crm:<contact id>".
+model RecruitingContactTag {
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingContactTagOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  personKey String
+  tag String
+  createdAt DateTime @default(now())
+
+  @@id([spaceId, ownerUserId, personKey, tag])
+  @@index([spaceId, ownerUserId, tag])
+  @@map("recruiting_contact_tags")
 }
 
 /// An organization's logo found once from its name and shared by everyone: public data, no person.

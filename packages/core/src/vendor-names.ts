@@ -285,6 +285,17 @@ export function vendorNeutralServiceName(name: string): string {
   return name;
 }
 
+/**
+ * A service the platform runs for the recruiter (search, profile data, sending) rather than an
+ * account they connect themselves. Recruiter screens leave it out instead of renaming it.
+ */
+export function isVendorService(service: { name: string; endpoint?: string | null }): boolean {
+  return (
+    vendorNeutralServiceName(service.name) !== service.name ||
+    Boolean(service.endpoint && isVendorUrl(service.endpoint))
+  );
+}
+
 /** A recruiter's connect card names what the service does, not its brand. */
 export function recruiterConnectBlock<
   T extends { text: string; connection?: { name: string; reason: string } },

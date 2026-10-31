@@ -21,6 +21,7 @@ export * from "./openai-compatible-ui.js";
 export * from "./reactions.js";
 export * from "./recruiting.js";
 export * from "./recruiting-account.js";
+export * from "./recruiting-contacts.js";
 export * from "./recruiting-crm.js";
 export * from "./recruiting-reply.js";
 export * from "./recruiting-scheduling.js";

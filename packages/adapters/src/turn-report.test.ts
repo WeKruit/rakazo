@@ -344,6 +344,20 @@ describe("declineRetry", () => {
     ).toMatch(/^Your reply deferred the request/);
   });
 
+  it("keeps a worked answer about upcoming interviews, whatever its coverage aside", () => {
+    const retry = (request: string) =>
+      declineRetry({
+        reply:
+          "No confirmed interviews are booked. Google Calendar isn’t connected, so I can’t verify interviews outside the connected scheduling records.",
+        request,
+        tools: [],
+        teammates: [],
+        worked: true,
+      });
+    expect(retry("What interviews do I have coming up?")).toBeUndefined();
+    expect(retry("Book an interview with Ana for Tuesday at 2 pm")?.note).toMatch(/declined/);
+  });
+
   it("keeps a reply that shows the drafted email, whatever its aside", () => {
     expect(
       declineRetry({

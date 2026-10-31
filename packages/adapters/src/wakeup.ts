@@ -80,13 +80,20 @@ export class GraphileJobPublisher implements JobPublisher {
     const key = job.replaceKey;
     if (!job.keepExisting || !key) return undefined;
     const existing = await utils.withPgClient(async (client) => {
-      const found = await client.query<{ attempts: number; max_attempts: number }>(
-        "select attempts, max_attempts from graphile_worker._private_jobs where key = $1",
+      const found = await client.query<{
+        attempts: number;
+        max_attempts: number;
+        locked_at: Date | null;
+      }>(
+        "select attempts, max_attempts, locked_at from graphile_worker._private_jobs where key = $1",
         [key],
       );
       return found.rows[0];
     });
     if (!existing || Number(existing.attempts) >= Number(existing.max_attempts)) return undefined;
+    // A started job may already have read the state this request is about, or belong to a worker
+    // that died; dedupe against it would drop the request. Replace queues a fresh one instead.
+    if (existing.locked_at) return undefined;
     return "unsafe_dedupe";
   }
 }

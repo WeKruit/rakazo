@@ -1038,3 +1038,33 @@ it("opens imported email attachments through the existing scoped artifact card",
     }),
   );
 });
+
+it("never names a platform-run mail provider; the recruiter's own mailbox keeps its name", async () => {
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: "2026-10-22T01:00:00Z",
+    connections: [
+      { name: "Instantly", status: "configured", checkIssue: null },
+      { name: "Gmail", status: "configured", checkIssue: null },
+    ],
+    emails: [
+      {
+        id: "saved",
+        sourceName: "Instantly",
+        sender: "person@example.test",
+        recipients: [],
+        subject: "Saved reply",
+        body: "Original reply remains",
+        snippet: false,
+        date: null,
+        url: null,
+      },
+    ],
+    events: [],
+    partial: false,
+  });
+  const view = await mount({ view: "inbox" });
+  expect(view.container.textContent).toContain("Gmail");
+  expect(view.container.textContent).toContain("Original reply remains");
+  expect(view.container.textContent).not.toContain("Instantly");
+});

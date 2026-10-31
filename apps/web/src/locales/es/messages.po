@@ -258,10 +258,6 @@ msgstr "Agrega un modelo en Configuración para usarlo."
 msgid "Add a name and prompt."
 msgstr ""
 
-#: src/pages/RoutineEditor.tsx
-#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-#~ msgstr ""
-
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
 msgstr "Agrega un nombre de servidor."
@@ -3290,10 +3286,6 @@ msgstr ""
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr ""
-
-#: src/pages/recruiting/HomeDashboard.tsx
-#~ msgid "Main"
-#~ msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6406,6 +6398,10 @@ msgstr "¿Dónde deben ejecutarse los bots?"
 
 #: src/pages/GroupPanel.tsx
 msgid "Who are you looking for?"
+msgstr ""
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Work Metrics"
 msgstr ""
 
 #: src/components/LiveWork.tsx
