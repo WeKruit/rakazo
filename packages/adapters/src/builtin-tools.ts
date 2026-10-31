@@ -333,7 +333,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "shell",
     description:
-      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python.",
+      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python. A replacement computer keeps your files but not installed packages; put install commands in .rakazo/setup.sh at the workspace root and they run again on every new computer.",
     inputSchema: {
       type: "object",
       properties: {
