@@ -1888,6 +1888,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   contacts: z.array(
     z.strictObject({
       candidateKey: RecruitingId,
+      imported: z.literal(true).optional(),
       linkedinUrl: z.httpUrl().nullable(),
       emails: z.array(z.strictObject({ address: z.email(), status: z.string().nullable() })),
       phones: z.array(z.strictObject({ number: z.string(), type: z.string().nullable() })),

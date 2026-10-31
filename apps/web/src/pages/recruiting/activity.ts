@@ -131,9 +131,11 @@ export function buildActivity({
         item.direction === "sent" ? "sent" : item.direction === "received" ? "received" : "email",
     });
   for (const item of saved ?? []) {
-    const kind = direction(item.sender, item.recipients);
-    // A saved mailbox read belongs to this person only when it names their address.
-    if (kind === "email") continue;
+    let kind = direction(item.sender, item.recipients);
+    if (item.imported && item.candidateKey) {
+      if (item.candidateKey !== candidateKey) continue;
+      kind = item.direction === "sent" || item.direction === "received" ? item.direction : "email";
+    } else if (kind === "email") continue;
     addEmail(item.providerMessageId, {
       id: `saved:${item.id}`,
       at: date(item.date),

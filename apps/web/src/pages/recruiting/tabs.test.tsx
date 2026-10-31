@@ -150,6 +150,35 @@ it("does not infer an empty candidate pool from a missing CRM binding", async ()
   expect(crmData).not.toHaveBeenCalled();
 });
 
+it("keeps imported candidate contact details out of lookup-only cards", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  const contact = {
+    candidateKey: "offscreen",
+    linkedinUrl: "https://linkedin.com/in/offscreen",
+    emails: [{ address: "imported@example.test", status: null }],
+    phones: [],
+    source: "Contact history",
+    checkedAt,
+    imported: true,
+  };
+  correspondence.mockResolvedValue({
+    ...savedCorrespondence,
+    contacts: [
+      contact,
+      {
+        ...contact,
+        candidateKey: "lookup-only",
+        imported: undefined,
+        linkedinUrl: "https://linkedin.com/in/lookup-only",
+        emails: [{ address: "lookup@example.test", status: null }],
+      },
+    ],
+  });
+  const view = await mount(<ContactsTab {...props} />);
+  expect(view.textContent).not.toContain("imported@example.test");
+  expect(view.textContent).toContain("lookup@example.test");
+});
+
 it("loads saved contacts beyond the first correspondence page", async () => {
   crmData.mockResolvedValue(candidatesPage);
   correspondence.mockImplementation(async ({ cursor }: { cursor?: string }) => ({
