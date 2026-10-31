@@ -37,7 +37,19 @@ export type KeylessHttpWebOptions = {
   fetchTimeoutMs?: number;
   maxBufferBytes?: number;
   userAgent?: string;
+  /** Reads a page that refuses a plain request (a sign-in wall such as LinkedIn's). */
+  pageReader?: PageReader;
 };
+
+/** Reads one page elsewhere and returns its text, already limited to maxChars. */
+export type PageReader = (
+  url: string,
+  maxChars: number,
+  signal?: AbortSignal,
+) => Promise<{ url: string; title: string; text: string }>;
+
+/** Statuses a site answers a plain request with when it wants a signed-in browser. */
+const REFUSED = /^Request failed: HTTP (401|403|429|451|999)$/;
 
 /** HTML search backend using DuckDuckGo’s public HTML form. One keyless option, not the interface. */
 export const duckDuckGoHtmlSearchBackend: KeylessHtmlSearchBackend = {
@@ -59,6 +71,7 @@ export class KeylessHttpWebProvider implements WebProvider {
   private readonly fetchTimeoutMs: number;
   private readonly maxBufferBytes: number;
   private readonly userAgent: string;
+  private readonly pageReader?: PageReader;
 
   constructor(options: KeylessHttpWebOptions = {}) {
     this.fetchImpl = options.fetch;
@@ -69,6 +82,7 @@ export class KeylessHttpWebProvider implements WebProvider {
     this.maxBufferBytes = options.maxBufferBytes ?? 5 * 1024 * 1024;
     this.userAgent =
       options.userAgent ?? "Rakazo/0.1 (+https://github.com/elie222/rakazo; web tools)";
+    this.pageReader = options.pageReader;
   }
 
   describe() {
@@ -105,14 +119,26 @@ export class KeylessHttpWebProvider implements WebProvider {
 
   async fetch(request: WebFetchRequest, context: AdapterContext): Promise<WebFetchResult> {
     const maxChars = clampMaxChars(request.maxChars);
-    const { url, body } = await fetchSafeWebText(request.url, {
-      fetch: this.fetchImpl,
-      resolveHostname: this.resolveHostname,
-      timeoutMs: this.fetchTimeoutMs,
-      maxBytes: this.maxBufferBytes,
-      userAgent: this.userAgent,
-      signal: request.signal ?? context.signal,
-    });
+    const signal = request.signal ?? context.signal;
+    let page: { url: string; body: string };
+    try {
+      page = await fetchSafeWebText(request.url, {
+        fetch: this.fetchImpl,
+        resolveHostname: this.resolveHostname,
+        timeoutMs: this.fetchTimeoutMs,
+        maxBytes: this.maxBufferBytes,
+        userAgent: this.userAgent,
+        signal,
+      });
+    } catch (error) {
+      // Only a page the site refused goes to the reader; a private or invalid URL never does.
+      if (!this.pageReader || !REFUSED.test(error instanceof Error ? error.message : ""))
+        throw error;
+      const read = await this.pageReader(request.url, maxChars, signal);
+      const truncated = read.text.length >= maxChars;
+      return { ...read, text: read.text.slice(0, maxChars), truncated };
+    }
+    const { url, body } = page;
     if (!body.trim()) throw new Error(`Failed to fetch content from ${url}`);
     const extracted = extractReadableText(body, url);
     const truncated = extracted.text.length > maxChars;
