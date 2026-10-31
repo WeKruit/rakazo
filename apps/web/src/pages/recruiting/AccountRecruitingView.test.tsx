@@ -688,3 +688,43 @@ it("shows each role as it arrives while a slow role is still loading", async () 
     await act(async () => pageRoot.unmount());
   }
 });
+it("shows the interview calendar for arrived roles and marks only the rest as loading", async () => {
+  read.mockImplementation((input: { view: string; roleId?: string }) =>
+    input.view === "roles"
+      ? Promise.resolve({
+          roles,
+          items: roles.map((role) => ({ roleId: role.id })),
+          nextCursor: null,
+        })
+      : input.roleId === "one"
+        ? new Promise(() => {})
+        : Promise.resolve({
+            ...data,
+            items: data.items.filter((item) => item.roleId === "two"),
+          }),
+  );
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.querySelectorAll('[aria-label="Calendar"]').length).toBe(1);
+    const loading = [...container.querySelectorAll('[role="status"]')];
+    expect(loading.length).toBeGreaterThan(0);
+    expect(loading.every((node) => node.closest('[aria-busy="true"]'))).toBe(true);
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
