@@ -124,7 +124,10 @@ export {
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
-export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
+export {
+  fillAllRecruitingRoleProfiles,
+  fillRecruitingRoleProfiles,
+} from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
