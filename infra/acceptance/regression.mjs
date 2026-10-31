@@ -245,6 +245,55 @@ function scaleReportChecks(messages, failures, scale) {
 const sendCard = (message) =>
   (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
 
+/** Every event of a thread so far, from the replay of its event stream. */
+async function readEvents(groupId, { limitMs = 15_000 } = {}) {
+  const controller = new AbortController();
+  // A busy stream must not keep replay open beyond a latency assertion's budget.
+  const replayLimit = setTimeout(() => controller.abort(), limitMs);
+  let idle = setTimeout(() => controller.abort(), 15_000);
+  const events = [];
+  try {
+    if (EMAIL && !cookie) await signIn();
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        origin: ORIGIN,
+        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+      },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // The replay arrives at once; a quiet stream means it has caught up.
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 3_000);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const data = JSON.parse(line.slice(5));
+          events.push(data.json ?? data);
+        } catch {}
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    clearTimeout(idle);
+    clearTimeout(replayLimit);
+  }
+  return events;
+}
 // A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
 const COUNT = String.raw`(?:\d+|all|none)`;
 const CONTACT_WORD = String.raw`(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)`;
@@ -388,56 +437,6 @@ async function cleanUp() {
     passed = false;
     log("archive-copies: FAIL (idle test copies left unarchived; see archive-copies.log)");
   }
-}
-
-/** Every event of a thread so far, from the replay of its event stream. */
-async function readEvents(groupId, { limitMs = 15_000 } = {}) {
-  const controller = new AbortController();
-  // A busy stream must not keep replay open beyond a latency assertion's budget.
-  const replayLimit = setTimeout(() => controller.abort(), limitMs);
-  let idle = setTimeout(() => controller.abort(), 15_000);
-  const events = [];
-  try {
-    if (EMAIL && !cookie) await signIn();
-    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "text/event-stream",
-        origin: ORIGIN,
-        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
-      },
-      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      // The replay arrives at once; a quiet stream means it has caught up.
-      clearTimeout(idle);
-      idle = setTimeout(() => controller.abort(), 3_000);
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        try {
-          const data = JSON.parse(line.slice(5));
-          events.push(data.json ?? data);
-        } catch {}
-      }
-    }
-  } catch (error) {
-    if (error.name !== "AbortError") throw error;
-  } finally {
-    clearTimeout(idle);
-    clearTimeout(replayLimit);
-  }
-  return events;
 }
 
 let passed = false;
