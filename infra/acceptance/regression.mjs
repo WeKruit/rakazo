@@ -2,14 +2,17 @@
 // Release regression on a live deployment: the live layers of the release gate. Unit tests and
 // prompt checks run before deploy (release script); this runs right after it, and a red result
 // rolls the release back. Each case starts its own test copy and never answers an approval card,
-// so nothing is sent, imported or booked.
+// except cards: it clicks every card in the web app, approving a send or booking only on the
+// internal fixtures (@wekruit.com recipients) and cancelling the booking it makes.
 //
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_ORIGIN=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
 //                  (which must end with a report stating the new count), pasted English JD
-//                  (needs <cases>/t3.txt)
+//                  (needs <cases>/t3.txt), cards (card-e2e.mjs: question, send and booking cards
+//                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
+//                  {"sendGroup","sendRoleMark","bookingGroup"})
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
@@ -304,10 +307,11 @@ const wanted = new Set(
           "t1",
           "dispatch",
           "ambiguous",
+          "cards",
           "t5",
           "expired",
         ]
-      : ["smoke", "first10", "progress", "t3"]),
+      : ["smoke", "first10", "progress", "t3", "cards"]),
 );
 
 if (wanted.has("smoke"))
@@ -703,6 +707,29 @@ if (wanted.has("ambiguous"))
     }
     fs.writeFileSync(path.join(OUT, "ambiguous.txt"), `${notes.join("\n\n")}\n`);
     fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
+  });
+
+// Every card clicked in the real web app, so no one has to answer them by hand after a release.
+if (wanted.has("cards"))
+  await stage("cards", async (failures) => {
+    const file = CASES && path.join(CASES, "cards.json");
+    const jd = CASES && path.join(CASES, "t3.txt");
+    if (!file || !fs.existsSync(file)) return failures.push("missing <cases>/cards.json");
+    if (!EMAIL || !PASSWORD) return failures.push("cards needs RAKAZO_EMAIL and RAKAZO_PASSWORD");
+    const fixture = JSON.parse(fs.readFileSync(file, "utf8"));
+    const code = await run("cards", "card-e2e.mjs", [
+      "--out",
+      path.join(OUT, "cards"),
+      "--jd-file",
+      jd,
+      "--send-group",
+      fixture.sendGroup,
+      "--send-role-mark",
+      fixture.sendRoleMark,
+      "--booking-group",
+      fixture.bookingGroup,
+    ]);
+    if (code !== 0) failures.push("card clicks did not pass; see cards/summary.md");
   });
 
 if (wanted.has("t5"))
