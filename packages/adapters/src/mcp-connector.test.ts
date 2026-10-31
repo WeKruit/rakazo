@@ -2051,7 +2051,11 @@ describe("MCP connector session cache", () => {
       }
       expect(events).toMatchObject([{ type: "result" }]);
       expect(state.initializations).toBe(1);
-      expect(sink.events.filter((event) => event.message !== "discovery.cache")).toHaveLength(2);
+      expect(
+        sink.events.filter(
+          (event) => !["discovery.cache", "mcp.call.timing"].includes(event.message),
+        ),
+      ).toHaveLength(2);
       const log = JSON.stringify(sink.events);
       expect(log).toContain("MCP secret revalidation failed");
       expect(log).not.toContain("private response value");

@@ -1019,6 +1019,8 @@ export class McpConnector implements ConnectorProvider {
     // oauthMaterialSecrets(material) so in-place token refresh stays covered.
     let material: OAuthMaterial | undefined;
     let callStarted = false;
+    const startedAt = Date.now();
+    let calledAt = startedAt;
     let sessionKey: string | undefined;
     let calledServer: McpServer | undefined;
     try {
@@ -1210,6 +1212,7 @@ export class McpConnector implements ConnectorProvider {
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
       }
       callStarted = true;
+      calledAt = Date.now();
       let result: Awaited<ReturnType<McpSession["callTool"]>>;
       const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
       const retryDeadline = Date.now() + PEOPLE_SEARCH_RETRY_BUDGET_MS;
@@ -1341,6 +1344,13 @@ export class McpConnector implements ConnectorProvider {
         return;
       }
       const secrets = material ? oauthMaterialSecrets(material) : [];
+      // Page loads chain several provider reads; per-call times show which one to speed up.
+      getLogger().info("mcp.call.timing", {
+        server: assignment.server.slug,
+        tool: call.route.toolName,
+        setupMs: calledAt - startedAt,
+        callMs: Date.now() - calledAt,
+      });
       yield { type: "result", data: redactConnectorPayload(result, secrets) };
     } catch (error) {
       // A known rate limit leaves the session healthy. Other thrown calls keep the existing
