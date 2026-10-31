@@ -83,7 +83,9 @@ image = (
         "'/usr/local/share/ca-certificates/supabase.crt')\"",
         "update-ca-certificates",
     )
-    .env({"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/supabase.crt"})
+    # Node resolves hostnames on a 4-thread pool by default; a few slow lookups then hold up every
+    # new database and model connection in the process.
+    .env({"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/supabase.crt", "UV_THREADPOOL_SIZE": "32"})
 )
 
 

@@ -432,6 +432,9 @@ const WAITS_ON_RECRUITER_RE =
   /(?:你|您)(?:确认|回复|同意|决定|选择|提供|补充|批准|点击)|请(?:你|您)?确认|确认后|取决于|once you|after you|when you|if you|depends on|after confirmation/i;
 // "我会把薪资作为偏好" says how a requirement is treated, not work still to do.
 const TREATMENT_RE = /我会把.{0,40}?(?:作为|当作|视为|按|列为|保留为)/;
+// "I'll stop here", "I'll wait for you", "我先停在这里" acknowledge a stop: nothing is owed.
+const STOP_RE =
+  /\bI(?:'|’)ll (?:stop here|stop for now|pause here|hold off|leave it (?:there|here)|stand by|wait (?:for (?:you|your)|here)|be here)\b|\bI will (?:stop here|wait for (?:you|your))\b|我(?:就|先)?(?:停在这里|停下|先停|到这里|等(?:你|您))|先到这里|随时(?:找我|叫我)/i;
 
 /**
  * The final sentence when it promises more work in this chat, else undefined. A turn that ends
@@ -446,7 +449,12 @@ export function turnEndPromise(text: string): string | undefined {
     .filter(Boolean);
   const last = sentences.at(-1);
   if (!last || QUESTION_RE.test(last)) return undefined;
-  if (!PROMISE_RE.test(last) || WAITS_ON_RECRUITER_RE.test(last) || TREATMENT_RE.test(last))
+  if (
+    !PROMISE_RE.test(last) ||
+    WAITS_ON_RECRUITER_RE.test(last) ||
+    TREATMENT_RE.test(last) ||
+    STOP_RE.test(last)
+  )
     return undefined;
   return last;
 }

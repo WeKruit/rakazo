@@ -111,12 +111,27 @@ async function rpc(route, json) {
   return body.json;
 }
 
+// Sign-in is rate limited, so scripts that accept a session token reuse this run's one sign-in.
+const TOKEN_SCRIPTS = new Set([
+  "recruiting-latency.mjs",
+  "first10-suite.mjs",
+  "archive-test-copies.mjs",
+]);
+async function scriptEnv(script) {
+  if (!EMAIL || !TOKEN_SCRIPTS.has(script)) return process.env;
+  if (!cookie) await signIn();
+  const session = cookie.split("; ").find((pair) => pair.includes("session_token"));
+  if (!session) return process.env;
+  const { RAKAZO_EMAIL: _email, RAKAZO_PASSWORD: _password, ...env } = process.env;
+  return { ...env, RAKAZO_TOKEN: decodeURIComponent(session.split(/=(.*)/s)[1]) };
+}
+
 /** Runs one harness script; resolves with its exit code. Output goes to <out>/<name>.log. */
-function run(name, script, scriptArgs) {
+async function run(name, script, scriptArgs) {
   const logFile = fs.openSync(path.join(OUT, `${name}.log`), "w");
   const child = spawn(process.execPath, [path.join(HERE, script), ...scriptArgs], {
     stdio: ["ignore", logFile, logFile],
-    env: process.env,
+    env: await scriptEnv(script),
   });
   return new Promise((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
 }
@@ -310,9 +325,45 @@ const CONTACT_REPORT = new RegExp(
   "i",
 );
 
-/** Sends one recruiter message and waits until the crew settles. Never answers a card. */
-async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
+/** The test copies this run made, from the reports in <out> and, for first10 suites, one folder down. */
+function ownCopies() {
+  const own = new Set();
+  const files = fs.existsSync(OUT)
+    ? fs.readdirSync(OUT, { recursive: true }).filter((file) => String(file).endsWith(".json"))
+    : [];
+  for (const file of files) {
+    try {
+      const { groupId } = JSON.parse(fs.readFileSync(path.join(OUT, String(file)), "utf8"));
+      if (typeof groupId === "string" && groupId) own.add(groupId);
+    } catch {}
+  }
+  return own;
+}
+
+/**
+ * Checks a chat is a test copy before work controls or messages touch it. The product renames a
+ * chat after its role, which drops the copy mark, so this run's own copies get the mark back.
+ */
+async function testCopy(groupId) {
+  if (ownCopies().has(groupId)) {
+    const { name } = await rpc("groups/get", { groupId });
+    if (!name.startsWith(COPY_MARK))
+      await rpc("groups/update", { groupId, name: `${COPY_MARK}${name}`.slice(0, 80) });
+  }
   await assertTestCopy(rpc, groupId);
+}
+const COPY_MARK = "测试副本 · ";
+
+/**
+ * Sends one recruiter message and waits until the crew settles. Never answers a card. A named
+ * internal fixture (the booking chat) passes `fixture` instead of being a test copy.
+ */
+async function say(
+  groupId,
+  text,
+  { quietMs = 30_000, limitMs = 15 * 60_000, until, fixture = false } = {},
+) {
+  if (!fixture) await testCopy(groupId);
   const before = new Set((await messagesOf(groupId)).map((message) => message.id));
   const busy = await working(groupId);
   const sentAt = Date.now();
@@ -434,6 +485,12 @@ if (paid.length && !args.includes("--paid"))
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
 // or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that
 // leaves an idle copy unarchived fails the run.
+let cleaning;
+for (const signal of ["SIGINT", "SIGTERM"])
+  process.on(signal, () => {
+    log(`${signal}: archiving this run's test copies before exiting`);
+    cleaning ??= cleanUp().finally(() => process.exit(1));
+  });
 async function cleanUp() {
   // The read-only global case archives only its validated copies in its own finally block.
   if (wanted.size === 1 && wanted.has("global-recruiting")) return;
@@ -441,17 +498,17 @@ async function cleanUp() {
   const keep =
     option("--t5-group") ??
     (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
-  for (const file of fs.existsSync(OUT) ? fs.readdirSync(OUT) : []) {
-    if (!file.endsWith(".json")) continue;
-    let groupId;
-    try {
-      groupId = JSON.parse(fs.readFileSync(path.join(OUT, file), "utf8")).groupId;
-    } catch {
-      continue;
-    }
-    if (typeof groupId === "string" && groupId && groupId !== keep)
-      await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
-  }
+  const own = ownCopies();
+  own.delete(keep);
+  // This run's copies close their open cards, stop and leave the sidebar now, even mid-run.
+  if (own.size)
+    await run("archive-own", "archive-test-copies.mjs", [
+      "--idle-hours",
+      "0",
+      "--stop",
+      "--only",
+      [...own].join(","),
+    ]);
   const code = await run("archive-copies", "archive-test-copies.mjs", [
     "--idle-hours",
     "2",
@@ -544,6 +601,7 @@ try {
           !stoppedCurrent &&
           (await rpc("threads/backgroundTasks", { groupId: report.groupId })).length
         ) {
+          await testCopy(report.groupId);
           await assertStopKeepsBackground(rpc, report.groupId);
           stoppedCurrent = true;
         }
@@ -895,6 +953,7 @@ try {
         .join("\n\n");
       fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
       commonChecks(await messagesOf(groupId), failures);
+      await testCopy(groupId);
       const pendingTasks = await rpc("threads/backgroundTasks", { groupId });
       const approvalRunId = send.replies.find(sendCard)?.runId;
       const approvalTask = pendingTasks.find(
@@ -1175,7 +1234,7 @@ try {
         return failures.push(
           "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
         );
-      const { replies } = await say(groupId, text);
+      const { replies } = await say(groupId, text, { fixture: true });
       fs.writeFileSync(path.join(OUT, "t5-replies.txt"), `${replies.map(botText).join("\n")}\n`);
       const card = cards(replies).find((block) => block.approvalEffectId);
       if (!card) failures.push("no booking confirmation card");

@@ -608,6 +608,7 @@ model Message {
   externalTranscriptFor  ExternalMessage?
   steeringMessages SteeringMessage[]
   embedding        MessageEmbedding?
+  thinking         MessageThinking?
   createdAt        DateTime  @default(now())
   /// Bumped on every change, so a resident history copy can tell which rows to re-read.
   updatedAt        DateTime  @default(now()) @updatedAt
@@ -617,6 +618,21 @@ model Message {
   @@index([threadId, seq])
   @@index([replyToMessageId])
   @@map("messages")
+}
+
+/// The model's own reasoning behind a bot message, kept for that model's next turn. Owner-only:
+/// never shown in the product and never sent to a different model.
+model MessageThinking {
+  messageId String   @id
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  provider  String
+  model     String
+  api       String
+  /// Pi thinking blocks: text, provider signature and the redacted flag.
+  blocks    Json
+  createdAt DateTime @default(now())
+
+  @@map("message_thinking")
 }
 
 /// Meaning vector of a message's searchable text, for history search when no words match.

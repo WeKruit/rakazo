@@ -507,6 +507,8 @@ export interface AgentRunRequest {
     requiredForRun?: true;
     /** Images attached to this message, hydrated only for recent user turns. */
     images?: AgentInputImage[];
+    /** The model's own reasoning behind this reply; replayed only to the same model. */
+    thinking?: AgentThinking;
   }>;
   currentTurnImages?: AgentInputImage[];
   tools: ConnectorTool[];
@@ -611,6 +613,14 @@ export interface AgentUsage {
   usageSource?: string | null;
 }
 
+/** Provider reasoning blocks of one assistant message and the model that wrote them. */
+export interface AgentThinking {
+  provider: string;
+  model: string;
+  api: string;
+  blocks: Array<{ thinking: string; thinkingSignature?: string; redacted?: boolean }>;
+}
+
 export type UsageOperationKind = "answer" | "setup" | "retrieval" | "subagent" | "compaction";
 
 export interface ModelCallObserver {
@@ -654,6 +664,8 @@ export type AgentRuntimeEvent =
       plannedSearches?: string[];
     }
   | { type: "takeover"; reason: string }
+  /** The reasoning behind the latest assistant message, for that model's next turn. */
+  | ({ type: "thinking" } & AgentThinking)
   | ({
       type: "usage";
       /** Producer-side onUsage completed; consumers must not account it again. */

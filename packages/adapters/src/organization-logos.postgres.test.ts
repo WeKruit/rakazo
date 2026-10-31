@@ -74,10 +74,10 @@ describePostgres("organization logos (PostgreSQL)", () => {
       fetch: vi.fn(async () => new Response("", { status: 404 })),
     });
     // The index answers both names, so each becomes a confirmed miss or logo; only ours matter.
-    const first = await fillOrganizationLogos(prisma, lookups, { maxLookups: 50_000 });
+    const first = await fillOrganizationLogos(prisma, lookups, { maxLookups: 50_000, paceMs: 0 });
     expect(first.names).toBeGreaterThanOrEqual(2);
     const looked = searchOrganizations.mock.calls.length;
-    await fillOrganizationLogos(prisma, lookups, { maxLookups: 50_000 });
+    await fillOrganizationLogos(prisma, lookups, { maxLookups: 50_000, paceMs: 0 });
     expect(searchOrganizations.mock.calls.length).toBe(looked);
 
     // A logo saved by any process is what a fresh process (after a deploy) answers, unasked.
