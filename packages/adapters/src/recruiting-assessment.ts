@@ -162,7 +162,8 @@ export async function executeRecruitingCandidatesTool(
           campaignId: input.campaignId,
           campaignServerId: input.campaignServerId,
           campaignLeadCursor: input.campaignLeadCursor,
-          limit: input.limit ?? 20,
+          // One call covers every role for an account-wide interview question.
+          limit: input.limit ?? (operation === "interviews" ? 50 : 20),
         },
       );
       const unknownReplyDirections =

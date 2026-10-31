@@ -42,6 +42,8 @@ export type RecruitingAccountReadDeps = {
 };
 
 const ROLE_READ_CONCURRENCY = 2;
+// Interview reads mostly wait on the shared account calendar, so they take Home's source limit.
+const INTERVIEW_READ_CONCURRENCY = 4;
 
 type RoleStatus = NonNullable<RecruitingAccountViewOutput["items"][number]["status"]>;
 
@@ -264,8 +266,7 @@ export async function readRecruitingAccountView(
         if (bot.thread?.id !== thread.id) throw new ORPCError("NOT_FOUND");
         return { kind: "bot", botId: bot.id, threadId: thread.id };
       };
-      if (input.view === "roles")
-        return { roleId: row.id, status: statuses.get(row.id) };
+      if (input.view === "roles") return { roleId: row.id, status: statuses.get(row.id) };
       const target = await authorize();
       const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
         threadId: thread.id,
@@ -459,13 +460,21 @@ export async function readRecruitingAccountView(
     const items: RecruitingAccountViewOutput["items"] = new Array(page.length);
     let next = 0;
     await Promise.all(
-      Array.from({ length: Math.min(ROLE_READ_CONCURRENCY, page.length) }, async () => {
-        while (next < page.length) {
-          deps.signal?.throwIfAborted();
-          const index = next++;
-          items[index] = await readItem(page[index]!);
-        }
-      }),
+      Array.from(
+        {
+          length: Math.min(
+            input.view === "interview" ? INTERVIEW_READ_CONCURRENCY : ROLE_READ_CONCURRENCY,
+            page.length,
+          ),
+        },
+        async () => {
+          while (next < page.length) {
+            deps.signal?.throwIfAborted();
+            const index = next++;
+            items[index] = await readItem(page[index]!);
+          }
+        },
+      ),
     );
     const unassigned =
       input.view === "tasks" && !input.roleId
