@@ -630,10 +630,15 @@ try {
           continue;
         }
         if (!report?.groupId || !report.milestones?.scale_sent) continue;
+        // Stop is pressed once the scale's own work runs in the background: an older first-round
+        // task alone would make Stop cancel the turn that is about to start the scale.
+        const scaleSentAt = Date.parse(report.milestones.scale_sent.at ?? "");
         if (
           asked &&
           !stoppedCurrent &&
-          (await rpc("threads/backgroundTasks", { groupId: report.groupId })).length
+          (await rpc("threads/backgroundTasks", { groupId: report.groupId })).some(
+            (task) => !task.startedAt || Date.parse(task.startedAt) > scaleSentAt,
+          )
         ) {
           await testCopy(report.groupId);
           await assertStopKeepsBackground(rpc, report.groupId);
