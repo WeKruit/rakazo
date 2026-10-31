@@ -37,10 +37,11 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     name: "Autumn",
     description: "Platform recruiting research",
     endpoint: "https://api.autumn.ai/mcp",
+    // Retired: people search scales and Reviewer grades. Crews keep the connection, which marks
+    // them as recruiting crews, with no tools, so nothing spends its credits; a grant the user
+    // set themselves stays.
     bots: ["main", "sourcer", "reviewer"],
-    tools: ["credits", "research", "get_task", "get_rows", "reply", "stop_task"],
-    // The quality check only starts grading requests and reads their rows.
-    toolsByBot: { reviewer: ["credits", "research", "get_task", "get_rows"] },
+    tools: [],
   },
   {
     slug: "fullenrich",
