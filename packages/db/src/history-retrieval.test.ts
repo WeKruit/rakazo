@@ -299,7 +299,7 @@ describe("local history retrieval", () => {
     mock.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([row(2, "salary is open")]);
     const partial = await searchHistory(prisma, scope, { query: "salary band", scope: "mine" });
     expect(partial).toMatchObject({ answerability: "partial", match: "some_words_ranked" });
-    expect(partial.missingEvidence).toContain("only share some words");
+    expect(partial.missingEvidence).toContain("only the closest matches");
   });
   it("bounds search excerpts and pages by stable sequence", async () => {
     const { mock, prisma } = db();

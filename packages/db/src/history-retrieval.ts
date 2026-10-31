@@ -19,6 +19,24 @@ export interface HistoryScope {
   /** Server-captured history boundary. Search excludes the active request and later messages. */
   searchBeforeSeq?: number;
 }
+/** Embeds a search query with the same model the stored message vectors used; null when unavailable. */
+export type HistoryQueryEmbedder = (
+  query: string,
+) => Promise<{ model: string; vector: number[] } | null>;
+/** Below this cosine similarity a message is not about the query; nothing is better than noise. */
+const MEANING_MIN_SIMILARITY = 0.3;
+const similarity = (vector: number[]) =>
+  Prisma.sql`(SELECT sum(a * b) FROM unnest(e.embedding, ${vector}::float8[]) AS v(a, b))`;
+
+/** Embed the query, or null when there is no embedder or it fails: search must not fail on it. */
+async function queryVector(embed: HistoryQueryEmbedder | undefined, query: string) {
+  if (!embed) return null;
+  try {
+    return await embed(query);
+  } catch {
+    return null;
+  }
+}
 interface HistoryRow {
   id: string;
   seq: number;
@@ -77,7 +95,7 @@ function bounded<
   }
   return response;
 }
-const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
+export const searchableText = Prisma.sql`jsonb_path_query_array(m.blocks,
   '$[*] ? (@.kind == "text" || @.kind == "channel_message" || @.kind == "bot_message_received" || @.kind == "bot_message_sent" || @.kind == "handoff").text')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").task')::text || jsonb_path_query_array(m.blocks, '$[*] ? (@.kind == "subagent").result')::text`;
 const columns = Prisma.sql`m.id, m.seq, m.role, m."runId", m."replyToMessageId", m."createdAt", m.blocks, t."groupId" AS "groupId"`;
 const MINE_SNIPPET_LENGTH = 200;
@@ -193,9 +211,9 @@ function answerability(
   query: string,
   input: HistorySearchInput,
   found: number,
-  someWordsOnly = false,
+  closestOnly = false,
 ): { answerability: "found" | "partial" | "none"; missingEvidence?: string } {
-  if (found && !someWordsOnly) return { answerability: "found" };
+  if (found && !closestOnly) return { answerability: "found" };
   const range = [
     input.after ? `from ${input.after}` : "",
     input.before ? `before ${input.before}` : "",
@@ -206,7 +224,7 @@ function answerability(
   if (found)
     return {
       answerability: "partial",
-      missingEvidence: `No message in ${where} has every word of "${query}"; these only share some words. Read them before relying on one.`,
+      missingEvidence: `No message in ${where} has every word of "${query}"; these are only the closest matches. Read them before relying on one.`,
     };
   return {
     answerability: "none",
@@ -221,6 +239,7 @@ async function searchMine(
   input: HistorySearchInput,
   query: string,
   limit: number,
+  embed?: HistoryQueryEmbedder,
 ) {
   const before = date(input.before);
   const after = date(input.after);
@@ -265,17 +284,43 @@ async function searchMine(
       `)),
     );
   }
+  // No shared words at all: rank by meaning (first page only, like the word ranking).
+  const meaning = !rows.length && !before ? await queryVector(embed, query) : null;
+  if (meaning) {
+    rows.push(
+      ...(await prisma.$queryRaw<
+        Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
+      >(Prisma.sql`
+        SELECT * FROM (
+          SELECT ${columns}, m."threadId" AS "threadId",
+            (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
+            (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName",
+            ${similarity(meaning.vector)} AS "similarity"
+          FROM message_embeddings e JOIN messages m ON m.id = e."messageId"
+          JOIN threads t ON t.id = m."threadId"
+          WHERE e.model = ${meaning.model} AND ${visible(scope, { mine: null })}
+            ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+        ) ranked WHERE "similarity" >= ${MEANING_MIN_SIMILARITY}
+        ORDER BY "similarity" DESC LIMIT ${limit}
+      `)),
+    );
+  }
+  const ranked = anyWord || Boolean(meaning);
   const page = rows.slice(0, limit);
-  const last = !anyWord && rows.length > limit ? page.at(-1)! : undefined;
+  const last = !ranked && rows.length > limit ? page.at(-1)! : undefined;
   return {
     untrusted: true as const,
     query,
     scope: "mine" as const,
-    ...(anyWord ? { match: "some_words_ranked" as const } : {}),
-    ...answerability(query, input, page.length, anyWord),
+    ...(meaning
+      ? { match: "meaning_ranked" as const }
+      : anyWord
+        ? { match: "some_words_ranked" as const }
+        : {}),
+    ...answerability(query, input, page.length, ranked),
     coverage: {
       scope: "requested_query_and_range" as const,
-      status: last || anyWord ? ("partial" as const) : ("exhausted" as const),
+      status: last || ranked ? ("partial" as const) : ("exhausted" as const),
     },
     messages: page.map((row) => ({
       threadId: row.threadId,
@@ -301,34 +346,41 @@ async function searchMine(
 type MineSearchResult = Awaited<ReturnType<typeof searchMine>>;
 type ConversationSearchResult = Awaited<ReturnType<typeof searchConversation>>;
 
-/** PostgreSQL full text search, descending sequence cursor, at most five excerpts. */
+/**
+ * PostgreSQL full text search, descending sequence cursor, at most five excerpts. When no message
+ * shares a word with the query and an embedder is given, messages are ranked by meaning instead.
+ */
 export function searchHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistorySearchInput & { scope: "mine" },
+  embed?: HistoryQueryEmbedder,
 ): Promise<MineSearchResult>;
 export function searchHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistorySearchInput & { scope?: "conversation" },
+  embed?: HistoryQueryEmbedder,
 ): Promise<ConversationSearchResult>;
 export function searchHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistorySearchInput,
+  embed?: HistoryQueryEmbedder,
 ): Promise<MineSearchResult | ConversationSearchResult>;
 export async function searchHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistorySearchInput,
+  embed?: HistoryQueryEmbedder,
 ): Promise<MineSearchResult | ConversationSearchResult> {
   const query = input.query.trim();
   if (!query || query.length > 500)
     throw new Error("History query must contain 1 to 500 characters");
   const limit = Math.min(pageSize(input.limit), 5);
   return input.scope === "mine"
-    ? searchMine(prisma, scope, input, query, limit)
-    : searchConversation(prisma, scope, input, query, limit);
+    ? searchMine(prisma, scope, input, query, limit, embed)
+    : searchConversation(prisma, scope, input, query, limit, embed);
 }
 
 async function searchConversation(
@@ -337,6 +389,7 @@ async function searchConversation(
   input: HistorySearchInput,
   query: string,
   limit: number,
+  embed?: HistoryQueryEmbedder,
 ) {
   const before = date(input.before);
   const after = date(input.after);
@@ -377,16 +430,31 @@ async function searchConversation(
     )
     ORDER BY m.seq DESC LIMIT ${limit + 1}
   `);
+  // No message shares the words: rank this conversation by meaning instead (no cursor).
+  const meaning = !rows.length ? await queryVector(embed, query) : null;
+  if (meaning)
+    rows.push(
+      ...(await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
+        SELECT * FROM (
+          SELECT ${columns}, ${similarity(meaning.vector)} AS "similarity"
+          FROM message_embeddings e JOIN messages m ON m.id = e."messageId"
+          JOIN threads t ON t.id = m."threadId"
+          WHERE e.model = ${meaning.model} AND ${searchScope}
+        ) ranked WHERE "similarity" >= ${MEANING_MIN_SIMILARITY}
+        ORDER BY "similarity" DESC LIMIT ${limit}
+      `)),
+    );
   const page = rows.slice(0, limit);
-  const nextBeforeSeq = rows.length > limit ? page.at(-1)!.seq : null;
+  const nextBeforeSeq = !meaning && rows.length > limit ? page.at(-1)!.seq : null;
   return bounded({
     untrusted: true as const,
     query,
+    ...(meaning ? { match: "meaning_ranked" as const } : {}),
     coverage: {
       scope: "requested_query_and_range" as const,
-      status: nextBeforeSeq === null ? ("exhausted" as const) : ("partial" as const),
+      status: nextBeforeSeq === null && !meaning ? ("exhausted" as const) : ("partial" as const),
     },
-    ...answerability(query, input, page.length),
+    ...answerability(query, input, page.length, Boolean(meaning)),
     messages: page.map((row) => reference(row, query)),
     nextBeforeSeq,
     nextSearch:

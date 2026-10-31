@@ -200,6 +200,7 @@ import type {
   PrismaClient,
   RecruitingRoleToolResult,
   RunTiming,
+  TextEmbedder,
   ThreadEvents,
 } from "@rakazo/db";
 import {
@@ -266,6 +267,7 @@ import {
   saveRecruitingCalibrationRound,
   searchHistory,
   skipRateLimitedRun,
+  unitVector,
   votePoll,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -3537,6 +3539,8 @@ export interface ExecutorDeps {
   listConnectedPluginSlugs?: (userId: string) => Promise<string[]>;
   /** Builtin web_search / web_fetch. Defaults to keyless HTTP when omitted. */
   web?: WebProvider;
+  /** Meaning vectors for history search when no words match; absent keeps word search only. */
+  embedder?: TextEmbedder | null;
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
@@ -10996,7 +11000,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
             const response =
               name === "search_history"
-                ? await searchHistory(deps.prisma, scope, HistorySearchInputSchema.parse(args))
+                ? await searchHistory(
+                    deps.prisma,
+                    scope,
+                    HistorySearchInputSchema.parse(args),
+                    deps.embedder
+                      ? async (query) => {
+                          const embedder = deps.embedder!;
+                          const result = await embedder.embed([query]);
+                          await recordUsage(
+                            deps.prisma,
+                            {
+                              type: "usage",
+                              provider: embedder.provider,
+                              model: embedder.model,
+                              inputTokens: result.tokens,
+                              outputTokens: 0,
+                              totalTokens: result.tokens,
+                              costUsd: result.costUsd,
+                              costSource: "catalog-estimate",
+                            },
+                            {
+                              spaceId: run.spaceId,
+                              userId: run.userId,
+                              botId: run.botId,
+                              runId,
+                              operationKind: "retrieval",
+                            },
+                          ).catch(() => undefined);
+                          const vector = result.vectors[0];
+                          return vector
+                            ? { model: embedder.model, vector: unitVector(vector) }
+                            : null;
+                        }
+                      : undefined,
+                  )
                 : await readHistory(
                     deps.prisma,
                     scope,
