@@ -13,9 +13,10 @@ Working notes for the hosted headhunter deployment (Modal app behind a Cloudflar
 
 ## Test environment
 
-A full copy of production for development and test runs, so they never block production users. It lives in the Modal environment `test`: App `wekruit-recruiting-test`, Volume `wekruit-recruiting-test-files`, Secret `wekruit-recruiting-test-config`, and Secret `wekruit-recruiting-test-db` holding `DATABASE_URL` for its own database. It has its own sign-in and encryption keys, starts with no customer data, and has no mail or outreach credentials, so it cannot send real email or outreach.
+A full copy of production for development and test runs, so they never block production users. It lives in the Modal environment `test`: App `wekruit-recruiting-test`, Volume `wekruit-recruiting-test-files`, Secret `wekruit-recruiting-test-config`, and Secret `wekruit-recruiting-test-db` holding `DATABASE_URL` for its own database. It has its own sign-in and encryption keys and no mail or outreach credentials, so it cannot send real email or outreach.
 
 - `RELEASE_TARGET=test RAKAZO_TEST_URL=<test app URL> release-cloud.sh <SHA|branch> deploy` deploys any pushed commit; no unit tests or idle wait. A pass is recorded in `RELEASE_TEST_PASSED_DIR` (default `$RELEASE_WORK/test-passed`; keep it on durable storage).
+- `RAKAZO_TEST_URL=<test app URL> sync-test-data.sh` replaces the test database with a copy of production (production is only read), pauses routines, cancels unfinished runs, empties the job queue, removes sessions and push tokens, then redeploys the test app. Connections stay encrypted with the production key, which the test environment does not have, so they cannot send anything.
 - A production deploy refuses a commit whose code (outside `docs/`) has not passed on the test environment. Rollbacks are exempt; `RELEASE_SKIP_TEST_ENV=<short SHA>` is the explicit emergency override.
 
 Later work on split services and worker slots is tracked as C5 in [../wekruit/ARCHITECTURE-WORKPLAN.md](../wekruit/ARCHITECTURE-WORKPLAN.md) and the `../wekruit/C5-*.md` notes.
