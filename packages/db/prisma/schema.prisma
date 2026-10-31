@@ -8,32 +8,32 @@ datasource db {
 }
 
 model AiDataConsent {
-  userId       String
-  spaceId      String
+  userId String
+  spaceId String
   recipientKey String
-  version      String
-  grantedAt    DateTime    @default(now())
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  space        Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  spaceMember  SpaceMember @relation(fields: [spaceId, userId], references: [spaceId, userId], onDelete: Cascade)
+  version String
+  grantedAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  spaceMember SpaceMember @relation(fields: [spaceId, userId], references: [spaceId, userId], onDelete: Cascade)
 
   @@id([userId, spaceId, recipientKey])
   @@map("ai_data_consents")
 }
 
 model User {
-  modelOAuthSessions          ModelOAuthSession[]
-  recruitingCrmCampaigns      RecruitingCrmCampaign[]
-  recruitingCrmLeads          RecruitingCrmLead[]
-  aiDataConsents              AiDataConsent[]
-  recruitingCrmRoles          RecruitingCrmRole[]
-  recruitingCrmContacts       RecruitingCrmContact[]
-  recruitingCrmSyncProgress   RecruitingCrmSyncProgress[]
-  recruitingCrmMessages       RecruitingCrmMessage[]
-  recruitingReminders         RecruitingReminder[]         @relation("RecruitingReminderOwner")
-  recruitingCandidateNotes    RecruitingCandidateNote[]    @relation("RecruitingCandidateNoteOwner")
-  recruitingSavedProfiles     RecruitingSavedProfile[]     @relation("RecruitingSavedProfileOwner")
-  recruitingRoles             RecruitingRole[]
+  modelOAuthSessions ModelOAuthSession[]
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
+  aiDataConsents AiDataConsent[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
+  recruitingCrmMessages RecruitingCrmMessage[]
+  recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
+  recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
+  recruitingSavedProfiles RecruitingSavedProfile[] @relation("RecruitingSavedProfileOwner")
+  recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
   email                       String
@@ -55,8 +55,8 @@ model User {
   actionApprovalRules         ActionApprovalRule[]
   actionAutoReviewPreferences ActionAutoReviewPreference[]
   createdSpaces               Space[]                      @relation("SpaceCreator")
-  botSecrets                  BotSecret[]
-  agentSecrets                AgentSecret[]
+  botSecrets BotSecret[]
+  agentSecrets               AgentSecret[]
   createdTickets              Ticket[]                     @relation("TicketCreatorUser")
   ticketComments              TicketComment[]              @relation("TicketCommentAuthorUser")
 
@@ -81,15 +81,11 @@ model Session {
   @@map("session")
 }
 
-/**
- * One mobile push token per account; a device token belongs to the account that saved it last.
- */
+/** One mobile push token per account; a device token belongs to the account that saved it last. */
 model PushToken {
   userId    String   @id
   token     String   @unique
-  /**
-   * The session that registered the token; delivery stops once it ends.
-   */
+  /** The session that registered the token; delivery stops once it ends. */
   sessionId String?
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -140,7 +136,7 @@ model RateLimit {
 }
 
 model Organization {
-  id          String          @id
+  id          String       @id
   name        String
   slug        String
   logo        String?
@@ -223,18 +219,18 @@ model Member {
 }
 
 model Space {
-  modelOAuthSessions          ModelOAuthSession[]
-  recruitingCrmCampaigns      RecruitingCrmCampaign[]
-  recruitingCrmLeads          RecruitingCrmLead[]
-  aiDataConsents              AiDataConsent[]
-  recruitingCrmRoles          RecruitingCrmRole[]
-  recruitingCrmContacts       RecruitingCrmContact[]
-  recruitingCrmSyncProgress   RecruitingCrmSyncProgress[]
-  recruitingCrmMessages       RecruitingCrmMessage[]
-  recruitingReminders         RecruitingReminder[]
-  recruitingSavedProfiles     RecruitingSavedProfile[]
-  recruitingCandidateNotes    RecruitingCandidateNote[]
-  recruitingRoles             RecruitingRole[]
+  modelOAuthSessions ModelOAuthSession[]
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
+  aiDataConsents AiDataConsent[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
+  recruitingCrmMessages RecruitingCrmMessage[]
+  recruitingReminders RecruitingReminder[]
+  recruitingSavedProfiles RecruitingSavedProfile[]
+  recruitingCandidateNotes RecruitingCandidateNote[]
+  recruitingRoles RecruitingRole[]
   id                          String                       @id
   organizationId              String
   organization                Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -276,7 +272,7 @@ model Space {
   memoryConfig                SpaceMemoryConfig?
   secrets                     Secret[]
   chatGroups                  ChatGroup[]
-  botSecrets                  BotSecret[]
+  botSecrets BotSecret[]
   externalConversations       ExternalConversation[]
   agentSecrets                AgentSecret[]
   board                       Board?
@@ -300,8 +296,8 @@ model SpaceMember {
   createdAt        DateTime
   modelPreferences SpaceModelPreference[]
   voicePreferences SpaceVoicePreference[]
-  aiDataConsents   AiDataConsent[]
-  backupModels     SpaceBackupModel[]
+  aiDataConsents AiDataConsent[]
+  backupModels SpaceBackupModel[]
 
   @@unique([spaceId, userId])
   @@index([organizationId, userId])
@@ -345,16 +341,16 @@ model DeploymentSettings {
 }
 
 model UserModelCredential {
-  id             String                 @id @default(cuid())
-  userId         String
-  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider       String
-  label          String
-  secretId       String
-  supportsImages Boolean                @default(false)
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  preferences    SpaceModelPreference[]
+  id          String                 @id @default(cuid())
+  userId      String
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String
+  label       String
+  secretId    String
+  supportsImages Boolean              @default(false)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  preferences SpaceModelPreference[]
 
   @@unique([id, userId])
   @@index([userId, provider, updatedAt])
@@ -377,17 +373,17 @@ model UserVoiceCredential {
 }
 
 model SpaceModelPreference {
-  id            String              @id @default(cuid())
-  spaceId       String
-  userId        String
-  spaceMember   SpaceMember         @relation(fields: [spaceId, userId], references: [spaceId, userId], onDelete: Cascade)
-  credentialId  String
-  credential    UserModelCredential @relation(fields: [credentialId, userId], references: [id, userId], onDelete: Cascade)
-  modelId       String?
+  id           String              @id @default(cuid())
+  spaceId      String
+  userId       String
+  spaceMember  SpaceMember         @relation(fields: [spaceId, userId], references: [spaceId, userId], onDelete: Cascade)
+  credentialId String
+  credential   UserModelCredential @relation(fields: [credentialId, userId], references: [id, userId], onDelete: Cascade)
+  modelId      String?
   thinkingLevel String?
-  isDefault     Boolean             @default(false)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  isDefault    Boolean             @default(false)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
 
   @@unique([spaceId, userId, credentialId])
   @@index([spaceId, userId, isDefault, updatedAt])
@@ -431,58 +427,58 @@ model SpaceVoicePreference {
 }
 
 model Bot {
-  screenGeneration       Int               @default(0)
-  id                     String            @id @default(cuid())
-  spaceId                String
-  space                  Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId                 String
-  name                   String
-  title                  String            @default("")
-  description            String            @default("")
-  instructions           String            @default("")
-  color                  String
-  notifyOnFinish         Boolean           @default(true)
-  pinned                 Boolean           @default(false)
-  position               Int               @default(0)
-  sectionId              String?
-  section                BotSection?       @relation(fields: [sectionId], references: [id], onDelete: SetNull)
-  archivedAt             DateTime?
-  parentBotId            String?
-  spawnKey               String?
-  memoryScope            String?
-  parent                 Bot?              @relation("BotChildren", fields: [parentBotId], references: [id], onDelete: SetNull)
-  children               Bot[]             @relation("BotChildren")
-  createdAt              DateTime          @default(now())
-  updatedAt              DateTime          @updatedAt
-  thread                 Thread?
-  computerId             String?
-  computer               Computer?         @relation(fields: [computerId], references: [id], onDelete: SetNull)
-  computerSwitching      Boolean           @default(false)
-  voiceId                String?
-  autoSpeak              Boolean           @default(false)
-  modelProvider          String?
-  modelId                String?
-  thinkingLevel          String?
-  disabledBuiltinTools   String[]          @default([])
-  webhookSecretId        String?
-  teamChatAmbientEnabled Boolean           @default(false)
-  teamChatRules          String            @default("")
-  routines               Routine[]
-  scratchpadItems        ScratchpadItem[]
-  taughtSkills           TaughtSkill[]
-  memoryDocuments        MemoryDocument[]
-  agentHome              AgentHome?
-  browserProfile         BrowserProfile?
-  artifacts              Artifact[]
-  tasks                  Task[]
-  runs                   Run[]
-  steeringMessages       SteeringMessage[]
-  mcpServers             BotMcpServer[]
-  groupMembers           ChatGroupMember[]
-  botSecrets             BotSecret[]
-  assignedTickets        Ticket[]          @relation("TicketAssigneeBot")
-  createdTickets         Ticket[]          @relation("TicketCreatorBot")
-  ticketComments         TicketComment[]   @relation("TicketCommentAuthorBot")
+  screenGeneration Int @default(0)
+  id                String            @id @default(cuid())
+  spaceId           String
+  space             Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId            String
+  name              String
+  title             String            @default("")
+  description       String            @default("")
+  instructions      String            @default("")
+  color             String
+  notifyOnFinish    Boolean           @default(true)
+  pinned            Boolean           @default(false)
+  position          Int               @default(0)
+  sectionId         String?
+  section           BotSection?       @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  archivedAt        DateTime?
+  parentBotId       String?
+  spawnKey          String?
+  memoryScope       String?
+  parent            Bot?              @relation("BotChildren", fields: [parentBotId], references: [id], onDelete: SetNull)
+  children          Bot[]             @relation("BotChildren")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  thread            Thread?
+  computerId        String?
+  computer          Computer?         @relation(fields: [computerId], references: [id], onDelete: SetNull)
+  computerSwitching Boolean           @default(false)
+  voiceId           String?
+  autoSpeak         Boolean           @default(false)
+  modelProvider     String?
+  modelId           String?
+  thinkingLevel     String?
+  disabledBuiltinTools String[] @default([])
+  webhookSecretId   String?
+  teamChatAmbientEnabled Boolean @default(false)
+  teamChatRules          String  @default("")
+  routines          Routine[]
+  scratchpadItems   ScratchpadItem[]
+  taughtSkills      TaughtSkill[]
+  memoryDocuments   MemoryDocument[]
+  agentHome         AgentHome?
+  browserProfile    BrowserProfile?
+  artifacts         Artifact[]
+  tasks             Task[]
+  runs              Run[]
+  steeringMessages  SteeringMessage[]
+  mcpServers        BotMcpServer[]
+  groupMembers      ChatGroupMember[]
+  botSecrets BotSecret[]
+  assignedTickets   Ticket[]          @relation("TicketAssigneeBot")
+  createdTickets    Ticket[]          @relation("TicketCreatorBot")
+  ticketComments    TicketComment[]   @relation("TicketCommentAuthorBot")
 
   externalConversations ExternalConversation[]
 
@@ -560,26 +556,26 @@ model ChatGroupMember {
 }
 
 model Thread {
-  activeRecruitingRoleId      String?
-  activeRecruitingRole        RecruitingRole?       @relation("ActiveRecruitingRole", fields: [activeRecruitingRoleId], references: [id], onDelete: SetNull)
-  sourcedRecruitingRoles      RecruitingRole[]      @relation("RecruitingSourceThread")
-  id                          String                @id @default(cuid())
+  activeRecruitingRoleId String?
+  activeRecruitingRole RecruitingRole? @relation("ActiveRecruitingRole", fields: [activeRecruitingRoleId], references: [id], onDelete: SetNull)
+  sourcedRecruitingRoles RecruitingRole[] @relation("RecruitingSourceThread")
+  id                          String     @id @default(cuid())
   spaceId                     String
-  space                       Space                 @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  botId                       String?               @unique
-  bot                         Bot?                  @relation(fields: [botId], references: [id], onDelete: Cascade)
-  groupId                     String?               @unique
-  group                       ChatGroup?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  externalConversationId      String?               @unique
+  space                       Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  botId                       String?    @unique
+  bot                         Bot?       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  groupId                     String?    @unique
+  group                       ChatGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  externalConversationId      String?    @unique
   externalConversation        ExternalConversation? @relation(fields: [externalConversationId], references: [id], onDelete: Cascade)
   userId                      String
-  createdAt                   DateTime              @default(now())
-  nextEventSeq                Int                   @default(0)
-  nextMessageSeq              Int                   @default(0)
+  createdAt                   DateTime   @default(now())
+  nextEventSeq                Int        @default(0)
+  nextMessageSeq              Int        @default(0)
   historyCompactedUpToSeq     Int?
-  historyCompactionSummary    String?               @db.Text
-  historyCompactionGeneration Int                   @default(0)
-  unread                      Boolean               @default(false)
+  historyCompactionSummary    String?    @db.Text
+  historyCompactionGeneration Int        @default(0)
+  unread                      Boolean    @default(false)
   messages                    Message[]
   events                      Event[]
   tasks                       Task[]
@@ -591,29 +587,29 @@ model Thread {
 }
 
 model Message {
-  recruitingShortlists  RecruitingCandidate[]      @relation("RecruitingCandidateShortlist")
-  recruitingActions     RecruitingResearchAction[]
-  id                    String                     @id @default(cuid())
-  threadId              String
-  thread                Thread                     @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  seq                   Int
-  role                  String
-  blocks                Json
-  botId                 String?
-  replyToMessageId      String?
-  replyQuote            String?
-  replyTo               Message?                   @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
-  replies               Message[]                  @relation("MessageReplies")
-  runId                 String?
-  clientNonce           String?
-  sourceRuns            Run[]                      @relation("RunSourceMessage")
-  externalTranscriptFor ExternalMessage?
-  steeringMessages      SteeringMessage[]
-  embedding             MessageEmbedding?
-  thinking              MessageThinking?
-  createdAt             DateTime                   @default(now())
+  recruitingShortlists RecruitingCandidate[] @relation("RecruitingCandidateShortlist")
+  recruitingActions RecruitingResearchAction[]
+  id               String    @id @default(cuid())
+  threadId         String
+  thread           Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  seq              Int
+  role             String
+  blocks           Json
+  botId            String?
+  replyToMessageId String?
+  replyQuote       String?
+  replyTo          Message?  @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies          Message[] @relation("MessageReplies")
+  runId            String?
+  clientNonce      String?
+  sourceRuns            Run[]             @relation("RunSourceMessage")
+  externalTranscriptFor  ExternalMessage?
+  steeringMessages SteeringMessage[]
+  embedding        MessageEmbedding?
+  thinking         MessageThinking?
+  createdAt        DateTime  @default(now())
   /// Bumped on every change, so a resident history copy can tell which rows to re-read.
-  updatedAt             DateTime                   @default(now()) @updatedAt
+  updatedAt        DateTime  @default(now()) @updatedAt
 
   @@unique([threadId, seq])
   @@unique([threadId, clientNonce])
@@ -692,50 +688,50 @@ model Task {
 
 model Run {
   initialRecruitingRoleRevisionId String?
-  initialRecruitingRoleRevision   RecruitingRoleRevision?    @relation(fields: [initialRecruitingRoleRevisionId], references: [id], onDelete: SetNull)
-  recruitingTasks                 RecruitingResearchTask[]
-  recruitingActions               RecruitingResearchAction[]
-  recruitingAssessments           RecruitingAssessment[]
-  id                              String                     @id @default(cuid())
-  spaceId                         String
-  space                           Space                      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  botId                           String
-  bot                             Bot                        @relation(fields: [botId], references: [id], onDelete: Cascade)
-  threadId                        String
-  thread                          Thread                     @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  taskId                          String
-  task                            Task                       @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  userId                          String
-  status                          String
-  trigger                         String
-  modelProvider                   String?
-  modelId                         String?
-  thinkingLevel                   String?
+  initialRecruitingRoleRevision RecruitingRoleRevision? @relation(fields: [initialRecruitingRoleRevisionId], references: [id], onDelete: SetNull)
+  recruitingTasks RecruitingResearchTask[]
+  recruitingActions RecruitingResearchAction[]
+  recruitingAssessments RecruitingAssessment[]
+  id                   String           @id @default(cuid())
+  spaceId              String
+  space                Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  botId                String
+  bot                  Bot              @relation(fields: [botId], references: [id], onDelete: Cascade)
+  threadId             String
+  thread               Thread           @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  taskId               String
+  task                 Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId               String
+  status               String
+  trigger              String
+  modelProvider        String?
+  modelId              String?
+  thinkingLevel        String?
   // True when these columns are the model the run must keep. A later attempt
   // may record the model it used in the same columns without setting this.
-  modelPinned                     Boolean                    @default(false)
-  error                           String?
-  leaseOwner                      String?
-  leaseFence                      Int                        @default(0)
-  leaseExpiresAt                  DateTime?
-  checkpoint                      String?
-  clientNonce                     String?
-  sourceMessageId                 String?
-  sourceMessage                   Message?                   @relation("RunSourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
-  routineId                       String?
-  routine                         Routine?                   @relation(fields: [routineId], references: [id], onDelete: SetNull)
-  startedAt                       DateTime?
-  completedAt                     DateTime?
-  botOutcomeReturnedAt            DateTime?
-  messagingMirroredAt             DateTime?
-  teamChatMirroredAt              DateTime?
-  createdAt                       DateTime                   @default(now())
-  updatedAt                       DateTime                   @updatedAt
-  attempts                        Attempt[]
-  effects                         ExternalEffect[]
-  usageRecords                    UsageRecord[]
-  steeringMessages                SteeringMessage[]
-  externalMessage                 ExternalMessage?
+  modelPinned          Boolean          @default(false)
+  error                String?
+  leaseOwner           String?
+  leaseFence           Int              @default(0)
+  leaseExpiresAt       DateTime?
+  checkpoint           String?
+  clientNonce          String?
+  sourceMessageId      String?
+  sourceMessage        Message?         @relation("RunSourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  routineId            String?
+  routine              Routine?         @relation(fields: [routineId], references: [id], onDelete: SetNull)
+  startedAt            DateTime?
+  completedAt          DateTime?
+  botOutcomeReturnedAt DateTime?
+  messagingMirroredAt  DateTime?
+  teamChatMirroredAt   DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  attempts             Attempt[]
+  effects              ExternalEffect[]
+  usageRecords         UsageRecord[]
+  steeringMessages     SteeringMessage[]
+  externalMessage      ExternalMessage?
 
   @@unique([spaceId, clientNonce])
   @@index([status, leaseExpiresAt])
@@ -751,22 +747,22 @@ model Run {
 }
 
 model SteeringMessage {
-  id            String    @id @default(cuid())
-  messageId     String
-  message       Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  botId         String
-  bot           Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
-  userId        String
-  runId         String?
-  run           Run?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+  id        String   @id @default(cuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  botId     String
+  bot       Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  userId    String
+  runId     String?
+  run       Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
   /// Set when a pending row must resume as this trigger so its reply can be delivered.
   originTrigger String?
   /// Model agreed for an inbound delivery that had to wait. Empty follows the bot.
   modelProvider String?
   modelId       String?
   thinkingLevel String?
-  claimedAt     DateTime?
-  createdAt     DateTime  @default(now())
+  claimedAt DateTime?
+  createdAt DateTime @default(now())
 
   @@unique([messageId, botId])
   @@index([botId, runId, createdAt])
@@ -791,8 +787,8 @@ model Attempt {
 // Deliberately independent of chat/user cascades: the worker must still be able
 // to cancel remote work after its originating chat or account is deleted.
 model CloudAgent {
-  id                  String    @id @default(uuid())
-  operationKey        String    @unique
+  id                  String   @id @default(uuid())
+  operationKey        String   @unique
   providerKey         String
   spaceId             String
   userId              String
@@ -802,23 +798,23 @@ model CloudAgent {
   remoteId            String?
   latestRunId         String?
   title               String
-  status              String    @default("running")
-  url                 String    @default("")
+  status              String   @default("running")
+  url                 String   @default("")
   branch              String?
   prUrl               String?
   launchRequest       Json
-  launchDispatched    Boolean   @default(false)
+  launchDispatched    Boolean  @default(false)
   followup            Json?
-  followupDispatching Boolean   @default(false)
-  cancelRequested     Boolean   @default(false)
-  generation          Int       @default(0)
-  wakeGeneration      Int       @default(-1)
-  version             Int       @default(0)
+  followupDispatching Boolean  @default(false)
+  cancelRequested     Boolean  @default(false)
+  generation          Int      @default(0)
+  wakeGeneration      Int      @default(-1)
+  version             Int      @default(0)
   leaseToken          String?
   leaseExpiresAt      DateTime?
   nextPollAt          DateTime? @default(now())
-  errorCount          Int       @default(0)
-  createdAt           DateTime  @default(now())
+  errorCount          Int      @default(0)
+  createdAt           DateTime @default(now())
 
   @@index([providerKey, nextPollAt])
   @@index([spaceId, userId, id])
@@ -826,29 +822,29 @@ model CloudAgent {
 }
 
 model ExternalEffect {
-  recruitingReply            RecruitingReply?           @relation("RecruitingReplyEffect")
-  recruitingReplyEmailProofs RecruitingReply[]          @relation("RecruitingReplyEmailProof")
-  recruitingReplyCrmProofs   RecruitingReply[]          @relation("RecruitingReplyCrmProof")
-  recruitingCrmRole          RecruitingRole?            @relation("RecruitingCrmBinding")
-  recruitingCrmImport        RecruitingCrmImport?       @relation("RecruitingCrmImportEffect")
-  recruitingCrmBoundImports  RecruitingCrmImport[]      @relation("RecruitingCrmImportBinding")
-  recruitingCandidatePage    RecruitingCandidatePage?
-  recruitingActions          RecruitingResearchAction[]
-  id                         String                     @id @default(cuid())
-  spaceId                    String
-  space                      Space                      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  runId                      String
-  run                        Run                        @relation(fields: [runId], references: [id], onDelete: Cascade)
-  kind                       String
-  idempotencyKey             String
-  status                     String
-  request                    Json
-  result                     Json?
-  reviewDecision             String?
-  reviewReason               String?
-  reviewModel                String?
-  createdAt                  DateTime                   @default(now())
-  updatedAt                  DateTime                   @updatedAt
+  recruitingReply RecruitingReply? @relation("RecruitingReplyEffect")
+  recruitingReplyEmailProofs RecruitingReply[] @relation("RecruitingReplyEmailProof")
+  recruitingReplyCrmProofs RecruitingReply[] @relation("RecruitingReplyCrmProof")
+  recruitingCrmRole RecruitingRole? @relation("RecruitingCrmBinding")
+  recruitingCrmImport RecruitingCrmImport? @relation("RecruitingCrmImportEffect")
+  recruitingCrmBoundImports RecruitingCrmImport[] @relation("RecruitingCrmImportBinding")
+  recruitingCandidatePage RecruitingCandidatePage?
+  recruitingActions RecruitingResearchAction[]
+  id             String   @id @default(cuid())
+  spaceId        String
+  space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  runId          String
+  run            Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  kind           String
+  idempotencyKey String
+  status         String
+  request        Json
+  result         Json?
+  reviewDecision String?
+  reviewReason   String?
+  reviewModel    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@unique([idempotencyKey])
   @@index([runId, status])
@@ -856,43 +852,43 @@ model ExternalEffect {
 }
 
 model Routine {
-  id              String    @id @default(cuid())
-  spaceId         String
-  space           Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  botId           String
-  bot             Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
-  userId          String
-  threadId        String?
-  thread          Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
-  name            String
-  prompt          String
-  crons           String[]
-  timezone        String    @default("UTC")
-  active          Boolean   @default(false)
-  notify          Boolean   @default(true)
-  webhookEnabled  Boolean   @default(false)
-  githubEnabled   Boolean   @default(false)
+  id             String    @id @default(cuid())
+  spaceId        String
+  space          Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  botId          String
+  bot            Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  userId         String
+  threadId       String?
+  thread         Thread?   @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  name           String
+  prompt         String
+  crons          String[]
+  timezone       String    @default("UTC")
+  active         Boolean   @default(false)
+  notify         Boolean   @default(true)
+  webhookEnabled Boolean   @default(false)
+  githubEnabled  Boolean   @default(false)
   messageProvider String?
-  modelProvider   String?
-  modelId         String?
-  thinkingLevel   String?
+  modelProvider  String?
+  modelId        String?
+  thinkingLevel  String?
   /// "new" starts each scheduled run without thread history; "reuse" continues the thread.
-  sessionMode     String    @default("new")
+  sessionMode    String    @default("new")
   /// Expression over the trigger that must be true for the routine to wake its model.
-  condition       String?
+  condition      String?
   /// Command run on the bot's computer before the model; empty output ends the run quietly.
-  probeCommand    String?
+  probeCommand   String?
   /// Record changes that fire the routine, e.g. "recruiting_role".
-  recordTrigger   String?
+  recordTrigger  String?
   /// Offered to the other members of the Space; each one runs their own copy.
-  shared          Boolean   @default(false)
+  shared         Boolean   @default(false)
   /// The shared routine this copy follows; edits to the original reach the copy.
-  sharedFromId    String?
-  lastRunAt       DateTime?
-  nextRunAt       DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  runs            Run[]
+  sharedFromId   String?
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  runs           Run[]
 
   @@index([active, nextRunAt])
   @@index([spaceId, botId])
@@ -1082,7 +1078,7 @@ model ComputerUpdate {
 }
 
 model Computer {
-  screenGeneration        Int                      @default(0)
+  screenGeneration Int @default(0)
   id                      String                   @id @default(cuid())
   spaceId                 String
   space                   Space                    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1135,25 +1131,25 @@ model ComputerExecutionLease {
 
 model Artifact {
   recruitingCandidatePages RecruitingCandidatePage[]
-  recruitingRequests       RecruitingResearchAction[] @relation("RecruitingRequest")
-  recruitingContexts       RecruitingResearchAction[] @relation("RecruitingContext")
-  recruitingReceipts       RecruitingResearchAction[] @relation("RecruitingReceipt")
-  id                       String                     @id @default(cuid())
-  spaceId                  String
-  space                    Space                      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  botId                    String?
-  bot                      Bot?                       @relation(fields: [botId], references: [id], onDelete: SetNull)
-  groupId                  String?
-  group                    ChatGroup?                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId                   String
-  runId                    String?
-  name                     String
-  description              String?
-  mimeType                 String
-  size                     Int
-  hash                     String
-  storageKey               String
-  createdAt                DateTime                   @default(now())
+  recruitingRequests RecruitingResearchAction[] @relation("RecruitingRequest")
+  recruitingContexts RecruitingResearchAction[] @relation("RecruitingContext")
+  recruitingReceipts RecruitingResearchAction[] @relation("RecruitingReceipt")
+  id         String     @id @default(cuid())
+  spaceId    String
+  space      Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  botId      String?
+  bot        Bot?       @relation(fields: [botId], references: [id], onDelete: SetNull)
+  groupId    String?
+  group      ChatGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId     String
+  runId      String?
+  name       String
+  description String?
+  mimeType   String
+  size       Int
+  hash       String
+  storageKey String
+  createdAt  DateTime   @default(now())
 
   // Null on the first version; that row's id is the family's stable id.
   rootArtifactId String?
@@ -1172,9 +1168,9 @@ model Artifact {
 }
 
 model UsageRecord {
-  id                 String   @id @default(cuid())
-  spaceId            String
-  space              Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  id               String   @id @default(cuid())
+  spaceId          String
+  space            Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   /// Which bot spent this. Deliberately NOT a relation: a usage row is spend that really
   /// happened, and no lifecycle event on the bot may delete it or blank its attribution.
   /// `Cascade` erased the row; `SetNull` would erase the attribution instead, and because
@@ -1183,42 +1179,42 @@ model UsageRecord {
   ///
   /// So the id outlives the bot and may dangle. Read it with a LEFT JOIN; `BotDeletion.id`
   /// IS the bot id, so a deleted bot's name is still reachable for display.
-  botId              String?
-  userId             String
-  runId              String?
-  run                Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
-  provider           String
-  model              String
+  botId            String?
+  userId           String
+  runId            String?
+  run              Run?     @relation(fields: [runId], references: [id], onDelete: SetNull)
+  provider         String
+  model            String
   /// Uncached input; cache buckets are additional, reasoning is a subset of output.
-  inputTokens        Int?
-  outputTokens       Int?
-  cacheReadTokens    Int?
-  cacheWriteTokens   Int?
+  inputTokens       Int?
+  outputTokens      Int?
+  cacheReadTokens   Int?
+  cacheWriteTokens  Int?
   cacheWrite1hTokens Int?
-  reasoningTokens    Int?
-  totalTokens        Int?
-  costUsd            Float?
+  reasoningTokens   Int?
+  totalTokens       Int?
+  costUsd           Float?
   /// Customer credits per USD vendor cost, frozen when this usage is recorded.
-  creditRate         Float    @default(200)
-  costSource         String?
-  pricingVersion     String?
-  usageSource        String?
-  callId             String?  @unique
-  operationId        String?
-  operationKind      String   @default("answer")
+  creditRate        Float    @default(200)
+  costSource        String?
+  pricingVersion    String?
+  usageSource       String?
+  callId            String? @unique
+  operationId       String?
+  operationKind     String  @default("answer")
   /// Durable attribution, deliberately without lifecycle foreign keys.
-  parentRunId        String?
-  agentId            String?
+  parentRunId       String?
+  agentId           String?
   /// "tokens" for model calls (the token columns), "credits" for research credits and
   /// "calls" for connector calls (`quantity`). Credits and calls rows are written by database
   /// triggers on research actions and completed connector effects, so every execution path
   /// records them; `provider` is the service slug and `model` the tool or action kind.
-  unit               String   @default("tokens")
-  quantity           Float?
+  unit              String   @default("tokens")
+  quantity          Float?
   /// The recruiting role the spend served; filled from the run's thread on insert and kept
   /// without a foreign key so it outlives the run and the role.
-  roleId             String?
-  createdAt          DateTime @default(now())
+  roleId            String?
+  createdAt         DateTime @default(now())
 
   @@index([spaceId, userId, createdAt])
   @@index([spaceId, userId, unit, createdAt])
@@ -1275,33 +1271,33 @@ model Secret {
 
 model McpServer {
   recruitingCrmCampaigns RecruitingCrmCampaign[]
-  recruitingCrmLeads     RecruitingCrmLead[]
-  recruitingTasks        RecruitingResearchTask[]
-  recruitingCrmRoles     RecruitingCrmRole[]
-  recruitingCrmContacts  RecruitingCrmContact[]
-  recruitingCrmMessages  RecruitingCrmMessage[]
-  id                     String                   @id @default(cuid())
-  spaceId                String
-  space                  Space                    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId                 String
-  user                   User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  slug                   String
-  name                   String
-  description            String                   @default("")
-  transport              String
-  endpoint               String?
-  command                String?
-  args                   Json                     @default("[]")
-  env                    Json                     @default("{}")
-  headers                Json                     @default("{}")
-  secretId               String?
-  secret                 Secret?                  @relation(fields: [secretId], references: [id], onDelete: SetNull)
-  enabled                Boolean                  @default(true)
-  revision               Int                      @default(1)
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime                 @updatedAt
-  assignments            BotMcpServer[]
-  oauthSessions          McpOAuthSession[]
+  recruitingCrmLeads RecruitingCrmLead[]
+  recruitingTasks RecruitingResearchTask[]
+  recruitingCrmRoles RecruitingCrmRole[]
+  recruitingCrmContacts RecruitingCrmContact[]
+  recruitingCrmMessages RecruitingCrmMessage[]
+  id            String            @id @default(cuid())
+  spaceId       String
+  space         Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug          String
+  name          String
+  description   String            @default("")
+  transport     String
+  endpoint      String?
+  command       String?
+  args          Json              @default("[]")
+  env           Json              @default("{}")
+  headers       Json              @default("{}")
+  secretId      String?
+  secret        Secret?           @relation(fields: [secretId], references: [id], onDelete: SetNull)
+  enabled       Boolean           @default(true)
+  revision      Int               @default(1)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  assignments   BotMcpServer[]
+  oauthSessions McpOAuthSession[]
 
   @@unique([spaceId, userId, slug])
   @@index([spaceId, userId])
@@ -1366,28 +1362,28 @@ model MessagingIdentity {
 }
 
 model MessagingChannel {
-  id            String                   @id @default(cuid())
+  id            String              @id @default(cuid())
   provider      String
   /// Opaque provider thread id of the group conversation.
-  threadId      String                   @unique
+  threadId      String              @unique
   name          String?
   introPostedAt DateTime?
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
   members       MessagingChannelMember[]
 
   @@map("messaging_channels")
 }
 
 model MessagingChannelMember {
-  id         String           @id @default(cuid())
+  id         String      @id @default(cuid())
   channelId  String
   channel    MessagingChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   address    String
   identityId String?
   status     String
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
   @@unique([channelId, address])
   @@index([identityId])
@@ -1463,26 +1459,27 @@ model BotSecret {
   @@map("bot_secrets")
 }
 
+
 model ExternalConversation {
-  id                      String            @id @default(cuid())
-  provider                String
-  workspaceId             String
-  externalKey             String
-  conversationId          String
-  displayName             String?
-  participantNames        String[]          @default([])
-  teamChatAmbientEnabled  Boolean?
-  teamChatRules           String?
-  automatedSenderPolicies Json              @default("{}")
-  spaceId                 String
-  space                   Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  botId                   String
-  bot                     Bot               @relation(fields: [botId], references: [id], onDelete: Cascade)
-  userId                  String
-  thread                  Thread?
-  messages                ExternalMessage[]
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  id                       String            @id @default(cuid())
+  provider                 String
+  workspaceId              String
+  externalKey              String
+  conversationId           String
+  displayName              String?
+  participantNames         String[]          @default([])
+  teamChatAmbientEnabled   Boolean?
+  teamChatRules            String?
+  automatedSenderPolicies  Json              @default("{}")
+  spaceId                  String
+  space                    Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  botId                    String
+  bot                      Bot               @relation(fields: [botId], references: [id], onDelete: Cascade)
+  userId                   String
+  thread                   Thread?
+  messages                 ExternalMessage[]
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
 
   @@unique([provider, workspaceId, externalKey])
   @@index([spaceId, botId])
@@ -1490,31 +1487,31 @@ model ExternalConversation {
 }
 
 model ExternalMessage {
-  id                     String               @id @default(cuid())
+  id                     String                @id @default(cuid())
   externalConversationId String
-  externalConversation   ExternalConversation @relation(fields: [externalConversationId], references: [id], onDelete: Cascade)
+  externalConversation   ExternalConversation  @relation(fields: [externalConversationId], references: [id], onDelete: Cascade)
   providerEventId        String
-  kind                   String               @default("direct")
+  kind                   String                @default("direct")
   senderId               String
   senderName             String
-  senderIsBot            Boolean              @default(false)
+  senderIsBot            Boolean               @default(false)
   content                String
   replyThreadId          String?
   batchContext           String?
   engagementReason       String?
   judgedAt               DateTime?
-  status                 String               @default("received")
-  runId                  String?              @unique
-  run                    Run?                 @relation(fields: [runId], references: [id], onDelete: SetNull)
-  threadMessageId        String?              @unique
-  threadMessage          Message?             @relation(fields: [threadMessageId], references: [id], onDelete: SetNull)
-  attempts               Int                  @default(0)
+  status                 String                @default("received")
+  runId                  String?               @unique
+  run                    Run?                  @relation(fields: [runId], references: [id], onDelete: SetNull)
+  threadMessageId        String?               @unique
+  threadMessage          Message?              @relation(fields: [threadMessageId], references: [id], onDelete: SetNull)
+  attempts               Int                   @default(0)
   nextAttemptAt          DateTime?
   lastError              String?
   providerReplyHandle    String?
   deliveredAt            DateTime?
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
 
   @@unique([externalConversationId, providerEventId])
   @@index([status, nextAttemptAt])
@@ -1540,7 +1537,7 @@ model AgentSecret {
 
 // Deployment-owned integration credentials; never exposed through read DTOs.
 model IntegrationProviderConfig {
-  id         String   @id
+  id         String @id
   ciphertext String
   updatedAt  DateTime @updatedAt
 
@@ -1562,25 +1559,25 @@ model Board {
 }
 
 model Ticket {
-  id              String          @id @default(cuid())
+  id              String    @id @default(cuid())
   boardId         String
-  board           Board           @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  board           Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
   spaceId         String
-  space           Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  space           Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   number          Int
   title           String
   description     String?
-  status          String          @default("todo")
+  status          String    @default("todo")
   priority        String?
   assigneeBotId   String?
-  assigneeBot     Bot?            @relation("TicketAssigneeBot", fields: [assigneeBotId], references: [id], onDelete: SetNull)
+  assigneeBot     Bot?      @relation("TicketAssigneeBot", fields: [assigneeBotId], references: [id], onDelete: SetNull)
   createdByBotId  String?
-  createdByBot    Bot?            @relation("TicketCreatorBot", fields: [createdByBotId], references: [id], onDelete: SetNull)
+  createdByBot    Bot?      @relation("TicketCreatorBot", fields: [createdByBotId], references: [id], onDelete: SetNull)
   createdByUserId String?
-  createdByUser   User?           @relation("TicketCreatorUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  completedAt     DateTime?
+  createdByUser   User?     @relation("TicketCreatorUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt       DateTime?
   comments        TicketComment[]
 
   @@unique([boardId, number])
@@ -1607,32 +1604,33 @@ model TicketComment {
   @@map("ticket_comments")
 }
 
+
 model RecruitingRole {
   crmWorkspaceAttachment RecruitingCrmWorkspaceAttachment?
-  crmBindingEffectId     String?                           @unique
-  crmBindingEffect       ExternalEffect?                   @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
-  id                     String                            @id @default(cuid())
-  spaceId                String
-  space                  Space                             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId                 String
-  user                   User                              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceThreadId         String
-  sourceThread           Thread                            @relation("RecruitingSourceThread", fields: [sourceThreadId], references: [id], onDelete: Cascade)
-  title                  String
-  revision               Int
-  currentRevisionId      String                            @unique
-  archivedAt             DateTime?
-  playbookStage          String                            @default("intake")
-  currentRevision        RecruitingRoleRevision            @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
-  revisions              RecruitingRoleRevision[]          @relation("RecruitingRoleRevisions")
-  activeThreads          Thread[]                          @relation("ActiveRecruitingRole")
-  candidates             RecruitingCandidate[]
-  sourcePages            RecruitingCandidatePage[]
-  researchTasks          RecruitingResearchTask[]
-  assessments            RecruitingAssessment[]
-  reminders              RecruitingReminder[]
-  candidateNotes         RecruitingCandidateNote[]
-  calibrationRounds      RecruitingCalibrationRound[]
+  crmBindingEffectId String? @unique
+  crmBindingEffect ExternalEffect? @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceThreadId String
+  sourceThread Thread @relation("RecruitingSourceThread", fields: [sourceThreadId], references: [id], onDelete: Cascade)
+  title String
+  revision Int
+  currentRevisionId String @unique
+  archivedAt DateTime?
+  playbookStage String @default("intake")
+  currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
+  revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
+  activeThreads Thread[] @relation("ActiveRecruitingRole")
+  candidates RecruitingCandidate[]
+  sourcePages RecruitingCandidatePage[]
+  researchTasks RecruitingResearchTask[]
+  assessments RecruitingAssessment[]
+  reminders RecruitingReminder[]
+  candidateNotes RecruitingCandidateNote[]
+  calibrationRounds RecruitingCalibrationRound[]
 
   @@index([spaceId, userId])
   @@map("recruiting_roles")
@@ -1641,60 +1639,60 @@ model RecruitingRole {
 /// One calibration review round: the exact ten saved people shown to the recruiter and their decision.
 /// Feedback stays on the native messages/effects; this row only marks which people a round showed.
 model RecruitingCalibrationRound {
-  id               String         @id @default(cuid())
-  roleId           String
-  role             RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  round            Int
-  candidateKeys    String[]
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  round Int
+  candidateKeys String[]
   /// The native recruiting_research effect that recorded this round.
-  effectId         String         @unique
-  createdAt        DateTime       @default(now())
-  approvedAt       DateTime?
+  effectId String @unique
+  createdAt DateTime @default(now())
+  approvedAt DateTime?
   approvedByUserId String?
   /// What carried the human decision: {kind:"control"} or {kind:"message",messageId} or {kind:"approval",effectId}.
-  approvalSource   Json?
+  approvalSource Json?
 
   @@unique([roleId, round])
   @@map("recruiting_calibration_rounds")
 }
 
 model RecruitingRoleRevision {
-  replies             RecruitingReply[]
-  brief               Json?
-  id                  String                     @id @default(cuid())
-  roleId              String
-  role                RecruitingRole             @relation("RecruitingRoleRevisions", fields: [roleId], references: [id], onDelete: Cascade)
-  revision            Int
-  sourceRefs          Json
-  criteria            Json
-  preferences         Json
+  replies RecruitingReply[]
+  brief Json?
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation("RecruitingRoleRevisions", fields: [roleId], references: [id], onDelete: Cascade)
+  revision Int
+  sourceRefs Json
+  criteria Json
+  preferences Json
   definitionQuestions Json
-  createdAt           DateTime                   @default(now())
-  currentFor          RecruitingRole?            @relation("CurrentRecruitingRevision")
-  initialRuns         Run[]
-  actions             RecruitingResearchAction[]
-  candidatePages      RecruitingCandidatePage[]
-  assessments         RecruitingAssessment[]
+  createdAt DateTime @default(now())
+  currentFor RecruitingRole? @relation("CurrentRecruitingRevision")
+  initialRuns Run[]
+  actions RecruitingResearchAction[]
+  candidatePages RecruitingCandidatePage[]
+  assessments RecruitingAssessment[]
 
   @@unique([roleId, revision])
   @@map("recruiting_role_revisions")
 }
 
 model RecruitingResearchTask {
-  id              String                     @id @default(cuid())
-  roleId          String
-  role            RecruitingRole             @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  mcpServerId     String
-  mcpServer       McpServer                  @relation(fields: [mcpServerId], references: [id], onDelete: NoAction)
-  serverRevision  Int
-  providerTaskId  String?
-  pendingActionId String?                    @unique
-  pendingAction   RecruitingResearchAction?  @relation("RecruitingPendingAction", fields: [pendingActionId], references: [id], onDelete: SetNull)
-  state           String                     @default("active")
-  createdByRunId  String
-  createdByRun    Run                        @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
-  actions         RecruitingResearchAction[] @relation("RecruitingTaskActions")
-  candidatePages  RecruitingCandidatePage[]
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: NoAction)
+  serverRevision Int
+  providerTaskId String?
+  pendingActionId String? @unique
+  pendingAction RecruitingResearchAction? @relation("RecruitingPendingAction", fields: [pendingActionId], references: [id], onDelete: SetNull)
+  state String @default("active")
+  createdByRunId String
+  createdByRun Run @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
+  actions RecruitingResearchAction[] @relation("RecruitingTaskActions")
+  candidatePages RecruitingCandidatePage[]
 
   @@unique([mcpServerId, serverRevision, providerTaskId])
   @@index([roleId])
@@ -1702,76 +1700,77 @@ model RecruitingResearchTask {
 }
 
 model RecruitingResearchAction {
-  id                    String                    @id @default(cuid())
-  taskId                String
-  task                  RecruitingResearchTask    @relation("RecruitingTaskActions", fields: [taskId], references: [id], onDelete: Cascade)
-  pendingFor            RecruitingResearchTask?   @relation("RecruitingPendingAction")
-  roleRevisionId        String
-  roleRevision          RecruitingRoleRevision    @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
-  runId                 String
-  run                   Run                       @relation(fields: [runId], references: [id], onDelete: Cascade)
-  sourceMessageId       String
-  sourceMessage         Message                   @relation(fields: [sourceMessageId], references: [id], onDelete: NoAction)
-  clientNonce           String                    @unique
-  kind                  String
-  purpose               String?
+  id String @id @default(cuid())
+  taskId String
+  task RecruitingResearchTask @relation("RecruitingTaskActions", fields: [taskId], references: [id], onDelete: Cascade)
+  pendingFor RecruitingResearchTask? @relation("RecruitingPendingAction")
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  runId String
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceMessageId String
+  sourceMessage Message @relation(fields: [sourceMessageId], references: [id], onDelete: NoAction)
+  clientNonce String @unique
+  kind String
+  purpose String?
   candidateOutputSchema String?
-  candidatePages        RecruitingCandidatePage[]
-  approvalEffectId      String?
-  deliveryState         String                    @default("prepared")
+  candidatePages RecruitingCandidatePage[]
+  approvalEffectId String?
+  deliveryState String @default("prepared")
   observedProviderState String?
-  requestArtifactId     String
-  requestArtifact       Artifact                  @relation("RecruitingRequest", fields: [requestArtifactId], references: [id], onDelete: NoAction)
-  requestArtifactHash   String
-  contextArtifactId     String
-  contextArtifact       Artifact                  @relation("RecruitingContext", fields: [contextArtifactId], references: [id], onDelete: NoAction)
-  contextArtifactHash   String
-  recallScope           String?
-  receiptArtifactId     String?
-  receiptArtifact       Artifact?                 @relation("RecruitingReceipt", fields: [receiptArtifactId], references: [id], onDelete: NoAction)
-  receiptArtifactHash   String?
-  outputArtifacts       Json                      @default("[]")
-  cursor                String?
-  effectId              String?
-  effect                ExternalEffect?           @relation(fields: [effectId], references: [id], onDelete: NoAction)
-  usage                 Json?
+  requestArtifactId String
+  requestArtifact Artifact @relation("RecruitingRequest", fields: [requestArtifactId], references: [id], onDelete: NoAction)
+  requestArtifactHash String
+  contextArtifactId String
+  contextArtifact Artifact @relation("RecruitingContext", fields: [contextArtifactId], references: [id], onDelete: NoAction)
+  contextArtifactHash String
+  recallScope String?
+  receiptArtifactId String?
+  receiptArtifact Artifact? @relation("RecruitingReceipt", fields: [receiptArtifactId], references: [id], onDelete: NoAction)
+  receiptArtifactHash String?
+  outputArtifacts Json @default("[]")
+  cursor String?
+  effectId String?
+  effect ExternalEffect? @relation(fields: [effectId], references: [id], onDelete: NoAction)
+  usage Json?
 
   @@index([taskId])
   @@map("recruiting_research_actions")
 }
 
 model RecruitingAssessment {
-  roleId         String
-  role           RecruitingRole         @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  candidateKey   String
-  version        Int
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  candidateKey String
+  version Int
   basedOnVersion Int?
   roleRevisionId String
-  roleRevision   RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
-  facts          Json
-  judgments      Json
-  questions      Json
-  sourceRefs     Json
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  facts Json
+  judgments Json
+  questions Json
+  sourceRefs Json
   createdByRunId String
-  createdByRun   Run                    @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
-  createdAt      DateTime               @default(now())
+  createdByRun Run @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 
   @@id([roleId, candidateKey, version])
   @@map("recruiting_assessments")
 }
 
+
 /// A role-local identity and independent human selection. Profiles live on immutable source rows.
 model RecruitingCandidate {
-  roleId             String
-  role               RecruitingRole                  @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  candidateKey       String
-  shortlisted        Boolean                         @default(false)
-  shortlistedAt      DateTime?
-  consideration      Json?
-  revision           Int                             @default(0)
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  candidateKey String
+  shortlisted Boolean @default(false)
+  shortlistedAt DateTime?
+  consideration Json?
+  revision Int @default(0)
   shortlistMessageId String?
-  shortlistMessage   Message?                        @relation("RecruitingCandidateShortlist", fields: [shortlistMessageId], references: [id], onDelete: NoAction)
-  occurrences        RecruitingCandidateOccurrence[]
+  shortlistMessage Message? @relation("RecruitingCandidateShortlist", fields: [shortlistMessageId], references: [id], onDelete: NoAction)
+  occurrences RecruitingCandidateOccurrence[]
 
   @@id([roleId, candidateKey])
   @@map("recruiting_candidates")
@@ -1779,25 +1778,25 @@ model RecruitingCandidate {
 
 /// One native get_rows effect, including genuine zero-row pages; never a synthetic sentinel row.
 model RecruitingCandidatePage {
-  effectId       String                          @id
-  effect         ExternalEffect                  @relation(fields: [effectId], references: [id], onDelete: Cascade)
-  roleId         String
-  role           RecruitingRole                  @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  taskId         String?
-  task           RecruitingResearchTask?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  actionId       String?
-  action         RecruitingResearchAction?       @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  effectId String @id
+  effect ExternalEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  taskId String?
+  task RecruitingResearchTask? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actionId String?
+  action RecruitingResearchAction? @relation(fields: [actionId], references: [id], onDelete: Cascade)
   roleRevisionId String
-  roleRevision   RecruitingRoleRevision          @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
-  artifactId     String
-  artifact       Artifact                        @relation(fields: [artifactId], references: [id], onDelete: NoAction)
-  artifactHash   String
-  requestCursor  String?
-  outputId       String?
-  observedAt     DateTime
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  artifactId String
+  artifact Artifact @relation(fields: [artifactId], references: [id], onDelete: NoAction)
+  artifactHash String
+  requestCursor String?
+  outputId String?
+  observedAt DateTime
   /// Null means the native receipt did not establish an accepted row array.
-  rowCount       Int?
-  occurrences    RecruitingCandidateOccurrence[]
+  rowCount Int?
+  occurrences RecruitingCandidateOccurrence[]
 
   @@index([roleId, observedAt, effectId])
   @@index([actionId])
@@ -1806,23 +1805,23 @@ model RecruitingCandidatePage {
 
 /// Projection only. Exact provider row bytes remain in the referenced native ArtifactStore receipt.
 model RecruitingCandidateOccurrence {
-  crmImports   RecruitingCrmImport[]
-  pageId       String
-  page         RecruitingCandidatePage @relation(fields: [pageId], references: [effectId], onDelete: Cascade)
-  rowIndex     Int
-  roleId       String
+  crmImports RecruitingCrmImport[]
+  pageId String
+  page RecruitingCandidatePage @relation(fields: [pageId], references: [effectId], onDelete: Cascade)
+  rowIndex Int
+  roleId String
   candidateKey String
-  candidate    RecruitingCandidate     @relation(fields: [roleId, candidateKey], references: [roleId, candidateKey], onDelete: Cascade)
-  name         String?
-  title        String?
-  company      String?
-  location     String?
-  linkedinUrl  String?
-  resumeUrl    String?
+  candidate RecruitingCandidate @relation(fields: [roleId, candidateKey], references: [roleId, candidateKey], onDelete: Cascade)
+  name String?
+  title String?
+  company String?
+  location String?
+  linkedinUrl String?
+  resumeUrl String?
   evidenceUrls Json?
-  issues       Json
+  issues Json
   /// Provider match cells (rank/tier/score keys) of this saved row; null until backfilled.
-  matchFields  Json?
+  matchFields Json?
 
   @@id([pageId, rowIndex])
   @@index([roleId, candidateKey])
@@ -1830,14 +1829,14 @@ model RecruitingCandidateOccurrence {
 }
 
 model RecruitingCrmImport {
-  replies         RecruitingReply[]
-  effectId        String                        @id
-  effect          ExternalEffect                @relation("RecruitingCrmImportEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  replies RecruitingReply[]
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingCrmImportEffect", fields: [effectId], references: [id], onDelete: Cascade)
   bindingEffectId String
-  bindingEffect   ExternalEffect                @relation("RecruitingCrmImportBinding", fields: [bindingEffectId], references: [id], onDelete: NoAction)
-  pageId          String
-  rowIndex        Int
-  occurrence      RecruitingCandidateOccurrence @relation(fields: [pageId, rowIndex], references: [pageId, rowIndex], onDelete: Cascade)
+  bindingEffect ExternalEffect @relation("RecruitingCrmImportBinding", fields: [bindingEffectId], references: [id], onDelete: NoAction)
+  pageId String
+  rowIndex Int
+  occurrence RecruitingCandidateOccurrence @relation(fields: [pageId, rowIndex], references: [pageId, rowIndex], onDelete: Cascade)
 
   @@unique([bindingEffectId, pageId, rowIndex])
   @@map("recruiting_crm_imports")
@@ -1845,16 +1844,16 @@ model RecruitingCrmImport {
 
 /// Recruiting scope only; approval, execution state and provider result remain on ExternalEffect.
 model RecruitingReply {
-  effectId               String                 @id
-  effect                 ExternalEffect         @relation("RecruitingReplyEffect", fields: [effectId], references: [id], onDelete: Cascade)
-  roleRevisionId         String
-  roleRevision           RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
-  crmImportEffectId      String
-  crmImport              RecruitingCrmImport    @relation(fields: [crmImportEffectId], references: [effectId], onDelete: NoAction)
-  emailReadEffectId      String
-  emailReadEffect        ExternalEffect         @relation("RecruitingReplyEmailProof", fields: [emailReadEffectId], references: [id], onDelete: NoAction)
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingReplyEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  crmImportEffectId String
+  crmImport RecruitingCrmImport @relation(fields: [crmImportEffectId], references: [effectId], onDelete: NoAction)
+  emailReadEffectId String
+  emailReadEffect ExternalEffect @relation("RecruitingReplyEmailProof", fields: [emailReadEffectId], references: [id], onDelete: NoAction)
   crmContextReadEffectId String
-  crmContextReadEffect   ExternalEffect         @relation("RecruitingReplyCrmProof", fields: [crmContextReadEffectId], references: [id], onDelete: NoAction)
+  crmContextReadEffect ExternalEffect @relation("RecruitingReplyCrmProof", fields: [crmContextReadEffectId], references: [id], onDelete: NoAction)
 
   @@index([crmImportEffectId])
   @@index([roleRevisionId])
@@ -1869,23 +1868,23 @@ enum RecruitingReminderStatus {
 
 /// Owner-scoped (spaceId + ownerUserId) follow-up reminder, optionally tied to a role and/or candidate.
 model RecruitingReminder {
-  id             String                   @id @default(cuid())
-  spaceId        String
-  space          Space                    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  ownerUserId    String
-  owner          User                     @relation("RecruitingReminderOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  roleId         String?
-  role           RecruitingRole?          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingReminderOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  roleId String?
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
   /// "autumn:<key>" | "crm:<id>", same key space as roleCandidates items.
-  candidateKey   String?
-  title          String
-  note           String?
-  dueAt          DateTime
-  status         RecruitingReminderStatus @default(open)
-  completedAt    DateTime?
+  candidateKey String?
+  title String
+  note String?
+  dueAt DateTime
+  status RecruitingReminderStatus @default(open)
+  completedAt DateTime?
   createdByBotId String?
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ownerUserId, status, dueAt])
   @@index([candidateKey])
@@ -1895,24 +1894,24 @@ model RecruitingReminder {
 /// Owner-scoped copy of one CRM role, keyed by the CRM's own ids. Never deleted; archivedAt marks
 /// a role missing from a complete CRM pass and clears when it returns.
 model RecruitingCrmRole {
-  id               String                     @id @default(cuid())
-  spaceId          String
-  space            Space                      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId           String
-  user             User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mcpServerId      String
-  mcpServer        McpServer                  @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
-  organizationId   String
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
   organizationName String?
-  crmRoleId        String
-  clientId         String
-  clientLabel      String
-  roleLabel        String
-  summary          String?
-  firstSyncedAt    DateTime                   @default(now())
-  syncedAt         DateTime
-  archivedAt       DateTime?
-  contacts         RecruitingCrmRoleContact[]
+  crmRoleId String
+  clientId String
+  clientLabel String
+  roleLabel String
+  summary String?
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+  contacts RecruitingCrmRoleContact[]
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId])
   @@map("recruiting_crm_roles")
@@ -1920,40 +1919,40 @@ model RecruitingCrmRole {
 
 /// Owner-scoped copy of one CRM contact in the product's candidate shape. Same archive rule as roles.
 model RecruitingCrmContact {
-  id             String                     @id @default(cuid())
-  spaceId        String
-  space          Space                      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mcpServerId    String
-  mcpServer      McpServer                  @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
   organizationId String
   crmCandidateId String
-  name           String
-  title          String?
-  company        String?
-  profile        Json?
-  location       String?
-  email          String?
-  phone          String?
-  linkedinUrl    String?
+  name String
+  title String?
+  company String?
+  profile Json?
+  location String?
+  email String?
+  phone String?
+  linkedinUrl String?
   /// linkedin.com/in/<slug>, else lowercased email; matches Autumn rows for the same person.
-  identityKey    String?
-  stage          String?
-  contactStatus  String
+  identityKey String?
+  stage String?
+  contactStatus String
   outreachStatus String
-  interest       String?
-  reviewed       Boolean?
-  lastReplyAt    DateTime?
+  interest String?
+  reviewed Boolean?
+  lastReplyAt DateTime?
   resumeReceived Boolean?
   /// The contact's canonical CRM pipeline role.
-  crmRoleId      String?
-  clientLabel    String
-  roleLabel      String
-  firstSyncedAt  DateTime                   @default(now())
-  syncedAt       DateTime
-  archivedAt     DateTime?
-  roles          RecruitingCrmRoleContact[]
+  crmRoleId String?
+  clientLabel String
+  roleLabel String
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+  roles RecruitingCrmRoleContact[]
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmCandidateId])
   @@index([userId, spaceId, identityKey])
@@ -1962,11 +1961,11 @@ model RecruitingCrmContact {
 
 /// A contact listed under a CRM role. A contact can be linked to several roles.
 model RecruitingCrmRoleContact {
-  roleId     String
-  role       RecruitingCrmRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  contactId  String
-  contact    RecruitingCrmContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  syncedAt   DateTime
+  roleId String
+  role RecruitingCrmRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  contactId String
+  contact RecruitingCrmContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  syncedAt DateTime
   archivedAt DateTime?
 
   @@id([roleId, contactId])
@@ -1976,25 +1975,25 @@ model RecruitingCrmRoleContact {
 
 /// One stored CRM email for a role. Mail is immutable, so rows are upserted and never archived.
 model RecruitingCrmMessage {
-  id             String    @id @default(cuid())
-  spaceId        String
-  space          Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mcpServerId    String
-  mcpServer      McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
   organizationId String
-  crmMessageId   String
+  crmMessageId String
   crmCandidateId String
-  crmRoleId      String
-  threadId       String?
-  direction      String?
-  sender         String?
-  recipients     Json
-  subject        String?
-  body           String?
-  sentAt         DateTime?
-  syncedAt       DateTime
+  crmRoleId String
+  threadId String?
+  direction String?
+  sender String?
+  recipients Json
+  subject String?
+  body String?
+  sentAt DateTime?
+  syncedAt DateTime
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmMessageId])
   @@index([userId, spaceId, crmCandidateId])
@@ -2003,13 +2002,13 @@ model RecruitingCrmMessage {
 
 /// Single-use server-owned progress; no source data or credentials.
 model RecruitingCrmSyncProgress {
-  userId    String
-  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  spaceId   String
-  space     Space  @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   targetKey String
-  token     String @unique
-  progress  Json
+  token String @unique
+  progress Json
 
   @@id([userId, spaceId])
   @@map("recruiting_crm_sync_progress")
@@ -2018,20 +2017,20 @@ model RecruitingCrmSyncProgress {
 /// Owner-scoped (spaceId + ownerUserId) note on a candidate; agent-written notes are owned by the
 /// user the agent ran for, with createdByBotId set. Soft-deleted via deletedAt.
 model RecruitingCandidateNote {
-  id             String          @id @default(cuid())
-  spaceId        String
-  space          Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  ownerUserId    String
-  owner          User            @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  roleId         String?
-  role           RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingCandidateNoteOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  roleId String?
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
   /// "autumn:<key>" | "crm:<id>", same key space as reminders.
-  candidateKey   String
-  body           String
+  candidateKey String
+  body String
   createdByBotId String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@index([spaceId, candidateKey, createdAt])
   @@map("recruiting_candidate_notes")
@@ -2040,19 +2039,19 @@ model RecruitingCandidateNote {
 /// One person's public-profile facts saved from a profile-data lookup the agent made, owner-scoped
 /// like notes. The provider's full result stays on its effect; this row is the display/cache copy.
 model RecruitingSavedProfile {
-  id             String   @id @default(cuid())
-  spaceId        String
-  space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  ownerUserId    String
-  owner          User     @relation("RecruitingSavedProfileOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingSavedProfileOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   /// The pool's candidate key, e.g. "linkedin:<handle>".
-  personKey      String
-  provider       String
+  personKey String
+  provider String
   sourceEffectId String
-  profile        Json
-  fetchedAt      DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  profile Json
+  fetchedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([spaceId, ownerUserId, personKey])
   @@map("recruiting_saved_profiles")
@@ -2061,11 +2060,11 @@ model RecruitingSavedProfile {
 /// An organization's logo found once from its name and shared by everyone: public data, no person.
 model OrganizationLogo {
   /// The organization's normalized name words, e.g. "usc korean american student association".
-  key          String   @id
-  host         String?
+  key String @id
+  host String?
   /// A small PNG data URL of the logo, when one was found.
-  icon         String?
-  checkedAt    DateTime @default(now())
+  icon String?
+  checkedAt DateTime @default(now())
   /// A miss is looked up again after this; a found logo is kept.
   checkAgainAt DateTime
 
@@ -2074,17 +2073,17 @@ model OrganizationLogo {
 
 /// Exact CRM workspace selected through an authenticated read, never an execution/approval receipt.
 model RecruitingCrmWorkspaceAttachment {
-  roleId         String         @id
-  role           RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  userId         String
-  spaceId        String
-  mcpServerId    String
+  roleId String @id
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  userId String
+  spaceId String
+  mcpServerId String
   serverRevision Int
   organizationId String
-  crmRoleId      String
+  crmRoleId String
   sourceMaterial String
-  target         Json
-  observedAt     DateTime
+  target Json
+  observedAt DateTime
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId], map: "recruiting_crm_workspace_exact_key")
   @@map("recruiting_crm_workspace_attachments")
@@ -2093,26 +2092,26 @@ model RecruitingCrmWorkspaceAttachment {
 /// Owner-scoped copy of one stored outreach campaign, including campaigns with no CRM role.
 /// Read-only copy: never starts, pauses or edits the campaign.
 model RecruitingCrmCampaign {
-  id                String    @id @default(cuid())
-  spaceId           String
-  space             Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId            String
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mcpServerId       String
-  mcpServer         McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
-  organizationId    String
-  crmCampaignId     String
-  name              String
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmCampaignId String
+  name String
   /// Provider campaign status code as stored by the CRM mirror.
-  status            Int?
-  crmRoleId         String?
-  clientId          String?
+  status Int?
+  crmRoleId String?
+  clientId String?
   campaignCreatedAt DateTime?
   campaignUpdatedAt DateTime?
-  mirrorSyncedAt    DateTime
-  firstSyncedAt     DateTime  @default(now())
-  syncedAt          DateTime
-  archivedAt        DateTime?
+  mirrorSyncedAt DateTime
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmCampaignId])
   @@map("recruiting_crm_campaigns")
@@ -2120,27 +2119,27 @@ model RecruitingCrmCampaign {
 
 /// One stored lead of a campaign: who (CRM candidate) and how the outreach went.
 model RecruitingCrmLead {
-  id             String    @id @default(cuid())
-  spaceId        String
-  space          Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mcpServerId    String
-  mcpServer      McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
   organizationId String
-  crmLeadId      String
-  crmCampaignId  String?
+  crmLeadId String
+  crmCampaignId String?
   crmCandidateId String?
-  status         Int?
+  status Int?
   interestStatus Int?
-  openCount      Int?
-  replyCount     Int?
-  lastContactAt  DateTime?
-  lastReplyAt    DateTime?
+  openCount Int?
+  replyCount Int?
+  lastContactAt DateTime?
+  lastReplyAt DateTime?
   mirrorSyncedAt DateTime
-  firstSyncedAt  DateTime  @default(now())
-  syncedAt       DateTime
-  archivedAt     DateTime?
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmLeadId])
   @@index([userId, spaceId, crmCandidateId])
@@ -2149,18 +2148,18 @@ model RecruitingCrmLead {
 }
 
 model ModelOAuthSession {
-  id             String   @id
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  spaceId        String
-  space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  provider       String
-  ownerId        String
-  state          String
-  acceptsCode    Boolean  @default(false)
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  provider String
+  ownerId String
+  state String
+  acceptsCode Boolean @default(false)
   codeCiphertext String?
-  result         String?
-  expiresAt      DateTime
+  result String?
+  expiresAt DateTime
 
   @@index([userId, provider, state])
   @@index([expiresAt])
@@ -2170,69 +2169,63 @@ model ModelOAuthSession {
 // Irreversible home-key activation marker; stores no files, user identity or credentials.
 model HomeAuthorityTombstone {
   homeKeyHash String @id
-
   @@map("home_authority_tombstones")
 }
 
 /// Verified complete home migration receipt; no actor access or foreign-key cascade.
 model HomeAuthorityCutover {
-  id                 String                       @id
-  manifestDigest     String
-  activatedAt        DateTime                     @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
-  sessionBudgets     SessionAdmissionBudget[]
+  id String @id
+  manifestDigest String
+  activatedAt DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
+  sessionBudgets SessionAdmissionBudget[]
   sessionGenerations SessionAdmissionGeneration[]
-  sessionAdmissions  SessionAdmission[]
-
+  sessionAdmissions SessionAdmission[]
   @@map("home_authority_cutover")
 }
 
 /// System-only desired worker deployment generation; no automatic takeover.
 model SessionAdmissionGeneration {
-  service    String               @id
+  service String @id
   generation String
-  cutoverId  String               @default("verified")
-  cutover    HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   @@map("session_admission_generations")
 }
 
 /// Global direct-session capacity, held until verified stopped-instance release.
 model SessionAdmission {
-  token                  String                       @id
-  service                String
-  instanceId             String                       @unique
-  observerRole           String
-  generation             String
-  sessionApplicationName String                       @unique
-  reservedSessions       Int
-  status                 String                       @default("active")
-  cutoverId              String                       @default("verified")
-  cutover                HomeAuthorityCutover         @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  createdAt              DateTime                     @default(now()) @db.Timestamptz(6)
-  connections            SessionAdmissionConnection[]
-
+  token String @id
+  service String
+  instanceId String @unique
+  observerRole String
+  generation String
+  sessionApplicationName String @unique
+  reservedSessions Int
+  status String @default("active")
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  connections SessionAdmissionConnection[]
   @@map("session_admissions")
 }
 
 model SessionAdmissionConnection {
-  token        String
-  pid          Int
-  backendStart DateTime         @db.Timestamptz(6)
-  admission    SessionAdmission @relation(fields: [token], references: [token], onDelete: Cascade, onUpdate: NoAction)
-
-  @@id([token, pid])
+  token String
+  pid Int
+  backendStart DateTime @db.Timestamptz(6)
+  admission SessionAdmission @relation(fields:[token], references:[token], onDelete:Cascade, onUpdate:NoAction)
+  @@id([token,pid])
   @@map("session_admission_connections")
 }
 
 /// Explicit external/migration session headroom; never silently defaulted to zero.
 model SessionAdmissionBudget {
-  id                       String               @id
-  totalSessions            Int
+  id String @id
+  totalSessions Int
   externalReservedSessions Int
-  replacementToken         String?
-  replacementOwner         String?
-  cutoverId                String               @default("verified")
-  cutover                  HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
+  replacementToken String?
+  replacementOwner String?
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields:[cutoverId], references:[id], onDelete:NoAction,onUpdate:NoAction)
   @@map("session_admission_budget")
 }
