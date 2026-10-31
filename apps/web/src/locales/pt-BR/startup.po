@@ -178,6 +178,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr ""
 
+#: src/components/background-task-time.ts
+msgid "About {minutes} min left"
+msgstr ""
+
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
 msgstr ""
@@ -812,6 +816,7 @@ msgid "Contacts"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "Continuar"
 
@@ -1005,6 +1010,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Could not reset password"
 msgstr "Não foi possível redefinir a senha"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not reset the computer."
+msgstr ""
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not run routine"
@@ -1654,6 +1663,10 @@ msgstr "Ir para a mensagem respondida: {excerpt}"
 msgid "just now"
 msgstr "agora mesmo"
 
+#: src/components/background-task-time.ts
+msgid "Just started"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Key work"
 msgstr ""
@@ -1942,6 +1955,10 @@ msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New Role"
+msgstr ""
+
+#: src/pages/routine-next-run.ts
+msgid "Next {when}"
 msgstr ""
 
 #. placeholder {0}: stage.nextStep
@@ -2567,6 +2584,7 @@ msgid "Reset"
 msgstr "Redefinir"
 
 #: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/ShellConversation.tsx
 msgid "Reset computer"
 msgstr "Redefinir computador"
 
@@ -2721,6 +2739,10 @@ msgstr ""
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "em execução"
+
+#: src/components/background-task-time.ts
+msgid "Running {minutes} min"
+msgstr ""
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Salary range"
@@ -3223,6 +3245,10 @@ msgstr "Testando…"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "The API did not come back. Refresh this page."
+msgstr ""
+
+#: src/pages/shell/useShellController.tsx
+msgid "The computer could not start. Reset it to continue."
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts

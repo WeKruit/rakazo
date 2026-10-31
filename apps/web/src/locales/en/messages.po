@@ -6244,6 +6244,10 @@ msgstr "View role records"
 msgid "Voice"
 msgstr "Voice"
 
+#: src/components/LiveWork.tsx
+msgid "Waiting for background work"
+msgstr "Waiting for background work"
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
 msgstr "Waiting for resume"

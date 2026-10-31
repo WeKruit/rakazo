@@ -13830,8 +13830,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           leaseValid &&
           computerStartFailure !== undefined &&
           setupError === computerStartFailure &&
-          (await deps.prisma.attempt.count({ where: { runId, status: "setup_failed" } })) >=
-            COMPUTER_START_ATTEMPTS - 1
+          (await setupFailures(deps.prisma, runId)) >= COMPUTER_START_ATTEMPTS - 1
         ) {
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
@@ -14110,6 +14109,15 @@ export const COMPUTER_TOOLS_DISABLED_ERROR =
   "Computer and browser tools are disabled for this recruiting agent. Use the connected mail/calendar/CRM service; if it is not connected, report the exact connection that is missing.";
 /** Starts of the run's computer to try before the turn ends with the reset-the-computer button. */
 const COMPUTER_START_ATTEMPTS = 3;
+
+/** Earlier failed setups of this run; unknown counts as none, so the run retries as before. */
+async function setupFailures(prisma: ExecutorDeps["prisma"], runId: string): Promise<number> {
+  try {
+    return await prisma.attempt.count({ where: { runId, status: "setup_failed" } });
+  } catch {
+    return 0;
+  }
+}
 
 function disabledToolError(name: string): string {
   return COMPUTER_LOGIN_TOOLS.has(name)

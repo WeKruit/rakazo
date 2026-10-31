@@ -6244,6 +6244,10 @@ msgstr ""
 msgid "Voice"
 msgstr "Ses"
 
+#: src/components/LiveWork.tsx
+msgid "Waiting for background work"
+msgstr ""
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
 msgstr ""

@@ -178,6 +178,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr "≥ Observed in loaded records"
 
+#: src/components/background-task-time.ts
+msgid "About {minutes} min left"
+msgstr "About {minutes} min left"
+
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
 msgstr "About groups"
@@ -812,6 +816,7 @@ msgid "Contacts"
 msgstr "Contacts"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "Continue"
 
@@ -1005,6 +1010,10 @@ msgstr "Could not read candidate records."
 #: src/pages/Auth.tsx
 msgid "Could not reset password"
 msgstr "Could not reset password"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not reset the computer."
+msgstr "Could not reset the computer."
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not run routine"
@@ -1654,6 +1663,10 @@ msgstr "Jump to replied message: {excerpt}"
 msgid "just now"
 msgstr "just now"
 
+#: src/components/background-task-time.ts
+msgid "Just started"
+msgstr "Just started"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Key work"
 msgstr "Key work"
@@ -1943,6 +1956,10 @@ msgstr "New role"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New Role"
 msgstr "New Role"
+
+#: src/pages/routine-next-run.ts
+msgid "Next {when}"
+msgstr "Next {when}"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2567,6 +2584,7 @@ msgid "Reset"
 msgstr "Reset"
 
 #: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/ShellConversation.tsx
 msgid "Reset computer"
 msgstr "Reset computer"
 
@@ -2721,6 +2739,10 @@ msgstr "Run trace"
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "running"
+
+#: src/components/background-task-time.ts
+msgid "Running {minutes} min"
+msgstr "Running {minutes} min"
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Salary range"
@@ -3224,6 +3246,10 @@ msgstr "Testing…"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "The API did not come back. Refresh this page."
 msgstr "The API did not come back. Refresh this page."
+
+#: src/pages/shell/useShellController.tsx
+msgid "The computer could not start. Reset it to continue."
+msgstr "The computer could not start. Reset it to continue."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
