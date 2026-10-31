@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentRunModel, AgentRuntime, SecretStore } from "@rakazo/adapter-kit";
 import {
+  estimateCatalogTokenCostUsd,
   formatCurrentTimeInstruction,
   resolveModelAuth,
   storedModelOAuthModifier,
@@ -136,13 +137,18 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
           runId: judgeId,
           usageOperationKind: "setup",
           onUsage: async (event) => {
-            await recordUsage(this.deps.prisma, event, {
-              spaceId: input.bot.spaceId,
-              botId: input.bot.id,
-              userId: input.bot.userId,
-              operationId: judgeId,
-              operationKind: "setup",
-            });
+            await recordUsage(
+              this.deps.prisma,
+              event,
+              {
+                spaceId: input.bot.spaceId,
+                botId: input.bot.id,
+                userId: input.bot.userId,
+                operationId: judgeId,
+                operationKind: "setup",
+              },
+              estimateCatalogTokenCostUsd,
+            );
           },
           prompt,
           instructions: [
@@ -167,13 +173,18 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
       )) {
         if (event.type === "done" && event.text) text = event.text;
         if (event.type === "usage" && !event.accounted) {
-          await recordUsage(this.deps.prisma, event, {
-            spaceId: input.bot.spaceId,
-            botId: input.bot.id,
-            userId: input.bot.userId,
-            operationId: judgeId,
-            operationKind: "setup",
-          });
+          await recordUsage(
+            this.deps.prisma,
+            event,
+            {
+              spaceId: input.bot.spaceId,
+              botId: input.bot.id,
+              userId: input.bot.userId,
+              operationId: judgeId,
+              operationKind: "setup",
+            },
+            estimateCatalogTokenCostUsd,
+          );
         }
       }
       return parseTeamChatEngagementDecision(text);

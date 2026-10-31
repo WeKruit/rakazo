@@ -3,6 +3,26 @@ import type { PrismaClient } from "./generated/prisma/client.js";
 import { recordUsage } from "./usage.js";
 
 describe("usage ledger", () => {
+  it("snapshots a catalog estimate when the provider has no dollar receipt", async () => {
+    const create = vi.fn(async (args) => args.data);
+    const prisma = { usageRecord: { create } } as unknown as Pick<PrismaClient, "usageRecord">;
+    await recordUsage(
+      prisma,
+      {
+        type: "usage",
+        provider: "vendor",
+        model: "model",
+        inputTokens: 100,
+        outputTokens: 20,
+      },
+      { spaceId: "space", userId: "user" },
+      () => 0.007,
+    );
+    expect(create.mock.calls[0]?.[0].data).toMatchObject({
+      costUsd: 0.007,
+      costSource: "catalog-estimate",
+    });
+  });
   it("retains charged usage arriving after its run was deleted", async () => {
     const createMany = vi
       .fn()

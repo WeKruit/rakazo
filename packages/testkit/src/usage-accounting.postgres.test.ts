@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ComposioEmulator } from "@rakazo/adapters";
+import type { InternalUsageCosts, UsageCosts } from "@rakazo/contracts";
 import { recordUsage } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import { runAutoReviewJudge } from "../../adapters/src/auto-review.js";
@@ -117,7 +118,7 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
         });
         const body = (await response.json()) as { json: T; error?: { message: string } };
         if (response.status >= 400 || body.error)
-          throw new Error(`${procedure}: ${body.error?.message ?? response.status}`);
+          throw new Error(`${procedure}: ${response.status} ${JSON.stringify(body)}`);
         return body.json;
       };
       await rpc("models/connect", {
@@ -264,6 +265,73 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
         ),
       );
       expect(await handles.prisma.usageRecord.count({ where: { botId: bot.id } })).toBe(7);
+      const customerUsage = await rpc<UsageCosts>("usage/costs");
+      expect(customerUsage.total).toEqual({ credits: 0.168, pending: false });
+      expect(customerUsage.canViewInternalCosts).toBe(false);
+      for (const procedure of ["usage/list", "usage/summary", "usage/internalCosts"]) {
+        const denied = await handles.app.request(`/rpc/${procedure}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie, origin },
+          body: JSON.stringify({ json: {} }),
+        });
+        expect(denied.status).toBe(403);
+      }
+      // Staff access follows the stored, verified mailbox, never deployment ownership.
+      await handles.prisma.user.update({
+        where: { id: delivered.userId },
+        data: { email: `staff-${randomUUID()}@wekruit.com`, emailVerified: false },
+      });
+      expect((await rpc<UsageCosts>("usage/costs")).canViewInternalCosts).toBe(false);
+      await expect(rpc("usage/internalCosts")).rejects.toThrow("403");
+      await handles.prisma.user.update({
+        where: { id: delivered.userId },
+        data: { emailVerified: true },
+      });
+      expect((await rpc<UsageCosts>("usage/costs")).canViewInternalCosts).toBe(true);
+      const otherUserId = `other-usage-${randomUUID()}`;
+      await handles.prisma.user.create({
+        data: { id: otherUserId, email: `${otherUserId}@example.test`, name: "Other fixture" },
+      });
+      await recordUsage(
+        handles.prisma,
+        {
+          type: "usage",
+          provider: "other-vendor",
+          model: "other-model",
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 120,
+          costUsd: 0.007,
+          costSource: "provider-reported",
+        },
+        { spaceId: delivered.spaceId, userId: otherUserId },
+      );
+      const report = await rpc<InternalUsageCosts>("usage/internalCosts");
+      expect(report.accounts.find((account) => account.userId === otherUserId)).toMatchObject({
+        credits: 1.4,
+        costUsd: 0.007,
+        vendors: [
+          {
+            vendor: "other-vendor",
+            models: [
+              {
+                model: "other-model",
+                tokens: 120,
+                inputTokens: 100,
+                outputTokens: 20,
+                costUsd: 0.007,
+                credits: 1.4,
+              },
+            ],
+          },
+        ],
+      });
+      expect((await rpc<UsageCosts>("usage/costs")).total).toEqual({
+        credits: 0.168,
+        pending: false,
+      });
       const summary = await rpc<{ totalTokens: number; modelCalls: number; runs: number }>(
         "usage/summary",
       );

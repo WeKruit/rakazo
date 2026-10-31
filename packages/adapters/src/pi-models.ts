@@ -1,4 +1,4 @@
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { calculateCost, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { ModelOAuthSignInMode, ThinkingLevel } from "@rakazo/contracts";
 import { supplementPiModels } from "./pi-current-models.js";
@@ -239,7 +239,13 @@ let pricingModels: ReturnType<typeof builtinModels> | undefined;
 export function estimateCatalogTokenCostUsd(
   provider: string,
   modelId: string,
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number | null;
+    cacheWrite: number | null;
+    cacheWrite1h?: number | null;
+  },
 ): number | null {
   pricingModels ??= supplementPiModels(builtinModels());
   const model =
@@ -248,11 +254,41 @@ export function estimateCatalogTokenCostUsd(
   const cost = model?.cost;
   if (!cost || !Object.values(cost).some((rate) => typeof rate === "number" && rate > 0))
     return null;
-  return (
-    (tokens.input * cost.input +
-      tokens.output * cost.output +
-      tokens.cacheRead * cost.cacheRead +
-      tokens.cacheWrite * cost.cacheWrite) /
-    1_000_000
-  );
+  const nativeResponses =
+    model?.api === "openai-responses" ||
+    model?.api === "openai-codex-responses" ||
+    model?.api === "azure-openai-responses";
+  // Responses has no cache-write charge; Anthropic's 1h writes are a subset of all writes.
+  const longWriteUnknown =
+    model?.api === "anthropic-messages" &&
+    (tokens.cacheWrite ?? 0) > 0 &&
+    tokens.cacheWrite1h == null;
+  if (
+    Object.values(tokens).some(
+      (value) => value != null && (!Number.isFinite(value) || value < 0),
+    ) ||
+    (tokens.cacheWrite1h ?? 0) > (tokens.cacheWrite ?? 0)
+  )
+    return null;
+  const promptTokens = tokens.input + (tokens.cacheRead ?? 0) + (tokens.cacheWrite ?? 0);
+  const rates =
+    [...(cost.tiers ?? [])]
+      .sort((a, b) => b.inputTokensAbove - a.inputTokensAbove)
+      .find((tier) => promptTokens > tier.inputTokensAbove) ?? cost;
+  if (
+    (tokens.cacheRead == null && rates.cacheRead > 0) ||
+    (tokens.cacheWrite == null && rates.cacheWrite > 0 && !nativeResponses) ||
+    longWriteUnknown
+  )
+    return null;
+  const usage = {
+    input: tokens.input,
+    output: tokens.output,
+    cacheRead: tokens.cacheRead ?? 0,
+    cacheWrite: tokens.cacheWrite ?? 0,
+    cacheWrite1h: tokens.cacheWrite1h ?? 0,
+    totalTokens: promptTokens + tokens.output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  return calculateCost(model!, usage).total;
 }

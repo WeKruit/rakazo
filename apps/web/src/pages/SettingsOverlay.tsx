@@ -3,6 +3,7 @@ import type { AvatarStyle, SpaceMemoryConfig, UsageCosts } from "@rakazo/contrac
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import {
   Brain,
+  ChartNoAxesCombined,
   CloudDownload,
   Cpu,
   CreditCard,
@@ -24,6 +25,7 @@ import {
   UsageSettingsPanel,
 } from "./AccountSettingsOverlay";
 import { BillingSettingsPanel } from "./BillingSettingsPanel";
+import { InternalCostsSettingsPanel } from "./InternalCostsSettingsPanel";
 import { MemorySettingsOverlay } from "./MemorySettingsOverlay";
 import { VoiceSettingsOverlay } from "./VoiceSettingsOverlay";
 
@@ -39,6 +41,7 @@ export type SettingsSection =
   | "memory"
   | "voice"
   | "usage"
+  | "internal-costs"
   | "computer"
   | "billing"
   | "updates";
@@ -124,13 +127,17 @@ export function SettingsOverlay({
   }, [billingEnabled, section]);
 
   useEffect(() => {
+    if (usage && !usage.canViewInternalCosts && section === "internal-costs") setSection("usage");
+  }, [usage, section]);
+
+  useEffect(() => {
     if (section !== "computer") releaseComputerRecovery();
   }, [section, releaseComputerRecovery]);
   useEffect(() => () => window.clearTimeout(recoveryHoldTimer.current), []);
 
   useEffect(() => {
+    onUsageOpen();
     if (section === "usage") {
-      onUsageOpen();
       usageRef.current?.focus();
     }
   }, [section, onUsageOpen]);
@@ -141,6 +148,9 @@ export function SettingsOverlay({
     { id: "memory", label: t`Memory`, icon: Brain },
     { id: "voice", label: t`Voice`, icon: Volume2 },
     { id: "usage", label: t`Usage`, icon: Gauge },
+    ...(usage?.canViewInternalCosts
+      ? [{ id: "internal-costs" as const, label: t`Internal Costs`, icon: ChartNoAxesCombined }]
+      : []),
     ...(showComputer ? [{ id: "computer" as const, label: t`Computer`, icon: Monitor }] : []),
     ...(billingEnabled ? [{ id: "billing" as const, label: t`Billing`, icon: CreditCard }] : []),
     { id: "updates", label: t`Updates`, icon: CloudDownload },
@@ -172,7 +182,7 @@ export function SettingsOverlay({
     leaveSettings(onClose);
   }
 
-  const widePane = section === "models" || section === "voice";
+  const widePane = section === "models" || section === "voice" || section === "internal-costs";
 
   return (
     <Dialog
@@ -266,6 +276,9 @@ export function SettingsOverlay({
               ) : null}
               {section === "usage" ? (
                 <UsageSettingsPanel usage={usage} panelRef={usageRef} />
+              ) : null}
+              {section === "internal-costs" && usage?.canViewInternalCosts ? (
+                <InternalCostsSettingsPanel />
               ) : null}
               {section === "computer" && showComputer ? (
                 <ComputerSettingsPanel

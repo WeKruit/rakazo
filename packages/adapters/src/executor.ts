@@ -442,7 +442,7 @@ import {
 import { peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
-import { listPiCatalog } from "./pi-models.js";
+import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
 import {
   isRetiredModelCredentialError,
   parseModelSecret,
@@ -7935,15 +7935,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   provider = createAutoReviewProvider("llm", {
                     llm: {
                       onUsage: async (event) => {
-                        await recordUsage(deps.prisma, event, {
-                          spaceId: run.spaceId,
-                          userId: run.userId,
-                          botId: bot.id,
-                          parentRunId: runId,
-                          runId,
-                          operationId: `auto-review:${runId}`,
-                          operationKind: "setup",
-                        });
+                        await recordUsage(
+                          deps.prisma,
+                          event,
+                          {
+                            spaceId: run.spaceId,
+                            userId: run.userId,
+                            botId: bot.id,
+                            parentRunId: runId,
+                            runId,
+                            operationId: `auto-review:${runId}`,
+                            operationKind: "setup",
+                          },
+                          estimateCatalogTokenCostUsd,
+                        );
                         await appendUsageTimingAudit(
                           deps,
                           { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
@@ -12374,14 +12379,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               onUsage: async (event) => {
                 runCostUsd += event.costUsd ?? 0;
                 countPromptCache(event);
-                await recordUsage(deps.prisma, event, {
-                  spaceId: run.spaceId,
-                  botId: bot.id,
-                  userId: run.userId,
-                  runId,
-                  parentRunId: runId,
-                  operationId: runId,
-                });
+                await recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    botId: bot.id,
+                    userId: run.userId,
+                    runId,
+                    parentRunId: runId,
+                    operationId: runId,
+                  },
+                  estimateCatalogTokenCostUsd,
+                );
                 await appendUsageTimingAudit(
                   deps,
                   { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
@@ -13179,14 +13189,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } else if (event.type === "usage" && !event.accounted) {
               runCostUsd += event.costUsd ?? 0;
               countPromptCache(event);
-              await recordUsage(deps.prisma, event, {
-                spaceId: run.spaceId,
-                botId: bot.id,
-                userId: run.userId,
-                runId,
-                parentRunId: runId,
-                operationId: runId,
-              });
+              await recordUsage(
+                deps.prisma,
+                event,
+                {
+                  spaceId: run.spaceId,
+                  botId: bot.id,
+                  userId: run.userId,
+                  runId,
+                  parentRunId: runId,
+                  operationId: runId,
+                },
+                estimateCatalogTokenCostUsd,
+              );
               await appendUsageTimingAudit(
                 deps,
                 { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },

@@ -402,11 +402,6 @@ export function RecruitingSupplementaryTab({
                             <p>{action.roleRevisionId}</p>
                             <p>{action.runId}</p>
                             <p>{action.sourceMessageId}</p>
-                            {action.usage?.map((usage, index) => (
-                              <p key={`${index}:${usage.unit}`}>
-                                {usage.scope} · {usage.amount} {usage.unit}
-                              </p>
-                            ))}
                           </div>
                         </details>
                       ) : null}

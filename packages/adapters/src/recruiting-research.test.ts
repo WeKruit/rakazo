@@ -215,12 +215,30 @@ describe("people-search agent runs", () => {
           provider: "people-search",
           unit: "credits",
           quantity: 0.21,
+          costUsd: 0.21,
+          costSource: "provider-reported",
           callId: "credits:people-search:agent_run_1",
           runId: "run",
         }),
       ],
       skipDuplicates: true,
     });
+  });
+
+  it("does not record non-finite or negative provider dollar receipts", async () => {
+    const createMany = vi.fn();
+    for (const total of ["Infinity", "NaN", -1]) {
+      await recordAgentRunCost(
+        { usageRecord: { createMany } } as never,
+        actor,
+        { ...server, slug: "people-search" },
+        "agent_run",
+        {
+          structuredContent: { id: "invalid", status: "completed", costDollars: { total } },
+        },
+      );
+    }
+    expect(createMany).not.toHaveBeenCalled();
   });
 
   it("leaves other tools and services unchanged", async () => {

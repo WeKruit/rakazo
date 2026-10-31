@@ -16,7 +16,7 @@ import {
   validateAttachmentMimeType,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { IsolationError, Prisma, withResolvedArtifactVersion } from "@rakazo/db";
+import { IsolationError, Prisma, seesOperatorSpend, withResolvedArtifactVersion } from "@rakazo/db";
 
 function adapterContext(actor: Actor, botId: string, operationId: string) {
   return {
@@ -130,8 +130,16 @@ function createdArtifact(row: Prisma.ArtifactGetPayload<Record<string, never>>) 
   };
 }
 
-function artifactDiagnostics(actor: Actor, input: { includeDiagnostics?: boolean }) {
-  return actor.isDeploymentOwner && input.includeDiagnostics === true;
+async function artifactDiagnostics(
+  prisma: Pick<PrismaClient, "user">,
+  actor: Actor,
+  input: { includeDiagnostics?: boolean },
+) {
+  return (
+    actor.isDeploymentOwner &&
+    input.includeDiagnostics === true &&
+    (await seesOperatorSpend(prisma, actor.userId))
+  );
 }
 
 // Match server-owned provenance on any family member, never a name or upload nonce.
@@ -174,11 +182,11 @@ function internalRecruitingFamily() {
 }
 
 async function assertArtifactVisible(
-  prisma: Pick<PrismaClient, "$queryRaw">,
+  prisma: Pick<PrismaClient, "$queryRaw" | "user">,
   actor: Actor,
   input: { artifactId: string; includeDiagnostics?: boolean },
 ) {
-  if (artifactDiagnostics(actor, input)) return;
+  if (await artifactDiagnostics(prisma, actor, input)) return;
   const internal = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT a.id FROM "artifacts" a
     WHERE a.id = ${input.artifactId} AND a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId}
@@ -189,11 +197,11 @@ async function assertArtifactVisible(
 }
 
 export async function listOwnedArtifacts(
-  deps: { prisma: Pick<PrismaClient, "$queryRaw"> },
+  deps: { prisma: Pick<PrismaClient, "$queryRaw" | "user"> },
   actor: Actor,
   input: { botId: string; includeDiagnostics?: boolean; offset?: number },
 ) {
-  const visibility = artifactDiagnostics(actor, input)
+  const visibility = (await artifactDiagnostics(deps.prisma, actor, input))
     ? Prisma.empty
     : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
   const page =
@@ -384,13 +392,13 @@ function decodeArtifactListCursor(value: string): ArtifactListCursor {
 }
 
 export async function listSpaceArtifacts(
-  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw"> },
+  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw" | "user"> },
   actor: Actor,
   input: { botId?: string; cursor?: string; limit?: number; includeDiagnostics?: boolean },
 ) {
   const take = Math.min(Math.max(input.limit ?? 30, 1), 60);
   const scopeBotId = input.botId ?? null;
-  const diagnostics = artifactDiagnostics(actor, input);
+  const diagnostics = await artifactDiagnostics(deps.prisma, actor, input);
   const scope = createHash("sha256")
     .update(JSON.stringify([actor.spaceId, actor.userId, scopeBotId, diagnostics]))
     .digest("hex");
@@ -467,7 +475,7 @@ export async function listSpaceArtifacts(
 }
 
 export async function listArtifactVersions(
-  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw"> },
+  deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw" | "user"> },
   actor: Actor,
   input: { familyId: string; includeDiagnostics?: boolean; offset?: number },
 ) {
