@@ -12,6 +12,8 @@ import {
   pendingInputAttention,
   resolveAskChoice,
   selectedAskActionLabel,
+  waitingApprovalCards,
+  waitingApprovalNote,
 } from "./answerable-ask.js";
 
 it("unsets cleared optional fields while preserving required and explicit empty enum values", () => {
@@ -280,5 +282,33 @@ describe("closed cards", () => {
     expect(
       closedAskAnswer({ kind: "ask", text: "Which city?", status: "answered" }, "Paris"),
     ).toBeNull();
+  });
+});
+
+describe("waiting approval cards", () => {
+  const approval = (text: string, status: string) => ({
+    kind: "ask",
+    text,
+    status,
+    approvalEffectId: "11111111-1111-4111-8111-111111111111",
+  });
+
+  it("lists only approval cards still waiting, once each, by their first line", () => {
+    expect(
+      waitingApprovalCards([
+        [approval("Confirm interview booking → Adam Test\nTue 10:00", "pending")],
+        [approval("Confirm interview booking → Adam Test", "pending")],
+        [approval("Send email to Bo", "answered"), approval("Old card", "expired")],
+        [{ kind: "ask", text: "Which city?", status: "pending" }],
+        "not blocks",
+      ]),
+    ).toEqual(["Confirm interview booking → Adam Test"]);
+  });
+
+  it("says nothing when no card waits and forbids claiming an answer when one does", () => {
+    expect(waitingApprovalNote([])).toBeUndefined();
+    const note = waitingApprovalNote(["Confirm interview booking → Adam Test"]);
+    expect(note).toContain('nobody has answered: "Confirm interview booking → Adam Test"');
+    expect(note).toContain("Never say or imply the user approved");
   });
 });

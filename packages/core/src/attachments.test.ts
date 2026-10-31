@@ -261,6 +261,30 @@ describe("ask history", () => {
   });
 });
 
+describe("approval card history", () => {
+  const card = {
+    kind: "ask" as const,
+    text: "Confirm interview booking → Adam Test",
+    approvalEffectId: "11111111-1111-4111-8111-111111111111",
+    actions: [
+      { id: "allow", label: "Allow once" },
+      { id: "deny", label: "Deny" },
+    ],
+  };
+
+  it("says an unanswered approval card is still waiting, so no turn reads it as granted", () => {
+    expect(blocksToAgentHistoryText([{ ...card, status: "pending" }])).toBe(
+      "Confirm interview booking → Adam Test\n(Approval card waiting for the user; not answered)",
+    );
+    expect(blocksToAgentHistoryText([{ ...card, status: "expired" }])).toBe(
+      "Confirm interview booking → Adam Test\n(Approval card closed unanswered)",
+    );
+    expect(blocksToAgentHistoryText([{ ...card, status: "answered", answer: "allow" }])).toBe(
+      "Confirm interview booking → Adam Test\nAnswer: Allow once",
+    );
+  });
+});
+
 describe("role chat context", () => {
   it("keeps the CRM role reference and the workbench selection together", () => {
     const crmRoleReference = {
