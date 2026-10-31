@@ -376,6 +376,56 @@ async function cleanUp() {
   }
 }
 
+/** Every event of a thread so far, from the replay of its event stream. */
+async function readEvents(groupId, { limitMs = 15_000 } = {}) {
+  const controller = new AbortController();
+  // A busy stream must not keep replay open beyond a latency assertion's budget.
+  const replayLimit = setTimeout(() => controller.abort(), limitMs);
+  let idle = setTimeout(() => controller.abort(), 15_000);
+  const events = [];
+  try {
+    if (EMAIL && !cookie) await signIn();
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        origin: ORIGIN,
+        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+      },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // The replay arrives at once; a quiet stream means it has caught up.
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 3_000);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const data = JSON.parse(line.slice(5));
+          events.push(data.json ?? data);
+        } catch {}
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    clearTimeout(idle);
+    clearTimeout(replayLimit);
+  }
+  return events;
+}
+
 let passed = false;
 try {
   if (wanted.has("smoke"))
@@ -787,55 +837,6 @@ try {
         1,
       ),
     );
-  }
-  /** Every event of a thread so far, from the replay of its event stream. */
-  async function readEvents(groupId, { limitMs = 15_000 } = {}) {
-    const controller = new AbortController();
-    // A busy stream must not keep replay open beyond a latency assertion's budget.
-    const replayLimit = setTimeout(() => controller.abort(), limitMs);
-    let idle = setTimeout(() => controller.abort(), 15_000);
-    const events = [];
-    try {
-      if (EMAIL && !cookie) await signIn();
-      const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "text/event-stream",
-          origin: ORIGIN,
-          ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
-        },
-        body: JSON.stringify({ json: { groupId, cursor: 0 } }),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // The replay arrives at once; a quiet stream means it has caught up.
-        clearTimeout(idle);
-        idle = setTimeout(() => controller.abort(), 3_000);
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          try {
-            const data = JSON.parse(line.slice(5));
-            events.push(data.json ?? data);
-          } catch {}
-        }
-      }
-    } catch (error) {
-      if (error.name !== "AbortError") throw error;
-    } finally {
-      clearTimeout(idle);
-      clearTimeout(replayLimit);
-    }
-    return events;
   }
   const DECLINED =
     /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
