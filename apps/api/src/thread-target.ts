@@ -1318,7 +1318,37 @@ export async function sendThreadMessage(
         const runs: Array<{ id: string; taskId: string; botId: string; status: string }> = [];
         // Queued only while every addressed bot holds it as unread steering.
         let steeredCount = 0;
-        for (const botId of targetBotIds) {
+        // "After you finish" sent while only a teammate is still working waits for that
+        // teammate's answer instead of starting a second, parallel turn.
+        const teammateRun =
+          queueMode === "follow_up" &&
+          !targetBotIds.some((botId) => activeByBotId.has(botId) || answeredByBotId.has(botId))
+            ? (
+                await tx.run.findMany({
+                  where: {
+                    threadId: target.threadId,
+                    botId: { in: memberBotIds.filter((botId) => !targetBotIds.includes(botId)) },
+                    status: { in: [...STEERABLE_RUN_STATUSES] },
+                  },
+                  orderBy: { createdAt: "desc" },
+                  select: { id: true, taskId: true, botId: true, status: true, trigger: true },
+                })
+              ).find(steersUserMessage)
+            : undefined;
+        if (teammateRun) {
+          await tx.steeringMessage.create({
+            data: {
+              messageId: message.id,
+              botId: teammateRun.botId,
+              userId: actor.userId,
+              runId: teammateRun.id,
+              originTrigger: "follow_up",
+            },
+          });
+          runs.push(teammateRun);
+          steeredCount = targetBotIds.length;
+        }
+        for (const botId of teammateRun ? [] : targetBotIds) {
           const answered = answeredByBotId.get(botId);
           if (answered) {
             runs.push(...answered);

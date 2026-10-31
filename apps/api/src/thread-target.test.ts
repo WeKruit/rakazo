@@ -9,8 +9,8 @@ import {
   cancelSupersededQueuedRuns,
   reactToThreadMessage,
   sendThreadMessage,
-  stopThreadRuns,
   stoppedNotice,
+  stopThreadRuns,
   threadHead,
   threadSnapshot,
 } from "./thread-target.js";
@@ -1298,6 +1298,76 @@ function groupTarget() {
 }
 
 describe("sendThreadMessage", () => {
+  it("waits for a still-working teammate when a follow-up arrives after the coordinator finished", async () => {
+    let seq = 0;
+    const teammate = {
+      id: "run-2",
+      taskId: "task-2",
+      botId: "bot-2",
+      trigger: "follow_up",
+      status: "running",
+    };
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
+      thread: {
+        findFirst: vi.fn().mockResolvedValue({ id: "thread-1" }),
+        update: vi.fn(async () => ({ nextMessageSeq: ++seq, nextEventSeq: seq })),
+      },
+      chatGroup: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "group-1",
+          members: [
+            { bot: { id: "bot-1", name: "Main", color: null } },
+            { bot: { id: "bot-2", name: "Sourcer", color: null } },
+          ],
+        }),
+        update: vi.fn(),
+      },
+      message: {
+        create: vi.fn(async ({ data }) => ({ ...data, id: "message-1", seq: 1 })),
+        update: vi.fn(),
+      },
+      task: { create: vi.fn(async ({ data }) => ({ ...data, id: "task-1" })) },
+      run: {
+        // The coordinator has nothing running; only the teammate it handed the search to does.
+        findMany: vi.fn(async ({ where }: { where: { botId: { in: string[] } } }) =>
+          where.botId.in.includes("bot-2") && !where.botId.in.includes("bot-1") ? [teammate] : [],
+        ),
+        findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+        create: vi.fn(async ({ data }) => ({ ...data, id: "run-1" })),
+      },
+      steeringMessage: { create: vi.fn() },
+      event: { create: vi.fn(async ({ data }) => ({ ...data, seq })) },
+    };
+    const deps = {
+      prisma: {
+        message: { findUnique: vi.fn().mockResolvedValue(null) },
+        $transaction: vi.fn(async (fn) => fn(tx)),
+      } as unknown as PrismaClient,
+      events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+      jobs: { enqueue: vi.fn().mockResolvedValue(undefined) } as never,
+    };
+    const target = {
+      kind: "group",
+      groupId: "group-1",
+      groupName: "Role",
+      threadId: "thread-1",
+      members: [],
+      memberBotIds: ["bot-1", "bot-2"],
+    } as unknown as ThreadTarget;
+    const actor = { spaceId: "space-1", userId: "user-1" } as Actor;
+    await sendThreadMessage(deps, actor, target, {
+      text: "When everything is done, tell me the total in one sentence.",
+      queueMode: "follow_up",
+      addressing: "coordinator",
+    });
+    expect(tx.run.create).not.toHaveBeenCalled();
+    expect(tx.steeringMessage.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "bot-2", runId: "run-2", originTrigger: "follow_up" }),
+    });
+    expect(tx.event.create.mock.lastCall![0].data.payload).toMatchObject({ queued: true });
+  });
+
   it.each([
     { kind: "bot", queueMode: undefined },
     { kind: "group", queueMode: undefined },
