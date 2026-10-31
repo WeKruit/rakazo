@@ -213,6 +213,9 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 let composerProps: ComponentProps<typeof Composer>;
 
+// jsdom has no layout: the composer asks what is on top before it records a shown run error.
+Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => null });
+
 afterEach(() => {
   readRetries.real = false;
   act(() => root?.unmount());
