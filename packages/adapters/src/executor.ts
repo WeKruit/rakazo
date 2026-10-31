@@ -185,6 +185,8 @@ import {
   unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
+  waitingApprovalCards,
+  waitingApprovalNote,
   withoutHiddenTools,
   workActivityForTool,
 } from "@rakazo/core";
@@ -1133,6 +1135,10 @@ const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 const HANDOFF_OPENING_NOTE =
   "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+
+/** A message typed while an approval card waits is its own request, never the card's answer. */
+const WAITING_CARDS_NEW_MESSAGE_NOTE =
+  "The user's latest message is a new message, not an answer to those cards: answer what it actually asks. If it asks to go ahead with one of them, point the user to that card.";
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
@@ -12725,28 +12731,45 @@ export function createRunExecutor(deps: ExecutorDeps) {
           historyMessages
             .find((message) => message.id === run.sourceMessageId)
             ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
-        const [jobRole, intake, intakeSkill, replyContext, plannedNote] = await ownTime(
-          "turnNotes",
-          Promise.all([
-            startRoleFromJob(),
-            intakeTurnNote().catch((error) => {
-              getLogger().warn("saved job page not loaded", { error: String(error) });
-              return undefined;
-            }),
-            tools.some((tool) => tool.name === "recruiting_role")
-              ? skillReadFromTool(
-                  deps.prisma,
-                  { spaceId: run.spaceId, userId: run.userId },
-                  { name: RECRUITING_INTAKE_SKILL_NAME },
-                ).catch(() => null)
-              : null,
-            loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
-            plannedSearchNote().catch((error) => {
-              getLogger().warn("planned people searches not run", { error: String(error) });
-              return undefined;
-            }),
-          ]),
-        );
+        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards] =
+          await ownTime(
+            "turnNotes",
+            Promise.all([
+              startRoleFromJob(),
+              intakeTurnNote().catch((error) => {
+                getLogger().warn("saved job page not loaded", { error: String(error) });
+                return undefined;
+              }),
+              tools.some((tool) => tool.name === "recruiting_role")
+                ? skillReadFromTool(
+                    deps.prisma,
+                    { spaceId: run.spaceId, userId: run.userId },
+                    { name: RECRUITING_INTAKE_SKILL_NAME },
+                  ).catch(() => null)
+                : null,
+              loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
+              plannedSearchNote().catch((error) => {
+                getLogger().warn("planned people searches not run", { error: String(error) });
+                return undefined;
+              }),
+              run.trigger === "user" && currentTurnMessage?.role === "user"
+                ? deps.prisma.message
+                    .findMany({
+                      where: {
+                        threadId: thread.id,
+                        role: "bot",
+                        blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+                      },
+                      orderBy: { seq: "desc" },
+                      take: 20,
+                      select: { blocks: true },
+                    })
+                    .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
+                    .catch(() => [])
+                : [],
+            ]),
+          );
+        const waitingCardsNote = waitingApprovalNote(waitingCards);
         linkRole = jobRole;
         // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
         // them instead of answering (or declining) them itself.
@@ -12841,6 +12864,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           handedIn ? HANDOFF_OPENING_NOTE : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
+          waitingCardsNote && `${waitingCardsNote} ${WAITING_CARDS_NEW_MESSAGE_NOTE}`,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
           voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
           // Per-turn, not in the system prompt: the timestamp changes every call and would break the cacheable prefix.

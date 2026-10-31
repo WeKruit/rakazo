@@ -156,6 +156,9 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
       }
       // Without the answer a later turn sees the question as still open and asks it again.
       if (block.kind === "ask") {
+        // An approval card that reads like a request must not read like a granted one.
+        if (block.approvalEffectId && block.status !== "answered")
+          return `${block.text}\n(${block.status === "expired" ? "Approval card closed unanswered" : "Approval card waiting for the user; not answered"})`;
         if (block.status !== "answered" || !block.answer) return block.text;
         const choice = block.actions?.find((action) => action.id === block.answer);
         return `${block.text}\nAnswer: ${choice?.label ?? block.answer}`;

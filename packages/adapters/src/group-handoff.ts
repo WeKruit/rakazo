@@ -5,6 +5,8 @@ import {
   nextBotMessageHop,
   recruitingBotKey,
   renderGroupMembersContext,
+  waitingApprovalCards,
+  waitingApprovalNote,
 } from "@rakazo/core";
 import {
   appendEventInTransaction,
@@ -155,11 +157,26 @@ export async function handoffToGroupBot(
         } as const;
       }
 
+      // The sender's words about a card are not its state: the next bot reads the cards' own record.
+      const waitingCards = await tx.message.findMany({
+        where: {
+          threadId: run.threadId,
+          role: "bot",
+          blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+        },
+        orderBy: { seq: "desc" },
+        take: 20,
+        select: { blocks: true },
+      });
+      const approvalNote = waitingApprovalNote(
+        waitingApprovalCards(waitingCards.map((message) => message.blocks)),
+      );
+      const text = approvalNote ? `${input.message}\n\n${approvalNote}` : input.message;
       const handoffBlock: MessageBlock = {
         kind: "handoff",
         fromBotId: run.botId,
         toBotId: targetId,
-        text: input.message,
+        text,
         hop,
         ...(input.report_back ? { reportBack: true } : {}),
       };
@@ -177,7 +194,7 @@ export async function handoffToGroupBot(
           botId: targetId,
           threadId: run.threadId,
           userId: run.userId,
-          prompt: input.message,
+          prompt: text,
           status: "queued",
         },
       });
@@ -203,7 +220,7 @@ export async function handoffToGroupBot(
           messageId: message.id,
           fromBotId: run.botId,
           toBotId: targetId,
-          text: input.message,
+          text: text,
         },
       });
       await touchGroupUpdatedAt(tx, groupId);
