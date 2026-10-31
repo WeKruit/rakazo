@@ -1164,6 +1164,22 @@ async function recruitingReplyOutcomes(
   return { operations, partial: effects.length > 100 };
 }
 
+export type PhaseTimer = { phases: Record<string, number>; mark(name: string): void };
+
+/** Adds the time since the previous mark to a named phase. */
+export function phaseTimer(): PhaseTimer {
+  let last = Date.now();
+  const phases: Record<string, number> = {};
+  return {
+    phases,
+    mark(name) {
+      const now = Date.now();
+      phases[name] = (phases[name] ?? 0) + now - last;
+      last = now;
+    },
+  };
+}
+
 export async function getRecruitingCorrespondence(
   prisma: PrismaClient,
   actor: Actor,
@@ -1173,6 +1189,7 @@ export async function getRecruitingCorrespondence(
   oauth?: Pick<McpOAuthBroker, "statusFor">,
   page: { limit?: number; cursor?: string } = {},
   crmReads?: Omit<RecruitingCrmReadDeps, "prisma">,
+  timer?: PhaseTimer,
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
     if (
@@ -1182,9 +1199,11 @@ export async function getRecruitingCorrespondence(
         Number(page.cursor) > Number.MAX_SAFE_INTEGER - 200)
     )
       throw new ORPCError("BAD_REQUEST");
+    timer?.mark("mailBeforeMs");
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
       threadId: target.threadId,
     });
+    timer?.mark("mailWorkspaceMs");
     const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
     const servers = await prisma.mcpServer.findMany({
       where: { userId: actor.userId, spaceId: actor.spaceId },
@@ -1256,8 +1275,10 @@ export async function getRecruitingCorrespondence(
         }),
       ),
     };
+    timer?.mark("mailConnectionsMs");
     let assertCalendarLineageCurrent: (() => Promise<void>) | undefined;
     const finish = async () => {
+      timer?.mark("mailSavedReadsMs");
       const contactEmails: string[] = [];
       if (workspace && crmReads && view === "interview") {
         let cursor: string | null = null;
@@ -1303,6 +1324,7 @@ export async function getRecruitingCorrespondence(
           }
         }
       }
+      timer?.mark("mailInterviewContactsMs");
       if (workspace && crmReads)
         await refreshRecruitingCorrespondence(
           { prisma, ...crmReads },
@@ -1317,6 +1339,7 @@ export async function getRecruitingCorrespondence(
           sourceRows,
           output,
         );
+      timer?.mark("mailRefreshMs");
       let assertNativeCurrent: (() => Promise<void>) | null = null;
       if (workspace && view === "inbox") {
         const native = await nativeRecruitingCorrespondence(prisma, actor, target.threadId, {
@@ -1442,6 +1465,7 @@ export async function getRecruitingCorrespondence(
           else if (output.status !== "unsupported") output.status = "empty";
         }
       }
+      timer?.mark("mailInboxMs");
       await assertNativeCurrent?.();
       await assertCalendarLineageCurrent?.();
       if (workspace && view === "interview") {
@@ -1455,6 +1479,7 @@ export async function getRecruitingCorrespondence(
         output.operations = outcomes.operations;
         output.partial ||= outcomes.partial;
       }
+      timer?.mark("mailOutcomesMs");
       const imported = workspace
         ? await recruiting.readRecruitingImportedCorrespondence(prisma, actor, {
             threadId: target.threadId,
@@ -1540,6 +1565,7 @@ export async function getRecruitingCorrespondence(
           });
         }
       }
+      timer?.mark("mailImportedMs");
       output.emails = [...uniqueMail.values()];
       if (imported)
         output.emails.sort(
@@ -4328,9 +4354,16 @@ export async function getRecruitingRoleCandidates(
    * `summary` is for lists that show names only: it reads the CRM's first page (the total is the
    * CRM's own count) and skips match reports. Later pages use the full read.
    */
-  options: { summary?: boolean } = {},
+  options: { summary?: boolean; timer?: PhaseTimer } = {},
 ): Promise<RecruitingRoleCandidatesOutput> {
   if (target.threadId !== input.threadId) throw new IsolationError();
+  const timed = async <T>(phase: string, read: Promise<T>) => {
+    try {
+      return await read;
+    } finally {
+      options.timer?.mark(phase);
+    }
+  };
   const roleId = await authenticated(() =>
     recruiting.getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: input.threadId }),
   );
@@ -4346,64 +4379,73 @@ export async function getRecruitingRoleCandidates(
   const sort = input.sort ?? "score";
   return mergeRoleCandidates(input, {
     autumn: (cursor, limit) =>
-      listRecruitingCandidates(
-        deps,
-        actor,
-        {
-          roleId,
-          limit,
-          sort,
-          ...(cursor ? { cursor } : {}),
-          ...(input.query ? { query: input.query } : {}),
-          ...(input.shortlistedOnly ? { shortlisted: true } : {}),
-          ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
-        },
-        options.summary ? { reports: false } : {},
-      ),
-    autumnLinkedinUrls: () =>
-      authenticated(() =>
-        recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
-      ),
-    async crm(binding) {
-      const rows: RoleCandidatesCrmRow[] = [];
-      let total: number | undefined;
-      try {
-        // Read the role's people live from the CRM, so replies and status are current. Each page
-        // is a fully authorized read; pages after the first load a few at a time.
-        const page = await getRecruitingCrmData(
+      timed(
+        "candidatesSavedMs",
+        listRecruitingCandidates(
           deps,
           actor,
-          target,
           {
-            operation: "candidates",
-            serverId: binding.mcpServerId,
-            serverRevision: binding.serverRevision,
-            organizationId: binding.organizationId,
-            crmRoleId: binding.crmRoleId,
-            limit: CRM_PAGE,
+            roleId,
+            limit,
+            sort,
+            ...(cursor ? { cursor } : {}),
+            ...(input.query ? { query: input.query } : {}),
+            ...(input.shortlistedOnly ? { shortlisted: true } : {}),
+            ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
           },
-          options.summary ? {} : { allPages: true },
-        );
-        if (page.operation !== "candidates") throw new IsolationError();
-        if (options.summary && page.nextOffset !== null) total = page.total;
-        const seen = new Set<string>();
-        for (const item of page.items) {
-          if (seen.has(item.candidateId)) continue;
-          seen.add(item.candidateId);
-          rows.push({
-            ...item,
-            serverId: page.source.serverId,
-            organizationId: page.source.organizationId,
-          });
-        }
-      } catch (error) {
-        // Never substitute stored data when current source authorization cannot be verified.
-        if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
-        return { status: "unavailable" };
-      }
-      return { status: "ok", rows, ...(total !== undefined ? { total } : {}) };
-    },
+          options.summary ? { reports: false } : {},
+        ),
+      ),
+    autumnLinkedinUrls: () =>
+      timed(
+        "candidatesLinkedinMs",
+        authenticated(() =>
+          recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
+        ),
+      ),
+    crm: (binding) => timed("candidatesCrmMs", readCrm(binding)),
   });
+  async function readCrm(
+    binding: RecruitingCrmTarget,
+  ): Promise<Awaited<ReturnType<RoleCandidatesSources["crm"]>>> {
+    const rows: RoleCandidatesCrmRow[] = [];
+    let total: number | undefined;
+    try {
+      // Read the role's people live from the CRM, so replies and status are current. Each page
+      // is a fully authorized read; pages after the first load a few at a time.
+      const page = await getRecruitingCrmData(
+        deps,
+        actor,
+        target,
+        {
+          operation: "candidates",
+          serverId: binding.mcpServerId,
+          serverRevision: binding.serverRevision,
+          organizationId: binding.organizationId,
+          crmRoleId: binding.crmRoleId,
+          limit: CRM_PAGE,
+        },
+        options.summary ? {} : { allPages: true },
+      );
+      if (page.operation !== "candidates") throw new IsolationError();
+      if (options.summary && page.nextOffset !== null) total = page.total;
+      const seen = new Set<string>();
+      for (const item of page.items) {
+        if (seen.has(item.candidateId)) continue;
+        seen.add(item.candidateId);
+        rows.push({
+          ...item,
+          serverId: page.source.serverId,
+          organizationId: page.source.organizationId,
+        });
+      }
+    } catch (error) {
+      // Never substitute stored data when current source authorization cannot be verified.
+      if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
+      return { status: "unavailable" };
+    }
+    return { status: "ok", rows, ...(total !== undefined ? { total } : {}) };
+  }
 }
 
 export const listRecruitingReminders = (
