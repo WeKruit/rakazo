@@ -39,3 +39,19 @@ export async function readResearchViewPages(
     }
   }
 }
+
+const views = [
+  "brief",
+  "feedback",
+  "shortlist",
+  "contacts",
+  "sequence",
+  "inbox",
+  "interview",
+  "tasks",
+  "routines",
+] as const;
+type AccountView = (typeof views)[number];
+export function isAccountRecruitingView(value: string | null): value is AccountView {
+  return views.some((view) => view === value);
+}

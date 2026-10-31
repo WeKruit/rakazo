@@ -425,12 +425,6 @@ export function CrmGate({ crm }: { crm: RoleCrm }) {
         <Trans>Open the role conversation to see its candidates.</Trans>
       </TabNotice>
     );
-  if (crm.status === "unbound")
-    return (
-      <TabNotice>
-        <Trans>No candidate records for this role yet.</Trans>
-      </TabNotice>
-    );
   return null;
 }
 

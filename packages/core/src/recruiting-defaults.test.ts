@@ -56,6 +56,20 @@ describe("maintained recruiting defaults", () => {
     expect(sourcing.body).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
   });
 
+  it("keeps account reads with Main before specialist work", () => {
+    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
+    expect(main.instructions).toContain(
+      "Answer read-only interviews, shortlist, replies, sequences and roles questions with recruiting_candidates yourself; do not hand off",
+    );
+    expect(main.instructions).toContain(
+      "Without a linked role default to all active roles and name each role",
+    );
+    expect(main.instructions).toContain("For specialist work beyond those reads");
+    expect(main.instructions.indexOf("do not hand off")).toBeLessThan(
+      main.instructions.indexOf("call handoff_to_bot"),
+    );
+  });
+
   it("gives Sourcer the scale stage order", () => {
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
     const order = [

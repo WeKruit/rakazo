@@ -1185,7 +1185,7 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. Use recruiting_role to create or explicitly select a role before recruiting work.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles, interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. Open the role's existing conversation for role-specific work. Never create or bind a role in global Main.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",

@@ -20,6 +20,7 @@ import {
 } from "../../lib/bot-run-status";
 import { markOnce } from "../../lib/performance";
 import { retryTransientRead } from "../../lib/read-retry";
+import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
 import { getToolActivityEnabled, subscribeToolActivity } from "../../lib/tool-activity-preference";
 import { sidebarGroupsForSpaces } from "../shell/space-sidebar";
@@ -168,6 +169,10 @@ export function useShellRoster({
   routeBotId.current = botId;
   const routeGroupId = useRef<string | undefined>(groupId);
   routeGroupId.current = groupId;
+  const isAccountRoute = () =>
+    !routeGroupId.current &&
+    !routeBotId.current &&
+    isAccountRecruitingView(searchParamsRef.current.get("view"));
 
   const refreshBots = useCallback(
     (includeArchived = false, replaceBotOrder = false) => {
@@ -230,6 +235,7 @@ export function useShellRoster({
               setSpaces(navigation.spaces);
               setInitialBotsLoaded(true);
               botsRefreshApplied.current = request;
+              if (showToolActivityRef.current === false && isAccountRoute()) continue;
               if (
                 includeArchived &&
                 list.length === 0 &&
@@ -393,6 +399,10 @@ export function useShellRoster({
             return archivedGroupList;
           },
         );
+        if (recruiting && isAccountRoute()) {
+          void archived.catch(() => undefined);
+          return;
+        }
         if (
           bootstrap.bots.length === 0 &&
           groupList.length === 0 &&

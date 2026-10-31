@@ -91,10 +91,13 @@ import {
   createPool,
   createSpaceForMember,
   createThreadEvents,
+  ensureRecruitingWorkspace,
   IsolationError,
   parsePositiveInteger,
   provisionMessagingIdentity,
   pushSessionExpiresAt,
+  RECRUITING_PRESET_SOURCE,
+  recruitingPresetId,
   requireMembership,
   SESSION_RELEASE_MS,
 } from "@rakazo/db";
@@ -433,6 +436,29 @@ export async function createApp(
     signupsEnabled: env.signupsEnabled,
     signupAllowlist: env.signupAllowlist,
     email,
+    ensureUserSpace: async (user, spaceId) => {
+      const installed = await prisma.capabilityInstall.findFirst({
+        where: {
+          id: recruitingPresetId({ userId: user.id, spaceId }),
+          userId: user.id,
+          spaceId,
+          kind: "plugin",
+          source: RECRUITING_PRESET_SOURCE,
+        },
+        select: { id: true },
+      });
+      if (installed) return;
+      await ensureRecruitingWorkspace(
+        prisma,
+        {
+          userId: user.id,
+          spaceId,
+          email: user.email,
+          isDeploymentOwner: false,
+        },
+        { sandboxKind: env.sandboxProvider, firstPartyMcpUrl: env.firstPartyMcpUrl },
+      );
+    },
     onEmailError: (error) => getLogger().error("transactional email delivery failed", error),
     extraOrigins: MOBILE_AUTH_ORIGINS,
     beforeDeleteUser: async (userId) => {

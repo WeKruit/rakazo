@@ -176,6 +176,12 @@ export const nativeInstantlyWrites = [
     "Lists leads of a campaign and/or one exact email, with lead id, status and interest.",
   ),
   tool(
+    "get_campaign_analytics",
+    CampaignIdInput,
+    true,
+    "Reads sent, opened and replied counts for one exact campaign.",
+  ),
+  tool(
     "get_campaign",
     CampaignIdInput,
     true,
@@ -1753,6 +1759,11 @@ export async function runInstantlyWrite(
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
     }
+    case "native_instantly_get_campaign_analytics":
+      return rest(
+        "GET",
+        `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
+      );
     case "native_instantly_get_campaign": {
       const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
       return {

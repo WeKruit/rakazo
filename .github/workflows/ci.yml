@@ -301,3 +301,47 @@ jobs:
         run: |
           printf '%s\n' 'Legacy Compose deployment is disabled pending a reviewed intake drain and writer barrier.' >&2
           exit 1
+
+  recruiting-global-regression:
+    name: Global recruiting workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://rakazo:rakazo@127.0.0.1:5433/rakazo
+      - run: pnpm --filter @rakazo/web exec playwright install chromium
+      - name: Check isolated release regression
+        run: node --test infra/acceptance/global-recruiting.test.mjs
+      - name: Capture global and role-filtered pages
+        env:
+          WEB_PORT: 5199
+          VITE_DEFAULT_UI_LOCALE: en
+        run: pnpm --filter @rakazo/web exec playwright test --config playwright.recruiting.config.ts
+      - name: Verify fresh account ordinary chat through the offline server
+        if: always()
+        env:
+          API_PORT: 3127
+          WEB_PORT: 5198
+        run: pnpm exec tsx packages/testkit/src/cli/harness.ts --e2e --spec=recruiting-global-journey.spec.ts
+      - name: Upload recruiting screenshots and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recruiting-global-screenshots
+          path: |
+            test-report/e2e/global-routes
+            test-report/e2e/recruiting-journey-results
+            playwright-report
+            test-report/e2e/recruiting-journey-report
+          retention-days: 7
+          if-no-files-found: error

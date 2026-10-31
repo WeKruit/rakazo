@@ -20,6 +20,8 @@ const db = vi.hoisted(() => ({
   candidates: vi.fn(),
   sources: vi.fn(),
 }));
+const overview = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock("./recruiting-account.js", () => ({ readRecruitingAccountView: overview.read }));
 const lookups = vi.hoisted(() => ({ saved: vi.fn(async () => new Map()) }));
 vi.mock("./recruiting-research.js", async (original) => ({
   ...(await original<object>()),
@@ -1057,5 +1059,166 @@ describe("native recruiting web material", () => {
       retainRecruitingWebMaterial(f.deps, readerTrusted, material, context),
     ).rejects.toBe(failure);
     expect(f.put).toHaveBeenCalledOnce();
+  });
+});
+
+describe("native cross-role recruiting reads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db.roleId.mockResolvedValue(null);
+    overview.read.mockResolvedValue({
+      roles: [{ id: "role", title: "Engineer" }],
+      items: [],
+      nextCursor: null,
+    });
+  });
+
+  it.each([
+    ["roles", "roles"],
+    ["interviews", "interview"],
+    ["shortlist", "shortlist"],
+    ["replies", "inbox"],
+    ["sequences", "sequence"],
+  ])("routes %s through the same account reader as the page", async (operation, view) => {
+    const f = fixture();
+    const connector = { execute: vi.fn() };
+    await executeRecruitingCandidatesTool(
+      { ...f.deps, connector },
+      trusted,
+      { operation },
+      context,
+    );
+    expect(overview.read).toHaveBeenCalledWith(
+      expect.objectContaining({ prisma: f.deps.prisma, connectors: connector }),
+      actor,
+      {
+        view,
+        roleId: undefined,
+        since: undefined,
+        cursor: undefined,
+        itemCursor: undefined,
+        campaignId: undefined,
+        campaignServerId: undefined,
+        campaignLeadCursor: undefined,
+        limit: 20,
+      },
+    );
+    const guard = overview.read.mock.calls[0]![0].stillAuthorized;
+    await expect(guard()).resolves.toBe(true);
+    f.run.userId = "foreign";
+    await expect(guard()).rejects.toThrow();
+  });
+
+  it("uses the current role by default and honors an explicit owned role filter", async () => {
+    const f = fixture();
+    db.roleId.mockResolvedValue("current");
+    const deps = { ...f.deps, connector: { execute: vi.fn() } };
+    await executeRecruitingCandidatesTool(deps, trusted, { operation: "shortlist" }, context);
+    expect(overview.read.mock.calls.at(-1)![2].roleId).toBe("current");
+    await executeRecruitingCandidatesTool(
+      deps,
+      trusted,
+      { operation: "shortlist", roleId: "selected" },
+      context,
+    );
+    expect(overview.read.mock.calls.at(-1)![2].roleId).toBe("selected");
+  });
+
+  it.each([
+    { status: "not_checked" },
+    { status: "failed" },
+    { status: "unsupported" },
+    { connectionChanged: true },
+    { connections: [{ status: "needs_connection", checkIssue: null }] },
+    { connections: [{ status: "configured", checkIssue: { status: "failed" } }] },
+    { partial: true },
+    { nextCursor: "next-mail" },
+  ])(
+    "does not present unavailable or incomplete replies as a complete zero (%j)",
+    async (unknown) => {
+      const f = fixture();
+      overview.read.mockResolvedValue({
+        roles: [{ id: "role", title: "Engineer" }],
+        items: [
+          {
+            roleId: "role",
+            correspondence: {
+              status: "empty",
+              connectionChanged: false,
+              connections: [],
+              partial: false,
+              nextCursor: null,
+              emails: [],
+              ...unknown,
+            },
+          },
+        ],
+        nextCursor: null,
+      });
+      const deps = { ...f.deps, connector: { execute: vi.fn() } };
+      expect(
+        await executeRecruitingCandidatesTool(deps, trusted, { operation: "replies" }, context),
+      ).toMatchObject({ counts: { messages: 0, complete: false } });
+    },
+  );
+
+  it("reports a verified complete empty inbox as zero", async () => {
+    const f = fixture();
+    overview.read.mockResolvedValue({
+      roles: [{ id: "role", title: "Engineer" }],
+      items: [
+        {
+          roleId: "role",
+          correspondence: {
+            status: "empty",
+            connectionChanged: false,
+            connections: [{ status: "configured", checkIssue: null }],
+            partial: false,
+            nextCursor: null,
+            emails: [],
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+    expect(
+      await executeRecruitingCandidatesTool(
+        { ...f.deps, connector: { execute: vi.fn() } },
+        trusted,
+        { operation: "replies" },
+        context,
+      ),
+    ).toMatchObject({ counts: { messages: 0, complete: true } });
+  });
+
+  it("counts only received mail and keeps page completeness explicit", async () => {
+    const f = fixture();
+    overview.read.mockResolvedValue({
+      roles: [{ id: "role", title: "Engineer" }],
+      items: [
+        {
+          roleId: "role",
+          correspondence: {
+            emails: [
+              { sender: "candidate@example.test", direction: "received" },
+              { sender: "candidate@example.test", crm: { direction: "received" } },
+              { sender: "recruiter@example.test", direction: "sent" },
+              { sender: "unknown@example.test" },
+            ],
+          },
+        },
+      ],
+      nextCursor: "next-role",
+    });
+    const result = await executeRecruitingCandidatesTool(
+      { ...f.deps, connector: { execute: vi.fn() } },
+      trusted,
+      { operation: "replies" },
+      context,
+    );
+    expect(result).toMatchObject({
+      counts: { messages: 2, people: 1, complete: false },
+      nextCursor: "next-role",
+    });
   });
 });

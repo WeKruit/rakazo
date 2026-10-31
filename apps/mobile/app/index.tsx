@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BotAvatar } from "../components/bot-avatar";
 import { BotOrganizeModal } from "../components/bot-organize-modal";
 import { GroupAvatar } from "../components/group-avatar";
+import { NativeActionButton } from "../components/native-action-button";
 import { NativeSymbol } from "../components/native-symbol";
 import { WorkingIndicator } from "../components/WorkingIndicator";
 import {
@@ -892,6 +893,46 @@ function Home() {
               />
             ) : null}
 
+            {!searching ? (
+              <View style={{ paddingHorizontal: 16, gap: 8, paddingBottom: 16 }}>
+                {groups.find((group) => group.id.startsWith("recruiting-global-")) ? (
+                  <NativeActionButton
+                    label={t("Main")}
+                    prominence="secondary"
+                    onPress={() => {
+                      const main = groups.find((group) =>
+                        group.id.startsWith("recruiting-global-"),
+                      );
+                      if (main)
+                        router.push({
+                          pathname: "/group-thread",
+                          params: { groupId: main.id, name: main.name },
+                        });
+                    }}
+                  />
+                ) : null}
+                <NativeActionButton
+                  label={t("Interview")}
+                  prominence="secondary"
+                  onPress={() =>
+                    router.push({
+                      pathname: "/recruiting",
+                      params: { view: "interview", role: "all" },
+                    })
+                  }
+                />
+                <NativeActionButton
+                  label={t("Sequence")}
+                  prominence="secondary"
+                  onPress={() =>
+                    router.push({
+                      pathname: "/recruiting",
+                      params: { view: "sequence", role: "all" },
+                    })
+                  }
+                />
+              </View>
+            ) : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {spaceRecoveryId ? (
               <Pressable

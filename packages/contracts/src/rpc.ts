@@ -172,6 +172,10 @@ import {
   UpdateRecruitingCandidateNoteInput,
   UpdateRecruitingReminderInput,
 } from "./recruiting.js";
+import {
+  RecruitingAccountViewInputSchema,
+  RecruitingAccountViewOutputSchema,
+} from "./recruiting-account.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import {
   RecruitingSchedulingPlanInputSchema,
@@ -729,6 +733,9 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    accountView: oc
+      .input(RecruitingAccountViewInputSchema)
+      .output(RecruitingAccountViewOutputSchema),
     profileActivity: {
       list: oc.input(RecruitingProfileActivityInput).output(RecruitingProfileActivityOutput),
       recordView: oc.input(RecordRecruitingProfileViewInput).output(RecruitingProfileViewSchema),
@@ -951,7 +958,15 @@ export const appContract = {
     disconnectProvider: oc.output(z.object({ ok: z.literal(true) })),
   },
   routines: {
-    list: oc.input(botId.safeExtend(listPageFields)).output(z.array(RoutineSchema)),
+    list: oc
+      .input(
+        botId.safeExtend({
+          ...listPageFields,
+          threadId: Id.optional(),
+          allConversations: z.boolean().optional(),
+        }),
+      )
+      .output(z.array(RoutineSchema)),
     history: oc
       .input(z.object({ routineId: Id, before: RoutineRunCursorSchema.optional() }))
       .output(RoutineHistorySchema),

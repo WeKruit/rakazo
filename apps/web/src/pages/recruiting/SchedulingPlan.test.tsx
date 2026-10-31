@@ -1,5 +1,6 @@
 import "../../lib/query.test-support";
 // @vitest-environment jsdom
+import type { RecruitingSchedulingPlan } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -269,4 +270,47 @@ it("does not hide incomplete history when the recent records contain no plan", a
     root.render(<SchedulingPlanHistory threadId="thread-1" roleId="role-1" />);
   });
   expect(host.textContent).toContain("Earlier plans may be missing");
+});
+
+it("reuses the account snapshot for native plan review without another backend read", async () => {
+  const plan: RecruitingSchedulingPlan = {
+    id: "account-plan",
+    threadId: "thread-1",
+    roleId: "role-1",
+    expectedRoleRevision: 2,
+    originalEmail,
+    candidate: { ...person, timeZone: "America/New_York" },
+    interviewer: { name: "Recruiter", email: "recruiter@example.test", timeZone: "Europe/London" },
+    calendar: slot,
+    createdAt: "2026-10-23T12:00:00Z",
+    roleTitle: "Engineering",
+    mailSourceId: "mail-source",
+    mailSourceRevision: 3,
+    mailRead: originalEmail.savedRead,
+    bookingStatus: "uncertain",
+    confirmationStatus: null,
+    bookingEffectId: "booking-effect",
+    confirmationEffectId: null,
+  };
+  await act(async () =>
+    root.render(
+      <SchedulingPlanHistory
+        threadId="thread-1"
+        roleId="role-1"
+        snapshot={{
+          plans: [plan, { ...plan, id: "foreign-plan", roleId: "foreign-role" }],
+          slots: [],
+          partial: false,
+        }}
+        onReview={review}
+      />,
+    ),
+  );
+  expect(list).not.toHaveBeenCalled();
+  expect(host.querySelectorAll("article")).toHaveLength(1);
+  await act(async () => button("Check outcome").click());
+  expect(review).toHaveBeenCalledWith({
+    plan,
+    text: expect.stringContaining("Do not rebook or resend"),
+  });
 });

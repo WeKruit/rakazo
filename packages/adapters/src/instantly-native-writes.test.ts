@@ -184,3 +184,28 @@ describe("activation card for one person's own first email", () => {
     expect(display.recipients).toEqual([]);
   });
 });
+
+describe("native campaign analytics", () => {
+  it("reads exact campaign totals through the existing read-only connection boundary", async () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    const rest = vi.fn(async () => ({
+      emails_sent_count: 3,
+      open_count_unique: 2,
+      reply_count_unique: 1,
+    }));
+    const tool = nativeInstantlyWrites.find(
+      (tool) => tool.toolName === "native_instantly_get_campaign_analytics",
+    );
+    expect(tool?.readOnly).toBe(true);
+    const result = await runInstantlyWrite(
+      {} as never,
+      rest,
+      context,
+      "server",
+      "native_instantly_get_campaign_analytics",
+      { campaign_id: id },
+    );
+    expect(rest).toHaveBeenCalledWith("GET", `/campaigns/analytics/overview?id=${id}`);
+    expect(result).toEqual({ emails_sent_count: 3, open_count_unique: 2, reply_count_unique: 1 });
+  });
+});

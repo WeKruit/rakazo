@@ -397,6 +397,15 @@ msgstr "返回结果"
 msgid "Back to sign in"
 msgstr "返回登录"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Background task"
+msgstr "后台任务"
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr "后台任务"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "Base URL"
@@ -481,9 +490,17 @@ msgstr "取消编辑"
 msgid "Cancel reply"
 msgstr "取消回复"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr "取消任务"
+
 #: src/components/CloudAgentCard.tsx
 msgid "cancelled"
 msgstr "已取消"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr "正在取消…"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate cards"
@@ -610,7 +627,9 @@ msgstr "客户端 ID"
 msgid "Client secret"
 msgstr "客户端密钥"
 
+#: src/components/BackgroundTasks.tsx
 #: src/components/LazyOverlay.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
@@ -900,6 +919,10 @@ msgstr "无法加载此文件。"
 msgid "Could not load this role’s candidate records."
 msgstr "无法加载这个岗位的候选人记录。"
 
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr "无法加载此任务。"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "无法加载更新状态"
@@ -981,6 +1004,10 @@ msgstr "无法更新消息"
 #: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "无法更新反应"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
+msgstr "无法更新任务。"
 
 #: src/components/computer/FilesApp.tsx
 #: src/pages/shell/useShellCreation.ts
@@ -1083,6 +1110,10 @@ msgstr "暂无间隔时间。"
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay: {0} days"
 msgstr "间隔：{0} 天"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Delegated task"
+msgstr "分派的任务"
 
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
@@ -1272,7 +1303,6 @@ msgstr "请输入有效的电子邮件地址"
 msgid "Enter an API key before testing."
 msgstr "测试前请输入 API 密钥。"
 
-#: src/lib/roster-status.ts
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Error"
 msgstr "错误"
@@ -1343,6 +1373,10 @@ msgstr "文件"
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "根据已保存的证据或已连接的服务查找这个人的工作邮箱。如果缺少连接，请说明需要连接什么。保存返回的来源和状态，不要编造联系方式，也不要发送消息。"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Finding candidates"
+msgstr "寻找候选人"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
 msgstr "请完成订阅登录，然后重新测试。"
@@ -1367,6 +1401,10 @@ msgstr "匹配度"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
 msgstr "固定日期"
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
+msgstr "稍后发送"
 
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
@@ -1621,7 +1659,9 @@ msgid "Loading trace…"
 msgstr "正在加载追踪…"
 
 #: src/App.tsx
+#: src/components/BackgroundTasks.tsx
 #: src/components/markdown-link-prompt.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1654,6 +1694,10 @@ msgstr "低"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "低"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr "Main"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1694,11 +1738,6 @@ msgstr "提及"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
-msgid "Message"
-msgstr "消息"
-
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
 msgid "Message"
 msgstr "消息"
 
@@ -1849,6 +1888,10 @@ msgstr "下一步：{0}"
 msgid "No apps found"
 msgstr "未找到应用"
 
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr "没有后台任务。"
+
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
 msgstr "还没有机器人活动。"
@@ -1895,6 +1938,10 @@ msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
 msgid "No loaded candidates match this date filter."
 msgstr "没有已加载的候选人符合这个日期筛选。"
 
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
+msgstr "还没有消息。"
+
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
 msgstr "未列出模型。"
@@ -1910,6 +1957,10 @@ msgstr "没有记录的调用"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr "未找到远程 MCP 服务器"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "No replies yet."
+msgstr "尚无回复。"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
@@ -1931,7 +1982,6 @@ msgstr "未返回邮件序列。"
 msgid "No steps returned."
 msgstr "未返回步骤。"
 
-#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr "这位候选人暂无已保存的邮件。"
@@ -2193,6 +2243,11 @@ msgstr "拉取请求"
 msgid "Qualifying work"
 msgstr "符合条件的工作"
 
+#: src/lib/roster-status.ts
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued"
+msgstr "排队中"
+
 #: src/pages/shell/queued-messages.tsx
 msgid "Queued messages"
 msgstr "排队消息"
@@ -2248,6 +2303,14 @@ msgstr "最近发现"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr "收件人不可用"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Reconnect"
+msgstr "重新连接"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
+msgstr "请重新连接模型以继续。"
 
 #: src/App.tsx
 msgid "Reconnecting"
@@ -2311,10 +2374,6 @@ msgstr "招聘助手"
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
 msgstr "招聘视图"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
-msgstr "招聘流程"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workspace"
@@ -2494,6 +2553,8 @@ msgid "Resume: {0}"
 msgstr "简历：{0}"
 
 #: src/components/AccountAccess.tsx
+#: src/components/BackgroundTasks.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
@@ -2561,6 +2622,10 @@ msgstr "第 {0} 轮这批人可以，开始扩大搜索。"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
+msgstr "例行任务"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
 msgstr "例行任务"
 
 #: src/pages/shell/ShellPanelContent.tsx
@@ -2892,10 +2957,6 @@ msgstr "软件更新"
 msgid "Some saved contact details could not be displayed."
 msgstr "部分已保存的联系方式无法显示。"
 
-#: src/pages/shell/useShellController.tsx
-msgid "Something went wrong."
-msgstr "出了点问题。"
-
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
@@ -2952,6 +3013,10 @@ msgstr "陈述"
 msgid "Status"
 msgstr "状态"
 
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr "立即引导"
+
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr "步骤失败"
@@ -2974,6 +3039,14 @@ msgstr "停止 {name}"
 msgid "Stop considering"
 msgstr "停止考虑"
 
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr "停止所有任务"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr "停止跟进"
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "停止朗读"
@@ -2981,6 +3054,10 @@ msgstr "停止朗读"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Stop teaching"
 msgstr "停止示范"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr "停止更新"
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Stopped"
@@ -3004,6 +3081,10 @@ msgstr "主题：{0}"
 msgid "Switch bot"
 msgstr "切换助手"
 
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr "按 Tab 切换"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Table"
@@ -3013,7 +3094,12 @@ msgstr "表格"
 msgid "Take control"
 msgstr "接管控制权"
 
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr "任务记录"
+
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr "任务"
 
@@ -3073,9 +3159,17 @@ msgstr "招聘团队已变更，请重新打开岗位。"
 msgid "The recruiting team is not ready yet."
 msgstr "招聘团队尚未准备就绪。"
 
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr "回复已中断，请重试。"
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
 msgstr "工作区已变更，请重新打开岗位。"
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
+msgstr "正在思考…"
 
 #: src/pages/shell/computer-presentation.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
@@ -3150,6 +3244,7 @@ msgstr "追踪不可用"
 msgid "Transcript"
 msgstr "文字记录"
 
+#: src/lib/roster-status.ts
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
@@ -3331,6 +3426,10 @@ msgstr "何时使用"
 msgid "Won't do"
 msgstr "不处理"
 
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr "任务操作"
+
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "后台任务进行中…"
@@ -3380,92 +3479,3 @@ msgstr "你的邮箱"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "你的名字"
-
-#: src/components/BackgroundTasks.tsx
-#: src/pages/shell/Composer.tsx
-msgid "Background tasks"
-msgstr "后台任务"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Cancel task"
-msgstr "取消任务"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Cancelling…"
-msgstr "正在取消…"
-
-#: src/components/StageTranscript.tsx
-msgid "Could not load this task."
-msgstr "无法加载此任务。"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Could not update tasks."
-msgstr "无法更新任务。"
-
-#: src/components/LiveWork.tsx
-msgid "Delegated task"
-msgstr "分派的任务"
-
-#: src/components/LiveWork.tsx
-msgid "Finding candidates"
-msgstr "寻找候选人"
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
-msgstr "稍后发送"
-
-#: src/components/BackgroundTasks.tsx
-msgid "No background tasks."
-msgstr "没有后台任务。"
-
-#: src/components/StageTranscript.tsx
-msgid "No messages yet."
-msgstr "还没有消息。"
-
-#: src/pages/ActivityList.tsx
-msgid "Queued"
-msgstr "排队中"
-
-#: src/pages/PluginsOverlay.tsx
-msgid "Reconnect"
-msgstr "重新连接"
-
-#: src/pages/shell/useShellController.tsx
-msgid "Reconnect your model to continue."
-msgstr "请重新连接模型以继续。"
-
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
-msgstr "立即引导"
-
-#: src/pages/shell/Composer.tsx
-msgid "Stop everything"
-msgstr "停止所有任务"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Stop following"
-msgstr "停止跟进"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr "停止更新"
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
-msgstr "按 Tab 切换"
-
-#: src/components/StageTranscript.tsx
-msgid "Task transcript"
-msgstr "任务记录"
-
-#: src/pages/shell/useShellController.tsx
-msgid "The reply stopped. Try again."
-msgstr "回复已中断，请重试。"
-
-#: src/lib/roster-status.ts
-msgid "Thinking…"
-msgstr "正在思考…"
-
-#: src/pages/shell/Composer.tsx
-msgid "Work actions"
-msgstr "任务操作"

@@ -397,6 +397,15 @@ msgstr "Back to results"
 msgid "Back to sign in"
 msgstr "Back to sign in"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Background task"
+msgstr "Background task"
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr "Background tasks"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "Base URL"
@@ -481,9 +490,17 @@ msgstr "Cancel edit"
 msgid "Cancel reply"
 msgstr "Cancel reply"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr "Cancel task"
+
 #: src/components/CloudAgentCard.tsx
 msgid "cancelled"
 msgstr "cancelled"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr "Cancelling…"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate cards"
@@ -610,7 +627,9 @@ msgstr "Client ID"
 msgid "Client secret"
 msgstr "Client secret"
 
+#: src/components/BackgroundTasks.tsx
 #: src/components/LazyOverlay.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
@@ -900,6 +919,10 @@ msgstr "Could not load this file."
 msgid "Could not load this role’s candidate records."
 msgstr "Could not load this role’s candidate records."
 
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr "Could not load this task."
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "Could not load update status"
@@ -981,6 +1004,10 @@ msgstr "Could not update message"
 #: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "Could not update reaction"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
+msgstr "Could not update tasks."
 
 #: src/components/computer/FilesApp.tsx
 #: src/pages/shell/useShellCreation.ts
@@ -1083,6 +1110,10 @@ msgstr "Delay unavailable."
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay: {0} days"
 msgstr "Delay: {0} days"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Delegated task"
+msgstr "Delegated task"
 
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
@@ -1272,7 +1303,6 @@ msgstr "Enter a valid email"
 msgid "Enter an API key before testing."
 msgstr "Enter an API key before testing."
 
-#: src/lib/roster-status.ts
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Error"
 msgstr "Error"
@@ -1343,6 +1373,10 @@ msgstr "Files"
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 
+#: src/components/BackgroundTasks.tsx
+msgid "Finding candidates"
+msgstr "Finding candidates"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
 msgstr "Finish subscription sign-in, then test again."
@@ -1367,6 +1401,10 @@ msgstr "Fit"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
 msgstr "Fixed date"
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
+msgstr "Follow up"
 
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
@@ -1621,7 +1659,9 @@ msgid "Loading trace…"
 msgstr "Loading trace…"
 
 #: src/App.tsx
+#: src/components/BackgroundTasks.tsx
 #: src/components/markdown-link-prompt.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1654,6 +1694,10 @@ msgstr "Low"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "Low"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr "Main"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1694,11 +1738,6 @@ msgstr "Mentions"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
-msgid "Message"
-msgstr "Message"
-
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
 msgid "Message"
 msgstr "Message"
 
@@ -1849,6 +1888,10 @@ msgstr "Next: {0}"
 msgid "No apps found"
 msgstr "No apps found"
 
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr "No background tasks."
+
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
 msgstr "No bot activity yet."
@@ -1895,6 +1938,10 @@ msgstr "No loaded candidates match these filters."
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
 
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
+msgstr "No messages yet."
+
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
 msgstr "No models listed."
@@ -1910,6 +1957,10 @@ msgstr "No recorded calls"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr "No remote MCP servers found"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "No replies yet."
+msgstr "No replies yet."
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
@@ -1931,7 +1982,6 @@ msgstr "No sequences returned."
 msgid "No steps returned."
 msgstr "No steps returned."
 
-#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr "No stored emails for this candidate."
@@ -2193,6 +2243,11 @@ msgstr "Pull request"
 msgid "Qualifying work"
 msgstr "Qualifying work"
 
+#: src/lib/roster-status.ts
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued"
+msgstr "Queued"
+
 #: src/pages/shell/queued-messages.tsx
 msgid "Queued messages"
 msgstr "Queued messages"
@@ -2248,6 +2303,14 @@ msgstr "Recently discovered"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr "Recipients unavailable"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Reconnect"
+msgstr "Reconnect"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
+msgstr "Reconnect your model to continue."
 
 #: src/App.tsx
 msgid "Reconnecting"
@@ -2311,10 +2374,6 @@ msgstr "Recruiting assistant"
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
 msgstr "Recruiting views"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
-msgstr "Recruiting workflow"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workspace"
@@ -2494,6 +2553,8 @@ msgid "Resume: {0}"
 msgstr "Resume: {0}"
 
 #: src/components/AccountAccess.tsx
+#: src/components/BackgroundTasks.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
@@ -2562,6 +2623,10 @@ msgstr "Round {0} looks good. Start finding more people."
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
 msgstr "Routine"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
+msgstr "Routines"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Run time must be in the future."
@@ -2892,10 +2957,6 @@ msgstr "Software update"
 msgid "Some saved contact details could not be displayed."
 msgstr "Some saved contact details could not be displayed."
 
-#: src/pages/shell/useShellController.tsx
-msgid "Something went wrong."
-msgstr "Something went wrong."
-
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
@@ -2952,6 +3013,10 @@ msgstr "Statement"
 msgid "Status"
 msgstr "Status"
 
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr "Steer"
+
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr "Step failed"
@@ -2974,6 +3039,14 @@ msgstr "Stop {name}"
 msgid "Stop considering"
 msgstr "Stop considering"
 
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr "Stop everything"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr "Stop following"
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "Stop speaking"
@@ -2981,6 +3054,10 @@ msgstr "Stop speaking"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Stop teaching"
 msgstr "Stop teaching"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr "Stop updates"
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Stopped"
@@ -3004,6 +3081,10 @@ msgstr "Subject: {0}"
 msgid "Switch bot"
 msgstr "Switch bot"
 
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr "Tab to switch"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Table"
@@ -3013,7 +3094,12 @@ msgstr "Table"
 msgid "Take control"
 msgstr "Take control"
 
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr "Task transcript"
+
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr "Tasks"
 
@@ -3073,9 +3159,17 @@ msgstr "The recruiting team changed. Open the role again."
 msgid "The recruiting team is not ready yet."
 msgstr "The recruiting team is not ready yet."
 
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr "The reply stopped. Try again."
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
 msgstr "The workspace changed. Open the role again."
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
+msgstr "Thinking…"
 
 #: src/pages/shell/computer-presentation.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
@@ -3150,6 +3244,7 @@ msgstr "Trace unavailable"
 msgid "Transcript"
 msgstr "Transcript"
 
+#: src/lib/roster-status.ts
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
@@ -3331,6 +3426,10 @@ msgstr "When to use"
 msgid "Won't do"
 msgstr "Won't do"
 
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr "Work actions"
+
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "Working in background…"
@@ -3380,92 +3479,3 @@ msgstr "Your email address"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Your name"
-
-#: src/components/BackgroundTasks.tsx
-#: src/pages/shell/Composer.tsx
-msgid "Background tasks"
-msgstr "Background tasks"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Cancel task"
-msgstr "Cancel task"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Cancelling…"
-msgstr "Cancelling…"
-
-#: src/components/StageTranscript.tsx
-msgid "Could not load this task."
-msgstr "Could not load this task."
-
-#: src/components/BackgroundTasks.tsx
-msgid "Could not update tasks."
-msgstr "Could not update tasks."
-
-#: src/components/LiveWork.tsx
-msgid "Delegated task"
-msgstr "Delegated task"
-
-#: src/components/LiveWork.tsx
-msgid "Finding candidates"
-msgstr "Finding candidates"
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
-msgstr "Follow up"
-
-#: src/components/BackgroundTasks.tsx
-msgid "No background tasks."
-msgstr "No background tasks."
-
-#: src/components/StageTranscript.tsx
-msgid "No messages yet."
-msgstr "No messages yet."
-
-#: src/pages/ActivityList.tsx
-msgid "Queued"
-msgstr "Queued"
-
-#: src/pages/PluginsOverlay.tsx
-msgid "Reconnect"
-msgstr "Reconnect"
-
-#: src/pages/shell/useShellController.tsx
-msgid "Reconnect your model to continue."
-msgstr "Reconnect your model to continue."
-
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
-msgstr "Steer"
-
-#: src/pages/shell/Composer.tsx
-msgid "Stop everything"
-msgstr "Stop everything"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Stop following"
-msgstr "Stop following"
-
-#: src/components/BackgroundTasks.tsx
-msgid "Stop updates"
-msgstr "Stop updates"
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
-msgstr "Tab to switch"
-
-#: src/components/StageTranscript.tsx
-msgid "Task transcript"
-msgstr "Task transcript"
-
-#: src/pages/shell/useShellController.tsx
-msgid "The reply stopped. Try again."
-msgstr "The reply stopped. Try again."
-
-#: src/lib/roster-status.ts
-msgid "Thinking…"
-msgstr "Thinking…"
-
-#: src/pages/shell/Composer.tsx
-msgid "Work actions"
-msgstr "Work actions"

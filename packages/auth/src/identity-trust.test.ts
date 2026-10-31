@@ -117,7 +117,9 @@ function fixture({
     members.add(user.id);
     return { spaceId: "space-1" };
   });
+  const provision = vi.fn(async () => undefined);
   const auth = createAuth(prisma as never, {
+    ensureUserSpace: provision,
     secret: "offline-auth-secret-at-least-32-characters",
     baseURL,
     webOrigin,
@@ -166,7 +168,19 @@ function fixture({
     const url = new URL(messages.at(-1)!.text.match(/http:\/\/\S+/)![0]);
     return request(`${url.pathname.replace("/api/auth", "")}${url.search}`);
   };
-  return { auth, request, signup, signin, verify, data, policy, messages, members };
+  return {
+    auth,
+    request,
+    signup,
+    signin,
+    verify,
+    data,
+    policy,
+    messages,
+    members,
+    provision,
+    prisma,
+  };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -202,6 +216,10 @@ describe("identity trust through auth endpoints", () => {
       token: string;
       user: { id: string; emailVerified: boolean };
     };
+    expect(f.provision).toHaveBeenCalledWith(
+      expect.objectContaining({ id: body.user.id }),
+      "space-1",
+    );
     expect(body.token).toEqual(expect.any(String));
     expect(body.user.emailVerified).toBe(false);
     expect(body.user.id).not.toBe("msg-attacker-chosen-id");
@@ -210,6 +228,29 @@ describe("identity trust through auth endpoints", () => {
     expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
   });
 
+  it("retries failed private workspace provisioning before a later session", async () => {
+    const f = fixture({ delivery: false });
+    expect((await f.signup()).status).toBe(200);
+    f.provision.mockClear();
+    f.provision.mockRejectedValueOnce(new Error("provision unavailable"));
+    const first = await f.signin();
+    expect(first.status).toBe(500);
+    expect(f.members.size).toBe(1);
+    const retried = await f.signin();
+    expect(retried.status).toBe(200);
+    expect(f.provision).toHaveBeenCalledTimes(2);
+    expect(bootstrapUserSpace).toHaveBeenCalledTimes(1);
+  });
+  it("never provisions recruiting defaults into a shared membership on sign-in", async () => {
+    const f = fixture({ delivery: false });
+    await f.signup();
+    f.provision.mockClear();
+    f.prisma.spaceMember.findFirst.mockImplementation(async ({ where }) =>
+      "role" in where ? null : { spaceId: "shared" },
+    );
+    expect((await f.signin()).status).toBe(200);
+    expect(f.provision).not.toHaveBeenCalled();
+  });
   it("admits the first allowlisted account without email delivery and still blocks everyone else", async () => {
     const f = fixture({ allowlist: "@example.test", delivery: false });
     expect((await f.signup("outsider@other.test")).status).toBe(400);

@@ -1517,6 +1517,16 @@ export const ListRecruitingCandidateSourcesInput = z.strictObject({
 export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
+const RecruitingAccountToolReadSchema = z.strictObject({
+  roleId: RecruitingId.optional(),
+  since: z.iso.datetime().optional(),
+  cursor: Text.optional(),
+  itemCursor: Text.max(10000).optional(),
+  campaignId: RecruitingId.optional(),
+  campaignServerId: RecruitingId.optional(),
+  campaignLeadCursor: Text.max(10000).optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
   // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
   ListRecruitingCandidatesInput.pick({ query: true, cursor: true, sort: true }).extend({
@@ -1528,10 +1538,11 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
-  z.strictObject({
-    operation: z.literal("replies"),
-    limit: z.number().int().min(1).max(100).optional(),
-  }),
+  RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
+  RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
+  RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
+  RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
+  RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
@@ -1697,6 +1708,14 @@ export const RecruitingCampaignDetailsSchema = z.strictObject({
 export type RecruitingCampaignDetails = z.infer<typeof RecruitingCampaignDetailsSchema>;
 
 export const RecruitingRoleCampaignSchema = z.strictObject({
+  nextLeadCursor: z.string().nullable().optional(),
+  stats: z
+    .strictObject({
+      sent: z.number().int().nonnegative().nullable(),
+      opened: z.number().int().nonnegative().nullable(),
+      replied: z.number().int().nonnegative().nullable(),
+    })
+    .optional(),
   /** Multiple exact role mappings require an explicit selection from roleCampaigns. */
   selectionRequired: z.boolean().optional(),
   status: z.enum(["none", "unavailable", "ready"]),
@@ -1809,6 +1828,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       id: Id,
       sourceName: z.string(),
       ...CorrespondenceOriginFields,
+      direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
       /** Optional provider observations, never application viewed-by state or current totals. */
       unread: z.boolean().nullable().optional(),
       leadId: z.uuid().nullable().optional(),
@@ -1828,6 +1848,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   events: z.array(
     z.strictObject({
       id: Id,
+      roleAssociation: z.enum(["contact", "booking"]).optional(),
       kind: z.enum(["event", "availability"]),
       title: z.string().nullable(),
       start: IsoDate,

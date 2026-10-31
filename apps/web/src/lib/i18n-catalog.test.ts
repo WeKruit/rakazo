@@ -116,7 +116,6 @@ describe("lingui catalogs", () => {
       "Sequence",
       "Inbox",
       "Interview",
-      "Recruiting workflow",
       "Subject",
       "Save draft",
       "Recipients",
