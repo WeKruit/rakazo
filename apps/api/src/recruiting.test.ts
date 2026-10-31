@@ -3128,7 +3128,7 @@ describe("saved recruiting correspondence", () => {
         type: "result",
         data: {
           structuredContent: {
-            items: [
+            events: [
               {
                 id: "saved-contact-interview",
                 summary: "Interview",
@@ -5342,7 +5342,7 @@ describe("live CRM browser reads", () => {
         type: "result",
         data: {
           structuredContent: {
-            items: [
+            events: [
               {
                 id: "crm-contact-interview",
                 summary: "Interview",

@@ -64,7 +64,7 @@ describe("live role correspondence", () => {
         type: "result",
         data: {
           structuredContent: {
-            items: [
+            events: [
               {
                 id: "owned",
                 summary: "Candidate interview",
@@ -145,7 +145,7 @@ describe("live role correspondence", () => {
   it("reads the account calendar once for all roles opened together", async () => {
     const { prisma, assignment } = fixture();
     const execute = vi.fn(async function* () {
-      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+      yield { type: "result", data: { structuredContent: { events: [] } } } as const;
     });
     const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
     const role = (roleId: string, botId: string) =>
@@ -169,7 +169,7 @@ describe("live role correspondence", () => {
   it("does not share cached personal calendars across accounts", async () => {
     const { prisma } = fixture();
     const execute = vi.fn(async function* () {
-      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+      yield { type: "result", data: { structuredContent: { events: [] } } } as const;
     });
     const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
     await refreshRecruitingCorrespondence(
@@ -209,7 +209,7 @@ describe("live role correspondence", () => {
           data: {
             structuredContent:
               kind === "calendar"
-                ? { items: later ? [row] : [], ...(later ? {} : { nextPageToken: "next" }) }
+                ? { events: later ? [row] : [], ...(later ? {} : { nextPageToken: "next" }) }
                 : { status: "success", data: [row], pagination: { hasNextPage: !later } },
           },
         } as const;
@@ -300,7 +300,7 @@ describe("live role correspondence", () => {
           data: {
             structuredContent:
               provider === "calendar"
-                ? { items: rows }
+                ? { events: rows }
                 : { status: "success", data: rows, pagination: { hasNextPage: false } },
           },
         } as const;
