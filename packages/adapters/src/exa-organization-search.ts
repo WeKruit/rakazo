@@ -1,7 +1,8 @@
 import type { OrganizationSearch } from "./company-site.js";
 
 const ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_advanced_exa";
-const RESULTS = 3;
+// The named organization is not always among the first few, so a page of ten is read.
+const RESULTS = 10;
 
 /**
  * Looks an organization up by name through the platform people-search provider's company index,

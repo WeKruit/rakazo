@@ -14,7 +14,8 @@ const MAX_WAIT_MS = 15_000;
 const MAX_CACHED_NAMES = 5_000;
 // A found logo is kept a year; organizations rarely change it.
 const FOUND_TTL_MS = 365 * 24 * 60 * 60 * 1000;
-const MISSING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+// Two days; organization-logos.ts tells older three-day misses apart by it.
+const MISSING_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 const LEGAL_SUFFIXES = new Set([
   "inc",
   "llc",
