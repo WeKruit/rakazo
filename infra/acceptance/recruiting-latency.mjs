@@ -731,6 +731,9 @@ function measureFirstTen(events, round) {
   // The recruiter sees the first people within 20 s of their last answer (or of the JD with no questions).
   if (result.firstPeopleInChatS == null || result.firstPeopleInChatS > 20)
     violation("first_people_slow", `first people at ${result.firstPeopleInChatS ?? "never"} s`);
+  // The first question follows the JD within 10 s, whether the JD is pasted, linked or a file.
+  if (result.firstQuestionS != null && result.firstQuestionS > 10)
+    violation("first_question_slow", `first question at ${result.firstQuestionS} s`);
   if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
   if (result.questions && !result.plannedSearches)
     violation("no_planned_searches", "the last question carried no planned searches");
