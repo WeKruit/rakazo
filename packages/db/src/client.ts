@@ -145,6 +145,26 @@ export function isTooManyDatabaseConnections(error: unknown): boolean {
   return false;
 }
 
+/** pg-pool's own words when no connection could be checked out or opened in time. */
+const CONNECT_TIMEOUT =
+  /timeout exceeded when trying to connect|Connection terminated due to connection timeout/;
+
+/**
+ * The database could not be reached at all: it is full, or no connection opened in time. Work
+ * that needs it should be retried whole rather than carry on without what it failed to read.
+ */
+export function isDatabaseUnreachable(error: unknown): boolean {
+  if (isTooManyDatabaseConnections(error)) return true;
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error && CONNECT_TIMEOUT.test(current.message)) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+}
+
 export async function retryOnTooManyConnections<T>(
   operation: () => Promise<T>,
   options: {

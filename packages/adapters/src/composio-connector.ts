@@ -9,6 +9,7 @@ import type {
   ConnectorTool,
   ManagedConnectorProvider,
 } from "@rakazo/adapter-kit";
+import { isDatabaseUnreachable } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
   composioToolkitDirectory,
@@ -754,6 +755,9 @@ export class ConnectorRegistry implements ConnectorProvider {
           getLogger().error("connector discovery failed", sanitizeComposioError(error), {
             "connector.id": connectorId,
           });
+          // Without the database every connector would come back empty and the turn would run
+          // without its tools; fail discovery so the turn is retried whole instead.
+          if (isDatabaseUnreachable(error)) throw error;
           return [connectorId, []] as const;
         }
       }),
