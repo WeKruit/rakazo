@@ -115,6 +115,24 @@ describe("ensurePlatformServices", () => {
     );
   });
 
+  it("leaves every grant to the retired research service with no tools", async () => {
+    const f = fixture();
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        server: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          endpoint: "https://api.autumn.ai/mcp",
+        },
+        NOT: { allowAllTools: false, allowedTools: { equals: [] } },
+      },
+      data: { allowAllTools: false, allowedTools: [] },
+    });
+  });
+
   it("creates the services and links the crew members that predate them", async () => {
     const f = fixture({
       missing: { "people-search": ["main-bot", "sourcer-bot"], fullenrich: ["outreach-bot"] },
@@ -210,7 +228,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: SEARCH, enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: "searches" }),
       data: { allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"] },
@@ -237,7 +255,7 @@ describe("ensurePlatformServices", () => {
         server: expect.objectContaining({ endpoint: "https://mcp.cal.com/mcp", enabled: true }),
       }),
     });
-    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(2); // and the retired research grants
     expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
         id: "books",
