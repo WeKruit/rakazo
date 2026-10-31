@@ -1081,6 +1081,10 @@ export const ThreadBackgroundTaskSchema = z.object({
   id: Id,
   kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
   status: z.enum(["running", "cancelling"]),
+  /** When the work was first seen running; optional for older servers. */
+  startedAt: IsoDate.optional(),
+  /** The countdown length the work started with, when it has one. */
+  estimateMs: z.number().int().positive().nullable().optional(),
 });
 export type ThreadBackgroundTask = z.infer<typeof ThreadBackgroundTaskSchema>;
 

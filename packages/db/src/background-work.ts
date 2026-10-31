@@ -12,23 +12,31 @@ export async function listThreadBackgroundWork(
   prisma: Pick<PrismaClient, "$queryRaw">,
   threadId: string,
 ): Promise<ThreadBackgroundTask[]> {
-  return prisma.$queryRaw<ThreadBackgroundTask[]>`
+  const rows = await prisma.$queryRaw<
+    (Omit<ThreadBackgroundTask, "startedAt" | "estimateMs"> & {
+      startedAt: Date | null;
+      estimateMs: number | null;
+    })[]
+  >`
     WITH owned AS (
       SELECT id, "spaceId", "userId" FROM threads WHERE id = ${threadId}
     )
-    SELECT q.id, 'research' AS kind, 'running' AS status
+    SELECT q.id, 'research' AS kind, 'running' AS status,
+      COALESCE(r."startedAt", r."createdAt") AS "startedAt", NULL::int AS "estimateMs"
     FROM recruiting_research_tasks q
     JOIN runs r ON r.id = q."createdByRunId"
     JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
     JOIN recruiting_roles rr ON rr.id = q."roleId" AND rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
     WHERE q.state = 'active'
     UNION ALL
-    SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status
+    SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status,
+      c."createdAt" AS "startedAt", NULL::int AS "estimateMs"
     FROM cloud_agents c
     JOIN owned o ON c."threadId" = o.id AND c."spaceId" = o."spaceId" AND c."userId" = o."userId"
     WHERE c.status = 'running'
     UNION ALL
-    SELECT r.id, 'run' AS kind, 'running' AS status
+    SELECT r.id, 'run' AS kind, 'running' AS status,
+      COALESCE(r."startedAt", r."createdAt") AS "startedAt", NULL::int AS "estimateMs"
     FROM runs r
     JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
     LEFT JOIN messages m ON m.id = r."sourceMessageId"
@@ -36,7 +44,9 @@ export async function listThreadBackgroundWork(
       AND (r.trigger IN (${Prisma.join([...AUTOMATION_RUN_TRIGGERS])})
         OR m.blocks @> '[{"kind":"handoff"}]'::jsonb)
     UNION ALL
-    SELECT e.id, 'agent_run' AS kind, 'running' AS status
+    SELECT e.id, 'agent_run' AS kind, 'running' AS status, e."createdAt" AS "startedAt",
+      CASE WHEN jsonb_typeof(e.request->'estimateMs') = 'number'
+        THEN (e.request->>'estimateMs')::int END AS "estimateMs"
     FROM external_effects e
     JOIN runs r ON r.id = e."runId"
     JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
@@ -44,4 +54,9 @@ export async function listThreadBackgroundWork(
       AND starts_with(e."idempotencyKey", 'work_estimate:agent_run_')
     ORDER BY kind, id
   `;
+  return rows.map(({ startedAt, estimateMs, ...task }) => ({
+    ...task,
+    ...(startedAt instanceof Date ? { startedAt: startedAt.toISOString() } : {}),
+    estimateMs: estimateMs && estimateMs > 0 ? estimateMs : null,
+  }));
 }
