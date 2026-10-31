@@ -129,6 +129,7 @@ import {
   oneTimeMcpWriteEndpoint,
   planActionGate,
   promptInvokesSkill,
+  RateWindow,
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
@@ -139,6 +140,8 @@ import {
   REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
+  RUN_EGRESS_PER_MINUTE,
+  RUN_EGRESS_RATE_LIMITED,
   recipientsShownToRecruiter,
   recruiterAskedToSend,
   recruiterConnectBlock,
@@ -655,6 +658,12 @@ import {
   workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
+
+/** Built-in tools that reach the outside network for the run. */
+const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_navigate"]);
+const runEgressWindow = new RateWindow(RUN_EGRESS_PER_MINUTE, 60_000);
+const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
+  "Not run: this call would send a saved credential to an outside service. Credentials are never passed in tool arguments; continue without it.";
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -5875,6 +5884,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             })
           )
             return { error: BLOCKED_TOOL_REFUSAL };
+          if (
+            (!BUILTIN_AGENT_TOOL_NAMES.has(name) || EGRESS_BUILTIN_TOOLS.has(name)) &&
+            !runEgressWindow.take(run.id)
+          ) {
+            getLogger().warn("rate_limit.egress", { runId: run.id, tool: name });
+            return { error: RUN_EGRESS_RATE_LIMITED };
+          }
+          // Text the model read (a page, an email, a tool result) may ask it to send a credential
+          // out. Credentials reach outside services only through their own server-side channels.
+          if (
+            (!BUILTIN_AGENT_TOOL_NAMES.has(name) || EGRESS_BUILTIN_TOOLS.has(name)) &&
+            containsSecret(rawArgs, runSecrets)
+          ) {
+            getLogger().warn("security.secret_blocked", { runId: run.id, tool: name });
+            return { error: SECRET_IN_OUTBOUND_ARGS_REFUSAL };
+          }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks

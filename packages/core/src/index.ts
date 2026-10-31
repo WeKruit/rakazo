@@ -51,6 +51,7 @@ export * from "./messaging-prompts.js";
 export * from "./model-oauth.js";
 export * from "./model-probe.js";
 export * from "./model-providers.js";
+export * from "./rate-window.js";
 export * from "./recruiting.js";
 export * from "./recruiting-candidates.js";
 export * from "./recruiting-crm.js";
