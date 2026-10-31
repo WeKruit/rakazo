@@ -19,7 +19,7 @@ export function connectorOf(toolName: string): string | null {
 
 /** Model-facing: what to tell the recruiter and where to go instead. */
 export const OUT_OF_CREDITS_NOTE =
-  "This service is still out of credits after waiting several minutes for a top-up, so every further call fails until the account is topped up; do not call it again in this turn. Tell the recruiter in one plain sentence that this lookup is paused because the service's credits ran out and needs a top-up (never the service's name), and never report its empty result as nobody found. Then keep going with another assigned source that does the same job (for people, the research provider's own research tools), and say which results came from it.";
+  "This service is still out of credits after waiting several minutes for a top-up, so every further call fails until the account is topped up; do not call it again in this turn. Tell the recruiter in one plain sentence that this lookup is paused because the service's credits ran out and needs a top-up (never the service's name), and never report its empty result as nobody found. Then keep going with another assigned source that does the same job, if there is one, and say which results came from it.";
 
 /** Per run: services that ran out of credits, so later calls return at once instead of failing again. */
 export function createCreditGuard() {

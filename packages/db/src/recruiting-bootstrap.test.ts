@@ -340,14 +340,14 @@ describe("ensureRecruitingWorkspace", () => {
           expect.objectContaining({
             botId: f.bots[index]!.id,
             allowAllTools: false,
-            allowedTools: ["credits", "research", "get_task", "get_rows", "reply", "stop_task"],
+            allowedTools: [],
           }),
         ),
-        // The quality check only starts grading and reads its rows.
+        // The retired research service keeps its connection with no tools.
         expect.objectContaining({
           botId: f.bots[4]!.id,
           allowAllTools: false,
-          allowedTools: ["credits", "research", "get_task", "get_rows"],
+          allowedTools: [],
         }),
       ],
       skipDuplicates: true,
@@ -793,14 +793,7 @@ it("upgrades exact managed tool sets without changing a user-replaced assignment
   f.assignments[1]!.allowedTools = ["credits"];
   f.presets[0]!.digest = "previous-release";
   await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-  expect(f.assignments[0]!.allowedTools).toEqual([
-    "credits",
-    "research",
-    "get_task",
-    "get_rows",
-    "reply",
-    "stop_task",
-  ]);
+  expect(f.assignments[0]!.allowedTools).toEqual([]);
   expect(f.assignments[1]!.allowedTools).toEqual(["credits"]);
   expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1195,7 +1188,7 @@ describe("crews set up before the recruiting preset", () => {
         expect.objectContaining({
           botId: reviewer.id,
           serverId: "old-autumn",
-          allowedTools: ["credits", "research", "get_task", "get_rows"],
+          allowedTools: [],
         }),
       ],
       skipDuplicates: true,

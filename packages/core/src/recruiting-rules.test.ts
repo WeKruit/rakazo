@@ -370,14 +370,9 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "top-up only the missing number",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "request research on this role for only the missing number of people",
+    phrase:
+      "run one people-search agent run (agent_run, effort auto) for only the missing number of people",
     why: "The deeper search re-ran research for the whole round.",
-  },
-  {
-    rule: "research only for the top-up",
-    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "never for a calibration round except that top-up",
-    why: "Calibration rounds started paid research tasks.",
   },
   {
     rule: "no quota talk",
@@ -564,7 +559,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "no research at the target",
     in: "Recruitment sourcing continuation skill",
-    phrase: "when Results already hold the target, start no research and report the count",
+    phrase: "when Results already hold the target, start no search and report the count",
     why: '"find 50" with 124 people saved still started paid research.',
   },
   {
@@ -610,22 +605,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Sourcer handed an unrequested email draft to Outreach.",
   },
   {
-    rule: "start research without asking",
+    rule: "scale with people-search agent runs",
     in: "Sourcer",
-    phrase: "as the role's first research request without asking anyone",
-    why: "Sourcer asked whether to start fresh when quick-search rounds left no research task.",
-  },
-  {
-    rule: "never ask whether to start fresh",
-    in: "Recruitment sourcing continuation skill",
-    phrase: "never ask whether to start fresh",
-    why: "Sourcer asked whether to start fresh when quick-search rounds left no research task.",
-  },
-  {
-    rule: "feedback on the same Autumn task",
-    in: "Sourcer",
-    phrase: "providerTaskId from saved candidate sources",
-    why: "Feedback started a new research task instead of replying on the role's task.",
+    phrase: "run people-search agent runs (agent_run) toward the target",
+    why: "Scale-outs stalled whenever the research service ran out of credits.",
   },
   {
     rule: "no status polling",

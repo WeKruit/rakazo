@@ -74,12 +74,10 @@ describe("maintained recruiting defaults", () => {
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
     const order = [
       "accepted round and every round's feedback",
-      "confirmed brief version",
-      "Autumn research",
-      "save every returned page",
+      "agent runs (agent_run) toward the target",
+      "previousRunId set",
       "feedback of any scope",
-      "reply on the same Autumn task",
-      "save the expanded pool",
+      "next wave's query",
     ].map((step) => sourcer.instructions.indexOf(step));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
