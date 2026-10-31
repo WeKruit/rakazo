@@ -221,11 +221,12 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
   # A fresh container may be cold, so it gets a second try. Needs RAKAZO_EMAIL/RAKAZO_PASSWORD.
   if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
     home=1
-    for attempt in 1 2; do
+    # A fresh container runs its startup backfills first, so later attempts wait longer.
+    for attempt in 1 2 3; do
       RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
         node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-$SHORT.log" 2>&1 && home=0 || home=$?
       [ "$home" = 1 ] || [ "$home" = 4 ] || break
-      sleep 10
+      sleep 30
     done
     case "$home" in
       0) log "home load ok: $(grep -o 'overview [0-9]* ms' "$WORK/home-$SHORT.log")" ;;
