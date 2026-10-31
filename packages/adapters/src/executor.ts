@@ -457,6 +457,7 @@ import {
   readInstantlyEmail,
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
+import type { TextJudge } from "./judge.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
@@ -470,7 +471,7 @@ import {
   needsOAuthProbe,
   parseMcpServerToolArgs,
 } from "./mcp-server-tool.js";
-import { loadAgentMemoryContext } from "./memory-context.js";
+import { lastingPreferenceNote, loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { applyMemoryEdit, nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
 import {
@@ -3555,6 +3556,8 @@ export interface ExecutorDeps {
   web?: WebProvider;
   /** Meaning vectors for history search when no words match; absent keeps word search only. */
   embedder?: TextEmbedder | null;
+  /** Optional yes/no judge the server asks about replies; absent means the wording rules decide. */
+  judge?: { resolve(): Promise<TextJudge | undefined> };
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
@@ -4808,6 +4811,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             : Promise.resolve(null),
         );
+        // A recruiter's own message that reads as a lasting preference gets a nudge to save it.
+        const preferenceNotePromise = ownTime(
+          "preferenceNote",
+          !messagingChannelRun &&
+            (run.trigger === "user" || run.trigger === "follow_up") &&
+            currentTurnMessage?.role === "user" &&
+            currentTurnMessage.botId === null &&
+            deps.judge
+            ? deps.judge
+                .resolve()
+                .then((judge) =>
+                  lastingPreferenceNote(
+                    judge,
+                    (currentTurnMessage.blocks as MessageBlock[])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  ),
+                )
+                .catch(() => undefined)
+            : Promise.resolve(undefined),
+        );
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -4922,6 +4946,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         setupMark("discoveryJoin");
         let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
+        // How often durable memory outgrows the prompt budget, which decides whether it needs
+        // relevance ranking instead of newest first.
+        setupMarks.memoryDocs = loadedMemoryContext.documents.length;
+        setupMarks.memoryCutDocs = loadedMemoryContext.documents.filter(
+          (document) => document.disposition === "budget" || document.disposition === "truncated",
+        ).length;
         let recruitingSourceMessageId = run.sourceMessageId ?? null;
         // Whether this run has read external text, including on an earlier attempt.
         let readExternalText = false;
@@ -12885,6 +12915,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
+          preferenceNote: await preferenceNotePromise,
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -14114,6 +14145,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   worked: turnReport.worked(),
                   read: turnReport.read(),
+                  judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
                   ...(handedIn
@@ -15286,6 +15318,7 @@ export function userTurnContext(parts: {
   redactedTicketContext?: string | undefined;
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
+  preferenceNote?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
@@ -15294,6 +15327,7 @@ export function userTurnContext(parts: {
     parts.redactedTicketContext,
     parts.stoppedRunNotice,
     parts.resumeBrief,
+    parts.preferenceNote,
     ...(parts.sourceInstructions ?? []),
   ].filter((section): section is string => Boolean(section));
   if (sections.length === 0) return undefined;

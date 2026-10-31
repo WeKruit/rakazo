@@ -117,6 +117,7 @@ import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
+  JudgeProviderConfigSchema,
 } from "./integration-settings.js";
 import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
@@ -1251,6 +1252,7 @@ export const appContract = {
   integrationSetup: {
     get: oc.output(IntegrationSetupStateSchema),
     save: oc.input(IntegrationProviderConfigSchema).output(z.object({ ok: z.literal(true) })),
+    saveJudge: oc.input(JudgeProviderConfigSchema).output(z.object({ ok: z.literal(true) })),
   },
   connections: {
     catalog: oc

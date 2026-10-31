@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, MemorySnapshot, MemoryStore } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
-import { loadAgentMemoryContext } from "./memory-context.js";
+import { lastingPreferenceNote, loadAgentMemoryContext } from "./memory-context.js";
 
 const context: AdapterContext = {
   operationId: "run-1",
@@ -192,3 +192,21 @@ function snapshot(documents: MemorySnapshot["documents"]): MemorySnapshot {
 function storeWith(read: MemoryStore["read"]): MemoryStore {
   return { read } as MemoryStore;
 }
+
+describe("lastingPreferenceNote", () => {
+  const judge = (p: number | undefined) => ({
+    yes: vi.fn(async (_instructions: string, _state: Record<string, unknown>) => p),
+  });
+
+  it("nudges only when the judge reads a lasting preference", async () => {
+    const sure = judge(0.9);
+    expect(await lastingPreferenceNote(sure, "Never email candidates on weekends")).toContain(
+      "exact words",
+    );
+    expect(sure.yes.mock.calls[0]?.[1]).toEqual({ message: "Never email candidates on weekends" });
+    expect(await lastingPreferenceNote(judge(0.2), "find 20 more")).toBeUndefined();
+    expect(await lastingPreferenceNote(judge(undefined), "find 20 more")).toBeUndefined();
+    expect(await lastingPreferenceNote(undefined, "Never email on weekends")).toBeUndefined();
+    expect(await lastingPreferenceNote(sure, "  ")).toBeUndefined();
+  });
+});

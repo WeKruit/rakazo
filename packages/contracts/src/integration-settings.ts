@@ -20,3 +20,10 @@ export const IntegrationSetupStateSchema = z.object({
   providers: z.array(z.object({ id: IntegrationProviderIdSchema, configured: z.boolean() })),
 });
 export type IntegrationSetupState = z.infer<typeof IntegrationSetupStateSchema>;
+
+/** An optional yes/no judge the server asks about text (for example, whether a reply refuses). */
+export const JudgeProviderConfigSchema = z.object({
+  provider: z.literal("typesafe"),
+  apiKey: z.string().trim().min(1).max(16384),
+});
+export type JudgeProviderConfig = z.infer<typeof JudgeProviderConfigSchema>;
