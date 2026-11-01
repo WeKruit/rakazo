@@ -1618,6 +1618,10 @@ msgstr "无法删除空间"
 msgid "Could not delete this artifact."
 msgstr "无法删除这个文件。"
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not disconnect"
+msgstr "无法断开"
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not disconnect memory provider"
 msgstr "无法断开记忆提供方"
@@ -2284,6 +2288,7 @@ msgstr "已停用的工具"
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsControls.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnect"
 msgstr "断开"
@@ -2299,6 +2304,7 @@ msgstr "已断开 {0}。"
 
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnecting…"
 msgstr "正在断开…"
