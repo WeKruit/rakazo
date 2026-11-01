@@ -585,7 +585,7 @@ export function ShellConversation({
                 className={
                   workspaceBrief
                     ? "app-drag hire-panel-heading justify-between"
-                    : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]"
+                    : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px] hire-pane-header"
                 }
               >
                 <div className="flex min-w-0 items-center gap-2">

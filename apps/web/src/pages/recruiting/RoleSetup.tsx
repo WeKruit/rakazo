@@ -14,7 +14,7 @@ export function RoleSetup({ status }: { status: RecruitingRoleSetup | undefined 
   const stage = status?.playbookStage;
   if (!stage) return null;
   return (
-    <section aria-label={t`Role stage`} className="border-b border-border px-6 py-3 text-sm">
+    <section aria-label={t`Role stage`} className="hire-pane-header flex items-center px-6 text-sm">
       <p className="flex flex-wrap items-center gap-2">
         <Badge variant="outline">{stage.label}</Badge>
         {stage.nextStep ? (

@@ -77,14 +77,29 @@ body,
 }
 
 /* The supplied WeKruit /hire workspace; native developer views keep their own chrome. */
+/* Every pane header shares one height so the divider reads as a single line. */
+[data-product-view="recruiting"] {
+  --hire-header-h: 64px;
+}
+[data-product-view="recruiting"] .hire-pane-header {
+  box-sizing: border-box;
+  height: var(--hire-header-h);
+  flex-shrink: 0;
+  padding-block: 0;
+  border-bottom: 1px solid var(--border);
+}
 [data-product-view="recruiting"] .hire-navigation {
-  padding: 18px 12px 12px;
+  padding: 0 12px 12px;
 }
 [data-product-view="recruiting"] .hire-brand-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 7px 31px;
+  box-sizing: border-box;
+  height: var(--hire-header-h);
+  margin: 0 -12px 16px;
+  padding: 0 19px;
+  border-bottom: 1px solid var(--border);
 }
 [data-product-view="recruiting"] .hire-brand {
   display: flex;
