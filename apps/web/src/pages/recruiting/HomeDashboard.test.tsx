@@ -96,17 +96,16 @@ beforeEach(() => {
               role: { id: string };
             } | null
           )?.role.id ?? null,
-        shortlistPage: (roleId, cursor) =>
-          listCandidates(
-            {
-              roleId,
-              shortlisted: true,
-              sort: "recent",
-              limit: 200,
-              ...(cursor ? { cursor } : {}),
-            },
+        shortlist: async (roleId) => {
+          const page = (await listCandidates(
+            { roleId, shortlisted: true, sort: "recent", limit: 200 },
             options,
-          ),
+          )) as { total: number; items: { shortlisted: boolean; shortlistedAt: string | null }[] };
+          return {
+            total: page.total,
+            dates: page.items.filter((item) => item.shortlisted).map((item) => item.shortlistedAt),
+          };
+        },
         candidates: (group) =>
           roleCandidates({ groupId: group.id, threadId: group.threadId, limit: 1 }, options),
         campaign: (group) => roleCampaign({ groupId: group.id }, options),

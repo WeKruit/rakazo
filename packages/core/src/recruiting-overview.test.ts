@@ -144,12 +144,7 @@ describe("streamRecruitingOverview", () => {
     }) as RecruitingCorrespondence;
   const reads = (patch: Partial<OverviewReads> = {}): OverviewReads => ({
     roleId: async (group) => (group.id === "g3" ? null : `role-${group.id}`),
-    shortlistPage: async (_roleId, cursor) =>
-      ({
-        items: [{ shortlisted: true, shortlistedAt: cursor ? "2026-10-22T00:00:00Z" : null }],
-        total: 2,
-        nextCursor: cursor ? null : "next",
-      }) as Awaited<ReturnType<OverviewReads["shortlistPage"]>>,
+    shortlist: async () => ({ total: 2, dates: [null, "2026-10-22T00:00:00Z"] }),
     candidates: async () => ({
       items: [],
       nextCursor: null,
@@ -163,7 +158,7 @@ describe("streamRecruitingOverview", () => {
     ...patch,
   });
 
-  it("reads every bound role once, with every shortlist page and its future bookings", async () => {
+  it("reads every bound role once, with its shortlist dates and future bookings", async () => {
     const overview = await getRecruitingOverview(groups, reads(), new AbortController().signal);
     expect(overview.failedGroups).toEqual([]);
     expect(overview.roles.map((role) => role.groupId).sort()).toEqual(["g1", "g2"]);
@@ -204,9 +199,9 @@ describe("streamRecruitingOverview", () => {
     const overview = await getRecruitingOverview(
       groups,
       reads({
-        shortlistPage: vi.fn(async (roleId: string) => {
+        shortlist: vi.fn(async (roleId: string) => {
           if (roleId === "role-g2") throw new Error("down");
-          return { items: [], total: 0, nextCursor: null } as never;
+          return { total: 0, dates: [] };
         }),
       }),
       new AbortController().signal,
