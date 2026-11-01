@@ -1,4 +1,5 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useLinkFavicon } from "@rakazo/chat-ui/web-contexts";
 import type {
   BotMcpServer,
   CapabilityInstall,
@@ -80,6 +81,43 @@ function nativeServerConfigured(server: McpServer) {
     (server.platformCredentialConfigured ||
       server.oauthStatus === "connected" ||
       (server.hasSecret && server.oauthStatus === "none"))
+  );
+}
+
+/** Bundled marks for the services we provision; any other server shows its own site's icon. */
+const SERVICE_LOGOS: Record<string, string> = {
+  "gmailmcp.googleapis.com": "/connectors/gmail.png",
+  "calendarmcp.googleapis.com": "/connectors/google-calendar.png",
+  "mcp.cal.com": "/connectors/cal-com.png",
+  "mcp.hubspot.com": "/connectors/hubspot.png",
+};
+
+function serviceHost(server: McpServer) {
+  try {
+    return server.endpoint ? new URL(server.endpoint).hostname : "";
+  } catch {
+    return "";
+  }
+}
+
+function ServiceLogo({ server }: { server: McpServer }) {
+  const host = serviceHost(server);
+  const bundled =
+    SERVICE_LOGOS[host] ?? (server.slug === "recruiting-crm" ? "/favicon.png" : undefined);
+  const site = !bundled && host ? `https://${host.replace(/^(mcp|api)\./, "")}/` : "";
+  const { icon, unusable } = useLinkFavicon(site);
+  const src = bundled ?? icon;
+  return src ? (
+    <img
+      src={src}
+      alt=""
+      onError={bundled ? undefined : unusable}
+      className="h-9 w-9 shrink-0 rounded-xl bg-accent object-contain p-1.5"
+    />
+  ) : (
+    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-sm font-semibold text-foreground">
+      {server.name[0]}
+    </div>
   );
 }
 
@@ -311,6 +349,21 @@ export function PluginsOverlay({
     } finally {
       if (current()) setPending(null);
       if (connectionAttempt.current === controller) connectionAttempt.current = null;
+    }
+  }
+
+  async function disconnectNative(server: McpServer) {
+    const scope = connectionScope;
+    const current = () => mounted.current && activeScope.current === scope;
+    setPending(server.id);
+    setCatalogError(null);
+    try {
+      await rpc.mcp.oauth.disconnect({ serverId: server.id });
+      if (current()) await refresh();
+    } catch (error) {
+      if (current()) setCatalogError(errorText(error, t`Could not disconnect`));
+    } finally {
+      if (current()) setPending(null);
     }
   }
 
@@ -989,9 +1042,7 @@ export function PluginsOverlay({
                     data-service-id={server.id}
                     className="flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2"
                   >
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-sm font-semibold text-foreground">
-                      {server.name[0]}
-                    </div>
+                    <ServiceLogo server={server} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-medium text-foreground">
                         {server.name}
@@ -1019,6 +1070,19 @@ export function PluginsOverlay({
                           <Trans>Reconnect</Trans>
                         ) : (
                           <Trans>Connect</Trans>
+                        )}
+                      </Button>
+                    ) : accessible && server.hasSecret && !server.platformCredentialConfigured ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={pending !== null}
+                        onClick={() => void disconnectNative(server)}
+                      >
+                        {pending === server.id ? (
+                          <Trans>Disconnecting…</Trans>
+                        ) : (
+                          <Trans>Disconnect</Trans>
                         )}
                       </Button>
                     ) : null}
