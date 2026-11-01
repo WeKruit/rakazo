@@ -1819,6 +1819,10 @@ msgid "Could not reach the server"
 msgstr "无法连接服务器"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not read {failedCalendars}."
+msgstr "无法读取 {failedCalendars}。"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "无法读取这个活动。"
