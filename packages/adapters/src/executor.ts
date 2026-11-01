@@ -13116,7 +13116,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
-        const lastRecruiterBlocks = messages.findLast((message) => message.role === "user")?.blocks;
+        // History is newest first, so the first user row is the recruiter's latest message.
+        const lastRecruiterBlocks = messages.find((message) => message.role === "user")?.blocks;
         const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
           ? lastRecruiterBlocks
               .map((block) =>
