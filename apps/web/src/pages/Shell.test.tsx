@@ -5512,7 +5512,7 @@ it.each(["normal", "retry", "switch", "missing-source"] as const)(
     }
     if (mode === "retry") shellApi.followUp.mockRejectedValueOnce(new Error("Receipt lost"));
     if (mode === "switch") {
-      let finishUpload!: (value: { id: string }) => void;
+      let finishUpload: ((value: { id: string }) => void) | undefined;
       shellApi.createArtifact.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -5522,12 +5522,12 @@ it.each(["normal", "retry", "switch", "missing-source"] as const)(
       let pending!: Promise<void>;
       await act(async () => {
         pending = save(input);
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await vi.waitFor(() => expect(finishUpload).toBeTypeOf("function"));
       });
       await view.navigate("/app/bot-2?view=conversation");
       const rejected = expect(pending).rejects.toThrow("file was saved");
       await act(async () => {
-        finishUpload({ id: "draft-edited" });
+        finishUpload?.({ id: "draft-edited" });
         await rejected;
       });
       expect(shellApi.followUp).not.toHaveBeenCalled();

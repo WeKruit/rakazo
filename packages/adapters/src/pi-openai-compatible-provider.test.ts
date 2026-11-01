@@ -508,9 +508,16 @@ describe("openai-compatible provider", () => {
           reject(new DOMException("The operation was aborted.", "AbortError"));
         });
       });
-    await expect(
-      probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
-    ).rejects.toThrow(/timed out.*explicit model id/is);
+    vi.useFakeTimers();
+    try {
+      const probe = expect(
+        probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+      ).rejects.toThrow(/timed out.*explicit model id/is);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await probe;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves caller AbortError without rewriting as timeout", async () => {

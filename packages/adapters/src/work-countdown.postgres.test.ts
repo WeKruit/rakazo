@@ -1,5 +1,6 @@
+import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { createDb } from "@rakazo/db";
+import { createDb, createRecruitingRole } from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import {
@@ -264,5 +265,106 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     );
     expect(asked[1]).toBe(30);
     expect(short).not.toHaveProperty("countdown");
+  });
+
+  it("keeps one countdown across waves of the same search", async () => {
+    const { bot, thread, turn } = await conversation();
+    const actor: Actor = {
+      userId,
+      spaceId,
+      email: `${userId}@example.test`,
+      isDeploymentOwner: false,
+    };
+    const asked = await prisma.message.findFirstOrThrow({ where: { threadId: thread.id } });
+    const { role } = await createRecruitingRole(prisma, actor, {
+      sourceThreadId: thread.id,
+      expectedRevision: 0,
+      title: "Synthetic role",
+      sourceRefs: [
+        {
+          id: "source-jd",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: asked.id, locator: "text:0" },
+          readState: "read",
+          readAt: "2026-10-23T00:00:00.000Z",
+        },
+      ],
+      preferences: [],
+      definitionQuestions: [],
+      criteria: [],
+    });
+    await prisma.thread.update({
+      where: { id: thread.id },
+      data: { activeRecruitingRoleId: role.id },
+    });
+    const save = (count: number, from: number) =>
+      prisma.recruitingCandidate.createMany({
+        data: Array.from({ length: count }, (_, i) => ({
+          roleId: role.id,
+          candidateKey: `person-${from + i}`,
+        })),
+      });
+    await save(10, 0);
+    const scope = { spaceId, threadId: thread.id };
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+
+    // The first wave asks for 200 people: a 5-minute countdown toward 210 in Results.
+    const first = await startWorkEstimate(prisma, turn, {
+      ref: `agent_run_wave1_${suffix}`,
+      kind: "search",
+      people: 200,
+    });
+    expect(first?.estimateMs).toBe(5 * MINUTE);
+    const t0 = Date.parse(first!.startedAt);
+
+    // Nine people later the agent starts the next wave for the remaining 191: no new note,
+    // and the recruiter's countdown keeps running from where it was.
+    await save(9, 10);
+    const waveId = `agent_run_wave2_${suffix}`;
+    await answer(turn.id, waveId, "running");
+    const second = await startWorkEstimate(prisma, turn, {
+      ref: waveId,
+      kind: "search",
+      people: 191,
+    });
+    expect(second).toBeNull();
+    const shown = await currentWorkEstimate(prisma, scope, t0 + 3 * MINUTE);
+    expect(shown).toMatchObject({
+      people: 200,
+      estimateMs: 5 * MINUTE,
+      startedAt: first!.startedAt,
+    });
+
+    // When the first countdown runs out, the recruiter hears about it once.
+    const payload = { threadId: thread.id, botId: bot.id, agentRunId: waveId };
+    await waitForRecruitingAgentRun({ prisma, jobs }, payload, t0 + 5.5 * MINUTE);
+    const woken = await wakes(thread.id);
+    expect(woken).toHaveLength(1);
+    expect(woken[0]?.task?.prompt).toContain("estimated 5 minutes are up");
+
+    // The recruiter asks again before that target is met: a new ask with its own countdown.
+    await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 1,
+        role: "user",
+        blocks: [{ kind: "text", text: "再找 100 个人" }],
+      },
+    });
+    const again = await startWorkEstimate(prisma, turn, {
+      ref: `agent_run_wave3_${suffix}`,
+      kind: "search",
+      people: 100,
+    });
+    expect(again?.estimateMs).toBe(2 * MINUTE);
+
+    // A new ask after the target is met starts its own countdown too.
+    await save(191, 19);
+    const next = await startWorkEstimate(prisma, turn, {
+      ref: `agent_run_wave4_${suffix}`,
+      kind: "search",
+      people: 100,
+    });
+    expect(next?.estimateMs).toBe(2 * MINUTE);
   });
 });

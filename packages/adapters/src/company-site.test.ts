@@ -158,10 +158,15 @@ describe("company site", () => {
       .mockResolvedValueOnce([{ url: "https://esu.edu/", title: "Example State University" }])
       .mockRejectedValue(new Error("rate limited"));
     const resolver = createCompanySiteResolver({ fetch, searchOrganizations });
-    expect(await resolver.companySite("Example State University")).toEqual({ host: "esu.edu" });
-    expect(await resolver.companySite("Busy Org")).toEqual({ host: null, retry: true });
+    expect(await withRetryClock(() => resolver.companySite("Example State University"))).toEqual({
+      host: "esu.edu",
+    });
+    expect(await withRetryClock(() => resolver.companySite("Busy Org"))).toEqual({
+      host: null,
+      retry: true,
+    });
     expect(searchOrganizations).toHaveBeenCalledTimes(5);
-  }, 15_000);
+  });
 
   it("saves answers for every process but never a miss the index could not confirm", async () => {
     const saved = new Map<string, unknown>();
@@ -178,10 +183,10 @@ describe("company site", () => {
         return [{ url: "https://esu.edu/", title: "Example State University" }];
       },
     });
-    await resolver.companySite("Example State University");
-    await resolver.companySite("Busy Org");
+    await withRetryClock(() => resolver.companySite("Example State University"));
+    await withRetryClock(() => resolver.companySite("Busy Org"));
     expect([...saved]).toEqual([["example state university", { host: "esu.edu" }]]);
-  }, 15_000);
+  });
 
   it("reads a page's saved answers in one store query and answers in the names' order", async () => {
     const future = Date.now() + 60_000;
@@ -209,6 +214,21 @@ describe("company site", () => {
     expect(searchOrganizations).not.toHaveBeenCalled();
   });
 });
+
+/** Runs one lookup on a fake clock, stepping through the index's retry backoff. */
+async function withRetryClock<T>(lookup: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    let done = false;
+    const answer = lookup().finally(() => {
+      done = true;
+    });
+    while (!done) await vi.advanceTimersByTimeAsync(500);
+    return await answer;
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 async function sharpPng() {
   const { default: sharp } = await import("sharp");

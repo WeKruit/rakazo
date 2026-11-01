@@ -1,0 +1,55 @@
+name: unit-shards
+run-name: unit tests ${{ inputs.ref }}${{ inputs.merge_into && format(' on {0}', inputs.merge_into) || '' }}
+
+# Started by the release flow only: the unit suite split across parallel runners.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit or branch to test
+        required: true
+        type: string
+      merge_into:
+        description: Branch to merge the ref into before testing (premerge), or empty
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests ${{ matrix.shard }}/6
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.merge_into || inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Merge the ref for a premerge run
+        if: inputs.merge_into != ''
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          git fetch -q origin "$REF"
+          git -c user.name=unit-shards -c user.email=unit-shards@localhost merge -q --no-edit FETCH_HEAD
+      - name: Record the tested code
+        run: echo "tested tree $(git rev-parse 'HEAD^{tree}') (commit $(git rev-parse HEAD))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+        env:
+          DATABASE_URL: postgres://rakazo:rakazo@127.0.0.1:5433/rakazo
+      - run: pnpm exec vitest run packages apps/api apps/worker apps/web --shard=${{ matrix.shard }}/6
