@@ -7,8 +7,8 @@ import {
   resolveSandboxProvider,
   secretStoreOptionsFromEnv,
 } from "@rakazo/adapters";
-import type { OidcConfig } from "@rakazo/auth";
-import { oidcConfigFromEnv } from "@rakazo/auth";
+import type { FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
+import { firstPartySessionConfigFromEnv, oidcConfigFromEnv } from "@rakazo/auth";
 import {
   resolveAuthSecret,
   resolveEncryptionKey,
@@ -107,6 +107,8 @@ export interface AppEnv {
   mcpAllowPrivateEndpoint: boolean;
   /** Exact trusted MCP endpoint that accepts this product's OIDC identity. */
   firstPartyMcpUrl?: string;
+  /** Lets the backend open the first-party CRM session itself, with no second sign-in. */
+  firstPartySession?: FirstPartySessionConfig;
   port: number;
   gitSha: string | undefined;
   /** Private Compose control-network URL for the opt-in updater sidecar. */
@@ -145,6 +147,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     passwordAuth,
     oidc,
     firstPartyMcpUrl: trustedMcpEndpoint,
+    firstPartySession: trustedMcpEndpoint
+      ? firstPartySessionConfigFromEnv(source, oidc)
+      : undefined,
     nodeEnv: source.NODE_ENV ?? "",
     databaseUrl: required(source, "DATABASE_URL"),
     actorDatabaseUrl,
