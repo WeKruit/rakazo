@@ -3365,6 +3365,50 @@ describe("Pi runtime interject", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 
+  it("answers a message claimed as the last step finished instead of ending the run", async () => {
+    const contexts: Context[] = [];
+    providerState.stream.mockImplementation(
+      (_model: Model<"openai-completions">, context: Context) => {
+        contexts.push(context);
+        if (contexts.length > 1)
+          return stream(
+            primary,
+            message(primary, [{ type: "text", text: "Here are three." }], "stop"),
+          );
+        const noted = message(primary, [{ type: "text", text: "Noted." }], "stop");
+        class SlowReply extends AssistantMessageEventStream {
+          override async *[Symbol.asyncIterator]() {
+            yield { type: "start" as const, partial: { ...noted, content: [] } };
+            yield { type: "text_delta" as const, contentIndex: 0, delta: "Noted.", partial: noted };
+            await new Promise((resolve) => setTimeout(resolve, 15));
+            yield { type: "done" as const, reason: "stop" as const, message: noted };
+          }
+        }
+        return new SlowReply();
+      },
+    );
+    const input = request();
+    let claims = 0;
+    input.claimSteering = vi.fn(async (seenIds: string[]) => {
+      claims += 1;
+      if (claims === 1 || seenIds.includes("steer-1")) return [];
+      // Claimed while the reply streams, but the claim lands after the step ended.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return [
+        {
+          id: "steer-1",
+          messageId: "message-1",
+          text: "List any three people in the role.",
+          interrupt: true as const,
+        },
+      ];
+    });
+    const events = await run(input, [], new PiAgentRuntime({ interjectPollMs: 5 }));
+    expect(contexts).toHaveLength(2);
+    expect(JSON.stringify(contexts[1]!.messages.at(-1))).toContain("List any three people");
+    expect(events.at(-1)).toEqual({ type: "done", text: "Noted.\n\nHere are three." });
+  });
+
   it("drops an interrupted assistant message that carries no text", () => {
     const messages = [
       { role: "user", content: "hi", timestamp: 1 },
