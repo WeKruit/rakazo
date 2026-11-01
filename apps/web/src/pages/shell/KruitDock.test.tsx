@@ -14,6 +14,13 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@rakazo/ui-web", async (original) => ({
+  ...(await original<typeof import("@rakazo/ui-web")>()),
+  toast: toastMock,
+  Toaster: () => null,
+}));
+
 import { KruitDock } from "./KruitDock";
 
 const group = (id: string, extra: Partial<Group> = {}) =>
@@ -131,4 +138,28 @@ it("in a conversation starts minimized and shows only waits from other conversat
   expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(other.host, "Kruit").click());
   expect(other.onOpen).toHaveBeenCalledWith("Open role");
+});
+
+it("pops a top-right toast when something newly waits, not for what already waited", async () => {
+  toastMock.mockClear();
+  host = document.createElement("div");
+  document.body.append(host);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const onOpen = vi.fn();
+  const root = createRoot(host);
+  const show = (groups: Group[]) =>
+    act(async () => root.render(<KruitDock groups={groups} onOpen={onOpen} />));
+  await show([group(KRUIT), group("Designer", { attention: "approval" })]);
+  expect(toastMock).not.toHaveBeenCalled();
+  await show([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  expect(toastMock).toHaveBeenCalledTimes(1);
+  const [title, options] = toastMock.mock.calls[0]!;
+  expect(title).toBe("Open role");
+  expect(options.description).toBe("Needs your response");
+  options.action.onClick();
+  expect(onOpen).toHaveBeenCalledWith("Open role");
 });
