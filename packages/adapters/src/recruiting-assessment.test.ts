@@ -921,7 +921,7 @@ describe("native saved candidate reads", () => {
     expect(f.get).not.toHaveBeenCalled();
   });
 
-  it.each([{ roleId: "foreign" }, { actor: { userId: "foreign" } }, { shortlisted: true }])(
+  it.each([{ actor: { userId: "foreign" } }, { shortlisted: true }])(
     "rejects model scope or mutation fields before any read: %j",
     async (extra) => {
       const f = fixture();
@@ -1107,6 +1107,29 @@ describe("native cross-role recruiting reads", () => {
     await expect(guard()).resolves.toBe(true);
     f.run.userId = "foreign";
     await expect(guard()).rejects.toThrow();
+  });
+
+  it("lists a named role's people where no role is linked, never overriding a linked role", async () => {
+    const f = fixture();
+    db.candidates.mockResolvedValue({ roleId: "selected", items: [], total: 0, nextCursor: null });
+    await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list", roleId: "selected", limit: 3 },
+      context,
+    );
+    expect(db.candidates).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      roleId: "selected",
+      limit: 3,
+    });
+    db.roleId.mockResolvedValue("current");
+    await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list", roleId: "selected" },
+      context,
+    );
+    expect(db.candidates).toHaveBeenLastCalledWith(f.deps.prisma, actor, { roleId: "current" });
   });
 
   it("uses the current role by default and honors an explicit owned role filter", async () => {

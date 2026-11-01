@@ -148,11 +148,12 @@ describe("jsonSchemaParameters", () => {
         { threadId: "foreign" },
       ])
         expect(() => parseConnectorToolArgs(wire, { ...input, ...override })).toThrow();
-      // The account reads share this tool and take a roleId, so the flattened wire schema lists
-      // it; the per-operation schema still refuses a role on candidate list and source reads.
-      expect(() =>
-        RecruitingCandidatesToolInputSchema.parse({ ...input, roleId: "foreign" }),
-      ).toThrow();
+      // A list may name a role (the executor reads it only where no role is linked, owner
+      // scoped); source reads still refuse one.
+      if (input.operation === "sources")
+        expect(() =>
+          RecruitingCandidatesToolInputSchema.parse({ ...input, roleId: "foreign" }),
+        ).toThrow();
     }
     for (const input of [
       { operation: "list", limit: 0 },
