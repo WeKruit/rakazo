@@ -453,7 +453,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr ""
 
@@ -1042,6 +1042,10 @@ msgstr "Arama sonuçları yüklenemedi"
 msgid "Could not load sign-in options"
 msgstr "Giriş seçenekleri yüklenemedi"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "Bu sohbet yüklenemedi"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "Bu dosya yüklenemedi."
@@ -1115,6 +1119,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr ""
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "Gönderilemedi"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1902,6 +1910,7 @@ msgstr ""
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "Yükleniyor…"
@@ -1995,6 +2004,7 @@ msgstr ""
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "Mesaj"
 
@@ -2015,6 +2025,7 @@ msgid "Message from {peer}"
 msgstr "{peer} botundan mesaj"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "Mesaj…"
 
@@ -2357,6 +2368,10 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "Harici bağlantı açılsın mı?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "Tüm sohbeti aç"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3123,6 +3138,7 @@ msgid "Select all on this page"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "Gönder"
 

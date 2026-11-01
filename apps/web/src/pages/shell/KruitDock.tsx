@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
-import { ArrowLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -14,7 +14,6 @@ export function KruitDock({
   groupId,
   chatting = false,
   onOpen,
-  onBack,
 }: {
   groups: Group[];
   /** The open conversation: its own card is already in view. */
@@ -22,8 +21,6 @@ export function KruitDock({
   /** A chat is on screen: no button over its composer, and cards sit at the top instead. */
   chatting?: boolean;
   onOpen: (groupId: string) => void;
-  /** Return to where the recruiter was before opening a card from here. */
-  onBack?: () => void;
 }) {
   const { t } = useLingui();
   const kruit = groups.find((group) => group.id.startsWith("recruiting-global-"));
@@ -35,21 +32,15 @@ export function KruitDock({
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
   const showCard = waiting.length > 0 && (opened || closedFor !== key);
-  if (!onBack && (chatting ? !showCard : !kruit && !waiting.length)) return null;
+  if (chatting ? !showCard : !kruit && !waiting.length) return null;
   return (
     <div
       className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "top-20" : "bottom-4"}`}
     >
-      {onBack ? (
-        <Button variant="outline" size="sm" className="shadow-lg" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />
-          <Trans>Back</Trans>
-        </Button>
-      ) : null}
       {showCard ? (
         <div
           role="status"
-          className="w-80 max-w-full rounded-xl border border-border bg-card p-2 text-card-foreground shadow-lg"
+          className="w-80 max-w-full rounded-2xl border border-border/60 bg-popover/80 p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/5 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
         >
           <div className="flex items-center justify-between ps-2">
             <span className="text-sm font-medium">
@@ -103,7 +94,7 @@ export function KruitDock({
               ? t`${RECRUITING_GLOBAL_AGENT_NAME}, ${waiting.length} waiting`
               : RECRUITING_GLOBAL_AGENT_NAME
           }
-          className="relative grid size-12 place-items-center rounded-full border border-border bg-card shadow-lg hover:bg-accent"
+          className="relative grid size-12 place-items-center rounded-full border border-border/60 bg-popover/80 shadow-2xl backdrop-blur-xl hover:bg-accent"
           onClick={() => {
             // With something waiting the button shows it; otherwise it opens Kruit.
             if (waiting.length) setOpened((open) => !open || closedFor !== key);
