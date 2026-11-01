@@ -17,11 +17,11 @@ import { BriefcaseBusiness, Mail, Search, Send, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { PersonAvatar } from "./ProfileImage";
+import { campaignName } from "./SequenceTab";
 
 export function recruitingTargetHref(target: RecruitingSearchTarget) {
   const query = new URLSearchParams({
     view: target.kind === "role" ? "conversation" : "sequence",
-    role: target.roleId,
   });
   if (target.campaignId) query.set("campaign", target.campaignId);
   if (target.serverId) query.set("campaignServer", target.serverId);
@@ -212,7 +212,7 @@ export function RecruitingGlobalSearch({
                   <Send aria-hidden />
                   <div className="min-w-0">
                     <p className="truncate" dir="auto">
-                      {target.title}
+                      {campaignName(target.title)}
                     </p>
                     <p className="truncate text-xs text-muted-foreground" dir="auto">
                       {target.roleTitle}

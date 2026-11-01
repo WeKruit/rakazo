@@ -816,10 +816,23 @@ export async function mockRecruitingApp(
         actorName: entry.actorName,
         roleTitle: entry.roleTitle,
       };
-    } else if (method === "recruiting/roleCampaign")
+    } else if (method === "recruiting/sequenceDraft")
+      value = {
+        roleId: appRoleId,
+        roleTitle: "Staff Platform Engineer",
+        mailboxes: [],
+        campaigns: [],
+        campaign: null,
+      };
+    else if (method === "recruiting/roleCampaign")
       value =
         options.multipleCampaigns && !input.campaignId
-          ? { status: "unavailable", campaign: null, selectionRequired: true }
+          ? {
+              status: "unavailable",
+              serverId: "fixture-campaign-source",
+              campaign: null,
+              selectionRequired: true,
+            }
           : {
               status: "ready",
               serverId: "fixture-campaign-source",

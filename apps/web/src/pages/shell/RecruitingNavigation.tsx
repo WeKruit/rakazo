@@ -25,6 +25,7 @@ import type { CrmBrowseSelection } from "../RecruitingPanel";
 
 export type RecruitingWorkspaceView =
   | "home"
+  | "roles"
   | "conversation"
   | "results"
   | "brief"
@@ -98,6 +99,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   kruitDisabled,
   inboxUnread,
   onAllRoles,
+  onViewAllRoles,
   onSearch,
   compact = false,
 }: {
@@ -111,6 +113,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     | { status: "loading" | "failed" }
     | { status: "ready"; count: number; partial: boolean };
   onAllRoles?: () => void;
+  onViewAllRoles?: () => void;
   onSearch?: () => void;
   compact?: boolean;
   /** Hover or focus on a role: start reading its conversation before the click. */
@@ -331,7 +334,15 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         <Button
           variant="ghost"
           aria-current={
-            !["shortlist", "contacts", "sequence", "inbox", "interview", "analytics"].includes(view)
+            ![
+              "roles",
+              "shortlist",
+              "contacts",
+              "sequence",
+              "inbox",
+              "interview",
+              "analytics",
+            ].includes(view)
               ? "page"
               : undefined
           }
@@ -628,7 +639,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           <Button
             variant="ghost"
             className="w-full justify-start text-sm text-muted-foreground"
-            onClick={() => onView("home")}
+            onClick={onViewAllRoles}
           >
             <Trans>View all roles</Trans>
           </Button>

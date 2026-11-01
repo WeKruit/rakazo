@@ -176,7 +176,7 @@ export function useShellRoster({
     !routeGroupId.current &&
     !routeBotId.current &&
     (isAccountRecruitingView(searchParamsRef.current.get("view")) ||
-      searchParamsRef.current.get("view") === "analytics");
+      ["analytics", "roles"].includes(searchParamsRef.current.get("view") ?? ""));
 
   const refreshBots = useCallback(
     (includeArchived = false, replaceBotOrder = false) => {

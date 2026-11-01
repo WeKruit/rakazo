@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Mail,
   MapPin,
   Maximize2,
   Minimize2,
@@ -32,7 +31,9 @@ import { LinkedInIcon } from "./LinkedInIcon";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import { PersonAvatar } from "./ProfileImage";
+import { ProfileMailIcon } from "./ProfileMailIcon";
 import { ProfileSequenceHistory } from "./ProfileSequenceHistory";
+import { ProfileSourceIcon } from "./ProfileSourceIcon";
 import { CurrentPosition, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
@@ -100,7 +101,14 @@ function Sources({ urls: allUrls }: { urls: readonly string[] }) {
   return (
     <span className="flex flex-wrap gap-x-2 text-xs">
       {urls.map((url) => (
-        <a key={url} href={url} target="_blank" rel="noreferrer" className="underline">
+        <a
+          key={url}
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 underline"
+        >
+          <ProfileSourceIcon href={url} className="size-3.5 shrink-0" />
           {sourceLabel(url)}
         </a>
       ))}
@@ -508,7 +516,7 @@ export function RecruitingDetailPanel({
             </summary>
             <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
               <dt className="flex items-center gap-1.5 text-muted-foreground">
-                <Mail size={14} aria-hidden />
+                <ProfileMailIcon className="size-3.5" />
                 <Trans>Email</Trans>
               </dt>
               <dd className="flex items-center justify-between gap-2 break-all">
@@ -537,7 +545,7 @@ export function RecruitingDetailPanel({
             <div className="flex flex-wrap gap-2">
               {emailDraft ? (
                 <Button size="sm" onClick={emailDraft}>
-                  <Mail size={15} aria-hidden />
+                  <ProfileMailIcon className="size-4" />
                   <Trans>Email draft</Trans>
                 </Button>
               ) : null}

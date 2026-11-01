@@ -5202,6 +5202,7 @@ describe("live CRM browser reads", () => {
       expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toMatchObject({
         status: "unavailable",
         selectionRequired: true,
+        serverId: "instantly",
         campaign: null,
         leads: [],
       });

@@ -405,6 +405,7 @@ export function ShellConversation({
               {recruitingWorkspaceView === "sequence" ? (
                 <>
                   <SequenceTab
+                    composeNew={searchParams.get("compose") === "new"}
                     requestedCampaign={
                       searchParams.get("campaign")
                         ? {

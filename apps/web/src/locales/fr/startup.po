@@ -115,6 +115,16 @@ msgstr ""
 msgid "{0} sequence contacts"
 msgstr ""
 
+#. placeholder {0}: filtered.length
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "{0} sequences"
+msgstr ""
+
+#. placeholder {0}: filtered.length
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "{0} sequences loaded"
+msgstr ""
+
 #. placeholder {0}: people.length
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "{0} shortlisted candidates"
@@ -127,8 +137,11 @@ msgstr ""
 
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
+#. placeholder {1}: offset + visible.length
 #. placeholder {2}: data.total
+#. placeholder {2}: roles.length
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "{0}–{1} of {2}"
 msgstr ""
 
@@ -266,6 +279,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "≥ Saved minimum · — Not reported"
+msgstr ""
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "14 day period"
 msgstr ""
@@ -298,15 +315,17 @@ msgstr "Jeton d'accès"
 msgid "Accounts"
 msgstr "Comptes"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Actions"
 msgstr ""
 
+#. placeholder {0}: campaignName(row.campaign.campaign!.name)
 #. placeholder {0}: group.name
 #. placeholder {0}: group.spaceName
-#. placeholder {0}: sectionMenu.section.name
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/shell/ShellOverlays.tsx
@@ -317,6 +336,7 @@ msgstr "Actions pour {0}"
 msgid "Actions for space"
 msgstr "Actions pour l'espace"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Active"
@@ -455,7 +475,9 @@ msgstr ""
 msgid "All responses"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "All roles"
 msgstr ""
@@ -468,12 +490,18 @@ msgstr ""
 msgid "All rounds"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "All sequences"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "All statuses"
 msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 msgid "All time"
 msgstr "Toute la période"
 
@@ -741,6 +769,7 @@ msgstr "Aperçu de l'écran du bot"
 msgid "Bounce rate"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -957,6 +986,10 @@ msgstr ""
 msgid "Choose the role again."
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Choose the role for this sequence."
+msgstr ""
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Clear date filter"
 msgstr ""
@@ -975,6 +1008,7 @@ msgstr ""
 msgid "Click rate"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Clicked"
 msgstr ""
@@ -1082,6 +1116,7 @@ msgstr ""
 msgid "Company: {0}"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Completed"
@@ -1179,6 +1214,7 @@ msgid "Contacts"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "Continuer"
@@ -1360,6 +1396,10 @@ msgstr ""
 msgid "Could not load replies."
 msgstr ""
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Could not load roles."
+msgstr ""
+
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Could not load saved sequences"
 msgstr ""
@@ -1433,6 +1473,10 @@ msgstr "Impossible d'atteindre le serveur"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Could not read candidate records."
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Could not read this campaign. Results are incomplete."
 msgstr ""
 
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
@@ -1545,6 +1589,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
 msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Created"
+msgstr "Créé"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Creating role…"
@@ -1777,6 +1825,7 @@ msgstr "Télécharger l'exécuteur"
 msgid "Downloading…"
 msgstr "Téléchargement en cours…"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Draft"
 msgstr ""
@@ -2029,6 +2078,14 @@ msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Filter"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Filter by saved contact"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Filter by saved contact…"
 msgstr ""
 
 #. placeholder {0}: chosen.length
@@ -2301,6 +2358,7 @@ msgstr "Intégrations"
 msgid "Interest rate"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Interested"
@@ -2415,6 +2473,14 @@ msgstr ""
 msgid "Last {count} days"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Last 30 days"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Last 90 days"
+msgstr ""
+
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
@@ -2508,6 +2574,10 @@ msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Loading roles…"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Loading sequences…"
 msgstr ""
 
 #: src/components/RunTrace.tsx
@@ -2772,6 +2842,7 @@ msgstr "Couper le micro"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -2832,11 +2903,13 @@ msgstr "Nouveau mot de passe"
 msgid "New role"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "New sequence"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Next"
 msgstr ""
 
@@ -2940,6 +3013,10 @@ msgstr ""
 msgid "No matching accounts"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No matching saved contact memberships."
+msgstr ""
+
 #: src/components/StageTranscript.tsx
 msgid "No messages yet."
 msgstr ""
@@ -2989,6 +3066,14 @@ msgstr ""
 msgid "No roles found"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "No roles match your search."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "No roles yet."
+msgstr ""
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No saved candidates"
@@ -3006,8 +3091,16 @@ msgstr ""
 msgid "No schedules returned."
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No sequences match these filters."
+msgstr ""
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "No sequences returned."
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No sequences yet. Create one for a role to get started."
 msgstr ""
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
@@ -3176,6 +3269,7 @@ msgstr "Ouvrir la conversation complète"
 msgid "Open in full window"
 msgstr "Ouvrir en fenêtre complète"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open navigation"
 msgstr "Ouvrir la navigation"
@@ -3207,6 +3301,7 @@ msgstr ""
 msgid "Open the saved sequence before editing it."
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Opened"
@@ -3309,8 +3404,17 @@ msgstr ""
 msgid "Overdue ({0})"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Overview"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Owner"
+msgstr ""
+
+#. placeholder {0}: page + 1
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Page {0} of {pages}"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -3367,6 +3471,7 @@ msgid "Pause consideration"
 msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
@@ -3444,7 +3549,12 @@ msgid "Preview steps"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Previous"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Privacy"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -3712,6 +3822,7 @@ msgstr "Renommer la section"
 msgid "Rename space"
 msgstr "Renommer l'espace"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -3879,6 +3990,7 @@ msgstr ""
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
@@ -3931,6 +4043,7 @@ msgstr ""
 msgid "Rich formatting, reply threading, signatures, attachments, snippets, unsubscribe settings and business-day delays cannot be changed in this draft editor."
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/TalentInsights.tsx
@@ -3948,6 +4061,14 @@ msgstr ""
 
 #: src/pages/recruiting/RoleDetailsMenu.tsx
 msgid "Role details"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Role for new sequence"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Role pages"
 msgstr ""
 
 #: src/pages/recruiting/RoleSetup.tsx
@@ -4069,6 +4190,10 @@ msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Saved contact lookups"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Saved contact membership only; coverage may be incomplete."
 msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -4213,6 +4338,7 @@ msgstr ""
 msgid "Search refinement"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search roles"
 msgstr ""
@@ -4231,6 +4357,14 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Search sequence runs…"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Search sequences"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Search sequences…"
 msgstr ""
 
 #. placeholder {0}: index + 1
@@ -4266,6 +4400,10 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Select a mailbox"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Select a role"
 msgstr ""
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
@@ -4322,6 +4460,10 @@ msgstr ""
 msgid "Send reset link"
 msgstr "Envoyer le lien de réinitialisation"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Send timing is not reported in saved sequence records."
+msgstr ""
+
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Sender"
 msgstr ""
@@ -4352,6 +4494,11 @@ msgstr "Envoi en cours…"
 msgid "Sent"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -4360,6 +4507,10 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence contacts"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence date range"
 msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -4374,6 +4525,14 @@ msgstr ""
 msgid "Sequence name"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence privacy is not reported"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence role filter"
+msgstr ""
+
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Sequence start"
 msgstr ""
@@ -4382,6 +4541,7 @@ msgstr ""
 msgid "Sequence status"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence status filter"
 msgstr ""
@@ -4499,6 +4659,7 @@ msgstr ""
 msgid "Show more"
 msgstr "Afficher plus"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Show navigation"
@@ -4591,11 +4752,19 @@ msgstr ""
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Some sequences could not be read. Results are incomplete."
+msgstr ""
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
 msgid "Something went wrong. Try again."
 msgstr "Un problème est survenu. Réessayez."
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sort sequences"
+msgstr ""
 
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Source context"
@@ -4655,6 +4824,10 @@ msgstr ""
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Status"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Status not reported"
 msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -4999,6 +5172,10 @@ msgstr ""
 msgid "Top locations"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Total"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Total · deduplicated people"
 msgstr ""
@@ -5246,6 +5423,10 @@ msgstr ""
 msgid "View all roles"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "View analytics"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "View insights"
 msgstr ""
@@ -5256,6 +5437,10 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "View observed replies"
+msgstr ""
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "View sequence"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx

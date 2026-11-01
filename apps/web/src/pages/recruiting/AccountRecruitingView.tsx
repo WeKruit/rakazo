@@ -1,6 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Bot, Group, RecruitingRoleCampaign } from "@rakazo/contracts";
-import { hideVendorNames } from "@rakazo/core";
+import type { Bot, Group } from "@rakazo/contracts";
 import { Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
@@ -9,6 +8,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
 import { AccountInbox } from "./AccountInbox";
+import { AccountSequences } from "./AccountSequences";
 import { AllContacts } from "./AllContacts";
 import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
@@ -95,7 +95,7 @@ export function AccountRecruitingView({
   const [pendingRoles, setPendingRoles] = useState<{ key: string; ids: string[] }>();
   const pending = pendingRoles?.key === readKey ? pendingRoles.ids : [];
   useEffect(() => {
-    if (view === "routines" || allContacts) return;
+    if (view === "routines" || view === "sequence" || allContacts) return;
     let cancelled = false;
     setLoading(true);
     setFailed(false);
@@ -320,67 +320,6 @@ export function AccountRecruitingView({
       setLoadingMore(undefined);
     }
   };
-  const loadMoreLeads = async (roleId: string, campaign: RecruitingRoleCampaign) => {
-    if (
-      !page ||
-      !campaign.campaign ||
-      !campaign.serverId ||
-      !campaign.nextLeadCursor ||
-      loadingMore
-    )
-      return;
-    setLoadingMore(roleId);
-    try {
-      const next = await rpc.recruiting.accountView({
-        view: "sequence",
-        roleId,
-        campaignId: campaign.campaign.id,
-        campaignServerId: campaign.serverId,
-        campaignLeadCursor: campaign.nextLeadCursor,
-        limit: 20,
-      });
-      const update = next.items[0]?.campaigns?.[0];
-      if (update)
-        setRead((current) =>
-          current?.key !== readKey
-            ? current
-            : {
-                key: readKey,
-                data: {
-                  ...current.data,
-                  items: current.data.items.map((item) =>
-                    item.roleId !== roleId
-                      ? item
-                      : {
-                          ...item,
-                          campaigns: (item.campaigns ?? (item.campaign ? [item.campaign] : [])).map(
-                            (saved) =>
-                              saved.serverId === update.serverId &&
-                              saved.campaign?.id === update.campaign?.id
-                                ? {
-                                    ...update,
-                                    leads: [
-                                      ...new Map(
-                                        [...saved.leads, ...update.leads].map((lead) => [
-                                          lead.email.toLowerCase(),
-                                          lead,
-                                        ]),
-                                      ).values(),
-                                    ],
-                                  }
-                                : saved,
-                          ),
-                        },
-                  ),
-                },
-              },
-        );
-    } catch {
-      setFailed(true);
-    } finally {
-      setLoadingMore(undefined);
-    }
-  };
   const calendarRows = new Map<
     string,
     {
@@ -453,6 +392,15 @@ export function AccountRecruitingView({
     next.set("view", nextView);
     return { search: `?${next}` };
   };
+  if (view === "sequence")
+    return (
+      <AccountSequences
+        accountKey={accountKey}
+        refreshSignal={refreshSignal}
+        initialQuery={urlQuery}
+        onOpenNavigation={onOpenNavigation}
+      />
+    );
   const Page = renderCorrespondence ? "section" : "main";
   return (
     <Page
@@ -895,77 +843,7 @@ export function AccountRecruitingView({
                       </ul>
                     </>
                   ) : null}
-                  {view === "sequence" ? (
-                    <>
-                      {(item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : []))
-                        .length ? (
-                        (item.campaigns ?? [item.campaign!]).map((campaign) => (
-                          <div key={campaign.campaign?.id} className="space-y-2">
-                            <h3 className="text-sm font-medium">
-                              {campaign.campaign?.name
-                                ? hideVendorNames(campaign.campaign.name)
-                                : null}
-                            </h3>
-                            {campaign.status === "unavailable" ? (
-                              <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                                <Trans>Could not read this campaign.</Trans>
-                              </RetryNotice>
-                            ) : null}
-                            <dl className="flex flex-wrap gap-4 text-sm">
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Sent</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.sent ?? "—"}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Opened</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.opened ?? "—"}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Replied</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.replied ?? "—"}</dd>
-                              </div>
-                            </dl>
-                            <ul className="space-y-2 text-sm">
-                              {campaign.leads.map((lead) => (
-                                <li key={lead.email}>{lead.email}</li>
-                              ))}
-                            </ul>
-                            {campaign.nextLeadCursor ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={Boolean(loadingMore)}
-                                onClick={() => void loadMoreLeads(item.roleId, campaign)}
-                              >
-                                <Trans>Load more</Trans>
-                              </Button>
-                            ) : null}
-                          </div>
-                        ))
-                      ) : item.campaign?.status === "unavailable" ? (
-                        <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                          <Trans>Could not read this campaign.</Trans>
-                        </RetryNotice>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          <Trans>No campaign yet.</Trans>
-                        </p>
-                      )}
-                      {item.correspondence?.contacts.map((contact) => (
-                        <p key={contact.candidateKey} className="text-sm">
-                          {contact.emails.map((email) => email.address).join(", ")}
-                        </p>
-                      ))}
-                    </>
-                  ) : null}
-                  {(view === "sequence" || view === "interview" || view === "inbox") &&
-                  renderCorrespondence
+                  {(view === "interview" || view === "inbox") && renderCorrespondence
                     ? renderCorrespondence(item)
                     : null}
                   {view === "feedback" && item.feedback?.nextCursor ? (

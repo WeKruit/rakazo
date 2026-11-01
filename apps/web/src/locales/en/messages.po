@@ -1966,7 +1966,6 @@ msgstr "Could not reach the server"
 msgid "Could not read {failedCalendars}."
 msgstr "Could not read {failedCalendars}."
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "Could not read this campaign."
@@ -4005,10 +4004,6 @@ msgstr "no auth"
 msgid "No authentication"
 msgstr "No authentication"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr "No campaign yet."
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
@@ -4522,7 +4517,6 @@ msgstr "Open work"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-compatible server URL"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr "Opened"
@@ -5176,7 +5170,6 @@ msgstr "Replace value"
 msgid "Replaced"
 msgstr "Replaced"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6023,10 +6016,6 @@ msgstr "Sending…"
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
 msgstr "Seniority"
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
-msgstr "Sent"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"

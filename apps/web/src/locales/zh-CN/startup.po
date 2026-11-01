@@ -115,6 +115,16 @@ msgstr "已选 {0} 人"
 msgid "{0} sequence contacts"
 msgstr "{0} 位邮件序列联系人"
 
+#. placeholder {0}: filtered.length
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "{0} sequences"
+msgstr "{0} 个邮件序列"
+
+#. placeholder {0}: filtered.length
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "{0} sequences loaded"
+msgstr "已加载 {0} 个邮件序列"
+
 #. placeholder {0}: people.length
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "{0} shortlisted candidates"
@@ -127,8 +137,11 @@ msgstr "有 {0} 位入选者没有记录入选日期。"
 
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
+#. placeholder {1}: offset + visible.length
 #. placeholder {2}: data.total
+#. placeholder {2}: roles.length
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "{0}–{1} of {2}"
 msgstr "第 {0}–{1} 人，共 {2} 人"
 
@@ -266,6 +279,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr "≥ 已加载记录中的数量"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "≥ Saved minimum · — Not reported"
+msgstr "≥ 已存记录的最低数量 · — 未提供"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "14 day period"
 msgstr "14 天周期"
@@ -298,15 +315,17 @@ msgstr "访问令牌"
 msgid "Accounts"
 msgstr "账号"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Actions"
 msgstr "操作"
 
+#. placeholder {0}: campaignName(row.campaign.campaign!.name)
 #. placeholder {0}: group.name
 #. placeholder {0}: group.spaceName
-#. placeholder {0}: sectionMenu.section.name
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/shell/ShellOverlays.tsx
@@ -317,6 +336,7 @@ msgstr "{0} 的操作"
 msgid "Actions for space"
 msgstr "空间操作"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Active"
@@ -455,7 +475,9 @@ msgstr "全部满足"
 msgid "All responses"
 msgstr "全部回复"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "All roles"
 msgstr "全部岗位"
@@ -468,12 +490,18 @@ msgstr "全部岗位 · 按人去重"
 msgid "All rounds"
 msgstr "全部轮次"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "All sequences"
+msgstr "全部邮件序列"
+
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "All statuses"
 msgstr "全部状态"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 msgid "All time"
 msgstr "全部时间"
 
@@ -741,6 +769,7 @@ msgstr "Bot 屏幕预览"
 msgid "Bounce rate"
 msgstr "退信率"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -957,6 +986,10 @@ msgstr "选择发件人"
 msgid "Choose the role again."
 msgstr "请重新选择岗位。"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Choose the role for this sequence."
+msgstr "选择此邮件序列所属的职位。"
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Clear date filter"
 msgstr "清除日期筛选"
@@ -975,6 +1008,7 @@ msgstr "清除选择"
 msgid "Click rate"
 msgstr "点击率"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Clicked"
 msgstr "已点击"
@@ -1082,6 +1116,7 @@ msgstr "公司介绍材料"
 msgid "Company: {0}"
 msgstr "公司：{0}"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Completed"
@@ -1179,6 +1214,7 @@ msgid "Contacts"
 msgstr "联系人"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "继续"
@@ -1360,6 +1396,10 @@ msgstr "无法加载提醒。"
 msgid "Could not load replies."
 msgstr "无法加载回复。"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Could not load roles."
+msgstr "无法加载职位。"
+
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Could not load saved sequences"
 msgstr "无法加载已保存的邮件序列"
@@ -1434,6 +1474,10 @@ msgstr "无法连接服务器"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Could not read candidate records."
 msgstr "无法读取候选人记录。"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Could not read this campaign. Results are incomplete."
+msgstr "无法读取此邮件序列，结果不完整。"
 
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 msgid "Could not read this cohort."
@@ -1545,6 +1589,10 @@ msgstr "创建提醒"
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
 msgstr "创建你的 WeKruit Headhunter 账号"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Created"
+msgstr "已创建"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Creating role…"
@@ -1777,6 +1825,7 @@ msgstr "下载 Executor"
 msgid "Downloading…"
 msgstr "正在下载…"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Draft"
 msgstr "草稿"
@@ -2030,6 +2079,14 @@ msgstr "文件"
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Filter"
 msgstr "筛选"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Filter by saved contact"
+msgstr "按已存联系人筛选"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Filter by saved contact…"
+msgstr "按已存联系人筛选…"
 
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
@@ -2301,6 +2358,7 @@ msgstr "集成"
 msgid "Interest rate"
 msgstr "感兴趣比例"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Interested"
@@ -2415,6 +2473,14 @@ msgstr "最近 {0} 天"
 msgid "Last {count} days"
 msgstr "最近 {count} 天"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Last 30 days"
+msgstr "最近 30 天"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Last 90 days"
+msgstr "最近 90 天"
+
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
@@ -2509,6 +2575,10 @@ msgstr ""
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Loading roles…"
 msgstr "正在加载岗位…"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Loading sequences…"
+msgstr "正在加载邮件序列…"
 
 #: src/components/RunTrace.tsx
 msgid "Loading trace…"
@@ -2772,6 +2842,7 @@ msgstr "静音"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -2832,11 +2903,13 @@ msgstr "新密码"
 msgid "New role"
 msgstr "新岗位"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "New sequence"
 msgstr "新建邮件序列"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Next"
 msgstr "下一步"
 
@@ -2940,6 +3013,10 @@ msgstr "没有已加载的候选人符合这个日期筛选。"
 msgid "No matching accounts"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No matching saved contact memberships."
+msgstr "没有找到此已存联系人所属的邮件序列。"
+
 #: src/components/StageTranscript.tsx
 msgid "No messages yet."
 msgstr "还没有消息。"
@@ -2989,6 +3066,14 @@ msgstr "未关联岗位"
 msgid "No roles found"
 msgstr "未找到岗位"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "No roles match your search."
+msgstr "没有匹配的职位。"
+
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "No roles yet."
+msgstr "还没有职位。"
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No saved candidates"
@@ -3006,9 +3091,17 @@ msgstr "此范围内没有已保存的邮件序列。"
 msgid "No schedules returned."
 msgstr "未返回日程。"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No sequences match these filters."
+msgstr "没有符合筛选条件的邮件序列。"
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "No sequences returned."
 msgstr "未返回邮件序列。"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "No sequences yet. Create one for a role to get started."
+msgstr "暂无邮件序列。选择一个职位创建序列。"
 
 #: src/pages/recruiting/ShortlistDirectory.tsx
 #: src/pages/recruiting/TalentInsights.tsx
@@ -3176,6 +3269,7 @@ msgstr "打开完整对话"
 msgid "Open in full window"
 msgstr "在完整窗口中打开"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open navigation"
 msgstr "打开导航"
@@ -3207,6 +3301,7 @@ msgstr "打开岗位对话查看候选人。"
 msgid "Open the saved sequence before editing it."
 msgstr "编辑前请先打开已保存的邮件序列。"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Opened"
@@ -3309,9 +3404,18 @@ msgstr "整体方向：{direction}"
 msgid "Overdue ({0})"
 msgstr "已逾期（{0}）"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Overview"
+msgstr "概览"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Owner"
 msgstr "所有者"
+
+#. placeholder {0}: page + 1
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Page {0} of {pages}"
+msgstr "第 {0} 页，共 {pages} 页"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -3367,6 +3471,7 @@ msgid "Pause consideration"
 msgstr "暂停考虑"
 
 #: src/components/ToolActivityDisclosure.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
@@ -3444,8 +3549,13 @@ msgid "Preview steps"
 msgstr "预览步骤"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Previous"
 msgstr "上一步"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Privacy"
+msgstr "隐私"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -3712,6 +3822,7 @@ msgstr "重命名分组"
 msgid "Rename space"
 msgstr "重命名工作区"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -3879,6 +3990,7 @@ msgstr "重启后已恢复"
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
@@ -3931,6 +4043,7 @@ msgstr "审核此岗位已保存的邮件序列“{0}”，并根据确切的已
 msgid "Rich formatting, reply threading, signatures, attachments, snippets, unsubscribe settings and business-day delays cannot be changed in this draft editor."
 msgstr "此草稿编辑器不支持修改富文本格式、回复线程、签名、附件、摘要、退订设置及按工作日计算的延迟。"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/TalentInsights.tsx
@@ -3949,6 +4062,14 @@ msgstr "岗位对话"
 #: src/pages/recruiting/RoleDetailsMenu.tsx
 msgid "Role details"
 msgstr "岗位详情"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Role for new sequence"
+msgstr "新邮件序列所属职位"
+
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Role pages"
+msgstr "职位列表分页"
 
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
@@ -4070,6 +4191,10 @@ msgstr "已保存的候选人"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Saved contact lookups"
 msgstr "已保存的联系方式查询"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Saved contact membership only; coverage may be incomplete."
+msgstr "仅匹配已存联系人的序列归属，记录可能不完整。"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Saved draft"
@@ -4213,6 +4338,7 @@ msgstr "搜索邮件…"
 msgid "Search refinement"
 msgstr "搜索调整"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search roles"
 msgstr "搜索岗位"
@@ -4232,6 +4358,14 @@ msgstr "搜索邮件序列记录"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Search sequence runs…"
 msgstr "搜索邮件序列记录…"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Search sequences"
+msgstr "搜索邮件序列"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Search sequences…"
+msgstr "搜索邮件序列…"
 
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -4267,6 +4401,10 @@ msgstr "选择一个会话。"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Select a mailbox"
 msgstr "选择发件邮箱"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Select a role"
+msgstr "选择职位"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Select a saved sequence"
@@ -4322,6 +4460,10 @@ msgstr "已记录发送"
 msgid "Send reset link"
 msgstr "发送重置链接"
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Send timing is not reported in saved sequence records."
+msgstr "已存邮件序列中未提供发送时间。"
+
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Sender"
 msgstr "发件人"
@@ -4352,6 +4494,11 @@ msgstr "正在发送…"
 msgid "Sent"
 msgstr "已发送"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr "已发送（累计）：{sentTotal}"
+
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -4361,6 +4508,10 @@ msgstr "邮件序列"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence contacts"
 msgstr "邮件序列联系人"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence date range"
+msgstr "邮件序列日期范围"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Sequence draft"
@@ -4374,6 +4525,14 @@ msgstr "邮件序列编辑器"
 msgid "Sequence name"
 msgstr "邮件序列名称"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence privacy is not reported"
+msgstr "未提供邮件序列的可见范围"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sequence role filter"
+msgstr "按邮件序列所属职位筛选"
+
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Sequence start"
 msgstr "邮件序列开始时间"
@@ -4382,6 +4541,7 @@ msgstr "邮件序列开始时间"
 msgid "Sequence status"
 msgstr "序列状态"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence status filter"
 msgstr "邮件序列状态筛选"
@@ -4499,6 +4659,7 @@ msgstr "收起"
 msgid "Show more"
 msgstr "显示更多"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Show navigation"
@@ -4591,11 +4752,19 @@ msgstr "部分搜索结果未能加载。"
 msgid "Some saved contact details could not be displayed."
 msgstr "部分已保存的联系方式无法显示。"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Some sequences could not be read. Results are incomplete."
+msgstr "部分邮件序列无法读取，结果不完整。"
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Sort sequences"
+msgstr "邮件序列排序"
 
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Source context"
@@ -4656,6 +4825,10 @@ msgstr "陈述"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Status"
 msgstr "状态"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Status not reported"
+msgstr "未提供状态"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Step"
@@ -4999,6 +5172,10 @@ msgstr ""
 msgid "Top locations"
 msgstr "主要地区"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Total"
+msgstr "总计"
+
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Total · deduplicated people"
 msgstr "总计 · 按人去重"
@@ -5246,6 +5423,10 @@ msgstr "查看全部邮件"
 msgid "View all roles"
 msgstr "查看全部岗位"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "View analytics"
+msgstr "查看统计"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "View insights"
 msgstr "查看洞察"
@@ -5257,6 +5438,10 @@ msgstr "查看已观测的已联系人员"
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "View observed replies"
 msgstr "查看已观测的回复"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "View sequence"
+msgstr "查看邮件序列"
 
 #: src/pages/shell/Composer.tsx
 msgid "Voice"

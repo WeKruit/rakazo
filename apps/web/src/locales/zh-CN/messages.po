@@ -1966,7 +1966,6 @@ msgstr "无法连接服务器"
 msgid "Could not read {failedCalendars}."
 msgstr "无法读取 {failedCalendars}。"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "无法读取这个活动。"
@@ -4005,10 +4004,6 @@ msgstr "无认证"
 msgid "No authentication"
 msgstr "无认证"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr "尚无邮件活动。"
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "还没有关联聊天应用。"
@@ -4522,7 +4517,6 @@ msgstr "待办"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI 兼容服务器 URL"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr "已打开"
@@ -5176,7 +5170,6 @@ msgstr "替换值"
 msgid "Replaced"
 msgstr "已替换"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6023,10 +6016,6 @@ msgstr "正在发送…"
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
 msgstr "职级"
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
-msgstr "已发送"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"

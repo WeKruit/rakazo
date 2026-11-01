@@ -5,6 +5,7 @@ test("cold contacts retain directory, keyboard detail navigation, and return foc
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: "light" });
   const fixture = await mockRecruitingApp(page);
   await page.goto(`/app/g/${appGroupId}?view=contacts`);
   const person = page.getByRole("button", { name: "Avery Example", exact: true }).first();
@@ -17,6 +18,15 @@ test("cold contacts retain directory, keyboard detail navigation, and return foc
   await page.keyboard.press("Enter");
   const panel = page.getByTestId("recruiting-detail-panel");
   await expect(panel.getByRole("heading", { name: "Avery Example", exact: true })).toBeVisible();
+  const linkedin = panel.locator('a[href="https://www.linkedin.com/in/synthetic-profile-0"]');
+  await expect(linkedin).toBeVisible();
+  await expect(linkedin.locator("svg")).toHaveCSS("fill", "rgb(10, 102, 194)");
+  await expect(
+    panel
+      .locator("dt")
+      .filter({ hasText: /^Email$/ })
+      .locator("svg"),
+  ).toHaveCSS("color", "rgb(37, 99, 235)");
   await panel.getByRole("button", { name: "Show all 5 criteria", exact: true }).click();
   await expect(panel.getByRole("region", { name: "Agent assessment", exact: true })).toContainText(
     "deployment scale is not stated",

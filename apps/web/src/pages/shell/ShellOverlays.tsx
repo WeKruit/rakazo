@@ -515,6 +515,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
         )}
         {!showToolActivity && commandPaletteOpen && (
           <RecruitingGlobalSearch
+            key={JSON.stringify([userId, bootstrapMe?.spaceId])}
             open={commandPaletteOpen}
             onOpenChange={setCommandPaletteOpen}
             spaceId={bootstrapMe?.spaceId}

@@ -35,25 +35,22 @@ for (const width of [1440, 390]) {
       ["tasks", "Prepare platform interview"],
     ] as const) {
       await page.goto(`/app?view=${view}&role=all`);
-      const main = page.getByTestId("account-recruiting-view");
+      const main = page.getByTestId(
+        view === "sequence" ? "account-sequences" : "account-recruiting-view",
+      );
       await expect(main).toBeVisible();
       await expect(main.getByText(row, { exact: false }).first()).toBeVisible();
-      const picker = main.getByRole("combobox", { name: "Role", exact: true });
+      const picker = main.getByRole("combobox", {
+        name: view === "sequence" ? "Sequence role filter" : "Role",
+        exact: true,
+      });
       await expect(picker).toHaveValue("all");
       if (view === "sequence") {
-        const campaign = main.getByRole("region", { name: "Staff Platform Engineer", exact: true });
-        for (const [label, count] of [
-          ["Sent", "3"],
-          ["Opened", "2"],
-          ["Replied", "1"],
-        ])
-          await expect(
-            campaign
-              .locator("dt")
-              .filter({ hasText: new RegExp(`^${label}$`) })
-              .locator("..")
-              .locator("dd"),
-          ).toHaveText(count);
+        const campaign = main
+          .getByRole("row")
+          .filter({ has: main.getByRole("link", { name: "Platform outreach", exact: true }) });
+        await expect(campaign.getByRole("cell").nth(3)).toHaveText("2");
+        await expect(campaign.getByRole("cell").nth(5)).toHaveText("1");
       }
       await captureScreenshot(page, testInfo, `global-${view}-${width}`);
       await picker.selectOption(appRoleId);
@@ -62,6 +59,8 @@ for (const width of [1440, 390]) {
         main.getByText("Product Designer", { exact: true }).filter({ visible: true }),
       ).toHaveCount(0);
       await expect(main.getByText(row, { exact: false }).first()).toBeVisible();
+      if (view === "sequence")
+        await expect(main.getByText("Sent (all time): 3", { exact: true })).toBeVisible();
       await captureScreenshot(page, testInfo, `role-${view}-${width}`);
       await picker.selectOption("fixture-role-two");
       await expect(page).toHaveURL(/role=fixture-role-two/);

@@ -117,7 +117,7 @@ it("does not read until scoped, debounces all sources, and opens exact owned tar
       .find((button) => button.textContent === "Engineer")!
       .click(),
   );
-  expect(navigate).toHaveBeenCalledWith("/app/g/group-1?view=conversation&role=role-1");
+  expect(navigate).toHaveBeenCalledWith("/app/g/group-1?view=conversation");
 });
 it("ignores a previous search completing after the newer query and exposes partial failure", async () => {
   let finish!: (value: unknown) => void;
@@ -148,9 +148,9 @@ it("has no unscoped requests and preserves campaign/source and contact keys in l
   expect(calls.targets).not.toHaveBeenCalled();
   expect(
     recruitingTargetHref({ ...role, kind: "sequence", campaignId: "c&1", serverId: "source-1" }),
-  ).toBe("/app/g/group-1?view=sequence&role=role-1&campaign=c%261&campaignServer=source-1");
+  ).toBe("/app/g/group-1?view=sequence&campaign=c%261&campaignServer=source-1");
   expect(recruitingTargetHref({ ...role, kind: "sequence", campaignId: "mirror-1" })).toBe(
-    "/app/g/group-1?view=sequence&role=role-1&campaign=mirror-1",
+    "/app/g/group-1?view=sequence&campaign=mirror-1",
   );
   const params = new URL(recruitingContactHref(person, "A&B"), "https://example.test").searchParams;
   expect(params.get("detail")).toBe("contact.person-1");

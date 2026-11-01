@@ -1,5 +1,19 @@
 import { expect, test } from "@playwright/test";
-import { appGroupId, mockRecruitingApp } from "./fixtures/recruiting-app-data";
+import { appGroupId, appRoleId, mockRecruitingApp } from "./fixtures/recruiting-app-data";
+
+for (const source of ["native", "crm"]) {
+  test(`search sequence deep link selects the exact ${source} campaign`, async ({ page }) => {
+    const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
+    const query = new URLSearchParams({ view: "sequence", campaign: "fixture-second-campaign" });
+    if (source === "native") query.set("campaignServer", "fixture-campaign-source");
+    await page.goto(`/app/g/${appGroupId}?${query}`);
+    await expect(
+      page.getByRole("heading", { name: "Platform follow-up", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sequences", exact: true })).toBeVisible();
+    expect(fixture.unknown).toEqual([]);
+  });
+}
 
 test("collapsed recruiting navigation retains destinations, unread, search and account", async ({
   page,
@@ -28,7 +42,7 @@ test("collapsed recruiting navigation retains destinations, unread, search and a
     contentType: "image/png",
   });
   await nav.getByRole("link", { name: "Inbox", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/app/g/${appGroupId}\\?view=inbox$`));
+  await expect(page).toHaveURL(new RegExp(`/app\\?view=inbox&role=${appRoleId}$`));
   await sidebar.getByRole("button", { name: "Expand navigation", exact: true }).click();
   await expect(sidebar.getByRole("button", { name: "All roles", exact: true })).toBeVisible();
   expect(fixture.unknown).toEqual([]);
@@ -60,7 +74,7 @@ for (const width of [320, 1440]) {
     );
     await expect(page.getByRole("button", { name: "New role", exact: true }).first()).toBeVisible();
     await nav.getByRole("link", { name: "Inbox", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/app/g/${appGroupId}\\?view=inbox$`));
+    await expect(page).toHaveURL(new RegExp(`/app\\?view=inbox&role=${appRoleId}$`));
     if (width < 768)
       await page
         .getByRole("button", { name: /^(Show|Open) navigation$/ })

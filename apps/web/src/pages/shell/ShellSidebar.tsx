@@ -141,6 +141,11 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             </div>
           ) : null}
           <RecruitingNavigation
+            onViewAllRoles={() => {
+              setPanel(null);
+              setMobileSidebarOpen(false);
+              navigate("/app?view=roles");
+            }}
             compact={botsSidebarCollapsed && !mobileSidebarOpen}
             onSearch={() => {
               model.setCommandPaletteOpen(true);

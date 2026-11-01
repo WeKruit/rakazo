@@ -170,7 +170,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
   }
 });
 
-it("loads the next campaign lead page without losing sibling campaigns or repeating a person", async () => {
+it("lists sibling sequences and routes to exact role detail without expanding lead pages globally", async () => {
   const lead = (email: string) => ({ candidateKey: null, email, status: 1, interestStatus: null });
   const campaign = (id: string) => ({
     status: "ready" as const,
@@ -211,23 +211,18 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
         </MemoryRouter>,
       ),
     );
-    await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Load more")!
-        .click(),
-    );
-    expect(read).toHaveBeenLastCalledWith({
-      view: "sequence",
-      roleId: "one",
-      campaignId: "one",
-      campaignServerId: "mail-source",
-      campaignLeadCursor: "lead-page-two",
-      limit: 20,
-    });
-    expect(container.textContent?.match(/one@example.test/g)).toHaveLength(1);
-    expect(container.textContent).toContain("new@example.test");
-    expect(container.textContent).toContain("Campaign two");
-    expect(container.textContent).toContain("two@example.test");
+    const links = [...container.querySelectorAll("a")];
+    expect(
+      links.find((link) => link.textContent === "Campaign one")?.getAttribute("href"),
+    ).toContain("campaign=one&campaignServer=mail-source");
+    expect(
+      links.find((link) => link.textContent === "Campaign two")?.getAttribute("href"),
+    ).toContain("campaign=two&campaignServer=mail-source");
+    expect(
+      read.mock.calls.every(
+        ([input]) => input.sequenceSummary === true && !input.campaignLeadCursor,
+      ),
+    ).toBe(true);
   } finally {
     await act(async () => pageRoot.unmount());
   }

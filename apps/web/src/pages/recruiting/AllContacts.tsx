@@ -38,6 +38,7 @@ import type { RecruitingDetailTarget } from "./detail";
 import { pendingDetailTarget, useRecruitingDetail } from "./detail";
 import { LinkedInIcon } from "./LinkedInIcon";
 import { PersonAvatar } from "./ProfileImage";
+import { ProfileMailIcon } from "./ProfileMailIcon";
 import { profileImageUrl } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
 import { statusText, TabLoading } from "./shared";
@@ -843,7 +844,7 @@ export function AllContacts({
                                 href={`mailto:${encodeURIComponent(person.email)}`}
                                 aria-label={t`Email ${name}`}
                               >
-                                <Mail size={15} aria-hidden />
+                                <ProfileMailIcon className="size-4" />
                               </a>
                             ) : null}
                             {linkedinUrl ? (

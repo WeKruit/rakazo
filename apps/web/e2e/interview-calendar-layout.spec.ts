@@ -1,5 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { mockRecruitingApp } from "./fixtures/recruiting-app-data";
+import { appGroupId, mockRecruitingApp } from "./fixtures/recruiting-app-data";
+
+test("direct role Interview opens the five-day calendar rather than legacy correspondence", async ({
+  page,
+}) => {
+  const fixture = await mockRecruitingApp(page, { nativeScheduling: true });
+  await page.goto(`/app/g/${appGroupId}?view=interview`);
+  const calendar = page.getByTestId("interview-calendar");
+  await expect(calendar).toBeVisible();
+  await expect(calendar.locator('fieldset[aria-label="Choose day"] button')).toHaveCount(5);
+  expect(fixture.unknown).toEqual([]);
+});
 
 for (const width of [1440, 390]) {
   test(`actual global Interview keeps five-date calendar and source activity at ${width}px`, async ({

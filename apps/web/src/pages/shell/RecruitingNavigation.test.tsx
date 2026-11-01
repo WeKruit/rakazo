@@ -42,6 +42,7 @@ it("distinguishes duplicate role titles by creation time without showing interna
     unread: false,
   });
   const onView = vi.fn();
+  const onViewAllRoles = vi.fn();
   const groups = [
     group("one", "Engineer", "2026-01-01T10:00:00Z"),
     group("two", "Engineer", "2026-01-02T10:00:00Z"),
@@ -53,7 +54,13 @@ it("distinguishes duplicate role titles by creation time without showing interna
         <RecruitingNavigation
           viewHref={(view) => `/app?view=${view}`}
           kruitHref="/app?view=conversation"
-          groups={groups}
+          groups={[
+            ...groups,
+            ...Array.from({ length: 4 }, (_, index) =>
+              group(`older-${index}`, `Other role ${index}`, "2025-01-01T00:00:00Z"),
+            ),
+          ]}
+          onViewAllRoles={onViewAllRoles}
           archivedGroups={[]}
           archivedOpen={false}
           query=""
@@ -100,6 +107,13 @@ it("distinguishes duplicate role titles by creation time without showing interna
     );
     expect(container.textContent).not.toContain("thread-one");
     expect(container.textContent).not.toContain("space-test");
+    const directory = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "View all roles",
+    )!;
+    onView.mockClear();
+    act(() => directory.click());
+    expect(onViewAllRoles).toHaveBeenCalledOnce();
+    expect(onView).not.toHaveBeenCalled();
   } finally {
     act(() => root.unmount());
   }

@@ -159,6 +159,7 @@ export function SequenceTab(
     onAskChat?: (message: string) => void;
     onViewAnalytics?: (roleId?: string) => void;
     requestedCampaign?: { id: string; serverId?: string };
+    composeNew?: boolean;
   },
 ) {
   const { t } = useLingui();
@@ -250,6 +251,16 @@ export function SequenceTab(
     campaignScope,
   );
   const draftServerId = roleCampaign.data?.serverId;
+  const openedCompose = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!props.composeNew) {
+      openedCompose.current = undefined;
+      return;
+    }
+    if (!draftServerId || roleCampaign.loading || openedCompose.current === props.roleId) return;
+    openedCompose.current = props.roleId;
+    setNewOpen(true);
+  }, [props.composeNew, props.roleId, draftServerId, roleCampaign.loading]);
   const nativeDrafts = useKeyedRead<RecruitingSequenceOutput>(
     draftServerId && (groupId || botId)
       ? JSON.stringify([campaignScope, draftServerId, reload])

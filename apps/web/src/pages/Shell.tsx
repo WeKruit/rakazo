@@ -8,6 +8,11 @@ const ShellPanelContent = lazyPanel(() =>
 import { ShellConversation } from "./shell/ShellConversation";
 
 const ShellOverlays = lazyPanel(() => import("./shell/ShellOverlays").then((m) => m.ShellOverlays));
+const RecruitingRolesDirectory = lazyPanel(() =>
+  withFeatureMessages(() => import("./recruiting/RecruitingRolesDirectory")).then(
+    (module) => module.RecruitingRolesDirectory,
+  ),
+);
 
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { useShellController } from "./shell/useShellController";
@@ -117,18 +122,24 @@ export function ShellPage() {
     !model.showToolActivity &&
     model.panel !== "create-group" &&
     isAccountRecruitingView(accountParams.get("view")) &&
-    (!model.groupId || accountParams.has("role"));
+    ((!model.groupId &&
+      !(model.active && ["sequence", "interview"].includes(accountParams.get("view") ?? ""))) ||
+      accountParams.has("role"));
   const analyticsView =
     !model.showToolActivity &&
     model.panel !== "create-group" &&
     accountParams.get("view") === "analytics";
+  const rolesDirectoryView =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    accountParams.get("view") === "roles";
   const roleCorrespondencePage =
     !model.showToolActivity &&
     model.panel !== "create-group" &&
     !model.crmMode &&
     Boolean(model.groupId) &&
     !accountParams.has("role") &&
-    ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
+    accountParams.get("view") === "inbox";
   const { t } = useLingui();
   // A waiting conversation opened from the corner, stacked over the current page.
   const [stacked, setStacked] = useState<{ groupId: string; messageId?: string } | null>(null);
@@ -514,7 +525,18 @@ export function ShellPage() {
         />
       ) : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
-      {analyticsView ? (
+      {rolesDirectoryView ? (
+        <RecruitingRolesDirectory
+          key={JSON.stringify([userId, bootstrapMe?.spaceId])}
+          spaceId={bootstrapMe?.spaceId}
+          refreshSignal={recruitingRefresh}
+          onNavigate={navigate}
+          onOpenNavigation={() => {
+            setBotsSidebarCollapsedPref(false);
+            setMobileSidebarOpen(true);
+          }}
+        />
+      ) : analyticsView ? (
         <main className="rk-scroll min-h-0 min-w-0 flex-1 overflow-y-auto bg-background">
           <div className="mx-auto w-full max-w-[1440px] p-4 md:p-8">
             <Button variant="ghost" onClick={() => model.openRecruitingView("sequence")}>
