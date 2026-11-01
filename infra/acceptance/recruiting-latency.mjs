@@ -22,6 +22,7 @@
 //            --area <regex>                   locations the role accepts; others are flagged
 //            --hiring-company <name>          flag people who work there now
 //            --keep                           keep the test copy in the sidebar (it is archived by default)
+//            --question-only                  time the first question, leave it unanswered (no paid search)
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
@@ -949,6 +950,17 @@ async function main() {
     mark("attached");
   }
 
+  // Times only the first question and leaves it unanswered, so no paid search runs.
+  if (flag("--question-only")) {
+    const until = Date.now() + 90_000;
+    while (!report.milestones.live_first_card && Date.now() < until) await sleep(250);
+    await sleep(2_000);
+    report.result = report.milestones.live_first_card ? "question_shown" : "no_question";
+    save();
+    await archiveCopy();
+    log(`result ${report.result}`);
+    process.exit(0);
+  }
   let phase = "intake";
   if (option("--group") && flag("--scale-now")) {
     await readMessages(groupId);
