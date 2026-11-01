@@ -130,7 +130,11 @@ if (!signedIn) {
 
 const all = await groups();
 const kruit = all.find((group) => group.name === "Kruit");
-const fixtureRole = all.find((group) => group.name.startsWith(FIXTURE_MARK));
+// Other checks leave fresh, empty test roles behind, so the people check reads a named role when
+// RAKAZO_PEOPLE_ROLE is set and otherwise the longest-standing one.
+const fixtureRole =
+  all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE) ??
+  all.findLast((group) => group.name.startsWith(FIXTURE_MARK));
 
 try {
   await check("ids", async (page, failures) => {
