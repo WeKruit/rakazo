@@ -123,6 +123,7 @@ import {
   isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
+  isChineseText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -153,7 +154,7 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_ENGLISH_NOTE,
+  REPLY_IN_CHINESE_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -162,7 +163,6 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
-  recruiterQuestionNotInEnglish,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
@@ -1135,7 +1135,7 @@ const ASK_DECLINES =
 const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
 
 /** A message typed while an approval card waits is its own request, never the card's answer. */
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
@@ -1186,8 +1186,8 @@ export const STEERING_ACK =
 
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
-const ASK_IN_ENGLISH =
-  "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
+const ASK_IN_RECRUITER_LANGUAGE =
+  "Not asked: questions and options to the recruiter are written in the language of their own latest message, not the JD's. Ask the same question again in that language, with the same options and plannedSearches.";
 
 const PLANNED_SEARCHES_EMPTY =
   "Not asked yet: plannedSearches: [] means the recruiter said not to look for people outside their own list. If they did not, ask the same question again with four plannedSearches; when the question is about the location, use the JD's location, since the answer only narrows or widens it. If they did say so, ask again with [] unchanged.";
@@ -12506,7 +12506,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
@@ -12826,11 +12826,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .join(" ")
           : "";
         const languageNote =
-          hideVendors &&
-          lastRecruiterText &&
-          recruiterQuestionNotInEnglish(lastRecruiterText, messages)
-            ? REPLY_IN_ENGLISH_NOTE
-            : undefined;
+          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -13401,14 +13397,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
                     if (known) return `"${known.key}" → "${known.value}"`;
-                    // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
+                    // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
                       !askLanguageBounced &&
-                      recruiterQuestionNotInEnglish(question, messages)
+                      isChineseText(question) !== isChineseText(lastRecruiterText)
                     ) {
                       askLanguageBounced = true;
-                      return { instead: ASK_IN_ENGLISH };
+                      return { instead: ASK_IN_RECRUITER_LANGUAGE };
                     }
                     // Any intake answer may be the last one, and the first people come from the searches
                     // planned with it; without four of them the answer turn waits on its own searches.
