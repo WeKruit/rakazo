@@ -299,16 +299,22 @@ it("checks fresh native state after OAuth rather than treating its completion si
   expect(api.approve).not.toHaveBeenCalled();
 });
 
-it("disconnects a personal service so it can be connected again, and shows each service's logo", async () => {
+it("disconnects a personal service, shows each service's logo and leaves built-in records out", async () => {
   const endpoint = "https://gmailmcp.googleapis.com/mcp/v1";
   api.servers.mockResolvedValue([
     server("Mailbox", { endpoint, oauthStatus: "connected", hasSecret: true }),
     server("Research", { platformCredentialConfigured: true }),
+    server("Records", { slug: "recruiting-crm", oauthStatus: "connected", hasSecret: true }),
   ]);
-  api.assignments.mockResolvedValue([assignment("Mailbox"), assignment("Research")]);
+  api.assignments.mockResolvedValue([
+    assignment("Mailbox"),
+    assignment("Research"),
+    assignment("Records"),
+  ]);
   api.disconnect.mockResolvedValue({ ok: true });
   const host = await open();
   const mailbox = () => host.querySelector('[data-service-id="Mailbox"]')!;
+  expect(host.querySelector('[data-service-id="Records"]')).toBeNull();
   expect(mailbox().querySelector("img")?.getAttribute("src")).toBe("/connectors/gmail.png");
   expect(host.querySelector('[data-service-id="Research"]')?.textContent).not.toContain(
     "Disconnect",

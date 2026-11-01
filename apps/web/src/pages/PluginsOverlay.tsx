@@ -102,8 +102,7 @@ function serviceHost(server: McpServer) {
 
 function ServiceLogo({ server }: { server: McpServer }) {
   const host = serviceHost(server);
-  const bundled =
-    SERVICE_LOGOS[host] ?? (server.slug === "recruiting-crm" ? "/favicon.png" : undefined);
+  const bundled = SERVICE_LOGOS[host];
   const site = !bundled && host ? `https://${host.replace(/^(mcp|api)\./, "")}/` : "";
   const { icon, unusable } = useLinkFavicon(site);
   const src = bundled ?? icon;
@@ -254,6 +253,8 @@ export function PluginsOverlay({
   const nativeServices = servers.flatMap((server) => {
     // Services the platform runs for the recruiter are not theirs to manage or see by brand.
     if (!developerView && isVendorService(server)) return [];
+    // The recruiting records come with every account; there is nothing for the recruiter to connect.
+    if (!developerView && server.slug === "recruiting-crm") return [];
     const access = assignments.filter(
       (assignment) => assignment.serverId === server.id && appliesToCurrentAssistant(assignment),
     );
