@@ -728,7 +728,6 @@ msgstr ""
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
-#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "닫기"
@@ -2059,6 +2058,7 @@ msgstr "마이크를 사용할 수 없습니다."
 msgid "Minimal"
 msgstr "최소"
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Minimize"
 msgstr "최소화"

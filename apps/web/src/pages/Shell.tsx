@@ -389,6 +389,7 @@ export function ShellPage() {
             model.recruitingWorkspaceView === "conversation" ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
+          start={visibleSidebarWidth}
           onOpen={(id) => openStacked(id)}
         />
       )}
