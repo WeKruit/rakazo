@@ -12,10 +12,8 @@ const MAX_CONCURRENT = 6;
 const MAX_WAITING = 64;
 const MAX_WAIT_MS = 15_000;
 const MAX_CACHED_NAMES = 5_000;
-// A found logo is kept a year; organizations rarely change it.
-const FOUND_TTL_MS = 365 * 24 * 60 * 60 * 1000;
-// Two days; organization-logos.ts tells older three-day misses apart by it.
-const MISSING_TTL_MS = 2 * 24 * 60 * 60 * 1000;
+// An answer, found or not, is kept a year, so each organization is looked up once.
+const ANSWER_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const LEGAL_SUFFIXES = new Set([
   "inc",
   "llc",
@@ -127,8 +125,7 @@ export function createCompanySiteResolver(
   const cache = new Map<string, Found & { expiresAt: number }>();
   const inFlight = new Map<string, Promise<CompanySiteAnswer>>();
   const limit = concurrencyLimit(MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS);
-  const ttl = (found: Found) => (found.host || found.icon ? FOUND_TTL_MS : MISSING_TTL_MS);
-  const remember = (key: string, found: Found, expiresAt = now() + ttl(found)) => {
+  const remember = (key: string, found: Found, expiresAt = now() + ANSWER_TTL_MS) => {
     cache.delete(key);
     cache.set(key, { host: found.host, ...(found.icon ? { icon: found.icon } : {}), expiresAt });
     while (cache.size > MAX_CACHED_NAMES) cache.delete(cache.keys().next().value!);
@@ -154,7 +151,7 @@ export function createCompanySiteResolver(
     // showing initials, and nothing is remembered.
     if (answer.unsure) return { host: null, retry: true };
     remember(key, answer);
-    await options.store?.put(key, answerOf(answer), now() + ttl(answer)).catch(() => undefined);
+    await options.store?.put(key, answerOf(answer), now() + ANSWER_TTL_MS).catch(() => undefined);
     return answerOf(answer);
   };
   const companySite = async (name: string): Promise<CompanySiteAnswer> => {
