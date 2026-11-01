@@ -6,11 +6,18 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
 const messages = vi.hoisted(() => vi.fn());
+const events = vi.hoisted(() => ({
+  onEvent: undefined as
+    | ((event: { type: string; payload: Record<string, unknown>; seq: number }) => void)
+    | undefined,
+}));
 const answer = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
 vi.mock("../../lib/rpc", () => ({ rpc: { threads: { messages, answer } } }));
 vi.mock("@rakazo/core", async (original) => ({
   ...(await original<object>()),
-  runThreadSubscription: vi.fn(async () => {}),
+  runThreadSubscription: vi.fn(async (options: { onEvent: typeof events.onEvent }) => {
+    events.onEvent = options.onEvent;
+  }),
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -28,7 +35,7 @@ vi.mock("../../components/AskCard", () => ({
       type="button"
       onClick={() => void onAnswer({ action: "send", body: "Edited reply", cc: [] })}
     >
-      {block.mailReply?.body}
+      {block.mailReply?.body} {block.mailReply?.status}
     </button>
   ),
 }));
@@ -41,6 +48,10 @@ const block = (body: string, sourceId = "mail"): Extract<MessageBlock, { kind: "
   text: "Review reply",
   status: "pending",
   approvalEffectId: "effect",
+  actions: [
+    { id: "allow", label: "Send" },
+    { id: "deny", label: "Discard" },
+  ],
   mailReply: {
     from: "sender@example.test",
     to: ["recipient@example.test"],
@@ -145,6 +156,70 @@ it("server-pages the same stored cards, filters each block, and clears accumulat
       answer: { action: "send", body: "Edited reply", cc: [] },
     });
     expect(container.textContent).not.toContain("Role A");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("updates a loaded older card from its terminal event beyond the latest fifty drafts", async () => {
+  const latest = Array.from({ length: 50 }, (_, index) =>
+    message(`recent-${index}`, index + 51, [block(`Recent ${index}`)]),
+  );
+  const older = message("old-card", 1, [block("Older pending reply")]);
+  messages.mockImplementation(async (input: { before?: number }) => ({
+    threadId: "chat",
+    messages: input.before === undefined ? latest : [older],
+    olderCursor: input.before === undefined ? 51 : null,
+  }));
+  answer.mockClear();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <MailReplyCards
+          conversation={{ groupId: "role-a" }}
+          filter={{ sourceId: "mail", threadId: "email-thread" }}
+        />,
+      ),
+    );
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain("Earlier drafts");
+    });
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Earlier drafts")!
+        .click(),
+    );
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain("Older pending reply needs_approval");
+    });
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent?.includes("Older pending reply"))!
+        .click(),
+    );
+    expect(messages).toHaveBeenLastCalledWith(expect.objectContaining({ before: undefined }));
+    const sent = block("Edited reply");
+    sent.mailReply!.status = "sent";
+    sent.mailReply!.canAnswer = false;
+    sent.mailReply!.sentAt = "2026-11-01T12:01:00Z";
+    await act(async () =>
+      events.onEvent!({
+        type: "thread.message.updated",
+        seq: 101,
+        payload: { messageId: "old-card", blocks: [sent] },
+      }),
+    );
+    expect(container.textContent).toContain("Edited reply sent");
+    expect(container.textContent).not.toContain("Older pending reply needs_approval");
+    expect(answer).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ messageId: "old-card" }),
+    );
   } finally {
     await act(async () => root.unmount());
     container.remove();

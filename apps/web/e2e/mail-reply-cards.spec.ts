@@ -35,7 +35,8 @@ for (const width of [1440, 390]) {
         threadId: email.providerThreadId,
         subject: email.subject,
         sender: email.sender,
-        inboxKey: original.key, roleId: original.roleId,
+        inboxKey: original.key,
+        roleId: original.roleId,
       },
       status: "needs_approval",
       sentAt: null,
@@ -46,12 +47,31 @@ for (const width of [1440, 390]) {
     await page.route("**/rpc/recruiting/globalInbox", (route) => {
       const input = route.request().postDataJSON().json;
       mailReads.push(input);
-      if (anchorOutsideFirstPage && !input.thread) return route.fulfill({ json: { json: {
-        ...indexPage, total: 100, items: Array.from({ length: 50 }, (_, index) => {
-          const key = JSON.parse(original.key); key[3] = `other-thread-${index}`;
-          return { ...original, key: JSON.stringify(key), email: { ...email, id: `other-${index}`, providerMessageId: `other-${index}`, providerThreadId: `other-thread-${index}`, subject: "Other conversation", body: "Not the original email." } };
-        }),
-      } } });
+      if (anchorOutsideFirstPage && !input.thread)
+        return route.fulfill({
+          json: {
+            json: {
+              ...indexPage,
+              total: 100,
+              items: Array.from({ length: 50 }, (_, index) => {
+                const key = JSON.parse(original.key);
+                key[3] = `other-thread-${index}`;
+                return {
+                  ...original,
+                  key: JSON.stringify(key),
+                  email: {
+                    ...email,
+                    id: `other-${index}`,
+                    providerMessageId: `other-${index}`,
+                    providerThreadId: `other-thread-${index}`,
+                    subject: "Other conversation",
+                    body: "Not the original email.",
+                  },
+                };
+              }),
+            },
+          },
+        });
       return route.fallback();
     });
     const saved: ThreadMessage[] = [];
@@ -212,9 +232,24 @@ for (const width of [1440, 390]) {
 
     anchorOutsideFirstPage = true;
     await card.getByRole("link").click();
-    await expect(page).toHaveURL(new RegExp(`role=${original.roleId}.*mailMessage=${encodeURIComponent(email.providerMessageId)}`));
-    await expect.poll(() => mailReads.some((input) => input.thread?.roleId === original.roleId && input.thread.key === original.key && input.thread.emailId === email.providerMessageId)).toBe(true);
-    await expect(page.getByTestId("email-conversation").getByText(email.body, { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(
+      new RegExp(
+        `role=${original.roleId}.*mailMessage=${encodeURIComponent(email.providerMessageId)}`,
+      ),
+    );
+    await expect
+      .poll(() =>
+        mailReads.some(
+          (input) =>
+            input.thread?.roleId === original.roleId &&
+            input.thread.key === original.key &&
+            input.thread.emailId === email.providerMessageId,
+        ),
+      )
+      .toBe(true);
+    await expect(
+      page.getByTestId("email-conversation").getByText(email.body, { exact: true }),
+    ).toBeVisible();
     anchorOutsideFirstPage = false;
     addDraft("second-mail-card");
     await page.goto(`/app/g/${appGroupId}?view=conversation`);

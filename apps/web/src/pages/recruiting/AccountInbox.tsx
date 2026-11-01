@@ -79,7 +79,10 @@ export function accountInboxPerson(
 }
 
 /** A list entry keeps its exact role/source/mailbox; missing provider threads stay single messages. */
-export function accountInboxThreads(items: readonly AccountItem[]) {
+export function accountInboxThreads(
+  items: readonly AccountItem[],
+  requested?: { roleId: string; emailId: string; sourceId: string },
+) {
   const rows = new Map<
     string,
     {
@@ -130,7 +133,15 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
     }
   }
   return [...rows.values()]
-    .filter((row) => row.emails.some((email) => email.direction !== "sent"))
+    .filter((row) =>
+      row.emails.some(
+        (email) =>
+          email.direction !== "sent" ||
+          (row.roleId === requested?.roleId &&
+            email.id === requested.emailId &&
+            email.sourceId === requested.sourceId),
+      ),
+    )
     .map((row) => ({
       ...row,
       emails: row.emails.sort(
@@ -163,7 +174,8 @@ export function AccountInbox({
   onFilterChange,
 }: Props) {
   const { t } = useLingui();
-  const rows = accountInboxThreads(items);
+  const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
+  const rows = accountInboxThreads(items, requestedServerThread);
   for (const row of rows) {
     const saved = serverThreads?.find(
       (thread) =>
@@ -185,7 +197,6 @@ export function AccountInbox({
   useEffect(() => setSelectedEmail(undefined), [requestedThread, requestedEmail]);
   const railTrigger = useRef<HTMLButtonElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
-  const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
   const requestedRow =
     requestedServerThread &&
     rows.find(
@@ -276,7 +287,11 @@ export function AccountInbox({
   const detailEmails = detail?.key === detailKey ? detail.emails : [];
   const conversationEmails = serverThreads
     ? requestedEmail
-      ? [...new Map([...(selected?.emails ?? []), ...detailEmails].map((email) => [email.id, email])).values()]
+      ? [
+          ...new Map(
+            [...(selected?.emails ?? []), ...detailEmails].map((email) => [email.id, email]),
+          ).values(),
+        ]
       : detailEmails
     : (selected?.emails ?? []);
   const authoritativeThreads = serverThreads?.flatMap((thread) => {
@@ -317,7 +332,10 @@ export function AccountInbox({
   const email =
     conversationEmails.find((item) => item.id === selectedEmail) ??
     selected?.emails.find((item) => item.id === selectedEmail) ??
-    conversationEmails.find((item) => requestedEmail && (item.providerMessageId === requestedEmail || item.id === requestedEmail)) ??
+    conversationEmails.find(
+      (item) =>
+        requestedEmail && (item.providerMessageId === requestedEmail || item.id === requestedEmail),
+    ) ??
     conversationEmails.find((item) => item.id === selected?.emails[0]?.id) ??
     conversationEmails[0] ??
     selected?.emails[0];

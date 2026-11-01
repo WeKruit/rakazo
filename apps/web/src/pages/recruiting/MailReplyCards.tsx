@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { MailReplyMessageFilter, ThreadMessage } from "@rakazo/contracts";
+import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import { mergeMessagesById, runThreadSubscription } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { useContext, useEffect, useState } from "react";
@@ -75,6 +76,17 @@ function MailReplyCardPage({ conversation, filter, readCacheScope, refreshSignal
         if (head) head = { threadId: head.threadId, cursor: event.seq };
       },
       onEvent: (event) => {
+        if (event.type === "thread.message.updated") {
+          const blocks = MessageBlockSchema.array().safeParse(event.payload.blocks);
+          if (blocks.success)
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === event.payload.messageId
+                  ? { ...message, blocks: blocks.data }
+                  : message,
+              ),
+            );
+        }
         if (event.type === "thread.cleared") {
           setMessages([]);
           queue.request();

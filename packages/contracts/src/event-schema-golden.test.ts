@@ -29,6 +29,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   8: "8e3ec5f2106a6e1fed52867abd4c4155253198d28e74738a06a2f28b6bb81031",
   // 9: role_link block (a card that opens a role's conversation).
   9: "b574260f2cac866fe0f8f8d3cb8363b20c74feeea9772c4d60a66e0263ef00c3",
+  // 10: optional editable mail reply on the existing Ask block and structured Send answers.
+  10: "b4ce00c4e4734c0d4d4cc573a955abaa826b86e0525a570391ab03ef7e8f108b",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -45,6 +47,13 @@ const OLD_ROWS: unknown[] = [
   },
   { kind: "ask", text: "Remote or onsite?", status: "pending" },
   { kind: "ask", text: "Remote or onsite?", status: "answered", answer: "Remote" },
+  {
+    kind: "ask",
+    text: "Send this reply?",
+    status: "answered",
+    answer: "allow",
+    approvalEffectId: "approval-a",
+  },
   { kind: "steps", steps: [{ label: "Searching candidates", count: 2 }], durationMs: 4200 },
   {
     kind: "bot_message_received",
