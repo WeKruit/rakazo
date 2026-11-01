@@ -8,6 +8,8 @@
 //   people     Kruit lists people in the LinkedIn format the role teams use.
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   reminder   The corner reminder never covers the composer in a role chat.
+//   dock       The corner logo follows a mouse drag at once, can be dragged again straight
+//              away, and keeps its place after a reload.
 //
 //   RAKAZO_ORIGIN=<test origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/ui-regressions.mjs [--only ids,multi] [--out <dir>]
@@ -304,6 +306,62 @@ try {
         if (overlap) failures.push(`the corner reminder covers the composer (${label})`);
       }
     }
+  });
+
+  await check("dock", async (page, failures) => {
+    if (!fixtureRole) return failures.push(`no ${FIXTURE_MARK}role on this account`);
+    await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}`);
+    await page
+      .locator('fieldset[aria-label="Message composer"]')
+      .first()
+      .waitFor({ timeout: 20_000 });
+    await sleep(3_000);
+    const logo = page.getByRole("button", { name: /^Kruit/ });
+    // Without anything waiting there is no corner entry in a chat; nothing to drag.
+    if (!(await logo.count())) return;
+    await page.evaluate(() => localStorage.removeItem("kruit-dock-position"));
+    await page.reload();
+    await logo.first().waitFor({ timeout: 20_000 });
+    const center = async () => {
+      const box = await logo.first().boundingBox();
+      return box && { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const drag = async (dx, dy) => {
+      const from = await center();
+      if (!from) return failures.push("the dock logo has no box");
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      const started = Date.now();
+      for (let step = 1; step <= 10; step += 1)
+        await page.mouse.move(from.x + (dx * step) / 10, from.y + (dy * step) / 10);
+      const midway = await center();
+      await page.mouse.up();
+      if (Date.now() - started > 3_000) failures.push("the drag took longer than 3 s");
+      return { from, midway };
+    };
+    const first = await drag(-160, -120);
+    const afterFirst = await center();
+    if (!first || !afterFirst) return;
+    if (Math.hypot(afterFirst.x - first.from.x, afterFirst.y - first.from.y) < 100)
+      failures.push("the logo did not follow a mouse drag");
+    const second = await drag(100, 60);
+    const afterSecond = await center();
+    if (
+      second &&
+      afterSecond &&
+      Math.hypot(afterSecond.x - afterFirst.x, afterSecond.y - afterFirst.y) < 60
+    )
+      failures.push("the logo could not be dragged again right after the first drag");
+    await page.reload();
+    await logo.first().waitFor({ timeout: 20_000 });
+    const remembered = await center();
+    if (
+      afterSecond &&
+      remembered &&
+      Math.hypot(remembered.x - afterSecond.x, remembered.y - afterSecond.y) > 4
+    )
+      failures.push("the dragged position was not remembered after a reload");
+    await page.evaluate(() => localStorage.removeItem("kruit-dock-position"));
   });
 } finally {
   await browser.close();
