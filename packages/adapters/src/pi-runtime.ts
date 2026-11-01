@@ -104,7 +104,7 @@ import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
 import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
-import { normalizeRecruitingRoleArgs } from "./recruiting-tools.js";
+import { normalizeRecruitingRoleArgs, repairSourceRefs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -1695,6 +1695,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       // Repair slips before the schema check so they never reject a regenerated brief.
       if (tool.name === "recruiting_role")
         return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
+      // A preference cites the recruiter's words; a citation written in another tool's shape is
+      // rewritten to this one instead of failing the save.
+      if (tool.name === "recruiting_feedback" && raw.target === "preference") {
+        const sourceRefs = repairSourceRefs(raw.sourceRefs, new Date().toISOString());
+        return sourceRefs ? { ...raw, sourceRefs } : raw;
+      }
       // The server fills sources and names the people; an empty list reaches it for a precise error.
       if (tool.name === "recruiting_feedback" && raw.target !== "preference") {
         const { candidateKeys, ...rest } = raw;
@@ -3099,6 +3105,22 @@ export function conversationSessionId(threadId: string, botId: string, agentId?:
   return agentId ? `${threadId}:${botId}:${agentId}` : `${threadId}:${botId}`;
 }
 
+/**
+ * The prompt cache key for a conversation's requests: its bot and the exact tool set, so every
+ * chat with the same bot shares the cached prefix. Undefined without a conversation session id.
+ */
+export function sharedPromptCacheKey(
+  sessionId: string | undefined,
+): ((tools: unknown) => string) | undefined {
+  const botId = sessionId?.split(":")[1];
+  if (!botId) return undefined;
+  return (tools) =>
+    `rk:${botId}:${createHash("sha256")
+      .update(JSON.stringify(tools ?? null))
+      .digest("hex")
+      .slice(0, 16)}`.slice(0, 64);
+}
+
 export function isOpenCodeProvider(provider: string): boolean {
   return provider === "opencode" || provider === "opencode-go";
 }
@@ -4154,6 +4176,23 @@ export function reliableStreamOptions(
             ? { ...headers, [CODEX_RESIDENCY_HEADER]: residency }
             : headers;
         return callerTransform ? callerTransform(merged) : merged;
+      },
+    };
+  }
+
+  // OpenAI routes its prompt cache by prompt_cache_key. Keyed by conversation, every new chat
+  // started cold; keyed by bot and tool set, a new chat reuses the cached tools and instructions.
+  const promptCacheKey = sharedPromptCacheKey(next.sessionId);
+  if (promptCacheKey) {
+    const callerPayload = next.onPayload;
+    next = {
+      ...next,
+      onPayload: async (payload, payloadModel) => {
+        const shaped = (await callerPayload?.(payload, payloadModel)) ?? payload;
+        if (!shaped || typeof shaped !== "object" || !("prompt_cache_key" in shaped)) return shaped;
+        const body = shaped as { prompt_cache_key?: unknown; tools?: unknown };
+        if (!body.prompt_cache_key) return shaped;
+        return { ...body, prompt_cache_key: promptCacheKey(body.tools) };
       },
     };
   }

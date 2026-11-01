@@ -158,9 +158,9 @@ function ordinaryAnswerFixture(
       })),
     },
   };
-  const prisma = {
+  const prisma = appendClient({
     $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-  } as unknown as PrismaClient;
+  });
   const input = {
     spaceId: "workspace-1",
     threadId: "thread-1",
@@ -229,12 +229,88 @@ function approvalAnswerFixture(request: unknown = persistedApprovalRequest) {
     },
     actionApprovalRule: { upsert: vi.fn().mockResolvedValue({ id: "rule-synthetic" }) },
   };
-  const prisma = {
+  const prisma = appendClient({
     $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-  } as unknown as PrismaClient;
+  });
   const fanout = new TestFanout();
   const publish = vi.spyOn(fanout, "publish");
   return { ...f, tx, prisma, effect, fanout, publish };
+}
+
+/**
+ * A client mock whose single-statement event append runs the statement's steps (run check,
+ * sequence bump, insert) against the given transaction mock, through its $transaction.
+ */
+function appendClient(client: { $transaction: (...args: never[]) => unknown }): PrismaClient {
+  type AppendTx = {
+    thread: { update: (args: unknown) => Promise<{ nextEventSeq: number; userId?: string }> };
+    run?: { findUnique: (args: unknown) => Promise<{ status: string } | null> };
+    event: {
+      create: (args: { data: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+    };
+  };
+  const transaction = client.$transaction as unknown as (
+    callback: (tx: AppendTx) => Promise<unknown>,
+  ) => Promise<unknown>;
+  return {
+    ...client,
+    $queryRaw: (_strings: TemplateStringsArray, ...values: unknown[]) =>
+      transaction(async (tx) => {
+        const [
+          runId,
+          cancelledOnly,
+          ,
+          ,
+          allowCancelled,
+          threadId,
+          ,
+          spaceId,
+          ,
+          botId,
+          type,
+          payload,
+        ] = values as [
+          string | null,
+          boolean,
+          unknown,
+          unknown,
+          boolean,
+          string,
+          string,
+          string,
+          string,
+          string,
+          string,
+          string,
+        ];
+        const run = runId
+          ? await tx.run?.findUnique({ where: { id: runId }, select: { status: true } })
+          : null;
+        const ok =
+          runId === null ||
+          (cancelledOnly
+            ? run?.status === "cancelled"
+            : Boolean(run) && (run!.status !== "cancelled" || allowCancelled));
+        if (!ok) return [{ runOk: false }];
+        const thread = await tx.thread.update({
+          where: { id: threadId },
+          data: { nextEventSeq: { increment: 1 } },
+          select: { nextEventSeq: true, userId: true },
+        });
+        const created = await tx.event.create({
+          data: {
+            spaceId,
+            threadId,
+            botId,
+            seq: thread.nextEventSeq - 1,
+            type,
+            payload: JSON.parse(payload),
+            runId: runId ?? undefined,
+          },
+        });
+        return [{ createdAt: new Date(0), ...created, userId: thread.userId ?? null, runOk: true }];
+      }),
+  } as unknown as PrismaClient;
 }
 
 describe("native approval answer provenance", () => {
@@ -919,7 +995,7 @@ describe("finalizeRun", () => {
 
     await expect(
       finalizeRun(
-        { $transaction: transaction } as unknown as PrismaClient,
+        appendClient({ $transaction: transaction }),
         {
           spaceId: "space-1",
           threadId: "thread-1",
@@ -978,9 +1054,9 @@ describe("finalizeRun", () => {
       message: { findFirst: vi.fn(async () => null) },
       bot: { update: vi.fn(async () => ({})) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       finalizeRun(prisma, {
@@ -1047,9 +1123,9 @@ describe("finalizeRun", () => {
       message: { findFirst: vi.fn(async () => null) },
       bot: { update: vi.fn(async () => ({})) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await finalizeRun(prisma, {
       spaceId: "space-1",
@@ -1138,9 +1214,9 @@ describe("finalizeRun", () => {
       message: { findFirst: vi.fn(async () => null) },
       bot: { update: vi.fn(async () => ({})) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       finalizeRun(prisma, {
@@ -1252,7 +1328,7 @@ describe("followThreadEvents", () => {
       .fn()
       .mockImplementationOnce(async () => {
         await publishTransientThreadEvent(
-          { $transaction: vi.fn() } as unknown as PrismaClient,
+          appendClient({ $transaction: vi.fn() }),
           {
             spaceId: "workspace-1",
             threadId: "thread-1",
@@ -1308,7 +1384,7 @@ describe("publishTransientThreadEvent", () => {
     await fanout.subscribe("thread:thread-1", (payload) => received.push(payload));
     const transaction = vi.fn();
     await publishTransientThreadEvent(
-      { $transaction: transaction } as unknown as PrismaClient,
+      appendClient({ $transaction: transaction }),
       progress,
       fanout,
     );
@@ -1337,11 +1413,11 @@ describe("publishTransientThreadEvent", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
       ),
-    } as unknown as PrismaClient;
+    });
     const large = { ...progress, payload: { delta: "y".repeat(9_000), streaming: true } };
     await publishTransientThreadEvent(prisma, large, fanout);
     expect(tx.event.create).toHaveBeenCalledTimes(1);
@@ -1362,11 +1438,11 @@ describe("publishTransientThreadEvent", () => {
         create: vi.fn(async ({ data }: { data: { seq: number } }) => ({ ...event(data.seq) })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
       ),
-    } as unknown as PrismaClient;
+    });
     await publishTransientThreadEvent(prisma, progress, undefined);
     expect(tx.event.create).toHaveBeenCalledTimes(1);
   });
@@ -1624,7 +1700,7 @@ describe("pauseRunForInput", () => {
         findFirst: vi.fn(async () => null as object | null),
       },
     };
-    const prisma = { $transaction: vi.fn(async (fn) => fn(tx)) } as unknown as PrismaClient;
+    const prisma = appendClient({ $transaction: vi.fn(async (fn) => fn(tx)) });
     const input = {
       spaceId: run.spaceId,
       threadId: run.threadId,
@@ -1720,9 +1796,9 @@ describe("pauseRunForInput", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       pauseRunForInput(
@@ -1802,9 +1878,9 @@ describe("pauseRunForInput", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       pauseRunForInput(
@@ -1886,9 +1962,9 @@ describe("pauseRunForTakeover", () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       pauseRunForTakeover(
@@ -1975,9 +2051,9 @@ describe("pauseRunForTakeover", () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       pauseRunForTakeover(prisma, {
@@ -2033,9 +2109,9 @@ describe("pauseRunForTakeover", () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       pauseRunForTakeover(prisma, {
@@ -2228,9 +2304,9 @@ describe("answerRunInput", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
     const input = {
       spaceId: "workspace-1",
       threadId: "thread-1",
@@ -2325,9 +2401,9 @@ describe("answerRunInput", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -2437,9 +2513,9 @@ describe("answerRunInput", () => {
             findFirst: vi.fn().mockResolvedValue(null),
           },
         };
-        const prisma = {
+        const prisma = appendClient({
           $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-        } as unknown as PrismaClient;
+        });
         await expect(
           answerRunInput(prisma, {
             spaceId: "workspace-1",
@@ -2502,9 +2578,9 @@ describe("answerRunInput", () => {
         ),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -2606,9 +2682,9 @@ describe("answerRunInput", () => {
           findFirst: vi.fn().mockResolvedValue(null),
         },
       };
-      const prisma = {
+      const prisma = appendClient({
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-      } as unknown as PrismaClient;
+      });
 
       await expect(
         answerRunInput(
@@ -2707,9 +2783,9 @@ describe("answerRunInput", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -2797,9 +2873,9 @@ describe("answerRunInput", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -2980,9 +3056,9 @@ describe("answerRunInput", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -3066,9 +3142,9 @@ describe("answerRunInput", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -3147,9 +3223,9 @@ describe("answerRunInput", () => {
       },
       actionApprovalRule: { upsert: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(prisma, {
@@ -3192,9 +3268,9 @@ describe("answerRunInput", () => {
       },
       externalEffect: { findFirst: vi.fn().mockResolvedValue(null) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(prisma, {
@@ -3235,9 +3311,9 @@ describe("answerRunInput", () => {
       },
       externalEffect: { findFirst: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(prisma, {
@@ -3267,9 +3343,9 @@ describe("answerRunInput", () => {
         updateMany: vi.fn(),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(prisma, {
@@ -3323,9 +3399,9 @@ describe("answerRunInput", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(
@@ -3415,9 +3491,9 @@ describe("answerRunInput", () => {
         }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
     expect(
       await answerRunInput(
         prisma,
@@ -3478,9 +3554,9 @@ describe("answerRunInput", () => {
           })),
         },
       };
-      const prisma = {
+      const prisma = appendClient({
         $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-      } as unknown as PrismaClient;
+      });
       const answer = (username?: string, password = "fake-password-1") =>
         answerRunInput(
           prisma,
@@ -3559,9 +3635,9 @@ describe("answerRunInput", () => {
         updateMany: vi.fn(),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       answerRunInput(prisma, {
@@ -4073,9 +4149,9 @@ describe("sendUserMessage", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       sendUserMessage(prisma, {
@@ -4128,9 +4204,9 @@ describe("sendUserMessage", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await sendUserMessage(prisma, {
       spaceId: "workspace-1",
@@ -4299,9 +4375,9 @@ describe("sendUserMessage", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       sendUserMessage(prisma, {
@@ -4358,9 +4434,9 @@ describe("sendUserMessage", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       sendUserMessage(prisma, {
@@ -4506,9 +4582,9 @@ describe("claimSteering", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 2 }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       claimSteering(prisma, {
@@ -4571,9 +4647,9 @@ describe("claimSteering", () => {
         updateMany: vi.fn(),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       claimSteering(prisma, {
@@ -4598,9 +4674,9 @@ describe("claimSteering", () => {
         updateMany: vi.fn(),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       claimSteering(prisma, {
@@ -4635,9 +4711,9 @@ describe("claimSteering", () => {
         updateMany: vi.fn(),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await claimSteering(prisma, {
       threadId: "thread-1",
@@ -4691,9 +4767,9 @@ describe("clearThread", () => {
       },
       bot: { update: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       clearThread(prisma, { spaceId: "workspace-1", threadId: "thread-1", botId: "bot-1" }, fanout),
@@ -4755,9 +4831,9 @@ describe("clearThread", () => {
       },
       chatGroup: { update: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       clearThread(
@@ -4829,9 +4905,9 @@ describe("claimSteering interject", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 2 }),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
     const claimed = await claimSteering(prisma, {
       threadId: "thread-1",
       botId: "bot-1",
@@ -4859,7 +4935,7 @@ describe("appendEvent", () => {
     const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
       callback(tx),
     );
-    return { tx, transaction, prisma: { $transaction: transaction } as unknown as PrismaClient };
+    return { tx, transaction, prisma: appendClient({ $transaction: transaction }) };
   }
 
   const progress = {
@@ -4961,9 +5037,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }) },
       event: { create: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       appendEvent(
@@ -4998,7 +5074,7 @@ describe("appendEvent", () => {
 
     await expect(
       appendEvent(
-        { $transaction: transaction } as unknown as PrismaClient,
+        appendClient({ $transaction: transaction }),
         {
           spaceId: "workspace-1",
           threadId: "thread-1",
@@ -5025,7 +5101,7 @@ describe("appendEvent", () => {
     const transaction = vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx));
 
     await expect(
-      appendEvent({ $transaction: transaction } as unknown as PrismaClient, {
+      appendEvent(appendClient({ $transaction: transaction }), {
         spaceId: "workspace-1",
         threadId: "thread-1",
         botId: "bot-1",
@@ -5050,9 +5126,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn().mockResolvedValue({ status: "running" }) },
       event: { create: vi.fn().mockResolvedValue(created) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       appendEvent(
@@ -5085,9 +5161,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn().mockResolvedValue({ status: "running" }) },
       event: { create: vi.fn().mockResolvedValue(created) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     // Orphaned UTF-16 high surrogate (e.g. 😀 split across stream chunks as \uD83D alone).
     const orphanedHigh = "hello \uD83D";
@@ -5126,9 +5202,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }) },
       event: { create: vi.fn().mockResolvedValue(created) },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       appendEvent(
@@ -5156,9 +5232,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn().mockResolvedValue({ status: "running" }) },
       event: { create: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       appendEvent(prisma, {
@@ -5179,9 +5255,9 @@ describe("appendEvent", () => {
       run: { findUnique: vi.fn() },
       event: { create: vi.fn() },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    });
 
     await expect(
       appendEvent(prisma, {
@@ -5388,9 +5464,9 @@ describe("appendEventsInTransaction", () => {
         },
         bot: { update: vi.fn(async () => ({})) },
       };
-      const prisma = {
+      const prisma = appendClient({
         $transaction: vi.fn(async (callback: (client: typeof full) => unknown) => callback(full)),
-      } as unknown as PrismaClient;
+      });
       const publish = vi.fn(async () => undefined);
       await expect(
         finalizeRun(
@@ -5471,11 +5547,11 @@ describe("sidebar signal", () => {
         })),
       },
     };
-    const prisma = {
+    const prisma = appendClient({
       $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
       ),
-    } as unknown as PrismaClient;
+    });
     return { prisma, fanout: new TopicFanout() };
   }
 
