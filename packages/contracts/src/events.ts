@@ -488,6 +488,12 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),
   }),
+  z.object({
+    /** Opens a role's conversation from another conversation. */
+    kind: z.literal("role_link"),
+    groupId: z.string(),
+    title: z.string(),
+  }),
   AskBlockSchema,
   z.object({
     kind: z.literal("choice"),
@@ -853,7 +859,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 8;
+export const EVENT_FORMAT_VERSION = 9;
 
 export const ProductEventSchema = z
   .object({

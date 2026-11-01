@@ -4638,10 +4638,6 @@ msgstr "正在读取文件"
 msgid "Reading the hiring playbook"
 msgstr "阅读招聘手册"
 
-#: src/components/LiveWork.tsx
-msgid "Reading the role"
-msgstr "阅读岗位要求"
-
 #: src/pages/recruiting/CandidateFeedback.tsx
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Reason"

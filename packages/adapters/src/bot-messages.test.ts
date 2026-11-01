@@ -4,6 +4,7 @@ import {
   currentBotMessageHop,
   loadBotMessageContext,
   messageBot,
+  reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
@@ -576,6 +577,38 @@ describe("delegating to a role team in another conversation", () => {
     });
     await returnDelegatedTeamOutcome(harness.deps, roleRun);
     expect(returnedTo(harness)).toEqual([expect.objectContaining({ text: "Added 50 people." })]);
+  });
+
+  it("tells the delegating conversation right away when the team waits on a card", async () => {
+    const harness = team({ busy: true });
+    await reportDelegatedTeamBlocked(harness.deps, roleRun, {
+      kind: "waiting",
+      text: "Send these 3 emails?",
+    });
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({
+        kind: "bot_message_received",
+        fromBotName: "SUI Engineer team",
+        intent: "status",
+        text: expect.stringContaining('on its card: "Send these 3 emails?"'),
+      }),
+    ]);
+    expect(harness.tx.message.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          threadId_clientNonce: {
+            threadId: "thread-global",
+            clientNonce: "bot-message:delegation-waiting:run-1",
+          },
+        },
+      }),
+    );
+  });
+
+  it("reports nothing when no other conversation delegated the work", async () => {
+    const harness = team({ root: { ...delegation, intent: "result" } });
+    await reportDelegatedTeamBlocked(harness.deps, roleRun, { kind: "failed", text: "boom" });
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
   });
 
   it("never sends a returned result back to the team", async () => {

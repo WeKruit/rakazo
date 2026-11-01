@@ -2365,6 +2365,10 @@ msgstr "Tam pencerede aç"
 msgid "Open navigation"
 msgstr "Gezinmeyi aç"
 
+#: src/pages/ShellMessage.tsx
+msgid "Open role"
+msgstr ""
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open role chat"
 msgstr ""

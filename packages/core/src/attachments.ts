@@ -137,6 +137,7 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
           : withRole;
       }
       if (block.kind === "chart") return `[chart: ${block.name}]`;
+      if (block.kind === "role_link") return `[opened role: ${block.title}]`;
       // The id lets another assistant vote; the count tells a later turn how it went.
       if (block.kind === "canvas")
         return `[canvas ${block.canvasId}: ${block.title}, revision ${block.revision}]`;

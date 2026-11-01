@@ -11,6 +11,7 @@ import {
 import { BotAvatar, Button, cn, resolvePersonaColorDef } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DeferredMenu, DeferredPopover } from "../components/DeferredPopover";
 import { lazyPanel } from "../components/ErrorBoundary";
 import { withFeatureMessages } from "../lib/i18n";
@@ -696,6 +697,8 @@ export const MessageView = memo(function MessageView({
             </div>
           );
         }
+        if (block.kind === "role_link")
+          return <RoleLinkCard key={i} groupId={block.groupId} title={block.title} />;
         if (block.kind === "card") {
           return (
             <div key={i} className="flex justify-start">
@@ -771,3 +774,19 @@ export const MessageView = memo(function MessageView({
     </>
   );
 });
+
+function RoleLinkCard({ groupId, title }: { groupId: string; title: string }) {
+  const navigate = useNavigate();
+  return (
+    <div className="flex justify-start">
+      <div className="flex w-[min(360px,90%)] items-center justify-between gap-3 rounded-[18px] border border-border bg-muted px-[18px] py-3.5">
+        <span className="min-w-0 truncate text-[15px] font-medium text-foreground" dir="auto">
+          {title}
+        </span>
+        <Button size="sm" onClick={() => navigate(`/app/g/${groupId}?view=brief`)}>
+          <Trans>Open role</Trans>
+        </Button>
+      </div>
+    </div>
+  );
+}
