@@ -505,6 +505,14 @@ msgstr "API key header"
 msgid "Appearance"
 msgstr "Appearance"
 
+#: src/components/LiveWork.tsx
+msgid "Applying the hiring playbook"
+msgstr "Applying the hiring playbook"
+
+#: src/components/LiveWork.tsx
+msgid "Applying your preferences"
+msgstr "Applying your preferences"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
@@ -584,6 +592,10 @@ msgstr "Ask first"
 #: src/components/LiveWork.tsx
 msgid "Asking a specialist"
 msgstr "Asking a specialist"
+
+#: src/components/LiveWork.tsx
+msgid "Assessing candidates"
+msgstr "Assessing candidates"
 
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Assessment"
@@ -1012,8 +1024,16 @@ msgid "Checking availability"
 msgstr "Checking availability"
 
 #: src/components/LiveWork.tsx
+msgid "Checking candidate notes"
+msgstr "Checking candidate notes"
+
+#: src/components/LiveWork.tsx
 msgid "Checking candidate records"
 msgstr "Checking candidate records"
+
+#: src/components/LiveWork.tsx
+msgid "Checking candidate replies"
+msgstr "Checking candidate replies"
 
 #: src/components/LiveWork.tsx
 msgid "Checking candidates"
@@ -1028,8 +1048,8 @@ msgid "Checking email"
 msgstr "Checking email"
 
 #: src/components/LiveWork.tsx
-msgid "Checking saved context"
-msgstr "Checking saved context"
+msgid "Checking reminders"
+msgstr "Checking reminders"
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "Checking…"
@@ -2160,6 +2180,10 @@ msgstr "Day-to-day work"
 msgid "days"
 msgstr "days"
 
+#: src/components/LiveWork.tsx
+msgid "Deciding the next step"
+msgstr "Deciding the next step"
+
 #: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
@@ -2674,6 +2698,10 @@ msgstr "Find models"
 msgid "Find work history"
 msgstr "Find work history"
 
+#: src/components/LiveWork.tsx
+msgid "Finding a time that works"
+msgstr "Finding a time that works"
+
 #. placeholder {0}: estimate.people
 #: src/components/LiveWork.tsx
 msgid "Finding about {0} people"
@@ -2686,6 +2714,10 @@ msgstr "Finding candidates"
 #: src/components/LiveWork.tsx
 msgid "Finding people"
 msgstr "Finding people"
+
+#: src/components/LiveWork.tsx
+msgid "Finding the candidate"
+msgstr "Finding the candidate"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2761,6 +2793,34 @@ msgstr "Git event"
 msgid "Give feedback"
 msgstr "Give feedback"
 
+#: src/components/LiveWork.tsx
+msgid "Going over candidate records"
+msgstr "Going over candidate records"
+
+#: src/components/LiveWork.tsx
+msgid "Going over candidate replies"
+msgstr "Going over candidate replies"
+
+#: src/components/LiveWork.tsx
+msgid "Going over earlier conversations"
+msgstr "Going over earlier conversations"
+
+#: src/components/LiveWork.tsx
+msgid "Going over emails"
+msgstr "Going over emails"
+
+#: src/components/LiveWork.tsx
+msgid "Going over search results"
+msgstr "Going over search results"
+
+#: src/components/LiveWork.tsx
+msgid "Going over the candidate"
+msgstr "Going over the candidate"
+
+#: src/components/LiveWork.tsx
+msgid "Going over the candidates"
+msgstr "Going over the candidates"
+
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Good example"
 msgstr "Good example"
@@ -2796,6 +2856,10 @@ msgstr "Groups"
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Guide retrieval; qualification criteria stay unchanged."
 msgstr "Guide retrieval; qualification criteria stay unchanged."
+
+#: src/components/LiveWork.tsx
+msgid "Handing this to the role team"
+msgstr "Handing this to the role team"
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Hard"
@@ -3277,8 +3341,16 @@ msgid "Log out"
 msgstr "Log out"
 
 #: src/components/LiveWork.tsx
+msgid "Looking back at earlier conversations"
+msgstr "Looking back at earlier conversations"
+
+#: src/components/LiveWork.tsx
 msgid "Looking up emails"
 msgstr "Looking up emails"
+
+#: src/components/LiveWork.tsx
+msgid "Looking up your roles"
+msgstr "Looking up your roles"
 
 #: src/components/AskCard.tsx
 msgid "Looks good, start searching"
@@ -4334,6 +4406,10 @@ msgstr "Pending usage"
 msgid "Phone"
 msgstr "Phone"
 
+#: src/components/LiveWork.tsx
+msgid "Picking the right role"
+msgstr "Picking the right role"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Pin"
 msgstr "Pin"
@@ -4350,6 +4426,10 @@ msgstr "Plan interview"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Plan saved. Booking and sending still require approval."
 msgstr "Plan saved. Booking and sending still require approval."
+
+#: src/components/LiveWork.tsx
+msgid "Planning the interview"
+msgstr "Planning the interview"
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Playing…"
@@ -4554,6 +4634,14 @@ msgstr "Reading a page"
 msgid "Reading files"
 msgstr "Reading files"
 
+#: src/components/LiveWork.tsx
+msgid "Reading the hiring playbook"
+msgstr "Reading the hiring playbook"
+
+#: src/components/LiveWork.tsx
+msgid "Reading the role"
+msgstr "Reading the role"
+
 #: src/pages/recruiting/CandidateFeedback.tsx
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Reason"
@@ -4563,6 +4651,10 @@ msgstr "Reason"
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
 msgstr "Reasoning effort"
+
+#: src/components/LiveWork.tsx
+msgid "Recalling your preferences"
+msgstr "Recalling your preferences"
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Receipt"
@@ -4937,6 +5029,14 @@ msgid "Reviewing candidates"
 msgstr "Reviewing candidates"
 
 #: src/components/LiveWork.tsx
+msgid "Reviewing search results"
+msgstr "Reviewing search results"
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the page"
+msgstr "Reviewing the page"
+
+#: src/components/LiveWork.tsx
 msgid "Reviewing the role"
 msgstr "Reviewing the role"
 
@@ -5076,6 +5176,10 @@ msgstr "Running"
 #: src/pages/RoutineList.tsx
 msgid "Running · Stop"
 msgstr "Running · Stop"
+
+#: src/components/LiveWork.tsx
+msgid "Running a step"
+msgstr "Running a step"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
@@ -5239,8 +5343,16 @@ msgid "Saved. Rotate to reveal."
 msgstr "Saved. Rotate to reveal."
 
 #: src/components/LiveWork.tsx
+msgid "Saving candidates"
+msgstr "Saving candidates"
+
+#: src/components/LiveWork.tsx
 msgid "Saving notes"
 msgstr "Saving notes"
+
+#: src/components/LiveWork.tsx
+msgid "Saving the role"
+msgstr "Saving the role"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saving this plan does not approve a booking or message."
@@ -5532,6 +5644,10 @@ msgstr "Server URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "Service connections"
+
+#: src/components/LiveWork.tsx
+msgid "Setting up a routine"
+msgstr "Setting up a routine"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -6427,12 +6543,12 @@ msgid "Workflow status"
 msgstr "Workflow status"
 
 #: src/components/LiveWork.tsx
-msgid "Working on it"
-msgstr "Working on it"
-
-#: src/components/LiveWork.tsx
 msgid "Working…"
 msgstr "Working…"
+
+#: src/components/LiveWork.tsx
+msgid "Writing to you"
+msgstr "Writing to you"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"
