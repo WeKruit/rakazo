@@ -426,6 +426,7 @@ import {
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import { loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -1301,7 +1302,7 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never create or bind a role in global Main.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -4870,6 +4871,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : Promise.resolve(undefined),
         );
         const lateNotes = lateNote(preferenceNotePromise);
+        // The global agent sees what each role team did lately. It never holds up the turn:
+        // it joins the first step if already read, otherwise the next one.
+        const crossRoleNotes = lateNote(
+          !messagingChannelRun && thread.groupId?.startsWith("recruiting-global-")
+            ? ownTime(
+                "crossRoleDigest",
+                loadCrossRoleDigest(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  (text) => redactSecrets(text, runSecrets),
+                ).catch((error) => {
+                  getLogger().warn("cross-role digest failed", { error: String(error) });
+                  return undefined;
+                }),
+              )
+            : Promise.resolve(undefined),
+        );
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -13042,6 +13060,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The judge's preference nudge never holds up the turn: it joins now only if already
           // back, otherwise at the run's next model step.
           preferenceNote: lateNotes.takeReady(),
+          crossRoleDigest: crossRoleNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13561,7 +13580,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   claimContextNotice: scripted
                     ? undefined
-                    : () => lateNotes.withNotice(contextWatch?.claimNotice()),
+                    : () =>
+                        lateNotes.withNotice(
+                          crossRoleNotes.withNotice(contextWatch?.claimNotice()),
+                        ),
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
@@ -15450,10 +15472,12 @@ export function userTurnContext(parts: {
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
   preferenceNote?: string | undefined;
+  crossRoleDigest?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
     parts.redactedRecruitingContext ?? parts.redactedMemoryContext,
+    parts.crossRoleDigest,
     parts.redactedScratchpadContext,
     parts.redactedTicketContext,
     parts.stoppedRunNotice,
