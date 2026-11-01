@@ -4,7 +4,7 @@ import { ORPCError } from "@orpc/client";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
@@ -1323,6 +1323,12 @@ it.each([
   ["Ada <ada@example.com>, Other <other@example.com>", false],
   ["other@example.com", false],
 ])("matches candidate calendar attendee %s by exact address", async (attendee, matches) => {
+  // A mid-week clock keeps the event in the calendar's current week whatever day the test runs.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   crmData.mockResolvedValue(candidatesPage);
   correspondence.mockResolvedValue({
     ...savedCorrespondence,
@@ -1332,8 +1338,7 @@ it.each([
         title: "Candidate-specific appointment",
         kind: "event",
         status: "confirmed",
-        // Upcoming whenever the test runs; a fixed date ages out of the interview window.
-        start: new Date(Date.now() + 86_400_000).toISOString(),
+        start: "2026-10-28T15:00:00Z",
         end: null,
         timeZone: "UTC",
         attendees: [attendee],

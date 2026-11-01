@@ -1,6 +1,22 @@
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { catalogTestPlugin } from "./apps/web/catalog-test-plugin.ts";
+
+// Suites that need a database, Docker, a live provider or a live computer skip every test unless
+// their opt-in variable is set; leave them out instead, so the unit run does not pay to import them.
+const env = process.env;
+const optInSuites = [
+  {
+    glob: "**/*.postgres.test.ts",
+    on:
+      Boolean(env.VERIFY_DATABASE || env.VERIFY_PROVIDERS) ||
+      Object.keys(env).some((key) => key.endsWith("_TEST_DATABASE_URL")),
+  },
+  { glob: "**/*.canary.test.ts", on: Boolean(env.VERIFY_PROVIDERS) },
+  { glob: "**/*.docker.test.ts", on: env.RUN_COMPUTER_REPLAY_DOCKER === "1" },
+  { glob: "**/*.e2e.test.ts", on: env.RUN_COMPUTER_E2E === "1" },
+];
 
 export default defineConfig({
   plugins: [catalogTestPlugin],
@@ -54,6 +70,12 @@ export default defineConfig({
       "apps/worker/src/**/*.test.ts",
       "apps/www/src/**/*.test.ts",
     ],
+    exclude: [
+      ...configDefaults.exclude,
+      ...optInSuites.filter((suite) => !suite.on).map((suite) => suite.glob),
+    ],
+    // Use every core; the default leaves one idle for the main process, which mostly waits.
+    maxWorkers: availableParallelism(),
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },
