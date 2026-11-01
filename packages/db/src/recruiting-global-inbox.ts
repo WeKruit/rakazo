@@ -394,9 +394,16 @@ async function savedPerson(
 }
 
 /** Canonical corrections first; then the existing complete-body/live-source preference and aliases. */
-function corpus(actor: Actor, includeFiles = true) {
+function corpus(actor: Actor) {
+  // Sort immutable identity and observed scalars, never full message/profile JSON. Bodies and
+  // alias attachments are read only after the requested page is selected below.
   return Prisma.sql`WITH origins AS (
-    SELECT DISTINCT ON (m.role_id,m.origin_key) m.* FROM recruiting_inbox_messages m
+    SELECT DISTINCT ON (m.role_id,m.origin_key)
+      m.id,m.role_id,m.origin_key,m.dedupe_key,m.thread_key,m.direction,m.message_at,
+      m.source_id,m.observed_at,m.search_text,m.email->>'providerMessageId' AS provider_message_id,
+      COALESCE((m.email->>'snippet')::boolean,false) AS snippet,
+      COALESCE((m.email->>'imported')::boolean,false) AS imported
+    FROM recruiting_inbox_messages m
     JOIN recruiting_roles r ON r.id=m.role_id JOIN threads t ON t.id=r."sourceThreadId"
     WHERE m.user_id=${actor.userId} AND m.space_id=${actor.spaceId} AND r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId} AND r."archivedAt" IS NULL
       AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id
@@ -404,22 +411,10 @@ function corpus(actor: Actor, includeFiles = true) {
     ORDER BY m.role_id,m.origin_key,(m.source_kind<>'crm') DESC,m.observed_at DESC,m.receipt_id DESC NULLS LAST,m.receipt_ordinal DESC NULLS LAST,m.id DESC
   ), preferred AS (
     SELECT DISTINCT ON (role_id,dedupe_key) * FROM origins
-    ORDER BY role_id,dedupe_key,COALESCE((email->>'snippet')::boolean,false),COALESCE((email->>'imported')::boolean,false),observed_at DESC,id DESC
-  )${
-    includeFiles
-      ? Prisma.sql`, files AS (
-    SELECT role_id,dedupe_key,jsonb_agg(file) AS attachments FROM (
-      SELECT DISTINCT ON (alias.role_id,alias.dedupe_key,file->>'id') alias.role_id,alias.dedupe_key,file
-      FROM origins alias CROSS JOIN LATERAL jsonb_array_elements(COALESCE(alias.email->'attachments','[]'::jsonb)) file
-      ORDER BY alias.role_id,alias.dedupe_key,file->>'id',alias.observed_at DESC
-    ) exact_files GROUP BY role_id,dedupe_key
-  )`
-      : Prisma.empty
-  }, canonical AS (
-    SELECT chosen.*${includeFiles ? Prisma.sql`, chosen.email || CASE WHEN files.attachments IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('attachments',files.attachments) END AS display_email` : Prisma.empty}
-    FROM preferred chosen ${includeFiles ? Prisma.sql`LEFT JOIN files ON files.role_id=chosen.role_id AND files.dedupe_key=chosen.dedupe_key` : Prisma.empty}
-  ), mail AS (SELECT *, COALESCE(thread_key,'message:'||id) AS view_key FROM canonical)`;
+    ORDER BY role_id,dedupe_key,snippet,imported,observed_at DESC,id DESC
+  ), mail AS (SELECT *, COALESCE(thread_key,'message:'||id) AS view_key FROM preferred)`;
 }
+
 const cursorSchema = {
   parse(value: string) {
     const parsed = record(JSON.parse(Buffer.from(value, "base64url").toString("utf8")));
@@ -476,6 +471,8 @@ export async function readGlobalRecruitingInbox(
     const base = corpus(actor);
     const filter = Prisma.sql`${input.roleId ? Prisma.sql`AND mail.role_id=${input.roleId}` : Prisma.empty}${input.sourceId ? Prisma.sql`AND source_id=${input.sourceId}` : Prisma.empty}`;
     const thread = input.thread;
+    // ponytail: window the scalar corpus directly. A materialized match-key join can choose
+    // a quadratic plan before a fresh import has planner statistics; hydrate only the page.
     const rows = await tx.$queryRaw<
       {
         id: string;
@@ -500,12 +497,27 @@ export async function readGlobalRecruitingInbox(
       SELECT mail.* FROM annotated mail ${input.unreadOnly ? Prisma.sql`LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=mail.thread_key` : Prisma.empty}
       WHERE true ${filter}
       ${thread ? Prisma.sql`AND role_id=${thread.roleId}` : Prisma.sql`AND has_incoming`}
-      ${thread?.emailId ? Prisma.sql`AND mail.email->>'providerMessageId'=${thread.emailId}` : Prisma.empty}
+      ${thread?.emailId ? Prisma.sql`AND mail.provider_message_id=${thread.emailId}` : Prisma.empty}
       ${input.unreadOnly ? Prisma.sql`AND mail.thread_key IS NOT NULL AND NOT unknown AND latest_incoming_at IS NOT NULL AND (COALESCE(c.unread,false) OR latest_incoming_at>COALESCE(c.last_read_at,${baseline.initializedAt}))` : Prisma.empty}
     ), selected AS (
       ${thread ? Prisma.sql`SELECT * FROM eligible` : Prisma.sql`SELECT DISTINCT ON(role_id,view_key) * FROM eligible WHERE matches ORDER BY role_id,view_key,(direction='received') DESC NULLS LAST,message_at DESC NULLS LAST,id DESC`}
-    ) SELECT *, count(*) OVER() AS total FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
-      ORDER BY message_at DESC NULLS LAST,id DESC LIMIT ${input.limit + 1} OFFSET ${input.offset ?? 0}`);
+    ), page AS MATERIALIZED (
+      SELECT *, count(*) OVER() AS total FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
+      ORDER BY message_at DESC NULLS LAST,id DESC LIMIT ${input.limit + 1} OFFSET ${input.offset ?? 0}
+    ), page_files AS (
+      SELECT role_id,dedupe_key,jsonb_agg(file) AS attachments FROM (
+        SELECT DISTINCT ON(alias.role_id,alias.dedupe_key,file->>'id') alias.role_id,alias.dedupe_key,file
+        FROM origins alias JOIN page ON page.role_id=alias.role_id AND page.dedupe_key=alias.dedupe_key
+        JOIN recruiting_inbox_messages stored ON stored.id=alias.id
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(stored.email->'attachments','[]'::jsonb)) file
+        ORDER BY alias.role_id,alias.dedupe_key,file->>'id',alias.observed_at DESC
+      ) exact_files GROUP BY role_id,dedupe_key
+    ) SELECT page.*, original.email,original.person,
+      original.email || CASE WHEN files.attachments IS NULL THEN '{}'::jsonb
+        ELSE jsonb_build_object('attachments',files.attachments) END AS display_email
+    FROM page JOIN recruiting_inbox_messages original ON original.id=page.id
+    LEFT JOIN page_files files ON files.role_id=page.role_id AND files.dedupe_key=page.dedupe_key
+    ORDER BY page.message_at DESC NULLS LAST,page.id DESC`);
     const summary = await inboxSummary(tx, actor, baseline.initializedAt);
     const page = rows.slice(0, input.limit);
     const last = page.at(-1);
@@ -571,7 +583,7 @@ async function inboxSummary(tx: Tx, actor: Actor, baseline: Date) {
   const empty = !eligible[0]?.present;
   const counts = await tx.$queryRaw<
     { unread: bigint; unknown: bigint }[]
-  >(Prisma.sql`${corpus(actor, false)}, inbox_threads AS (
+  >(Prisma.sql`${corpus(actor)}, inbox_threads AS (
       SELECT COALESCE(thread_key,'message:'||id) AS key,thread_key,max(message_at) FILTER (WHERE direction='received') AS incoming,
         bool_or(direction='received' AND message_at IS NULL) OR bool_or(direction IS NULL) AS unknown
       FROM mail GROUP BY COALESCE(thread_key,'message:'||id),thread_key

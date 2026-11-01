@@ -9,6 +9,7 @@ export default defineConfig({
   testMatch: [
     "recruiting-global.spec.ts",
     "recruiting-app-routes.spec.ts",
+    "recruiting-search-focus.spec.ts",
     "mail-reply-cards.spec.ts",
     "sender-confirmation-cards.spec.ts",
     "recruiting-mobile-directory.spec.ts",

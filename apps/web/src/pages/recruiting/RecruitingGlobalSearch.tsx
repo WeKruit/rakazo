@@ -14,7 +14,7 @@ import {
   CommandList,
 } from "@rakazo/ui-web";
 import { BriefcaseBusiness, Mail, Search, Send, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { PersonAvatar } from "./ProfileImage";
 import { campaignName } from "./SequenceTab";
@@ -57,6 +57,7 @@ export function RecruitingGlobalSearch({
   onNavigate: (href: string) => void;
 }) {
   const { t } = useLingui();
+  const searchInput = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Results>();
   const [retry, setRetry] = useState(0);
@@ -111,9 +112,11 @@ export function RecruitingGlobalSearch({
       title={t`Search`}
       description={t`Search roles, contacts, sequences and saved mail.`}
       className="sm:max-w-2xl"
+      initialFocus={searchInput}
     >
       <Command shouldFilter={false}>
         <CommandInput
+          ref={searchInput}
           value={query}
           onValueChange={setQuery}
           maxLength={200}
