@@ -2917,7 +2917,7 @@ it("bounds legacy workspace candidate rows without discarding the loaded result 
   expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
 });
 
-it("defaults to a table with authoritative score ordering and leaves unknown scores last", async () => {
+it("defaults to a table in best-match order and leaves unknown scores last", async () => {
   const people = (
     [
       ["highest", "Zoe", "95"],
@@ -2947,7 +2947,7 @@ it("defaults to a table with authoritative score ordering and leaves unknown sco
     view: "results",
   });
   expect(api.listCandidates).toHaveBeenLastCalledWith(
-    { roleId: role.id, limit: 30, sort: "score" },
+    { roleId: role.id, limit: 30, sort: "ranking" },
     { signal: expect.any(AbortSignal) },
   );
   expect(view.container.querySelector('button[aria-pressed="true"]')?.textContent).toBe("Table");
@@ -3190,7 +3190,7 @@ it("keeps the candidate page when empty auxiliary assessments finish without cha
     {
       roleId: role.id,
       limit: 30,
-      sort: "score",
+      sort: "ranking",
     },
     { signal: expect.any(AbortSignal) },
   );
@@ -4027,15 +4027,13 @@ it.each([false, true])(
       'select[aria-label="Candidate sort"]',
     )!;
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      "Rank",
-      "Match tier",
-      "Match score",
+      "Best match",
       "Name",
       "Recently discovered",
     ]);
-    expect(select.value).toBe("score");
+    expect(select.value).toBe("ranking");
     await changeInput(view.container, "Search candidates", "Synthetic");
-    for (const sort of ["tier", "rank", "score"]) {
+    for (const sort of ["name", "recent", "ranking"]) {
       await changeSelect(view.container, "Candidate sort", sort);
       expect(api.listCandidates).toHaveBeenLastCalledWith(
         {
@@ -4047,96 +4045,6 @@ it.each([false, true])(
         { signal: expect.any(AbortSignal) },
       );
     }
-  },
-);
-
-it.each(["rank", "tier", "score"])(
-  "normalizes a saved unavailable %s sort to Name from the authoritative scope signal",
-  async (sort) => {
-    api.listCandidates.mockResolvedValue({
-      ...candidatePage(),
-      sortAvailability: { rank: true, tier: true, score: true },
-    });
-    const saved = await mounted("thread-1", undefined, false);
-    await saved.click("Evidence");
-    await changeSelect(saved.container, "Candidate sort", sort);
-    await cleanup?.();
-    const person = { ...candidateFixture("unranked", false), name: "Synthetic Avery" };
-    api.listCandidates.mockClear().mockResolvedValue({
-      ...candidatePage([person]),
-      sortAvailability: { rank: false, tier: false, score: false },
-    });
-    const view = await mounted("thread-1", undefined, false);
-    const select = view.container.querySelector<HTMLSelectElement>(
-      'select[aria-label="Candidate sort"]',
-    )!;
-    expect([...select.options].map((option) => option.textContent)).toEqual([
-      "Name",
-      "Recently discovered",
-    ]);
-    expect(select.value).toBe("name");
-    expect(api.listCandidates).toHaveBeenLastCalledWith(
-      {
-        roleId: role.id,
-        limit: 30,
-        sort: "name",
-      },
-      { signal: expect.any(AbortSignal) },
-    );
-    expect(view.container.textContent).toContain("Score / tier not returned");
-    expect(view.container.textContent).toContain(person.name);
-  },
-);
-
-it("falls back from an unavailable score sort to the provider rank, not Name", async () => {
-  api.listCandidates.mockResolvedValue({
-    ...candidatePage(),
-    sortAvailability: { rank: true, tier: false, score: false },
-  });
-  const view = await mounted("thread-1", undefined, false);
-  await view.click("Evidence");
-  expect(
-    view.container.querySelector<HTMLSelectElement>('select[aria-label="Candidate sort"]')?.value,
-  ).toBe("rank");
-  expect(api.listCandidates).toHaveBeenLastCalledWith(
-    expect.objectContaining({ roleId: role.id, sort: "rank" }),
-    { signal: expect.any(AbortSignal) },
-  );
-});
-
-it.each(["tier", "score"])(
-  "ignores %s availability from a late previous search scope",
-  async (sort) => {
-    let finish!: (page: ReturnType<typeof candidatePage>) => void;
-    api.listCandidates.mockImplementation(({ query }) =>
-      query === "Previous"
-        ? new Promise((resolve) => {
-            finish = resolve;
-          })
-        : Promise.resolve(candidatePage()),
-    );
-    const view = await mounted("thread-1", undefined, false);
-    await view.click("Evidence");
-    await changeSelect(view.container, "Candidate sort", sort);
-    await changeInput(view.container, "Search candidates", "Previous");
-    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toBeNull();
-    await changeInput(view.container, "Search candidates", "Current");
-    await act(async () =>
-      finish({ ...candidatePage(), sortAvailability: { rank: false, tier: false, score: false } }),
-    );
-    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
-      "value",
-      sort,
-    );
-    expect(api.listCandidates).toHaveBeenLastCalledWith(
-      {
-        roleId: role.id,
-        limit: 30,
-        query: "Current",
-        sort,
-      },
-      { signal: expect.any(AbortSignal) },
-    );
   },
 );
 
@@ -4296,7 +4204,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
     {
       roleId: role.id,
       limit: 30,
-      sort: "score",
+      sort: "ranking",
       actionId: f.action.id,
       sourceEffectId: undefined,
     },
@@ -6117,7 +6025,7 @@ it.each(["action:action-1", "source:native-read-1"])(
     await view.render("thread-1", 1);
     expect(api.listCandidates.mock.lastCall?.[0]).toEqual({
       roleId: "role-next",
-      sort: "score",
+      sort: "ranking",
       limit: 30,
     });
     expect(

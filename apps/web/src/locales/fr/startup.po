@@ -2871,7 +2871,7 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Remove"
-msgstr ""
+msgstr "Retirer"
 
 #. placeholder {0}: attachment.file.name
 #. placeholder {0}: item.name
