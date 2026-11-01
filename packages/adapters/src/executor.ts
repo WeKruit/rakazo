@@ -725,6 +725,9 @@ const runEgressWindow = new RateWindow(RUN_EGRESS_PER_MINUTE, 60_000);
 const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
   "Not run: this call would send a saved credential to an outside service. Credentials are never passed in tool arguments; continue without it.";
 
+/** People Kruit lists from a role when the recruiter named no number. */
+const SHOWN_ROLE_PEOPLE = 10;
+
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
   for (const match of text.matchAll(/https?:\/\/[^\s<>"'()，。、]+/g)) {
@@ -5944,6 +5947,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !thread.groupId?.startsWith("recruiting-global-") ||
             args.operation !== "list" ||
             typeof args.roleId !== "string" ||
+            // A name or profile lookup finds one person; it is not a list to show.
+            args.query !== undefined ||
             !items?.length
           )
             return undefined;
@@ -5956,9 +5961,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
-            candidateKeys: items.flatMap((item) =>
-              typeof item.candidateKey === "string" ? [item.candidateKey] : [],
-            ),
+            candidateKeys: items
+              .slice(0, typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE)
+              .flatMap((item) =>
+                typeof item.candidateKey === "string" ? [item.candidateKey] : [],
+              ),
             knownOnly: true,
             heading: `${role.title}:`,
           });
