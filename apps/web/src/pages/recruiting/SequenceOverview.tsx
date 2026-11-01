@@ -1,7 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
-import { Badge } from "@rakazo/ui-web";
-import { CalendarDays, MousePointer2, Send } from "lucide-react";
+import { useState } from "react";
 
 /** Counts of the supplied observations only, never campaign reach or conversion rates. */
 export function sequenceObservations(campaign: RecruitingRoleCampaign | undefined) {
@@ -41,55 +40,130 @@ export function datedSends(dates: readonly string[], now: Date, days = 7) {
   });
 }
 
-/** Presentation over existing saved reads; unreported mail telemetry remains visibly unknown. */
+/** Historical telemetry is never relabeled as a date-filtered count. */
 export function SequenceOverview({
   campaign,
   replied,
   sendDates = null,
   sendContext,
   now = new Date(),
+  period = "all",
+  detail = false,
+  onMetric,
 }: {
   campaign?: RecruitingRoleCampaign;
-  /** A complete authorized CRM count, or null while partial/unavailable. */
   replied: number | null;
-  /** Exact role-proven sentAt timestamps only; null means role activity is unavailable. */
   sendDates?: readonly string[] | null;
-  /** Exact record scope for the supplied send dates, such as the selected contact. */
   sendContext?: string | null;
   now?: Date;
+  period?: "all" | "30" | "90";
+  detail?: boolean;
+  onMetric?: (metric: "all" | "active" | "interested" | "bounced") => void;
 }) {
   const { t, i18n } = useLingui();
   const locale = i18n?.locale || "en";
+  const [chartPeriod, setChartPeriod] = useState(7);
   const observed = sequenceObservations(campaign);
-  const metrics = [
-    { label: t`Contacted`, value: null, observed: false },
-    { label: t`Active`, value: observed.active, observed: observed.partial },
-    { label: t`Opened`, value: null, observed: false },
+  const ready = campaign?.status === "ready" && campaign.campaign !== null;
+  const allTime = period === "all";
+  const count = (status: number) => {
+    if (!ready) return null;
+    const found = campaign.leads.filter((lead) => lead.status === status).length;
+    return campaign.leadsComplete ? found : found || null;
+  };
+  const metrics: {
+    label: string;
+    value: number | null;
+    observed: boolean;
+    filter?: "all" | "active" | "interested" | "bounced";
+  }[] = [
+    {
+      label: detail ? t`Contacts` : t`Contacted`,
+      value:
+        detail && ready
+          ? campaign.leadsComplete
+            ? campaign.leads.length
+            : campaign.leads.length || null
+          : null,
+      observed: observed.partial,
+      ...(detail ? { filter: "all" as const } : {}),
+    },
+    {
+      label: t`Active`,
+      value: allTime ? observed.active : null,
+      observed: observed.partial,
+      filter: "active",
+    },
+    {
+      label: t`Opened`,
+      value: allTime && ready ? (campaign.stats?.opened ?? null) : null,
+      observed: false,
+    },
     { label: t`Clicked`, value: null, observed: false },
-    { label: t`Replied`, value: replied, observed: false },
-    { label: t`Interested`, value: observed.interested, observed: observed.partial },
+    { label: t`Replied`, value: allTime ? replied : null, observed: false },
+    {
+      label: t`Interested`,
+      value: allTime ? observed.interested : null,
+      observed: observed.partial,
+      filter: "interested",
+    },
+    ...(detail
+      ? [
+          {
+            label: t`Bounced`,
+            value: allTime ? count(-1) : null,
+            observed: observed.partial,
+            filter: "bounced" as const,
+          },
+        ]
+      : []),
   ];
-  const days = datedSends(sendDates ?? [], now);
-  const max = Math.max(1, ...days.map((day) => day.count));
-  const hasDatedSends = days.some((day) => day.count > 0);
+  const history = datedSends(sendDates ?? [], now, chartPeriod);
+  const max = Math.max(1, ...history.map((day) => day.count));
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const ticks = Array.from(
+    { length: chartPeriod * 2 },
+    (_, index) => today + (index - chartPeriod + 1) * 86400000,
+  );
+  const hasDatedSends = history.some((day) => day.count > 0);
+  const unknown = t`Not reported`;
   return (
     <div className="mb-6 space-y-4">
-      <dl className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-xl border bg-card sm:grid-cols-3 xl:grid-cols-6">
+      <dl
+        className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${detail ? "2xl:grid-cols-7" : "xl:grid-cols-6"}`}
+      >
         {metrics.map((metric) => (
-          <div key={metric.label} className="min-w-0 px-4 py-4">
-            <dt className="text-xs text-muted-foreground">{metric.label}</dt>
-            <dd className="mt-2 text-2xl font-semibold tabular-nums">
+          <div key={metric.label} className="relative min-w-0 rounded-xl border bg-muted/20 p-4">
+            <dt className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+              {onMetric && metric.filter ? (
+                <button
+                  type="button"
+                  className="text-left hover:text-foreground hover:underline focus-visible:rounded focus-visible:outline-2 focus-visible:outline-ring"
+                  disabled={metric.value === null}
+                  onClick={() => onMetric(metric.filter!)}
+                >
+                  {metric.label}
+                </button>
+              ) : (
+                metric.label
+              )}
+              <span
+                title={t`Change from previous period is not reported`}
+                role="img"
+                aria-label={t`Change from previous period: not reported`}
+                className="after:content-['—']"
+              />
+            </dt>
+            <dd className="mt-3 text-2xl font-semibold tabular-nums">
               {metric.value === null ? (
                 <>
                   <span aria-hidden>—</span>
-                  <span className="sr-only">
-                    <Trans>Not reported</Trans>
-                  </span>
+                  <span className="sr-only">{unknown}</span>
                 </>
               ) : (
                 <>
                   {metric.observed ? "≥ " : ""}
-                  {metric.value}
+                  {metric.value.toLocaleString(locale)}
                 </>
               )}
             </dd>
@@ -100,60 +174,130 @@ export function SequenceOverview({
         <span>
           <Trans>— Not reported</Trans>
         </span>
+        {period !== "all" ? (
+          <span role="status">
+            <Trans>
+              Date-filtered sequence metrics are not available. Historical totals stay unchanged
+              below.
+            </Trans>
+          </span>
+        ) : null}
         {metrics.some((metric) => metric.observed && metric.value !== null) ? (
           <span>
             <Trans>≥ Observed in loaded records</Trans>
           </span>
         ) : null}
       </div>
-      <section aria-label={t`Recorded send activity`} className="rounded-xl border bg-card p-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Send size={15} aria-hidden /> <Trans>Recorded send activity</Trans>
-          </h3>
-          <Badge variant="outline">
-            <CalendarDays size={12} aria-hidden /> <Trans>Last 7 days · UTC</Trans>
-          </Badge>
+      <section
+        aria-label={t`Recorded send activity`}
+        className="min-w-0 rounded-xl border bg-card p-4 sm:p-5"
+      >
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-sm font-semibold">
+              <Trans>Schedule</Trans>
+            </h3>
+            <label className="text-xs">
+              <span className="sr-only">
+                <Trans>Schedule period</Trans>
+              </span>
+              <select
+                className="rounded-md border bg-background p-1.5 text-foreground"
+                aria-label={t`Schedule period`}
+                value={chartPeriod}
+                onChange={(event) => setChartPeriod(Number(event.target.value))}
+              >
+                <option value={7}>{t`7 day period`}</option>
+                <option value={14}>{t`14 day period`}</option>
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden className="size-2 rounded-full bg-primary" />
+              <Trans>Sent</Trans>
+            </span>
+            <span className="flex items-center gap-1.5" title={t`Scheduled sends are not reported`}>
+              <span aria-hidden className="size-2 rounded-full border border-muted-foreground" />
+              <Trans>Scheduled · not reported</Trans>
+            </span>
+          </div>
         </div>
         {sendContext ? (
           <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
         ) : null}
-        {hasDatedSends ? (
-          <ol className="grid h-36 grid-cols-7 items-end gap-2">
-            {days.map((day) => {
-              const label = new Intl.DateTimeFormat(locale, {
-                month: "short",
-                day: "numeric",
-                timeZone: "UTC",
-              }).format(day.start);
-              return (
-                <li
-                  key={day.start}
-                  className="flex h-full min-w-0 flex-col items-center justify-end gap-1"
+        <div className="overflow-x-auto">
+          <div className="min-w-[580px]">
+            <div className="relative ms-7 h-40 border-b border-border">
+              {[0, 1, 2, 3].map((line) => (
+                <div
+                  key={line}
+                  className="absolute inset-x-0 border-t border-border/50"
+                  style={{ bottom: `${line * 33}%` }}
                 >
-                  <span className="text-xs tabular-nums">{day.count}</span>
-                  <span
-                    aria-hidden
-                    className="w-full max-w-12 rounded-t bg-primary"
-                    style={{ height: `${(day.count / max) * 75}%`, minHeight: day.count ? 2 : 0 }}
-                  />
-                  <span className="text-xs text-muted-foreground">{label}</span>
-                </li>
-              );
-            })}
-          </ol>
-        ) : (
-          <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-sm text-muted-foreground">
-            <MousePointer2 size={20} aria-hidden />
-            <p>
-              {sendDates === null ? (
-                <Trans>Recruiter messages are unavailable for this role.</Trans>
-              ) : (
-                <Trans>No dated sends in the available records.</Trans>
-              )}
-            </p>
+                  <span className="absolute -start-7 -top-2 w-5 text-right text-[10px] text-muted-foreground">
+                    {sendDates === null ? "—" : Math.round((max * line) / 3).toLocaleString(locale)}
+                  </span>
+                </div>
+              ))}
+              <div className="relative flex h-full items-end">
+                {ticks.map((date) => {
+                  const day = history.find((item) => item.start === date);
+                  return (
+                    <div
+                      key={date}
+                      className={`relative flex h-full min-w-0 flex-1 items-end justify-center ${date === today ? "border-s border-dashed border-foreground/60" : ""}`}
+                    >
+                      {date === today ? (
+                        <span className="absolute -top-4 start-1 text-[10px] font-medium">
+                          <Trans>Today</Trans>
+                        </span>
+                      ) : null}
+                      {day?.count ? (
+                        <div
+                          className="z-10 w-3/5 max-w-8 rounded-t bg-primary"
+                          role="img"
+                          aria-label={t`${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date)}: ${day.count} recorded sends`}
+                          style={{ height: `${(day.count / max) * 82}%` }}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+              {!hasDatedSends ? (
+                <div className="absolute inset-0 flex items-center justify-center px-8">
+                  <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
+                    {sendDates === null ? (
+                      <Trans>Recruiter messages are unavailable for this role.</Trans>
+                    ) : (
+                      <Trans>No dated sends in the available records.</Trans>
+                    )}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+            <div className="ms-7 flex pt-2">
+              {ticks.map((date, index) => (
+                <span
+                  key={date}
+                  className="min-w-0 flex-1 text-center text-[10px] text-muted-foreground"
+                >
+                  {chartPeriod === 7 || index % 2 === 0
+                    ? new Intl.DateTimeFormat(locale, {
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      }).format(date)
+                    : ""}
+                </span>
+              ))}
+            </div>
           </div>
-        )}
+        </div>
+        <p className="mt-3 text-right text-[10px] text-muted-foreground">
+          <Trans>UTC · only recorded send timestamps are plotted</Trans>
+        </p>
       </section>
     </div>
   );

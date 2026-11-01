@@ -8402,7 +8402,7 @@ function scoreCellPart(fields: Prisma.Sql, part: "plain" | "fraction") {
 export const RECRUITING_GRADE_NONCE_PREFIX = "recruiting-grade:";
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
-function candidateIndexQuery(
+export function candidateIndexQuery(
   roleId: string,
   sort?: CandidatesInput["sort"],
   rankDomainPageId?: string,

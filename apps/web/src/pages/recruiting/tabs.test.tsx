@@ -323,9 +323,9 @@ it("shows only exact role campaign associations and withholds unscoped messages"
   const view = await mount(<SequenceTab {...props} />);
   expect(view.textContent).toContain("Staff outreach");
   expect(view.querySelector("tbody td")?.textContent).toBe("1");
-  expect(view.querySelector('section[aria-label="Role campaigns"]')?.textContent).not.toContain(
-    "Active",
-  );
+  expect(
+    view.querySelector('section[aria-label="Role campaigns"] tbody')?.textContent,
+  ).not.toContain("Active");
   expect(view.textContent).toContain("Replied · 1");
   const ada = [...view.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("Ada"),
@@ -453,7 +453,9 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
   expect(
     [...view.querySelectorAll("dl > div")].map((node) => node.textContent).join(" "),
   ).toContain("Active1");
-  const loadMore = view.querySelector<HTMLButtonElement>('[aria-label="Role campaigns"] button')!;
+  const loadMore = view.querySelector<HTMLButtonElement>(
+    '[aria-label="Role campaigns"] footer button',
+  )!;
   await act(async () => loadMore.click());
   await settle();
   expect([...selector().options].map((option) => option.textContent)).toContain("Later outreach");

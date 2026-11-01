@@ -6,6 +6,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
+import { sequenceConfigurationRevision } from "./instantly-native-writes.js";
 import {
   allowlistDrift,
   DISCOVERY_CACHE_TTL_MS,
@@ -285,7 +286,36 @@ describe("local native Instantly thread history", () => {
         events.push(event);
       return events;
     };
-    return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
+    const discover = async (toolName: string, args: Record<string, unknown> = {}) => {
+      const tools = await connector.discoverTools(context as never);
+      const direct = tools.find((tool) => tool.route?.toolName === toolName);
+      if (direct) return direct;
+      const execute = tools.find((tool) => tool.route?.toolName === "__catalog_execute");
+      if (!execute) return undefined;
+      return (
+        await connector.resolveCall(
+          {
+            tool: execute.name,
+            route: execute.route,
+            executionId: "fixture-discovery",
+            args: { id: `${server.id}:${toolName}`, arguments: args },
+          },
+          context as never,
+        )
+      )?.tool;
+    };
+    return {
+      connector,
+      context,
+      state,
+      server,
+      assignment,
+      prisma,
+      secrets,
+      rest,
+      collect,
+      discover,
+    };
   }
   it("keeps the local mail tools when the remote server cannot list its tools", async () => {
     const f = fixture();
@@ -320,8 +350,7 @@ describe("local native Instantly thread history", () => {
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
     const f = fixture();
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === route.toolName);
+      const tool = await f.discover(route.toolName, { anchor_id: anchor.id });
       expect(tool).toMatchObject({
         name: "instantly__demo__get_thread_history",
         readOnly: true,
@@ -389,8 +418,7 @@ describe("local native Instantly thread history", () => {
     };
     f.state.page = { items: [anchor, outbound], next_starting_after: "provider-next" };
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === contactRoute.toolName);
+      const tool = await f.discover(contactRoute.toolName, { email: anchor.from_address_email });
       expect(tool).toMatchObject({
         name: "instantly__demo__search_contact_emails",
         readOnly: true,
@@ -616,8 +644,7 @@ describe("local native Instantly thread history", () => {
     const direct = { ...anchor, campaign_id: null, subject: "Direct note" };
     f.state.page = { items: [direct] };
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === mailboxRoute.toolName);
+      const tool = await f.discover(mailboxRoute.toolName, { eaccount: anchor.eaccount });
       expect(tool).toMatchObject({
         name: "instantly__demo__list_mailbox_emails",
         readOnly: true,
@@ -1218,7 +1245,8 @@ describe("local native Instantly thread history", () => {
         ),
       ).toMatchObject([{ type: "error" }]);
       expect(f.rest).not.toHaveBeenCalled();
-      const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+      const remote = (await f.discover(toolName))!;
+      expect(remote.name).toBe(`mcp__demo__${toolName}`);
       expect(remote.readOnly).not.toBe(true);
       if (toolName === localName) {
         expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
@@ -4082,7 +4110,13 @@ describe("local native Instantly campaign and lead tools", () => {
         name: "Draft",
         eaccount: "team@example.test",
         ...(name === "create_campaign" ? {} : { role_id: "role-1" }),
-        ...(name === "update_role_draft" ? { campaign_id: CAMPAIGN } : {}),
+        ...(name === "update_role_draft"
+          ? {
+              campaign_id: CAMPAIGN,
+              expected_revision: sequenceConfigurationRevision(f.state.campaign),
+            }
+          : {}),
+        ...(name === "create_role_draft" ? { client_nonce: "authorization-regression" } : {}),
       });
       expect(events).toMatchObject([{ type: "error" }]);
       expect(f.context.reauthorize).toHaveBeenCalledOnce();

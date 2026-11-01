@@ -129,6 +129,7 @@ export {
   agentRunWaitTarget,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
+export * from "./recruiting-global-inbox.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
 export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
 export {

@@ -402,7 +402,7 @@ export function useShellController() {
   const viewportWidth = useViewportWidth();
   const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth(
     "rakazo:bots-sidebar-width",
-    showToolActivity ? 316 : 260,
+    showToolActivity ? 316 : 240,
   );
   const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
   const visibleSidebarWidth = botsSidebarCollapsed
@@ -734,7 +734,6 @@ export function useShellController() {
     activeGroupId,
     roleChatOpen,
     roleChatSection,
-    setSearchParams,
     setMobileSidebarOpen,
     setPanel,
     recruitingTab,

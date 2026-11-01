@@ -52,3 +52,24 @@ export function inboxThreadUnread(
   const cursor = Date.parse(lastReadAt ?? initializedAt);
   return Number.isFinite(incoming) && Number.isFinite(cursor) ? incoming > cursor : null;
 }
+
+/** Provider ids are only comparable inside their proven source and organization. */
+export function inboxMessageKey(
+  email: {
+    id: string;
+    sourceId: string;
+    providerMessageId: string;
+    campaignId?: string | null;
+    eaccount?: string | null;
+    crm?: { organizationId: string } | null;
+  },
+  organizationId = email.crm?.organizationId ?? null,
+) {
+  return JSON.stringify([
+    email.sourceId,
+    organizationId,
+    email.campaignId ?? null,
+    email.eaccount?.toLowerCase() ?? null,
+    email.providerMessageId || email.id,
+  ]);
+}

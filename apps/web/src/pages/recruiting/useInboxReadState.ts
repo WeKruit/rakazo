@@ -1,9 +1,10 @@
 import type { InboxThreadIdentity, RecruitingInboxReadState } from "@rakazo/contracts";
 import { inboxThreadKey, inboxThreadUnread } from "@rakazo/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { authClient } from "../../lib/auth";
 import { rpc } from "../../lib/rpc";
 import type { EmailConversationItem } from "./EmailConversation";
+import { RecruitingReadCacheContext } from "./shared";
 
 export function emailThreadIdentity(email: EmailConversationItem): InboxThreadIdentity | null {
   return email.sourceId && email.threadId && email.eaccount && email.organizationId !== undefined
@@ -39,12 +40,18 @@ export function incomingThreadEvidence(items: readonly EmailConversationItem[]) 
 export function useInboxReadState(
   spaceId: string | undefined,
   items: readonly EmailConversationItem[],
+  authoritativeThreads?: readonly (InboxThreadIdentity & { latestIncomingAt: string | null })[],
 ) {
+  const cache = useContext(RecruitingReadCacheContext);
   const userId = authClient.useSession().data?.user.id;
   const scope = JSON.stringify([userId, spaceId]);
   const currentScope = useRef(scope);
   currentScope.current = scope;
-  const evidence = incomingThreadEvidence(items);
+  const byThread = new Map(
+    incomingThreadEvidence(items).map((thread) => [inboxThreadKey(thread), thread]),
+  );
+  for (const thread of authoritativeThreads ?? []) byThread.set(inboxThreadKey(thread), thread);
+  const evidence = [...byThread.values()];
   const evidenceKey = JSON.stringify(evidence);
   const [result, setResult] = useState<{
     scope: string;
@@ -104,14 +111,19 @@ export function useInboxReadState(
       setStatus({ scope, failed: false, pending: true });
       try {
         await rpc.recruiting.markInboxThread({ spaceId, thread, observedIncomingAt, unread });
-        if (currentScope.current === scope) setRefresh((value) => value + 1);
+        if (currentScope.current === scope) {
+          setRefresh((value) => value + 1);
+          void cache?.client.invalidateQueries({
+            queryKey: ["recruiting", `global-inbox:${scope}`],
+          });
+        }
       } catch {
         if (currentScope.current === scope) setStatus({ scope, failed: true, pending: false });
       } finally {
         if (currentScope.current === scope) setStatus((value) => ({ ...value, pending: false }));
       }
     },
-    [scope],
+    [scope, cache],
   );
   return { unread, mark, failed, pending, ready: !!state && !failed };
 }

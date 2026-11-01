@@ -136,6 +136,7 @@ export function ContactsTab(
     const sections = candidateSections(candidate?.latestSource?.report?.fields);
     return {
       view: "contact",
+      collection: { label: t`Contacts`, index, total: rows.length },
       role,
       criterionRevision: props.criterionRevision,
       crm: Boolean(crm),

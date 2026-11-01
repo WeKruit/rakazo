@@ -44,6 +44,7 @@ export const RecruitingAccountRoleSchema = z.strictObject({
   title: z.string(),
   threadId: Id,
   groupId: Id.nullable(),
+  botId: Id.optional(),
   stage: z.string(),
 });
 export const RecruitingAccountViewOutputSchema = z.strictObject({

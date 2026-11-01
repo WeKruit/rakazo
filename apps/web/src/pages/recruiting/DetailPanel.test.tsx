@@ -349,3 +349,46 @@ it("opens stored company and profile history without inventing education or asse
   expect(original?.open).toBe(false);
   expect(original?.textContent).toContain("unstructured data");
 });
+
+it("shows an owned contact-only profile without fabricating a role or reading role history", async () => {
+  const current = {
+    view: "contact" as const,
+    role: null,
+    crm: false,
+    person: {
+      candidateId: "contact-only",
+      name: "Taylor Example",
+      title: "Engineer",
+      company: "Example Labs",
+      email: "taylor@example.test",
+      profileImageUrl: "https://assets.example.test/person.png",
+      roles: [],
+    },
+  };
+  const controller = {
+    current,
+    stack: [current],
+    open: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    close: vi.fn(),
+    pending: null,
+    restore: vi.fn(),
+  };
+  crmData.mockClear();
+  recordView.mockClear();
+  const view = await mount(
+    <RecruitingChatContextProvider
+      value={{ setSelectedContact, setSelectedEmail: () => undefined }}
+    >
+      <RecruitingDetailPanel controller={controller} />
+    </RecruitingChatContextProvider>,
+  );
+  expect(view.textContent).toContain("Taylor Example");
+  expect(view.textContent).toContain("taylor@example.test");
+  expect(view.querySelector('img[src="https://assets.example.test/person.png"]')).not.toBeNull();
+  expect(button(view, "Activity")).toBeUndefined();
+  expect(button(view, "Notes")).toBeUndefined();
+  expect(crmData).not.toHaveBeenCalled();
+  expect(recordView).not.toHaveBeenCalled();
+});

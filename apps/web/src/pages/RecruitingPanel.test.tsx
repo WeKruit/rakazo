@@ -223,6 +223,19 @@ it("browses scoped Contacts and stored mail without inventing a native recruitin
     await vi.dynamicImportSettled();
   });
   expect(view.container.textContent).toContain("Existing CRM person");
+  expect([...view.container.querySelectorAll("h1")].map((heading) => heading.textContent)).toEqual([
+    "Candidates",
+  ]);
+  const candidateLists = view.container.querySelector('nav[aria-label="Candidate lists"]')!;
+  expect(candidateLists.querySelector('[aria-current="page"]')?.textContent).toBe("Contacts");
+  expect(candidateLists.querySelector('a[href$="?view=shortlist"]')).not.toBeNull();
+  expect(view.container.textContent).toContain("Engineering");
+  await view.click("Role details");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  expect(document.querySelector('a[href$="?view=brief"]')?.textContent).toBe("Job brief");
+  expect(document.querySelector('a[href$="?view=feedback"]')?.textContent).toBe("Client feedback");
   expect(view.container.textContent).toContain("person@example.test");
   expect(api.getWorkspace).not.toHaveBeenCalled();
   expect(api.listCandidates).not.toHaveBeenCalled();
@@ -1060,11 +1073,26 @@ it("shows Important role rows, sourced interest, internal notes and stored campa
   });
   const onSelectCandidate = vi.fn();
   const browse = { selection, onSelectCandidate, view: "shortlist" as const };
-  const options = { groupId: "group-1", crmBrowse: browse };
+  const onAskChat = vi.fn();
+  const options = { groupId: "group-1", crmBrowse: browse, onAskChat };
   const view = await mounted("thread-1", undefined, false, undefined, options);
-  expect(api.crmData).toHaveBeenCalledWith(
-    expect.objectContaining({ operation: "important", status: "high_signal" }),
+  expect(api.crmData).not.toHaveBeenCalledWith(expect.objectContaining({ operation: "important" }));
+  expect(view.container.querySelectorAll("tbody tr")).toHaveLength(0);
+  expect(view.container.textContent).toContain("Link a recruiting role to manage its shortlist.");
+  expect(view.container.textContent).not.toContain("Another role");
+  expect(api.setCandidateShortlist).not.toHaveBeenCalled();
+  await view.click("Open role chat");
+  expect(onAskChat).toHaveBeenCalledWith(
+    "Set up this CRM role’s recruiting workspace so I can manage its shortlist.",
   );
+  await view.render("thread-1", 0, false, undefined, {
+    ...options,
+    crmBrowse: { ...browse, view: "workflow" },
+  });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
+  expect(api.crmData).toHaveBeenCalledWith(expect.objectContaining({ operation: "important" }));
   expect(view.container.querySelectorAll("tbody tr")).toHaveLength(2);
   expect(view.container.textContent).toContain("Another role");
   expect(view.container.textContent).not.toContain("Passed");
@@ -1622,6 +1650,7 @@ async function mounted(
     | "workspaceRead"
     | "crmBrowse"
     | "roleConversation"
+    | "onAskChat"
   > = {},
 ) {
   const container = document.createElement("div");
@@ -1802,14 +1831,22 @@ it.each(["results", "shortlist", "contacts"] as const)(
     });
     await act(async () => vi.dynamicImportSettled());
     if (viewName !== "results")
-      expect(view.container.querySelector("h1")?.textContent).toBe(
-        viewName === "shortlist" ? "Shortlist" : "Contacts",
-      );
+      expect(view.container.querySelector("h1")?.textContent).toBe("Candidates");
     if (viewName === "contacts") {
       // One unified table: contact details live in the person's panel, not in table cells.
       expect(
         [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
-      ).toEqual(["Name", "Current role", "Location", "Status", "Actions"]);
+      ).toEqual([
+        "Name",
+        "Current role",
+        "Company",
+        "Location",
+        "Status",
+        "Outreach",
+        "Owner",
+        "Date added",
+        "Actions",
+      ]);
       expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
         limit: 200,
         groupId: "group-1",
@@ -1839,7 +1876,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
     await act(async () =>
       view.container
         .querySelector<HTMLButtonElement>(
-          ".hire-candidate-identity, .hire-table button[aria-haspopup='dialog'], section[aria-label='Contacts'] tbody button[aria-haspopup='dialog']",
+          "[data-candidate-name], .hire-candidate-identity, .hire-table button[aria-haspopup='dialog'], section[aria-label='Contacts'] tbody button[aria-haspopup='dialog']",
         )!
         .click(),
     );
@@ -2917,7 +2954,7 @@ it("bounds legacy workspace candidate rows without discarding the loaded result 
   expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
 });
 
-it("defaults to a table in best-match order and leaves unknown scores last", async () => {
+it("defaults to a table with authoritative match ordering and leaves unknown scores last", async () => {
   const people = (
     [
       ["highest", "Zoe", "95"],
@@ -4028,12 +4065,15 @@ it.each([false, true])(
     )!;
     expect([...select.options].map((option) => option.textContent)).toEqual([
       "Best match",
+      "Rank",
+      "Match tier",
+      "Match score",
       "Name",
       "Recently discovered",
     ]);
     expect(select.value).toBe("ranking");
     await changeInput(view.container, "Search candidates", "Synthetic");
-    for (const sort of ["name", "recent", "ranking"]) {
+    for (const sort of ["tier", "rank", "score"]) {
       await changeSelect(view.container, "Candidate sort", sort);
       expect(api.listCandidates).toHaveBeenLastCalledWith(
         {
@@ -4045,6 +4085,98 @@ it.each([false, true])(
         { signal: expect.any(AbortSignal) },
       );
     }
+  },
+);
+
+it.each(["rank", "tier", "score"])(
+  "normalizes a saved unavailable %s sort to Name from the authoritative scope signal",
+  async (sort) => {
+    api.listCandidates.mockResolvedValue({
+      ...candidatePage(),
+      sortAvailability: { rank: true, tier: true, score: true },
+    });
+    const saved = await mounted("thread-1", undefined, false);
+    await saved.click("Evidence");
+    await changeSelect(saved.container, "Candidate sort", sort);
+    await cleanup?.();
+    const person = { ...candidateFixture("unranked", false), name: "Synthetic Avery" };
+    api.listCandidates.mockClear().mockResolvedValue({
+      ...candidatePage([person]),
+      sortAvailability: { rank: false, tier: false, score: false },
+    });
+    const view = await mounted("thread-1", undefined, false);
+    const select = view.container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Candidate sort"]',
+    )!;
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Best match",
+      "Name",
+      "Recently discovered",
+    ]);
+    expect(select.value).toBe("name");
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      {
+        roleId: role.id,
+        limit: 30,
+        sort: "name",
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(view.container.textContent).toContain("Score / tier not returned");
+    expect(view.container.textContent).toContain(person.name);
+  },
+);
+
+it("falls back from an unavailable score sort to the provider rank, not Name", async () => {
+  api.listCandidates.mockResolvedValueOnce(candidatePage()).mockResolvedValue({
+    ...candidatePage(),
+    sortAvailability: { rank: true, tier: false, score: false },
+  });
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await changeSelect(view.container, "Candidate sort", "score");
+  expect(
+    view.container.querySelector<HTMLSelectElement>('select[aria-label="Candidate sort"]')?.value,
+  ).toBe("rank");
+  expect(api.listCandidates).toHaveBeenLastCalledWith(
+    expect.objectContaining({ roleId: role.id, sort: "rank" }),
+    { signal: expect.any(AbortSignal) },
+  );
+});
+
+it.each(["tier", "score"])(
+  "ignores %s availability from a late previous search scope",
+  async (sort) => {
+    let finish!: (page: ReturnType<typeof candidatePage>) => void;
+    api.listCandidates.mockImplementation(({ query }) =>
+      query === "Previous"
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(candidatePage()),
+    );
+    const view = await mounted("thread-1", undefined, false);
+    await view.click("Evidence");
+    await changeSelect(view.container, "Candidate sort", sort);
+    await changeInput(view.container, "Search candidates", "Previous");
+    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toBeNull();
+    await changeInput(view.container, "Search candidates", "Current");
+    await act(async () =>
+      finish({ ...candidatePage(), sortAvailability: { rank: false, tier: false, score: false } }),
+    );
+    expect(view.container.querySelector('select[aria-label="Candidate sort"]')).toHaveProperty(
+      "value",
+      sort,
+    );
+    expect(api.listCandidates).toHaveBeenLastCalledWith(
+      {
+        roleId: role.id,
+        limit: 30,
+        query: "Current",
+        sort,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   },
 );
 
@@ -8662,8 +8794,12 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
   expect([...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent)).toEqual([
     "Name",
     "Current role",
+    "Company",
     "Location",
     "Status",
+    "Outreach",
+    "Owner",
+    "Date added",
     "Actions",
   ]);
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
@@ -8822,6 +8958,9 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
     crmBrowse: browse,
     roleConversation: true,
   });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.querySelector("[data-role-tab]")).toBeNull();
   expect(view.container.textContent).toContain("Stored CRM person");
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
@@ -8960,13 +9099,33 @@ it.each(["contacts", "shortlist"] as const)(
       },
     });
     expect(view.container.querySelectorAll("h1")).toHaveLength(1);
-    expect(view.container.querySelector("h1")?.textContent).toBe(
-      tab === "contacts" ? "Contacts" : "Shortlist",
-    );
+    expect(view.container.querySelector("h1")?.textContent).toBe("Candidates");
     expect(view.container.textContent).toContain(role.title);
     expect(view.container.querySelector(".hire-standard-view > .hire-section-header")).toBeNull();
   },
 );
+
+it("uses the actual native shortlist even before its CRM target is bound", async () => {
+  api.getWorkspace.mockResolvedValue({ role, revision, crmTarget: null });
+  api.listCandidates.mockResolvedValue(
+    candidatePage([
+      { ...candidateFixture("native-picked", true), name: "Actual native selection" },
+    ]),
+  );
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    groupId: "group-1",
+    roleConversation: true,
+    crmBrowse: { selection: linkedSelection, view: "shortlist", onSelectCandidate: vi.fn() },
+  });
+  expect(api.listCandidates).toHaveBeenCalledWith(
+    expect.objectContaining({ roleId: role.id, shortlisted: true }),
+    { signal: expect.any(AbortSignal) },
+  );
+  expect(view.container.textContent).toContain("Actual native selection");
+  expect(view.container.textContent).not.toContain("Link a recruiting role");
+  expect(view.container.querySelectorAll("h1")).toHaveLength(1);
+  expect(api.crmData).not.toHaveBeenCalledWith(expect.objectContaining({ operation: "important" }));
+});
 
 it("uses only the Shell navigation's fresh workspace and waits for its next refresh generation", async () => {
   const page = candidatePage([

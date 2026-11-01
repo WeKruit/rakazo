@@ -333,6 +333,7 @@ export type SkillEvidenceSource = {
 
 /** One requirement line of Autumn's own assessment, its words kept verbatim. */
 export type RequirementRow = {
+  priority?: "hard" | "preferred";
   key: string;
   /** Supplied criterion name or exact matching definition; never an inferred technical name. */
   label: string | null;
@@ -376,6 +377,7 @@ function criterionName(reference: string, context?: ProfileCriterionContext) {
     return {
       label: criterion.expression.kind === "atom" ? criterion.expression.statement : null,
       criterionId: reference,
+      priority: criterion.priority,
     };
   }
   return /^R\d+$/i.test(reference) ? { label: null, criterionId: reference } : { label: reference };

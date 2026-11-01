@@ -116,11 +116,12 @@ it.each([
   expect(element.textContent).not.toContain("No timed events");
 });
 
-it("shows a checked empty week without claiming that free slots are available", async () => {
+it("shows a checked empty date range without claiming that free slots are available", async () => {
   correspondence.mockResolvedValue({ ...saved, status: "empty", events: [] });
   await render();
   expect(element.querySelector('[data-testid="interview-calendar"]')).not.toBeNull();
-  expect(element.textContent).toContain("No timed events in this week.");
+  expect(element.textContent).toContain("No timed events in this date range.");
+  expect(element.textContent).toContain("Empty space does not confirm availability.");
   expect(element.textContent).not.toContain("Available time");
 });
 

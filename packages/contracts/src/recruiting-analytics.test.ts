@@ -21,6 +21,8 @@ it("requires an ordered explicit date window", () => {
 it("does not accept a fabricated rate or claim complete history", () => {
   const partial = {
     roles: [],
+    trend: [],
+    groups: [],
     observedShortlistedPeople: 0,
     shortlistDateUnknownPeople: 0,
     observedContactedPeople: null,

@@ -211,7 +211,7 @@ export async function readRecruitingAccountView(
         title: true,
         sourceThreadId: true,
         playbookStage: true,
-        sourceThread: { select: { groupId: true } },
+        sourceThread: { select: { groupId: true, botId: true } },
       },
     });
     const roles = catalog.map((row) => ({
@@ -219,6 +219,7 @@ export async function readRecruitingAccountView(
       title: row.title,
       threadId: row.sourceThreadId,
       groupId: row.sourceThread.groupId,
+      ...(row.sourceThread.botId ? { botId: row.sourceThread.botId } : {}),
       stage: row.playbookStage,
     }));
     if (input.view === "routines") {
@@ -396,26 +397,29 @@ export async function readRecruitingAccountView(
         const bindings = await deps.prisma.externalEffect.findMany({
           where: {
             spaceId: actor.spaceId,
+            kind: "instantly_role_campaign",
             status: "completed",
-            idempotencyKey: {
-              startsWith: "instantly-role-campaign:",
-              endsWith: `:${row.id}`,
-            },
+            run: { userId: actor.userId },
+            request: { path: ["roleId"], equals: row.id },
           },
-          select: { idempotencyKey: true, result: true },
+          select: { request: true, result: true },
         });
         for (const binding of bindings) {
-          const key = binding.idempotencyKey;
+          const request = binding.request;
           const result = binding.result;
           if (
-            !key ||
+            !request ||
+            typeof request !== "object" ||
+            Array.isArray(request) ||
+            request.roleId !== row.id ||
+            typeof request.serverId !== "string" ||
             !result ||
             typeof result !== "object" ||
             Array.isArray(result) ||
             typeof result.campaignId !== "string"
           )
             continue;
-          const serverId = key.slice("instantly-role-campaign:".length, -`:${row.id}`.length);
+          const serverId = request.serverId;
           if (
             item.campaigns.some(
               (campaign) =>

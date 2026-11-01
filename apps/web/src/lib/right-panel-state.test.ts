@@ -143,19 +143,19 @@ it("starts candidate lists as a table ordered by saved role match groups", () =>
   });
 });
 
-it("does not keep an automatic fallback sort, so a role that gains scores sorts by them", () => {
+it("retains an existing valid sort rather than replacing it when reopening a role", () => {
   vi.stubGlobal("localStorage", {
     getItem: () =>
       JSON.stringify({ ...readRecruitingPanelState(null), filters: { sort: "name", query: "a" } }),
   });
-  expect(readRecruitingPanelState("role").filters).toEqual({ sort: "ranking", query: "a" });
+  expect(readRecruitingPanelState("role").filters).toEqual({ sort: "name", query: "a" });
 });
 
 it.each(["rank", "tier", "score"] as const)(
-  "restores provider %s preferences using saved match groups",
+  "restores the exact saved provider %s preference",
   (sort) => {
     const state = { ...readRecruitingPanelState(null), filters: { sort }, userSort: true };
     vi.stubGlobal("localStorage", { getItem: () => JSON.stringify(state) });
-    expect(readRecruitingPanelState("list")).toEqual({ ...state, filters: { sort: "ranking" } });
+    expect(readRecruitingPanelState("list")).toEqual(state);
   },
 );

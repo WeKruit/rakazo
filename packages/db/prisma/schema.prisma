@@ -22,6 +22,8 @@ model AiDataConsent {
 }
 
 model User {
+  recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
+  recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
   recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
@@ -222,6 +224,8 @@ model Member {
 }
 
 model Space {
+  recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
+  recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
   recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
@@ -1612,6 +1616,7 @@ model TicketComment {
 
 
 model RecruitingRole {
+  inboxMessages RecruitingInboxMessage[]
   crmWorkspaceAttachment RecruitingCrmWorkspaceAttachment?
   crmBindingEffectId String? @unique
   crmBindingEffect ExternalEffect? @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
@@ -2033,6 +2038,7 @@ model RecruitingCandidateNote {
   /// "autumn:<key>" | "crm:<id>", same key space as reminders.
   candidateKey String
   body String
+  artifactIds String[] @default([])
   createdByBotId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2273,4 +2279,47 @@ model RecruitingInboxCursor {
   space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   @@id([userId, spaceId, threadKey])
   @@map("recruiting_inbox_cursors")
+}
+
+/// Queryable display copy; original receipts, imported corrections and artifacts stay authoritative.
+model RecruitingInboxMessage {
+  id String @id
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  roleId String @map("role_id")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  originKey String @map("origin_key")
+  dedupeKey String @map("dedupe_key")
+  threadKey String? @map("thread_key")
+  sourceId String @map("source_id")
+  organizationId String? @map("organization_id")
+  sourceKind String @map("source_kind")
+  receiptId String? @map("receipt_id")
+  receiptOrdinal Int? @map("receipt_ordinal")
+  observedAt DateTime @map("observed_at")
+  messageAt DateTime? @map("message_at")
+  direction String?
+  searchText String @map("search_text")
+  email Json
+  person Json?
+  @@unique([userId, spaceId, receiptId, receiptOrdinal])
+  @@index([userId, spaceId, roleId, messageAt, id])
+  @@index([userId, spaceId, sourceKind, receiptId])
+  @@map("recruiting_inbox_messages")
+}
+
+/// Background projection coverage, independent of the person's first-enable read baseline.
+model RecruitingInboxIndexProgress {
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  nativeCursor Json? @map("native_cursor")
+  importsComplete Boolean @default(false) @map("imports_complete")
+  crmComplete Boolean @default(false) @map("crm_complete")
+  checkedAt DateTime @default(now()) @map("checked_at")
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  space Space @relation(fields:[spaceId],references:[id],onDelete:Cascade)
+  @@id([userId,spaceId])
+  @@map("recruiting_inbox_index_progress")
 }

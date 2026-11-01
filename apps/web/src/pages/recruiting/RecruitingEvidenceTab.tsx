@@ -9,12 +9,13 @@ import {
   TabsContent,
 } from "@rakazo/ui-web";
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { LayoutGrid, List } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { withFeatureMessages } from "../../lib/i18n";
 import { ContactsTab } from "../recruiting/ContactsTab";
 import { RetryNotice } from "../recruiting/RetryNotice";
+import { ShortlistDirectory } from "./ShortlistDirectory";
+import { TalentInsights } from "./TalentInsights";
 
 const RecruitingLegacyResults = lazyPanel(() =>
   withFeatureMessages(() => import("./RecruitingLegacyResults")).then(
@@ -34,6 +35,8 @@ export function RecruitingEvidenceTab({
   model: ReturnType<typeof useRecruitingWorkspace>;
 }) {
   const { t } = useLingui();
+  const [insights, setInsights] = useState(false);
+  useEffect(() => setInsights(false), [model.workspace?.role.id]);
   const {
     shortlistWeekFilter,
     onClearShortlistWeekFilter,
@@ -78,6 +81,17 @@ export function RecruitingEvidenceTab({
     table: { offset: 0, measurements: [] as VirtualItem[] },
     cards: { offset: 0, measurements: [] as VirtualItem[] },
   });
+  if (insights && workspace && view === "shortlist")
+    return (
+      <TabsContent value="evidence">
+        <TalentInsights
+          roleId={workspace.role.id}
+          roleTitle={workspace.role.title}
+          filters={candidateFilters}
+          onBack={() => setInsights(false)}
+        />
+      </TabsContent>
+    );
   return (
     <TabsContent value="evidence" className="space-y-4">
       {workspace ? (
@@ -96,6 +110,13 @@ export function RecruitingEvidenceTab({
                   )),
               )
             : null}
+          {view === "shortlist" ? (
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => setInsights(true)}>
+                <Trans>View insights</Trans>
+              </Button>
+            </div>
+          ) : null}
           <div
             className={
               filteredShortlistWeek
@@ -224,6 +245,21 @@ export function RecruitingEvidenceTab({
                 <NativeSelectOption value="ranking">
                   <Trans>Best match</Trans>
                 </NativeSelectOption>
+                {candidatePage.sortAvailability.rank ? (
+                  <NativeSelectOption value="rank">
+                    <Trans>Rank</Trans>
+                  </NativeSelectOption>
+                ) : null}
+                {candidatePage.sortAvailability.tier ? (
+                  <NativeSelectOption value="tier">
+                    <Trans>Match tier</Trans>
+                  </NativeSelectOption>
+                ) : null}
+                {candidatePage.sortAvailability.score ? (
+                  <NativeSelectOption value="score">
+                    <Trans>Match score</Trans>
+                  </NativeSelectOption>
+                ) : null}
                 <NativeSelectOption value="name">
                   <Trans>Name</Trans>
                 </NativeSelectOption>
@@ -295,13 +331,8 @@ export function RecruitingEvidenceTab({
               </label>
             ) : null}
           </div>
-          {!contactsView ? (
-            <fieldset
-              className={
-                presentation === "workspace" ? "hire-view-toggle flex gap-1" : "flex gap-1"
-              }
-              aria-label={t`Saved candidates`}
-            >
+          {!contactsView && !(presentation === "workspace" && view === "shortlist") ? (
+            <fieldset className="flex gap-1" aria-label={t`Saved candidates`}>
               <Button
                 size="sm"
                 variant={candidateView === "cards" ? "secondary" : "ghost"}
@@ -310,7 +341,6 @@ export function RecruitingEvidenceTab({
                   setCandidateList((current) => ({ ...current, candidateView: "cards" }))
                 }
               >
-                {presentation === "workspace" ? <LayoutGrid size={15} aria-hidden /> : null}
                 <Trans>Cards</Trans>
               </Button>
               <Button
@@ -321,7 +351,6 @@ export function RecruitingEvidenceTab({
                   setCandidateList((current) => ({ ...current, candidateView: "table" }))
                 }
               >
-                {presentation === "workspace" ? <List size={15} aria-hidden /> : null}
                 <Trans>Table</Trans>
               </Button>
             </fieldset>
@@ -378,11 +407,15 @@ export function RecruitingEvidenceTab({
             <TabLoading />
           ) : null}
           {!contactsView && candidatePage ? (
-            <RecruitingLegacyResults
-              model={model}
-              candidateKeys={candidateKeys}
-              candidateOffsets={candidateOffsets}
-            />
+            presentation === "workspace" && view === "shortlist" ? (
+              <ShortlistDirectory model={model} />
+            ) : (
+              <RecruitingLegacyResults
+                model={model}
+                candidateKeys={candidateKeys}
+                candidateOffsets={candidateOffsets}
+              />
+            )
           ) : null}
         </>
       ) : (
