@@ -866,6 +866,8 @@ export function lateNote(pending: Promise<string | undefined>) {
   };
 }
 
+/** The working title of a role saved before the recruiter has named it. */
+const NEW_ROLE_TITLE = "New role";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -6369,8 +6371,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             plannedEarlyRefusalAt ??= now;
             return now - plannedEarlyRefusalAt < 3_000;
           };
+          // A people-search agent run takes minutes, so it too waits until the first picks
+          // from the planned rows are on screen; after them it is the way to fill the ten.
+          const quickSearch = name.endsWith("web_search_advanced_exa") || name === "web_search";
           if (
-            (name.endsWith("web_search_advanced_exa") || name === "web_search") &&
+            (quickSearch || (name.endsWith("agent_run") && !firstPicksShown)) &&
             plannedNewPeople >= PLANNED_POOL_ENOUGH &&
             !executionId.startsWith(`${runId}:planned-search:`) &&
             !(await deps.prisma.externalEffect.findFirst({
@@ -12496,7 +12501,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : currentTurnMessage.blocks.find(
                 (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
               );
-          if (!block && !file) return undefined;
+          // A role team opened without a JD ("new grads from USC, CS") still gets its role saved
+          // now, under a working title, so every later step has a role to save to.
+          const request =
+            !block && !file && thread.groupId && recruitingBotKey(bot)
+              ? texts
+                  .map((item) => item.text)
+                  .join("\n")
+                  .trim()
+              : "";
+          if (!block && !file && !request) return undefined;
           // These calls run before the model's first step, so they report themselves like the
           // model's own calls: the recruiter sees the file or link being read and the role saved.
           const step = async (
@@ -12555,6 +12569,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             });
           const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          if (request)
+            return {
+              saving: create(NEW_ROLE_TITLE, [], request),
+              note: `This role team's role is being saved now as "${NEW_ROLE_TITLE}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
+            };
           try {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
@@ -12746,6 +12765,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const outside = outsideOf(onTime);
           addFresh(inArea(onTime, outside));
+          // The people are already in Results; chat says so at once instead of staying on the
+          // last activity until the model's picks.
+          if (plannedNewPeople > 0 && !isBackgroundRunTrigger(run.trigger))
+            void deps.events
+              .publishTransient({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: {
+                  // In the recruiter's own language, like every other recruiter-facing line.
+                  text: isChineseText(
+                    (currentTurnMessage?.blocks ?? [])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  )
+                    ? `找到 ${plannedNewPeople} 人`
+                    : `Found ${plannedNewPeople} people`,
+                  activity: true,
+                },
+              })
+              .catch(() => undefined);
           // A search still running at the pick adds its people when it returns; a refused extra
           // search hands them to the model instead of searching again.
           results.forEach((result, index) => {
@@ -13128,7 +13170,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
               pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
-              recruitingIntake: Boolean(linkRole) || firstRoundPending,
+              // A role team whose role is not saved yet is still in intake: its questions
+              // are what the recruiter waits on, so they skip reasoning too.
+              recruitingIntake:
+                Boolean(linkRole) ||
+                firstRoundPending ||
+                (Boolean(thread.groupId) &&
+                  !thread.activeRecruitingRoleId &&
+                  recruitingSearch &&
+                  Boolean(recruitingBotKey(bot))),
             });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({

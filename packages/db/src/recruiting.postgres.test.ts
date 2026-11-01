@@ -342,6 +342,27 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     return { ...f, input, context, reader };
   }
 
+  it("creates a role from the run's request when the recruiter added a detail while it worked", async () => {
+    const f = await roleMutationFixture("create");
+    const detail = await recruiting.createThreadMessage(prisma, {
+      threadId: f.thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: "Recent graduates preferred" }],
+    });
+    await prisma.steeringMessage.create({
+      data: { messageId: detail.id, userId, botId, runId: f.run.id, claimedAt: new Date() },
+    });
+    const result = await recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      f.context,
+      f.input,
+      f.reader,
+    );
+    expect(result.status).toBe("saved");
+    await prisma.steeringMessage.deleteMany({ where: { runId: f.run.id } });
+  });
+
   it("admits group notes only for the run's own group conversation", async () => {
     const f = await assessmentFixture("Group notes fixture");
     await prisma.thread.update({
@@ -3677,7 +3698,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       where: { id: steer.id },
       data: { claimedAt: new Date() },
     });
-    await expect(call(first.id)).rejects.toThrow(IsolationError);
     const revised = await mutateRole(
       prisma,
       actor,
