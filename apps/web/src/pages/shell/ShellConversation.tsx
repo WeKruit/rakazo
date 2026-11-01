@@ -405,6 +405,15 @@ export function ShellConversation({
               {recruitingWorkspaceView === "sequence" ? (
                 <>
                   <SequenceTab
+                    composeNew={searchParams.get("compose") === "new"}
+                    requestedCampaign={
+                      searchParams.get("campaign")
+                        ? {
+                            id: searchParams.get("campaign")!,
+                            serverId: searchParams.get("campaignServer") ?? undefined,
+                          }
+                        : undefined
+                    }
                     onAskChat={(text) => openRoleChat(text)}
                     roleId={currentBindingRead.workspace.role.id}
                     spaceId={currentBindingRead.workspace.role.spaceId}

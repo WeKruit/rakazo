@@ -1966,7 +1966,6 @@ msgstr "Impossible d'atteindre le serveur"
 msgid "Could not read {failedCalendars}."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr ""
@@ -4003,10 +4002,6 @@ msgstr "pas d'authentification"
 msgid "No authentication"
 msgstr "Aucune authentification"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr ""
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "Aucune application de discussion connectée pour le moment."
@@ -4520,7 +4515,6 @@ msgstr "Travaux en cours"
 msgid "OpenAI-compatible server URL"
 msgstr "URL de serveur compatible OpenAI"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr ""
@@ -5174,7 +5168,6 @@ msgstr ""
 msgid "Replaced"
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6018,10 +6011,6 @@ msgstr "Envoi en cours…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -6964,6 +6953,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "Webhook"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"

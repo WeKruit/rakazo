@@ -173,7 +173,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
   }
 });
 
-it("pages campaign recipients back and forth without losing sibling campaigns or rereading a page", async () => {
+it("lists sibling sequences and routes to exact role detail without expanding lead pages globally", async () => {
   const lead = (email: string) => ({ candidateKey: null, email, status: 1, interestStatus: null });
   const campaign = (id: string) => ({
     status: "ready" as const,
@@ -214,34 +214,18 @@ it("pages campaign recipients back and forth without losing sibling campaigns or
         </MemoryRouter>,
       ),
     );
-    // Roles still waiting for a brief have nothing to send, so Sequence leaves them out.
-    expect(read).toHaveBeenCalledWith(
-      expect.objectContaining({ view: "roles", briefedOnly: true }),
-      expect.anything(),
-    );
-    const button = (label: string) =>
-      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
-    await act(async () => button("Next page").click());
-    expect(read).toHaveBeenLastCalledWith({
-      view: "sequence",
-      roleId: "one",
-      campaignId: "one",
-      campaignServerId: "mail-source",
-      campaignLeadCursor: "lead-page-two",
-      limit: 20,
-    });
-    expect(container.textContent).not.toContain("one@example.test");
-    expect(container.textContent).toContain("new@example.test");
-    expect(container.textContent).toContain("Campaign two");
-    expect(container.textContent).toContain("two@example.test");
-    const reads = read.mock.calls.length;
-    await act(async () => button("Page 1").click());
-    expect(container.textContent).toContain("one@example.test");
-    expect(container.textContent).not.toContain("new@example.test");
-    await act(async () => button("Page 2").click());
-    expect(container.textContent).toContain("new@example.test");
-    // Pages already read are shown again without another provider read.
-    expect(read.mock.calls.length).toBe(reads);
+    const links = [...container.querySelectorAll("a")];
+    expect(
+      links.find((link) => link.textContent === "Campaign one")?.getAttribute("href"),
+    ).toContain("campaign=one&campaignServer=mail-source");
+    expect(
+      links.find((link) => link.textContent === "Campaign two")?.getAttribute("href"),
+    ).toContain("campaign=two&campaignServer=mail-source");
+    expect(
+      read.mock.calls.every(
+        ([input]) => input.sequenceSummary === true && !input.campaignLeadCursor,
+      ),
+    ).toBe(true);
   } finally {
     await act(async () => pageRoot.unmount());
   }
@@ -906,17 +890,27 @@ it("lists every role's people in one server-paged table", async () => {
     );
     expect(read).not.toHaveBeenCalled();
     expect(listContacts).toHaveBeenCalledWith({ filters: {}, limit: 50 });
-    expect(container.textContent).toContain("Ada Lovelace");
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain("Ada Lovelace");
+    });
     expect(container.textContent).toContain("UCLA");
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),
     );
-    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+      expect(container.textContent).toContain("51–52 of 120");
+    });
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
     );
-    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
+    });
   } finally {
     await act(async () => pageRoot.unmount());
     container.remove();

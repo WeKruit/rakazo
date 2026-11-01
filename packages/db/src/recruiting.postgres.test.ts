@@ -16,11 +16,13 @@ import type {
 import { boundDirectApprovalRequest } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { projectRecruitingCandidateProfiles } from "../../adapters/src/recruiting-profiles.js";
+import { saveRecruitingPeopleSearch } from "../../adapters/src/recruiting-tools.js";
 import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
-import * as recruiting from "./index.js";
 import { chatReplyToAsk } from "./events.js";
+import * as recruiting from "./index.js";
 import { IsolationError } from "./scope.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -737,6 +739,423 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const lookup = { threadId: f.thread.id, roleId: f.role.role.id, effectId: effect.id };
     return { ...f, request, effect, attempt, pause, lookup };
   }
+  it("returns new-role supplied facts before background photo work and eventually projects Contacts", async () => {
+    await prisma.member.create({
+      data: {
+        id: `media-member-${suffix}`,
+        organizationId,
+        userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    await prisma.spaceMember.create({
+      data: {
+        id: `media-space-member-${suffix}`,
+        organizationId,
+        spaceId,
+        userId,
+        createdAt: new Date(),
+      },
+    });
+    const sourceBot = await prisma.bot.create({
+      data: { spaceId, userId, name: "New role assistant", color: "blue" },
+    });
+    const botId = sourceBot.id;
+    const thread = await prisma.thread.create({ data: { spaceId, userId, botId } });
+    const message = await recruiting.createThreadMessage(prisma, {
+      threadId: thread.id,
+      role: "user",
+      blocks: [
+        { kind: "text", text: "Find engineers for a new role using supplied profile facts." },
+      ],
+    });
+    const ref = { ...source(message.id), readAt: new Date().toISOString() };
+    const role = await recruiting.createRecruitingRole(prisma, actor, {
+      ...roleInput(ref),
+      sourceThreadId: thread.id,
+    });
+    const task = await prisma.task.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId: thread.id,
+        prompt: "Find engineers",
+        status: "running",
+      },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        taskId: task.id,
+        threadId: thread.id,
+        sourceMessageId: message.id,
+        status: "running",
+        trigger: "user",
+        initialRecruitingRoleRevisionId: role.revision.id,
+        leaseOwner: "media-worker",
+        leaseFence: 1,
+        leaseExpiresAt: new Date(Date.now() + 60000),
+      },
+    });
+    const server = await prisma.mcpServer.create({
+      data: {
+        spaceId,
+        userId,
+        name: "People search",
+        transport: "http",
+        slug: `ingest-${suffix}`,
+        endpoint: "https://mcp.exa.ai/mcp?tools=web_search_advanced_exa",
+      },
+    });
+    const slug = `new-media-${suffix}`;
+    const photo = "https://media.licdn.com/dms/image/v2/A/profile-displayphoto-shrink_200_200/0/1";
+    const original = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            results: [
+              {
+                url: `https://www.linkedin.com/in/${slug}`,
+                image: photo,
+                entities: [
+                  {
+                    properties: {
+                      name: "New supplied person",
+                      email: "supplied@example.test",
+                      github_url: "https://github.com/supplied-person",
+                      website_url: "https://portfolio.example.test/",
+                      stackoverflow_url: "https://stackoverflow.com/users/123/supplied",
+                      workHistory: [
+                        {
+                          title: "Engineer",
+                          company: {
+                            name: "Supplied Employer",
+                            website: "https://employer.example.test/",
+                            logo_url: "https://images.example.test/employer.png",
+                          },
+                          dates: { from: "2021-02" },
+                        },
+                      ],
+                      educationHistory: [
+                        {
+                          degree: "BSc",
+                          institution: {
+                            name: "Supplied School",
+                            website: "https://school.example.test/",
+                            logo_url: "https://images.example.test/school.png",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+              {
+                url: `https://www.linkedin.com/in/${slug}-unknown`,
+                entities: [{ properties: { name: "Valid person with absent media" } }],
+              },
+            ],
+          }),
+        },
+      ],
+    };
+    const effect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: run.id,
+        kind: "mcp",
+        status: "completed",
+        idempotencyKey: `source-media-${suffix}`,
+        request: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: server.id,
+            resourceRevision: server.revision,
+            toolName: "web_search_advanced_exa",
+          },
+          { query: "engineers" },
+          "__rakazoCatalogTool",
+        ) as Prisma.InputJsonValue,
+        result: original,
+      },
+    });
+    const input = { operation: "save_search" as const, expectedRoleRevision: 1 };
+    const saving = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
+        status: "executing",
+        idempotencyKey: `save-media-${suffix}`,
+        request: input,
+      },
+    });
+    const files: Uint8Array[] = [];
+    let releasePhoto!: () => void;
+    let photoStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      photoStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releasePhoto = resolve;
+    });
+    const fetchPhoto = vi.fn(async () => {
+      photoStarted();
+      await release;
+      return Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="blue"/></svg>',
+      );
+    });
+    sourceQueries = [];
+    const response = await saveRecruitingPeopleSearch(
+      {
+        prisma,
+        artifacts: {
+          put: async ({ bytes }: { bytes: Uint8Array }) => {
+            files.push(bytes);
+            return { id: `media-${suffix}` };
+          },
+        },
+      } as never,
+      {
+        actor,
+        sourceMessageId: message.id,
+        runId: run.id,
+        leaseOwner: "media-worker",
+        leaseFence: 1,
+        effectId: saving.id,
+        effectRequest: input,
+      },
+      input,
+      {
+        userId,
+        spaceId,
+        botId,
+        runId: run.id,
+        operationId: run.id,
+        traceId: run.id,
+        signal: new AbortController().signal,
+      },
+      effect.id,
+    );
+    const responseQueries = sourceQueries;
+    sourceQueries = undefined;
+    expect(responseQueries.join("\n")).not.toContain("recruiting_saved_profiles");
+    expect(responseQueries.join("\n")).not.toContain("recruiting_profile_projection");
+    expect(fetchPhoto).not.toHaveBeenCalled();
+    expect(JSON.stringify(response)).not.toContain("_profile");
+    expect(
+      await prisma.recruitingSavedProfile.count({
+        where: { ownerUserId: userId, spaceId, personKey: `linkedin:/in/${slug}` },
+      }),
+    ).toBe(0);
+    const immediate = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: role.role.id,
+    });
+    expect(
+      immediate.items.find((item) => item.candidateKey === `linkedin:/in/${slug}`)?.savedProfile,
+    ).toMatchObject({
+      profileImageUrl: photo,
+      email: "supplied@example.test",
+      githubUrl: "https://github.com/supplied-person",
+      experience: [{ company_logo_url: "https://images.example.test/employer.png" }],
+      education: [{ school_logo_url: "https://images.example.test/school.png" }],
+    });
+    const displayed = immediate.items.find((item) => item.candidateKey === `linkedin:/in/${slug}`)!;
+    const gradeInput = {
+      operation: "save_grades" as const,
+      expectedRoleRevision: role.role.revision,
+      rows: [
+        {
+          name: displayed.name!,
+          linkedin_url: displayed.linkedinUrl!,
+          ...(displayed.title ? { current_title: displayed.title } : {}),
+          ...(displayed.company ? { current_company: displayed.company } : {}),
+          ...(displayed.location ? { location: displayed.location } : {}),
+          match_score: 88,
+          match_tier: "Strong" as const,
+          fit_reasons: "Supplied evidence",
+          concerns: [],
+          requirements_assessment: [
+            {
+              requirement: "Supplied evidence",
+              status: "met" as const,
+              evidence: "Supplied evidence",
+            },
+          ],
+        },
+      ],
+    };
+    const gradeEffect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
+        status: "executing",
+        idempotencyKey: `media-grade-${suffix}`,
+        request: gradeInput,
+      },
+    });
+    const gradeBytes = Buffer.from(stableJsonValue(recruiting.recruitingGradesReceipt(gradeInput)));
+    await recruiting.saveRecruitingCandidateGrades(
+      prisma,
+      actor,
+      {
+        runId: run.id,
+        leaseOwner: "media-worker",
+        leaseFence: 1,
+        effectId: gradeEffect.id,
+        effectRequest: gradeInput,
+      },
+      gradeInput,
+      {
+        outputArtifact: {
+          name: "grades.json",
+          mimeType: "application/json",
+          size: gradeBytes.length,
+          hash: createHash("sha256").update(gradeBytes).digest("hex"),
+          storageKey: `media-grade-${suffix}`,
+          clientNonce: `recruiting-grades:${gradeEffect.id}`,
+        },
+      },
+    );
+    const gradedBeforeProjection = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: role.role.id,
+    });
+    expect(
+      gradedBeforeProjection.items.find((item) => item.candidateKey === `linkedin:/in/${slug}`)
+        ?.savedProfile,
+    ).toMatchObject({
+      profileImageUrl: photo,
+      email: "supplied@example.test",
+      githubUrl: "https://github.com/supplied-person",
+    });
+    const notify = vi.fn();
+    const projection = projectRecruitingCandidateProfiles(
+      { prisma, events: { notify } },
+      { pageEffectId: saving.id },
+      fetchPhoto,
+    );
+    await Promise.race([
+      started,
+      projection.then(() => {
+        throw new Error("Projection returned without requesting its supplied photo");
+      }),
+    ]);
+    expect(fetchPhoto).toHaveBeenCalledExactlyOnceWith(photo);
+    const pending = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: role.role.id,
+    });
+    expect(
+      pending.items.find((item) => item.candidateKey === `linkedin:/in/${slug}`)?.savedProfile
+        ?.profileImageUrl,
+    ).toBe(photo);
+    releasePhoto();
+    await projection;
+    expect(notify).toHaveBeenCalled();
+    const records = await prisma.recruitingSavedProfile.findMany({
+      where: { ownerUserId: userId, spaceId, personKey: { startsWith: `linkedin:/in/${slug}` } },
+    });
+    const full = records.find((item) => item.personKey === `linkedin:/in/${slug}`)!;
+    expect(full.sourceEffectId).toBe(effect.id);
+    const retained = await recruiting.saveRecruitingSavedProfile(prisma, actor, run.id, {
+      personKey: full.personKey,
+      provider: "old_lookup",
+      sourceEffectId: effect.id,
+      fetchedAt: new Date(full.fetchedAt.getTime() - 1000),
+      profile: { headline: "Older result", profileImageUrl: null, experience: [], education: [] },
+    });
+    expect(retained.profileImageUrl).toMatch(/^data:image\/webp;base64,/);
+    expect(retained.email).toBe("supplied@example.test");
+
+    expect(full.profile).toMatchObject({
+      profileImageUrl: expect.stringMatching(/^data:image\/webp;base64,/),
+      email: "supplied@example.test",
+      githubUrl: "https://github.com/supplied-person",
+      websiteUrl: "https://portfolio.example.test/",
+      stackOverflowUrl: "https://stackoverflow.com/users/123/supplied",
+      experience: [
+        {
+          company_name: "Supplied Employer",
+          company_logo_url: "https://images.example.test/employer.png",
+          company_url: "https://employer.example.test/",
+        },
+      ],
+      education: [
+        {
+          school_name: "Supplied School",
+          school_logo_url: "https://images.example.test/school.png",
+          school_url: "https://school.example.test/",
+        },
+      ],
+    });
+    expect(records.find((item) => item.personKey.endsWith("-unknown"))!.profile).toEqual({
+      headline: null,
+      profileImageUrl: null,
+      experience: [],
+      education: [],
+      email: null,
+      githubUrl: null,
+      websiteUrl: null,
+      stackOverflowUrl: null,
+    });
+    const contacts = await recruiting.listRecruitingContacts(prisma, actor, {
+      filters: { roleIds: [role.role.id] },
+    });
+    const person = contacts.items.find((item) => item.personKey === full.personKey)!;
+    expect(person).toMatchObject({
+      email: "supplied@example.test",
+      linkedinUrl: `https://www.linkedin.com/in/${slug}`,
+      profileImageUrl: expect.stringMatching(/^data:image\/webp;base64,/),
+      companyLogoUrl: "https://images.example.test/employer.png",
+      schoolLogoUrl: "https://images.example.test/school.png",
+      savedProfile: { githubUrl: "https://github.com/supplied-person" },
+    });
+    expect(
+      (await prisma.externalEffect.findUniqueOrThrow({ where: { id: effect.id } })).result,
+    ).toEqual(original);
+    expect(
+      JSON.parse(Buffer.from(files[0]!).toString()).rows[0].row._profile_image_source_url,
+    ).toBe(photo);
+    expect(
+      (await prisma.externalEffect.findUniqueOrThrow({ where: { id: saving.id } })).status,
+    ).toBe("completed");
+    // A durable retry may outlive access: no projection or publication after membership is removed.
+    const completionKey = `recruiting-profile-project:${saving.id}:${(await prisma.recruitingCandidatePage.findUniqueOrThrow({ where: { effectId: saving.id } })).artifactHash}`;
+    await prisma.externalEffect.delete({ where: { idempotencyKey: completionKey } });
+    await prisma.spaceMember.delete({ where: { id: `media-space-member-${suffix}` } });
+    const beforeRevocationRetry = await prisma.recruitingSavedProfile.findUniqueOrThrow({
+      where: { id: full.id },
+    });
+    const revokedFetch = vi.fn();
+    const revokedNotify = vi.fn();
+    await projectRecruitingCandidateProfiles(
+      { prisma, events: { notify: revokedNotify } },
+      { pageEffectId: saving.id },
+      revokedFetch,
+    );
+    expect(revokedFetch).not.toHaveBeenCalled();
+    expect(revokedNotify).not.toHaveBeenCalled();
+    expect(
+      await prisma.recruitingSavedProfile.findUniqueOrThrow({ where: { id: full.id } }),
+    ).toEqual(beforeRevocationRetry);
+    expect(await prisma.externalEffect.count({ where: { idempotencyKey: completionKey } })).toBe(0);
+    await prisma.spaceMember.create({
+      data: {
+        id: `media-space-member-${suffix}`,
+        organizationId,
+        spaceId,
+        userId,
+        createdAt: new Date(),
+      },
+    });
+  });
+
   beforeAll(async () => {
     const db = createDb(databaseUrl!);
     prisma = db.prisma;

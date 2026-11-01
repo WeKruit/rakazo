@@ -582,6 +582,34 @@ export async function getRecruitingRoleCampaign(
       selectedNative.status === "completed" &&
       correspondenceRecord(selectedNative.result)?.campaignId === selection.campaignId &&
       typeof correspondenceRecord(selectedNative.result)?.campaignName === "string";
+    const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
+    const assignment = await deps.prisma.botMcpServer.findFirst({
+      where: {
+        ...(selection.serverId ? { serverId: selection.serverId } : {}),
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        botId: { in: botIds },
+        server: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          endpoint: "https://mcp.instantly.ai/mcp",
+          transport: "streamable_http",
+        },
+      },
+      orderBy: { botId: "asc" },
+      select: {
+        botId: true,
+        allowAllTools: true,
+        allowedTools: true,
+        server: { select: { id: true, revision: true } },
+      },
+    });
+    if (
+      assignment &&
+      ["get_email", "list_emails"].every((tool) => correspondenceAllows(assignment, tool))
+    )
+      none.serverId = assignment.server.id;
     let recheckImported: (() => Promise<void>) | undefined;
     let imported: { id: string; name: string } | null = null;
     if (workspace.crmTarget && workspace.crmTarget.bindingEffectId === null && !nativeSelected) {
@@ -670,29 +698,6 @@ export async function getRecruitingRoleCampaign(
           throw new IsolationError();
       };
     }
-    const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
-    const assignment = await deps.prisma.botMcpServer.findFirst({
-      where: {
-        ...(selection.serverId ? { serverId: selection.serverId } : {}),
-        userId: actor.userId,
-        spaceId: actor.spaceId,
-        botId: { in: botIds },
-        server: {
-          userId: actor.userId,
-          spaceId: actor.spaceId,
-          enabled: true,
-          endpoint: "https://mcp.instantly.ai/mcp",
-          transport: "streamable_http",
-        },
-      },
-      orderBy: { botId: "asc" },
-      select: {
-        botId: true,
-        allowAllTools: true,
-        allowedTools: true,
-        server: { select: { id: true, revision: true } },
-      },
-    });
     if (
       !assignment ||
       !["get_email", "list_emails"].every((tool) => correspondenceAllows(assignment, tool))

@@ -9,14 +9,14 @@ import {
   DropdownMenuTrigger,
 } from "@rakazo/ui-web";
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
+import { LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { preloadCandidateDetail } from "../shell/preload-detail";
 import { CandidateWindow } from "./CandidateWindow";
 import { CompanyLogo } from "./CompanyLogo";
-import { LinkedInIcon } from "./LinkedInIcon";
 import { PersonAvatar } from "./ProfileImage";
+import { ProfileSourceIcon } from "./ProfileSourceIcon";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections, withSavedProfile } from "./profile";
 import {
@@ -366,11 +366,7 @@ export function CandidateDirectory({
         className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
       >
         {view !== "table" ? <Trans>Profile</Trans> : null}
-        {/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\//i.test(profile.profileUrl) ? (
-          <LinkedInIcon className="size-3" />
-        ) : (
-          <ExternalLink size={11} aria-hidden />
-        )}
+        <ProfileSourceIcon href={profile.profileUrl} className="size-4 shrink-0" />
       </a>
     ) : null;
   const recordedStage = (row: RoleCandidate) =>

@@ -158,6 +158,8 @@ export function SequenceTab(
   props: RecruitingTabProps & {
     onAskChat?: (message: string) => void;
     onViewAnalytics?: (roleId?: string) => void;
+    requestedCampaign?: { id: string; serverId?: string };
+    composeNew?: boolean;
   },
 ) {
   const { t } = useLingui();
@@ -206,6 +208,8 @@ export function SequenceTab(
     props,
   );
   const campaignScope = JSON.stringify([props.spaceId, props.roleId, props.conversation, ready]);
+  const requestedCampaign = props.requestedCampaign?.id;
+  const requestedServer = props.requestedCampaign?.serverId;
   const [chosenCampaign, setChosenCampaign] = useState<{
     scope: string;
     campaignId: string;
@@ -222,6 +226,15 @@ export function SequenceTab(
     setSearch("");
     setRunFilter("all");
   }, [campaignScope]);
+  useEffect(() => {
+    if (!requestedCampaign) return;
+    setChosenCampaign({
+      scope: campaignScope,
+      campaignId: requestedCampaign,
+      ...(requestedServer ? { serverId: requestedServer } : {}),
+    });
+    setPage("detail");
+  }, [campaignScope, requestedCampaign, requestedServer]);
   const selection =
     chosenCampaign?.scope === campaignScope
       ? {
@@ -238,6 +251,16 @@ export function SequenceTab(
     campaignScope,
   );
   const draftServerId = roleCampaign.data?.serverId;
+  const openedCompose = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!props.composeNew) {
+      openedCompose.current = undefined;
+      return;
+    }
+    if (!draftServerId || roleCampaign.loading || openedCompose.current === props.roleId) return;
+    openedCompose.current = props.roleId;
+    setNewOpen(true);
+  }, [props.composeNew, props.roleId, draftServerId, roleCampaign.loading]);
   const nativeDrafts = useKeyedRead<RecruitingSequenceOutput>(
     draftServerId && (groupId || botId)
       ? JSON.stringify([campaignScope, draftServerId, reload])

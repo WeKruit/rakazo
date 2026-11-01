@@ -8,6 +8,7 @@ import {
   NOTIFICATION_RETRY_ATTEMPTS,
   notificationRetryJob,
   parseBackgroundJob,
+  recruitingCandidateProfilesJob,
 } from "./background-jobs.js";
 import type { BackgroundJobHandlers } from "./types.js";
 
@@ -26,6 +27,7 @@ function handlers(): BackgroundJobHandlers {
     "recruiting_grade.start": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
+    "recruiting_profile.project": vi.fn(async () => undefined),
     "thread.reply_check": vi.fn(async () => undefined),
     "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
@@ -33,6 +35,27 @@ function handlers(): BackgroundJobHandlers {
 }
 
 describe("background job contracts", () => {
+  it("queues only a candidate page reference and preserves an existing in-flight projection", async () => {
+    const job = recruitingCandidateProfilesJob("page-effect-1");
+    expect(job).toEqual({
+      name: "recruiting_profile.project",
+      payload: { pageEffectId: "page-effect-1" },
+      replaceKey: "recruiting_profile.project:page-effect-1",
+      keepExisting: true,
+    });
+    const target = handlers();
+    await dispatchBackgroundJob(target, job.name, job.payload);
+    expect(target["recruiting_profile.project"]).toHaveBeenCalledWith({
+      pageEffectId: "page-effect-1",
+    });
+    expect(() => parseBackgroundJob(job.name, { pageEffectId: "" })).toThrow();
+    expect(() =>
+      parseBackgroundJob(job.name, {
+        pageEffectId: "page-effect-1",
+        profile: { photo: "https://example.test/private" },
+      }),
+    ).toThrow();
+  });
   it("validates and dispatches messaging.deliver", async () => {
     const target = handlers();
     await dispatchBackgroundJob(target, "messaging.deliver", { runId: "run-1" });

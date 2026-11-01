@@ -565,8 +565,8 @@ export async function mockRecruitingApp(
     }
     let value: unknown;
     if (method === "recruiting/globalInbox" || method === "recruiting/globalInboxSummary") {
-      const roles = accountRolesData().slice(0, 1);
-      const rows = roles.flatMap((role) => {
+      const roles = accountRolesData();
+      const rows = roles.slice(0, 1).flatMap((role) => {
         const item = fixtureAccountItem(role);
         return (item.correspondence?.emails ?? []).map((email) => ({
           roleId: role.id,
@@ -817,10 +817,23 @@ export async function mockRecruitingApp(
         actorName: entry.actorName,
         roleTitle: entry.roleTitle,
       };
-    } else if (method === "recruiting/roleCampaign")
+    } else if (method === "recruiting/sequenceDraft")
+      value = {
+        roleId: appRoleId,
+        roleTitle: "Staff Platform Engineer",
+        mailboxes: [],
+        campaigns: [],
+        campaign: null,
+      };
+    else if (method === "recruiting/roleCampaign")
       value =
         options.multipleCampaigns && !input.campaignId
-          ? { status: "unavailable", campaign: null, selectionRequired: true }
+          ? {
+              status: "unavailable",
+              serverId: "fixture-campaign-source",
+              campaign: null,
+              selectionRequired: true,
+            }
           : {
               status: "ready",
               serverId: "fixture-campaign-source",

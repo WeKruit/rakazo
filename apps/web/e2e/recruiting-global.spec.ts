@@ -35,25 +35,20 @@ for (const width of [1440, 390]) {
       ["tasks", "Prepare platform interview"],
     ] as const) {
       await page.goto(`/app?view=${view}&role=all`);
-      const main = page.getByTestId("account-recruiting-view");
+      const main = page.getByTestId(
+        view === "sequence" ? "account-sequences" : "account-recruiting-view",
+      );
       await expect(main).toBeVisible();
       await expect(main.getByText(row, { exact: false }).first()).toBeVisible();
-      const picker = main.getByRole("combobox", { name: "Role", exact: true });
+      const picker = main.getByRole("combobox", {
+        name: view === "sequence" ? "Sequence role filter" : "Role",
+        exact: true,
+      });
       await expect(picker).toHaveValue("all");
       if (view === "sequence") {
-        const campaign = main.getByRole("region", { name: "Staff Platform Engineer", exact: true });
-        for (const [label, count] of [
-          ["Sent", "3"],
-          ["Opened", "2"],
-          ["Replied", "1"],
-        ])
-          await expect(
-            campaign
-              .locator("dt")
-              .filter({ hasText: new RegExp(`^${label}$`) })
-              .locator("..")
-              .locator("dd"),
-          ).toHaveText(count);
+        const campaign = main.getByRole("row").filter({ hasText: "Platform outreach" });
+        await expect(campaign.getByRole("cell").nth(3)).toHaveText("2");
+        await expect(campaign.getByRole("cell").nth(5)).toHaveText("1");
       }
       await captureScreenshot(page, testInfo, `global-${view}-${width}`);
       await picker.selectOption(appRoleId);
@@ -62,6 +57,8 @@ for (const width of [1440, 390]) {
         main.getByText("Product Designer", { exact: true }).filter({ visible: true }),
       ).toHaveCount(0);
       await expect(main.getByText(row, { exact: false }).first()).toBeVisible();
+      if (view === "sequence")
+        await expect(main.getByText("Sent (all time): 3", { exact: true })).toBeVisible();
       await captureScreenshot(page, testInfo, `role-${view}-${width}`);
       await picker.selectOption("fixture-role-two");
       await expect(page).toHaveURL(/role=fixture-role-two/);
@@ -84,6 +81,8 @@ for (const width of [1440, 390]) {
     await mockRecruitingApp(page, { nativeScheduling: true });
     const reads: { filters: Record<string, unknown>; cursor?: string }[] = [];
     const tagged: unknown[] = [];
+    let holdContactRead = false;
+    let releaseContactRead: (() => void) | undefined;
     const person = (key: string, name: string, role: (typeof roles)[number], tags: string[]) => ({
       personKey: key,
       name,
@@ -92,7 +91,20 @@ for (const width of [1440, 390]) {
       location: "Los Angeles, California",
       school: "University of Example",
       linkedinUrl: `https://www.linkedin.com/in/${key}`,
-      email: null,
+      email: `${key}@example.test`,
+      savedProfile: {
+        personKey: `linkedin:/in/${key}`,
+        provider: "search",
+        fetchedAt: checkedAt,
+        headline: "Staff Engineer",
+        email: `${key}@example.test`,
+        githubUrl: `https://github.com/${key}`,
+        websiteUrl: `http://${key}.example.test/`,
+        stackOverflowUrl: `https://stackoverflow.com/users/123/${key}`,
+        profileImageUrl: null,
+        experience: [],
+        education: [],
+      },
       status: "shortlisted",
       noteKey: `autumn:linkedin:/in/${key}`,
       roles: [
@@ -114,11 +126,18 @@ for (const width of [1440, 390]) {
     await page.route("**/rpc/recruiting/contacts/list", async (route) => {
       const input = route.request().postDataJSON().json;
       reads.push(input);
+      if (holdContactRead)
+        await new Promise<void>((resolve) => {
+          releaseContactRead = resolve;
+        });
       const items = [
         person("avery", "Avery Example", roles[0]!, tagged.length ? ["Hot"] : []),
         person("blake", "Blake Example", roles[1]!, []),
       ].filter(
-        (item) => !input.filters.roleIds || input.filters.roleIds.includes(item.roles[0]!.id),
+        (item) =>
+          (!input.filters.roleIds || input.filters.roleIds.includes(item.roles[0]!.id)) &&
+          (!input.filters.query ||
+            item.name.toLowerCase().includes(input.filters.query.toLowerCase())),
       );
       await route.fulfill({ json: { json: { items, total: items.length, nextCursor: null } } });
     });
@@ -137,10 +156,61 @@ for (const width of [1440, 390]) {
       tagged.push(route.request().postDataJSON().json);
       await route.fulfill({ json: { json: { ok: true } } });
     });
+    await page.route("**/rpc/search/recruitingTargets", async (route) => {
+      const searchRoleTitle = `${route.request().postDataJSON().json.q} role`;
+      await route.fulfill({
+        json: {
+          json: {
+            items: [
+              {
+                kind: "role",
+                title: searchRoleTitle,
+                roleId: roles[0]!.id,
+                roleTitle: searchRoleTitle,
+                groupId: roles[0]!.groupId,
+                botId: null,
+                campaignId: null,
+                serverId: null,
+              },
+            ],
+          },
+        },
+      });
+    });
     await page.goto("/app?view=contacts&role=all");
     const list = page.getByRole("region", { name: "All contacts", exact: true });
     await expect(list.getByText("Avery Example")).toBeVisible();
     await expect(list.getByText("Blake Example")).toBeVisible();
+    const avery = list.getByRole("row").filter({ hasText: "Avery Example" });
+    await expect(avery.locator('a[href="https://github.com/avery"]')).toBeVisible();
+    await expect(avery.locator('a[href="http://avery.example.test/"]')).toBeVisible();
+    await expect(
+      avery.locator('a[href="https://stackoverflow.com/users/123/avery"]'),
+    ).toBeVisible();
+    await expect(
+      avery.getByRole("link", { name: "Email Avery Example", exact: true }).locator("svg"),
+    ).toHaveCSS("color", "rgb(37, 99, 235)");
+    // A slow refresh must leave cached contacts visible and interactive.
+    holdContactRead = true;
+    const beforeRefresh = reads.length;
+    await list.getByRole("button", { name: "Refresh contacts", exact: true }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(beforeRefresh);
+    await expect(list.getByText("Avery Example")).toBeVisible();
+    await expect(list.getByRole("textbox", { name: "Search contacts", exact: true })).toBeEnabled();
+    holdContactRead = false;
+    releaseContactRead?.();
+    const tableScroll = list.locator(".hire-contact-table-scroll");
+    await page.mouse.move(0, 0);
+    await expect(tableScroll).toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
+    await tableScroll.hover();
+    await expect(tableScroll).not.toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
+    const search = list.getByRole("textbox", { name: "Search contacts", exact: true });
+    await search.fill("Blake");
+    await expect(list.getByText("Avery Example")).toHaveCount(0);
+    await expect(list.getByText("Blake Example")).toBeVisible();
+    expect(reads.at(-1)?.filters.query).toBe("Blake");
+    await search.fill("");
+    await expect(list.getByText("Avery Example")).toBeVisible();
     await captureScreenshot(page, testInfo, `all-contacts-${width}`);
 
     await list.getByRole("button", { name: "Filter", exact: true }).click();
@@ -163,5 +233,26 @@ for (const width of [1440, 390]) {
     await expect(list.getByText("Tagged 1 contacts.")).toBeVisible();
     expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"] }]);
     await expect(list.getByText("Hot", { exact: true })).toBeVisible();
+    await page.keyboard.press("Control+k");
+    const searchDialog = page.getByRole("dialog", { name: "Search", exact: true });
+    await searchDialog.getByRole("combobox", { name: "Global search", exact: true }).fill("Blake");
+    await expect(searchDialog.getByRole("option", { name: /Blake role/ })).toBeVisible();
+    const contactResult = searchDialog.getByRole("option", { name: /^Blake Example/ });
+    await expect(contactResult).toBeVisible();
+    await captureScreenshot(page, testInfo, `global-search-${width}`);
+    await contactResult.click();
+    await expect(searchDialog).not.toBeVisible();
+    await expect(page).toHaveURL(/view=contacts&role=all&query=Blake&detail=/);
+    await expect(
+      page
+        .getByTestId("recruiting-detail-panel")
+        .getByRole("heading", { name: "Blake Example", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+k");
+    await searchDialog.getByRole("combobox", { name: "Global search", exact: true }).fill("Avery");
+    await searchDialog.getByRole("option", { name: /^Interview availability/ }).click();
+    await expect(page).toHaveURL(/view=inbox&role=all&query=Avery&mailThread=/);
+    await expect(page.getByTestId("email-conversation")).toBeVisible();
   });
 }

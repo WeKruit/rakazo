@@ -23,11 +23,11 @@ import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruitin
 import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
-import { useSequenceLabels } from "../recruiting/SequenceStats";
 import { ARCHIVED_GROUPS_PER_PAGE } from "./useShellRoster";
 
 export type RecruitingWorkspaceView =
   | "home"
+  | "roles"
   | "conversation"
   | "results"
   | "brief"
@@ -104,6 +104,9 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   kruitDisabled,
   inboxUnread,
   onAllRoles,
+  onViewAllRoles,
+  onSearch,
+  compact = false,
 }: {
   /** The role list has not arrived yet. */
   loading?: boolean;
@@ -115,6 +118,9 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     | { status: "loading" | "failed" }
     | { status: "ready"; count: number; partial: boolean };
   onAllRoles?: () => void;
+  onViewAllRoles?: () => void;
+  onSearch?: () => void;
+  compact?: boolean;
   /** Hover or focus on a role: start reading its conversation before the click. */
   onPrefetchRole?: (id: string) => void;
   crmContext?: {
@@ -170,12 +176,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     failed?: boolean;
     unavailable?: boolean;
   }>();
-  type UnassignedSequence = Extract<
-    RecruitingCrmDataOutput,
-    { operation: "unassignedSequences" }
-  >["items"][number] & { key: string };
-  const [sequences, setSequences] = useState<{ key: string; items: UnassignedSequence[] }>();
-  const [sequencesOpen, setSequencesOpen] = useState(false);
   useEffect(() => {
     if (!crmContext) return;
     let cancelled = false;
@@ -207,7 +207,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
       .then(async (result) => {
         if (cancelled || invalidated()) return;
         if (result.operation !== "memberships") throw new Error("Unexpected CRM response");
-        const sequenceReads: Promise<UnassignedSequence[]>[] = [];
         const lists = await Promise.all(
           result.sources.flatMap((source) =>
             source.status === "ready"
@@ -228,22 +227,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                     roles.source.organizationId !== membership.organizationId
                   )
                     throw new Error("CRM scope changed");
-                  // Saved sequences with no role are optional context; a failed read hides them.
-                  sequenceReads.push(
-                    rpc.recruiting
-                      .crmData({ ...target, ...selection, operation: "unassignedSequences" })
-                      .then((value) =>
-                        value.operation === "unassignedSequences" &&
-                        value.source.serverId === source.serverId &&
-                        value.source.organizationId === membership.organizationId
-                          ? value.items.map((item) => ({
-                              ...item,
-                              key: JSON.stringify([selection, item.id]),
-                            }))
-                          : [],
-                      )
-                      .catch(() => []),
-                  );
                   return roles.items.map((role) => ({
                     ...role,
                     selection: { ...selection, crmRoleId: role.crmRoleId },
@@ -256,9 +239,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         if (cancelled || invalidated()) return;
         const roles = lists.flat();
         rememberRecruitingRead(cache, cacheKey, roles, epoch);
-        void Promise.all(sequenceReads).then((found) => {
-          if (!cancelled && !invalidated()) setSequences({ key: crmKey, items: found.flat() });
-        });
         setCrm({
           key: crmKey,
           roles,
@@ -274,8 +254,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     };
   }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
-  const currentSequences = sequences?.key === crmKey ? sequences.items : [];
-  const sequenceLabels = useSequenceLabels();
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
   // Roles waiting on the recruiter come first; the rest keep their order.
@@ -319,6 +297,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     <div
       className="hire-navigation flex min-h-0 flex-1 flex-col"
       data-testid="recruiting-navigation"
+      data-compact={compact || undefined}
     >
       <div className="hire-brand-row">
         <button
@@ -336,21 +315,49 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         <button
           type="button"
           className="hire-sidebar-collapse"
-          aria-label={t`Collapse navigation`}
+          aria-label={compact ? t`Expand navigation` : t`Collapse navigation`}
+          title={compact ? t`Expand navigation` : t`Collapse navigation`}
           onClick={onCollapse}
         >
           <PanelLeft size={17} aria-hidden="true" />
         </button>
       </div>
+      {onSearch ? (
+        <Button
+          variant="outline"
+          aria-label={t`Search`}
+          title={t`Search`}
+          className="hire-global-search mx-2 mb-2 justify-start gap-2 text-muted-foreground"
+          onClick={onSearch}
+        >
+          <Search size={15} aria-hidden />
+          <span className="hire-nav-label">
+            <Trans>Search</Trans>
+          </span>
+          <span className="hire-search-shortcut ms-auto text-xs" aria-hidden>
+            ⌘ K / Ctrl K
+          </span>
+        </Button>
+      ) : null}
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
         <Button
           variant="ghost"
           aria-current={
-            !["shortlist", "contacts", "sequence", "inbox", "interview", "analytics"].includes(view)
+            ![
+              "roles",
+              "shortlist",
+              "contacts",
+              "sequence",
+              "inbox",
+              "interview",
+              "analytics",
+            ].includes(view)
               ? "page"
               : undefined
           }
           role="link"
+          aria-label={RECRUITING_GLOBAL_AGENT_NAME}
+          title={RECRUITING_GLOBAL_AGENT_NAME}
           render={<a href={kruitHref} />}
           nativeButton={false}
           disabled={kruitDisabled}
@@ -369,7 +376,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           }}
         >
           <MessageSquare size={18} aria-hidden="true" />
-          {RECRUITING_GLOBAL_AGENT_NAME}
+          <span className="hire-nav-label">{RECRUITING_GLOBAL_AGENT_NAME}</span>
         </Button>
         {destinations.map(({ view: target, label, Icon }) => (
           <Button
@@ -384,6 +391,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
             }
             role="link"
             aria-label={label}
+            title={label}
             aria-description={
               target === "inbox"
                 ? inboxUnread?.status === "ready"
@@ -409,11 +417,11 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
             }}
           >
             <Icon size={18} aria-hidden="true" />
-            {label}
+            <span className="hire-nav-label">{label}</span>
             {target === "inbox" && inboxUnread?.status === "ready" && inboxUnread.count > 0 ? (
               <span
                 aria-hidden="true"
-                className="ms-auto text-xs tabular-nums"
+                className="hire-inbox-badge ms-auto text-xs tabular-nums"
                 title={t`Unread threads in saved mail`}
               >
                 {inboxUnread.count}
@@ -640,46 +648,10 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           <Button
             variant="ghost"
             className="w-full justify-start text-sm text-muted-foreground"
-            onClick={() => onView("home")}
+            onClick={onViewAllRoles}
           >
             <Trans>View all roles</Trans>
           </Button>
-        ) : null}
-        {currentSequences.length > 0 ? (
-          <div className="mt-3 border-t border-border pt-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-between text-muted-foreground"
-              aria-expanded={sequencesOpen}
-              onClick={() => setSequencesOpen((open) => !open)}
-            >
-              <Trans>Sequences without a role</Trans>
-              <span>{currentSequences.length}</span>
-            </Button>
-            {sequencesOpen ? (
-              <ul aria-label={t`Sequences without a role`} className="space-y-1">
-                {currentSequences.map((sequence) => {
-                  const { people, replied } = sequence;
-                  return (
-                    <li key={sequence.key} className="rounded-lg px-3 py-2">
-                      <span className="block truncate text-sm" dir="auto">
-                        {sequence.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {[
-                          sequence.status ? sequenceLabels.sequence[sequence.status] : null,
-                          t`${people} people`,
-                          sequenceLabels.replies(replied),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
         ) : null}
         {archivedGroupTotal > 0 || archivedGroups.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">

@@ -38,6 +38,7 @@ function fakePrisma(
   }> = [],
 ) {
   return {
+    $queryRaw: vi.fn(async () => []),
     run: { findMany: vi.fn(async () => runs.map((run) => ({ status: "queued", ...run }))) },
     routine: { findMany: vi.fn(async () => routines) },
     computer: { findMany: vi.fn(async () => controls) },
@@ -46,6 +47,64 @@ function fakePrisma(
 }
 
 describe("createJobReconciler", () => {
+  it("discovers only newly marked profile intents, pages by metadata and recovers them after restart", async () => {
+    const prisma = fakePrisma();
+    const rows = [1, 2].map((n) => ({
+      id: `save-${n}`,
+      createdAt: new Date(0),
+      pageEffectId: `page-${n}`,
+    }));
+    vi.mocked(prisma.$queryRaw)
+      .mockResolvedValueOnce(rows)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(rows);
+    const { jobs, enqueue } = publisher();
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
+    await reconciler.reconcileOnce();
+    expect(enqueue.mock.calls.map(([job]) => job)).toEqual(
+      rows.map((row) => ({
+        name: "recruiting_profile.project",
+        payload: { pageEffectId: row.pageEffectId },
+        replaceKey: `recruiting_profile.project:${row.pageEffectId}`,
+        keepExisting: true,
+      })),
+    );
+    const first = vi.mocked(prisma.$queryRaw).mock.calls[0]![0] as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(first.sql).toContain("saving.result->>'profileFactsVersion'='1'");
+    expect(first.sql).toContain("saving.kind='recruiting_research'");
+    expect(first.sql).toContain("done.kind='recruiting_profile_projection'");
+    expect(first.sql).toContain(
+      "'recruiting-profile-project:'||page.\"effectId\"||':'||page.\"artifactHash\"",
+    );
+    expect(first.sql.split("FROM external_effects")[0]).not.toContain("result");
+    await reconciler.reconcileOnce();
+    const second = vi.mocked(prisma.$queryRaw).mock.calls[1]![0] as { values: unknown[] };
+    expect(second.values).toContain("save-2");
+    // Process restarts need no in-memory cursor: the marker and completion proof remain durable.
+    await createJobReconciler({ prisma, jobs }, { batchSize: 2 }).reconcileOnce();
+    const restarted = vi.mocked(prisma.$queryRaw).mock.calls[2]![0] as { values: unknown[] };
+    expect(restarted.values).not.toContain("save-2");
+    expect(enqueue).toHaveBeenCalledTimes(4);
+  });
+
+  it("retries a failed profile enqueue without advancing its cursor or blocking core reconciliation", async () => {
+    const prisma = fakePrisma();
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([
+      { id: "save-1", createdAt: new Date(0), pageEffectId: "page-1" },
+    ]);
+    const { jobs, enqueue } = publisher();
+    enqueue.mockRejectedValueOnce(new Error("queue busy"));
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 1 });
+    await reconciler.reconcileOnce();
+    expect(prisma.run.findMany).toHaveBeenCalled();
+    await reconciler.reconcileOnce();
+    const second = vi.mocked(prisma.$queryRaw).mock.calls[1]![0] as { values: unknown[] };
+    expect(second.values).not.toContain("save-1");
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
   it.each(["leased", "running"] as const)(
     "replaces a wakeup blocked by an expired %s owner without preserving its queue lock",
     async (status) => {

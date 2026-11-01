@@ -12,15 +12,31 @@ import { createBackgroundJobHandlers } from "./background-job-handlers.js";
 import { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
 import type { EncryptedSecretStore } from "./secrets.js";
 
 vi.mock("./history-compaction.js", () => ({ compactHistory: vi.fn(async () => undefined) }));
+vi.mock("./recruiting-profiles.js", () => ({
+  projectRecruitingCandidateProfiles: vi.fn(async () => undefined),
+}));
 vi.mock("./messaging-delivery.js", () => ({
   deliverMessagingOutbound: vi.fn(async () => undefined),
   mirrorMessagingOutbound: vi.fn(async () => undefined),
 }));
 
 describe("createBackgroundJobHandlers", () => {
+  it("registers saved-profile projection with the existing worker and lets queue failures retry", async () => {
+    const deps = { prisma: {}, events: {} } as Parameters<typeof createBackgroundJobHandlers>[0];
+    const handlers = createBackgroundJobHandlers(deps);
+    const payload = { pageEffectId: "page-effect-1" };
+    await handlers["recruiting_profile.project"](payload);
+    expect(projectRecruitingCandidateProfiles).toHaveBeenCalledWith(
+      { prisma: deps.prisma, events: deps.events },
+      payload,
+    );
+    vi.mocked(projectRecruitingCandidateProfiles).mockRejectedValueOnce(new Error("database busy"));
+    await expect(handlers["recruiting_profile.project"](payload)).rejects.toThrow("database busy");
+  });
   it("delivers directly when shutdown rejects a completed run's mirror job", async () => {
     const enqueueError = new Error("Background job publisher is closing");
     const jobs = {

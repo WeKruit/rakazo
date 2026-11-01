@@ -1966,7 +1966,6 @@ msgstr "서버에 연결할 수 없습니다"
 msgid "Could not read {failedCalendars}."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr ""
@@ -4003,10 +4002,6 @@ msgstr "인증 없음"
 msgid "No authentication"
 msgstr "인증 없음"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr ""
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "아직 연결된 채팅 앱이 없습니다."
@@ -4520,7 +4515,6 @@ msgstr "진행 중인 작업"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI 호환 서버 주소"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr ""
@@ -5174,7 +5168,6 @@ msgstr ""
 msgid "Replaced"
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6018,10 +6011,6 @@ msgstr "보내는 중…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -6964,6 +6953,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "웹훅"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"
