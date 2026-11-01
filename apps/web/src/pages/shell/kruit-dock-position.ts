@@ -39,38 +39,46 @@ export function saveDockOffset(offset: DockOffset) {
 }
 
 /**
- * First spot along the right edge, then the left edge, going upward from the corner, where no
- * point of the dock lands on a control. `blocked` tells whether a viewport point holds one.
+ * The spot along the right edge, then the left edge, going upward from the corner, with the
+ * fewest points of the dock on a control: a clear spot when there is one, otherwise the least
+ * covered. `blocked` tells whether a viewport point holds a control.
  */
 export function findFreeOffset(
   box: Box,
   viewport: Box,
   blocked: (x: number, y: number) => boolean,
 ): DockOffset {
-  const fallback = { right: DOCK_MARGIN, bottom: DOCK_MARGIN };
-  const free = (offset: DockOffset) => {
+  const covered = (offset: DockOffset) => {
     const left = viewport.width - offset.right - box.width - GAP;
     const top = viewport.height - offset.bottom - box.height - GAP;
     const width = box.width + GAP * 2;
     const height = box.height + GAP * 2;
+    let count = 0;
     for (let x = 0; x <= width; x += SAMPLE) {
       for (let y = 0; y <= height; y += SAMPLE) {
-        if (blocked(left + Math.min(x, width - 1), top + Math.min(y, height - 1))) return false;
+        if (blocked(left + Math.min(x, width - 1), top + Math.min(y, height - 1))) count += 1;
       }
     }
-    return true;
+    return count;
   };
-  const maxBottom = viewport.height * 0.6;
+  let best = { right: DOCK_MARGIN, bottom: DOCK_MARGIN };
+  let bestCount = Number.POSITIVE_INFINITY;
+  const maxBottom = Math.max(DOCK_MARGIN, viewport.height - box.height - DOCK_MARGIN);
   for (const side of ["right", "left"] as const) {
     for (let bottom = DOCK_MARGIN; bottom <= maxBottom; bottom += STEP) {
       const offset = {
         right: side === "right" ? DOCK_MARGIN : viewport.width - box.width - DOCK_MARGIN,
         bottom,
       };
-      if (free(offset)) return offset;
+      const count = covered(offset);
+      if (count === 0) return offset;
+      if (count < bestCount) {
+        best = offset;
+        bestCount = count;
+      }
     }
   }
-  return fallback;
+  return best;
 }
 
 export function controlAt(x: number, y: number, dock: Element | null): boolean {

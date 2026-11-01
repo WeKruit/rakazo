@@ -47,7 +47,7 @@ export function ListPager({
   };
   return (
     <Pagination aria-label={t`Pages`} className="ms-auto me-0 w-auto justify-end">
-      <PaginationContent>
+      <PaginationContent className="flex-wrap justify-end">
         <PaginationItem>
           <Button
             variant="ghost"

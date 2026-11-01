@@ -814,10 +814,13 @@ export class PiAgentRuntime implements AgentRuntime {
         ]);
         try {
           await agent.prompt(initialPrompt, images?.length ? images : undefined);
-          while (interjected && !signal.aborted && !host.pausePending) {
-            interjected = false;
+          while (!signal.aborted && !host.pausePending && !host.toolCallBudget.exceeded) {
+            // A message claimed just as the last step ended was steered in after the loop
+            // stopped looking: answer it in this run, or it would count as answered unseen.
             await interjectClaim;
-            keepInterruptedAssistantMessage(agent.state.messages);
+            if (!interjected && !agent.hasQueuedMessages?.()) break;
+            if (interjected) keepInterruptedAssistantMessage(agent.state.messages);
+            interjected = false;
             const gap = cutMidReply
               ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
               : streamed.trim() && !streamed.endsWith("\n")
