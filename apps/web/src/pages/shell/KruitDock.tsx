@@ -23,7 +23,7 @@ export function KruitDock({
   groups: Group[];
   /** The open conversation: its own card is already in view. */
   groupId?: string;
-  /** A chat is on screen: start minimized so the reminder stays clear of its composer. */
+  /** A chat is on screen: start minimized and sit above its composer. */
   chatting?: boolean;
   /** Width of the sidebar the entry sits beside. */
   start?: number;
@@ -51,7 +51,7 @@ export function KruitDock({
   );
   return (
     <div
-      className="fixed bottom-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2"
+      className={`fixed z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2 ${chatting ? "bottom-24" : "bottom-4"}`}
       style={{ insetInlineStart: `calc(${start}px + 1rem)` }}
     >
       {showList ? (
