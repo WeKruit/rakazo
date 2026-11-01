@@ -24,6 +24,13 @@ export interface AdapterContext {
   cancelRunWork?: boolean;
   /** Trusted in-process authorization fence before external mutations; never RPC/provider input. */
   reauthorize?: () => Promise<void>;
+  /** Native in-process read timing; never a provider argument or recruiter-facing output. */
+  recruitingCampaignSourceRevision?: number;
+  onRecruitingCampaignRead?: (read: {
+    roleId: string;
+    campaignId: string;
+    observedAt: string;
+  }) => void;
   signal: AbortSignal;
   /** Connected external accounts available to this run, including their owning connector. */
   connectedConnections?: ConnectedConnector[];

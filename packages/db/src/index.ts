@@ -41,6 +41,7 @@ export * from "./recruiting-inbox.js";
 export * from "./recruiting-reminders.js";
 export * from "./recruiting-saved-profiles.js";
 export * from "./recruiting-scheduling.js";
+export * from "./recruiting-sequences.js";
 export * from "./repos.js";
 export * from "./routines-read.js";
 export * from "./scope.js";

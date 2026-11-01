@@ -16,6 +16,13 @@ import {
   RecruitingSchedulingSlotSchema,
 } from "./recruiting-scheduling.js";
 
+export const RecruitingSequenceObservationKeySchema = z.strictObject({
+  roleId: Id,
+  serverId: Id,
+  campaignId: Id,
+  sourceRevision: z.number().int().nonnegative(),
+  observedAt: IsoDate,
+});
 export const RecruitingAccountViewInputSchema = z.strictObject({
   view: z.enum([
     "roles",
@@ -30,6 +37,22 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
     "routines",
   ]),
   sequenceSummary: z.boolean().optional(),
+  sequenceObservations: z.array(RecruitingSequenceObservationKeySchema).max(50).optional(),
+  sequenceQuery: z.string().trim().max(200).optional(),
+  sequenceStatus: z.number().int().min(0).max(3).optional(),
+  sequenceSort: z
+    .enum([
+      "name",
+      "role",
+      "total",
+      "active",
+      "opened",
+      "replied",
+      "interested",
+      "bounced",
+      "created",
+    ])
+    .optional(),
   sequenceContactQuery: z.string().trim().min(1).max(200).optional(),
   campaignId: Id.optional(),
   campaignServerId: Id.optional(),
@@ -54,6 +77,19 @@ export const RecruitingAccountRoleSchema = z.strictObject({
   stage: z.string(),
 });
 export const RecruitingAccountViewOutputSchema = z.strictObject({
+  sequencePendingObservations: z.array(RecruitingSequenceObservationKeySchema).max(50).optional(),
+  sequenceSummary: z
+    .strictObject({
+      contacted: z.number().int().nonnegative().nullable(),
+      active: z.number().int().nonnegative().nullable(),
+      opened: z.number().int().nonnegative().nullable(),
+      clicked: z.number().int().nonnegative().nullable(),
+      replied: z.number().int().nonnegative().nullable(),
+      interested: z.number().int().nonnegative().nullable(),
+      sent: z.number().int().nonnegative().nullable(),
+      partial: z.boolean(),
+    })
+    .optional(),
   routines: z.array(RoutineSchema).optional(),
   unassignedReminders: ListRecruitingRemindersOutput.optional(),
   roles: z.array(RecruitingAccountRoleSchema),

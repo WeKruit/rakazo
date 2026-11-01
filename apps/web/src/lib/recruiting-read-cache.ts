@@ -1,3 +1,4 @@
+import type { RecruitingSequenceOutput } from "@rakazo/contracts";
 import { QueryClient } from "@tanstack/react-query";
 
 /** Owned by one authenticated Shell. Display data never authorizes an action. */
@@ -67,4 +68,25 @@ export function fetchRecruitingRead<T>(
     queryFn: load,
     staleTime: 30_000,
   });
+}
+
+/** A slow earlier provider read must not replace a newer verified pause/save. Display only. */
+export function rememberRecruitingSequenceRead(
+  cache: RecruitingReadCache | undefined,
+  key: string,
+  value: RecruitingSequenceOutput,
+  epoch = cache?.epoch,
+) {
+  if (value.sourceRevision === undefined || !value.observedAt) return;
+  const previous = savedRecruitingRead(cache, key) as RecruitingSequenceOutput | undefined;
+  if (
+    previous?.sourceRevision !== undefined &&
+    value.sourceRevision !== undefined &&
+    (previous.sourceRevision > value.sourceRevision ||
+      (previous.sourceRevision === value.sourceRevision &&
+        previous.observedAt &&
+        (!value.observedAt || Date.parse(previous.observedAt) > Date.parse(value.observedAt))))
+  )
+    return;
+  rememberRecruitingRead(cache, key, value, epoch);
 }

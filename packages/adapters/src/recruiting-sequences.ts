@@ -4,7 +4,11 @@ import type { AdapterContext, ConnectorProvider } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingSequenceInput, RecruitingSequenceOutput } from "@rakazo/contracts";
 import { RecruitingSequenceInputSchema, RecruitingSequenceOutputSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { getRecruitingWorkspace, IsolationError } from "@rakazo/db";
+import {
+  getRecruitingWorkspace,
+  IsolationError,
+  rememberRecruitingSequenceObservation,
+} from "@rakazo/db";
 import type { RecruitingThreadTarget } from "./recruiting-reads.js";
 import { getRecruitingRoleCampaign } from "./recruiting-reads.js";
 
@@ -16,6 +20,7 @@ export async function executeRecruitingSequence(
     signal?: AbortSignal;
     reauthorize: () => Promise<RecruitingThreadTarget>;
     stillAuthorized: () => Promise<boolean>;
+    deferSequenceObservation?: (work: () => Promise<void>) => void;
   },
   actor: Actor,
   target: RecruitingThreadTarget,
@@ -73,8 +78,40 @@ export async function executeRecruitingSequence(
           select: { id: true },
         })
       : null;
+  let observedRead: { roleId: string; campaignId: string; observedAt: string } | undefined;
+  const remember = (raw: unknown) => {
+    const result = RecruitingSequenceOutputSchema.parse(raw);
+    if (
+      result.campaign &&
+      observedRead?.roleId === input.roleId &&
+      observedRead.campaignId === result.campaign.id
+    ) {
+      const snapshot = {
+        botId: assignment.botId,
+        roleId: input.roleId,
+        threadId: target.threadId,
+        serverId: input.serverId,
+        sourceRevision: assignment.server.revision,
+        observedAt: observedRead.observedAt,
+        campaign: { ...result.campaign, stopOnReply: result.campaign.stopOnReply ?? null },
+      };
+      deps.deferSequenceObservation?.(async () => {
+        await guard();
+        await rememberRecruitingSequenceObservation(deps.prisma, actor, snapshot);
+      });
+    }
+    return {
+      ...result,
+      sourceRevision: assignment.server.revision,
+      ...(observedRead ? { observedAt: observedRead.observedAt } : {}),
+    };
+  };
   const context: AdapterContext = {
     reauthorize: guard,
+    recruitingCampaignSourceRevision: assignment.server.revision,
+    onRecruitingCampaignRead: (read) => {
+      observedRead = read;
+    },
     operationId: randomUUID(),
     traceId: randomUUID(),
     userId: actor.userId,
@@ -95,6 +132,7 @@ export async function executeRecruitingSequence(
     args: Record<string, unknown>,
   ) => {
     await guard();
+    observedRead = undefined;
     let result: unknown;
     for await (const event of deps.connectors.execute(
       {
@@ -261,7 +299,7 @@ export async function executeRecruitingSequence(
       });
     }
 
-    return RecruitingSequenceOutputSchema.parse(
+    return remember(
       await call("clone_role_draft", {
         role_id: input.roleId,
         campaign_id: input.campaignId,
@@ -283,7 +321,7 @@ export async function executeRecruitingSequence(
           role_id: input.roleId,
           ...("campaignId" in input && input.campaignId ? { campaign_id: input.campaignId } : {}),
         });
-  return RecruitingSequenceOutputSchema.parse({
+  return remember({
     ...(result as object),
     roleBrief: workspace.revision?.brief ?? null,
   });

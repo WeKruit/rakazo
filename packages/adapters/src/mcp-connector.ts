@@ -15,6 +15,7 @@ import {
   RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
+  RecruitingSequenceOutputSchema,
 } from "@rakazo/contracts";
 import {
   abortableDelay,
@@ -29,6 +30,7 @@ import {
   getRecruitingWorkspaceCrmTarget,
   IsolationError,
   loadVerifiedRecruitingSchedulingPlan,
+  rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
@@ -784,6 +786,7 @@ export class McpConnector implements ConnectorProvider {
     private readonly prisma: PrismaClient,
     private readonly secrets: SecretStore,
     private readonly options: {
+      deferSequenceObservation?: (work: () => Promise<void>) => void;
       stdioEnabled?: boolean;
       allowedCommands?: string[];
       network?: RemoteTransportDependencies;
@@ -1543,7 +1546,7 @@ export class McpConnector implements ConnectorProvider {
           }
           return rest(method, path, body);
         },
-        context,
+        { ...context, recruitingCampaignSourceRevision: credential.server.revision },
         credential.server.id,
         call.route!.toolName,
         call.args,
@@ -1566,10 +1569,55 @@ export class McpConnector implements ConnectorProvider {
         )
           throw new IsolationError("Email does not belong to the current role campaign");
       }
+      const sequence = RecruitingSequenceOutputSchema.safeParse(result);
+      if (
+        !context.onRecruitingCampaignRead &&
+        context.botId &&
+        context.runId &&
+        sequence.success &&
+        sequence.data.campaign &&
+        sequence.data.observedAt
+      ) {
+        const snapshot = {
+          botId: context.botId,
+          roleId: sequence.data.roleId,
+          serverId: credential.server.id,
+          sourceRevision: credential.server.revision,
+          observedAt: sequence.data.observedAt,
+          campaign: {
+            ...sequence.data.campaign,
+            stopOnReply: sequence.data.campaign.stopOnReply ?? null,
+          },
+        };
+        this.options.deferSequenceObservation?.(async () => {
+          await assertScope();
+          const run = await this.prisma.run.findFirst({
+            where: {
+              id: context.runId,
+              userId: context.userId,
+              spaceId: context.spaceId,
+              botId: context.botId,
+            },
+            select: { threadId: true },
+          });
+          if (!run) throw new IsolationError();
+          await rememberRecruitingSequenceObservation(
+            this.prisma,
+            { userId: context.userId, spaceId: context.spaceId },
+            { ...snapshot, threadId: run.threadId },
+          );
+        });
+      }
+      const publicResult =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? Object.fromEntries(
+              Object.entries(result).filter(([key]) => key !== "__rakazoSequenceObservation"),
+            )
+          : result;
       yield {
         type: "result",
         data: redactConnectorPayload(
-          { structuredContent: { source: "local_native_instantly_rest", result } },
+          { structuredContent: { source: "local_native_instantly_rest", result: publicResult } },
           redactions,
         ),
       };

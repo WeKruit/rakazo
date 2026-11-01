@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 
-vi.mock("@rakazo/db", () => ({
+vi.mock("@rakazo/db", async (original) => ({
+  ...(await original<typeof import("@rakazo/db")>()),
   IsolationError: class IsolationError extends Error {},
   getRecruitingWorkspace: vi.fn(async () => ({
     role: { id: "role", title: "Engineer" },
@@ -204,3 +205,185 @@ it("checks exact campaign membership before response changes and reports asynchr
     "native_instantly_list_leads",
   ]);
 });
+
+it.each(["read", "pause", "save"] as const)(
+  "returns verified %s without awaiting the derived-cache write",
+  async (operation) => {
+    const { runInstantlyWrite, sequenceConfigurationRevision } = await import(
+      "./instantly-native-writes.js"
+    );
+    const deps = dependencies();
+    const id = "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69";
+    let campaign: Record<string, unknown> = {
+      id,
+      name: "Original",
+      status: operation === "save" ? 0 : 1,
+      email_list: ["team@example.test"],
+      sequences: [],
+      campaign_schedule: {
+        schedules: [
+          {
+            name: "Weekdays",
+            timezone: "America/Chicago",
+            timing: { from: "09:00", to: "17:00" },
+            days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          },
+        ],
+      },
+    };
+    const entries = new Map<string, Record<string, unknown>>([
+      [
+        "instantly-role-campaign:server:role",
+        {
+          spaceId: "space",
+          status: "completed",
+          kind: "instantly_role_campaign",
+          result: { campaignId: id, campaignName: "Original" },
+        },
+      ],
+    ]);
+    let release!: (value: number) => void;
+    const blocked = new Promise<number>((resolve) => {
+      release = resolve;
+    });
+    const write = vi.fn(async () => blocked);
+    const effects = {
+      findUnique: vi.fn(
+        async ({ where }: { where: { idempotencyKey: string } }) =>
+          entries.get(where.idempotencyKey) ?? null,
+      ),
+      findMany: vi.fn(async () => [...entries.values()]),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        entries.set(String(data.idempotencyKey), data);
+        return data;
+      }),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { idempotencyKey: string };
+          data: Record<string, unknown>;
+        }) => {
+          Object.assign(entries.get(where.idempotencyKey)!, data);
+          return { count: 1 };
+        },
+      ),
+    };
+    Object.assign(deps.prisma, {
+      $executeRaw: write,
+      externalEffect: effects,
+      recruitingRole: { findFirst: vi.fn(async () => ({ id: "role", title: "Engineer" })) },
+      run: { findFirst: vi.fn(async () => ({ id: "existing-run" })) },
+    });
+    const sequence: string[] = [];
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const rest = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (path === "/accounts?limit=100") return { items: [{ email: "team@example.test" }] };
+      if (path.startsWith("/accounts/")) return { email: "team@example.test" };
+      if (method === "POST" && path.endsWith("/pause")) {
+        campaign = { ...campaign, status: 2 };
+        sequence.push("mutation-completed");
+        vi.setSystemTime(new Date("2031-01-01T00:00:00.000Z"));
+        return { success: true };
+      }
+      if (method === "PATCH") {
+        campaign = { ...campaign, ...(body as object) };
+        sequence.push("mutation-completed");
+        vi.setSystemTime(new Date("2031-01-01T00:00:00.000Z"));
+        return campaign;
+      }
+      sequence.push("verification-read");
+      return campaign;
+    });
+    deps.execute.mockImplementation(async function* (
+      request: { tool: string; args: object },
+      context: import("@rakazo/adapter-kit").AdapterContext,
+    ) {
+      const result = await runInstantlyWrite(
+        deps.prisma,
+        rest,
+        context,
+        "server",
+        request.tool,
+        request.args,
+      );
+      yield { type: "result", data: { structuredContent: { result } } };
+    } as never);
+    const work: Array<() => Promise<void>> = [];
+    try {
+      const expectedRevision = sequenceConfigurationRevision(campaign);
+      const result = await executeRecruitingSequence(
+        {
+          ...deps,
+          deferSequenceObservation: (job) => {
+            work.push(job);
+          },
+        },
+        actor,
+        target,
+        operation === "save"
+          ? {
+              operation,
+              roleId: "role",
+              serverId: "server",
+              campaignId: id,
+              expectedRevision,
+              draft: {
+                name: "Verified renamed",
+                eaccount: "team@example.test",
+                steps: [{ subject: "Hi", body: "Saved copy", delay_days: 0 }],
+                timezone: "America/Chicago",
+                send_hours: "weekdays_9_to_5",
+              },
+            }
+          : { operation, roleId: "role", serverId: "server", campaignId: id },
+      );
+      expect(result.campaign).toMatchObject({
+        id,
+        name: operation === "save" ? "Verified renamed" : "Original",
+        status: operation === "pause" ? 2 : operation === "save" ? 0 : 1,
+      });
+      expect(result.observedAt).toBe(
+        operation === "read" ? "2030-01-01T00:00:00.000Z" : "2031-01-01T00:00:00.000Z",
+      );
+      if (operation !== "read")
+        expect(sequence.lastIndexOf("verification-read")).toBeGreaterThan(
+          sequence.indexOf("mutation-completed"),
+        );
+      expect(write).not.toHaveBeenCalled();
+      if (operation === "save") {
+        expect(work).toHaveLength(1);
+        expect(
+          [...entries.values()].find((effect) => effect.kind === "instantly_sequence_draft")
+            ?.result,
+        ).toMatchObject({
+          __rakazoSequenceObservation: {
+            sourceRevision: 1,
+            observedAt: "2031-01-01T00:00:00.000Z",
+            campaign: { name: "Verified renamed", status: 0 },
+          },
+        });
+      } else {
+        expect(work).toHaveLength(1);
+        let finished = false;
+        const pending = work[0]!().then(() => {
+          finished = true;
+        });
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        expect(write).toHaveBeenCalledOnce();
+        expect(finished).toBe(false);
+        release(1);
+        await pending;
+        expect(finished).toBe(true);
+        deps.stillAuthorized.mockResolvedValue(false);
+        await expect(work[0]!()).rejects.toThrow();
+        expect(write).toHaveBeenCalledOnce();
+      }
+    } finally {
+      release?.(1);
+      vi.useRealTimers();
+    }
+  },
+);
