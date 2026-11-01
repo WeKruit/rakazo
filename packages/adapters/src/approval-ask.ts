@@ -624,20 +624,65 @@ function calendarEvent(toolName: string) {
   );
 }
 
-function eventTime(value: unknown): { at: string; zone?: string } | undefined {
+function eventTime(
+  value: unknown,
+  fallbackZone?: string,
+): { at: string; zone?: string } | undefined {
   const time = typeof value === "string" ? { dateTime: value } : (value as Record<string, unknown>);
   const at = time?.dateTime ?? time?.date;
   if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined;
-  return { at, ...(typeof time.timeZone === "string" ? { zone: time.timeZone } : {}) };
+  const zone = typeof time.timeZone === "string" ? time.timeZone : fallbackZone;
+  // A calendar reads a time without an offset as wall time in the event's zone, not UTC.
+  const instant =
+    zone && /T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(at) ? wallTimeIn(at, zone) : undefined;
+  return { at: instant ?? at, ...(zone ? { zone } : {}) };
+}
+
+/** The instant a wall-clock time ("2026-11-04T14:00:00") names in a time zone. */
+function wallTimeIn(wall: string, zone: string): string | undefined {
+  try {
+    const asUtc = Date.parse(`${wall}Z`);
+    const offset = (instant: number) => {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: zone,
+          hourCycle: "h23",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+          .formatToParts(instant)
+          .map((part) => [part.type, part.value]),
+      );
+      return (
+        Date.UTC(
+          Number(parts.year),
+          Number(parts.month) - 1,
+          Number(parts.day),
+          Number(parts.hour),
+          Number(parts.minute),
+          Number(parts.second),
+        ) - instant
+      );
+    };
+    const first = asUtc - offset(asUtc);
+    return new Date(asUtc - offset(first)).toISOString();
+  } catch {
+    return undefined;
+  }
 }
 
 /** A calendar event the recruiter confirms: who, when and what, without the calendar's name or ids. */
 function formatCalendarEvent(toolName: string, args: Record<string, unknown>) {
   if (!calendarEvent(toolName)) return undefined;
-  const start = eventTime(args.start ?? args.startTime);
+  const argZone = typeof args.timeZone === "string" ? args.timeZone : undefined;
+  const start = eventTime(args.start ?? args.startTime, argZone);
   if (!start) return undefined;
-  const end = eventTime(args.end ?? args.endTime);
-  const zone = start.zone ?? (typeof args.timeZone === "string" ? args.timeZone : "UTC");
+  const end = eventTime(args.end ?? args.endTime, start.zone);
+  const zone = start.zone ?? "UTC";
   const attendee = bookingAttendee(toolName, args);
   const title = args.summary ?? args.title;
   const length = end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;

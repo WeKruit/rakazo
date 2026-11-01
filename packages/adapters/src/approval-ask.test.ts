@@ -623,6 +623,23 @@ describe("buildApprovalAskBlock", () => {
     expect(`${block.text}\n${block.detail}`).not.toMatch(/google|Google|primary/);
   });
 
+  it("reads a calendar event time without an offset as wall time in its zone", () => {
+    const block = buildApprovalAskBlock(
+      "event-wall-time",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Interview with Adam Test",
+        start: { dateTime: "2026-11-04T14:00:00", timeZone: "America/Chicago" },
+        end: { dateTime: "2026-11-04T14:30:00", timeZone: "America/Chicago" },
+        attendees: [{ email: "adam.test@example.com", displayName: "Adam Test" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.detail).toContain("When: Wed, Nov 4, 2026, 2:00 PM CST (America/Chicago)");
+    expect(block.detail).toContain("Length: 30 min");
+  });
+
   it("shows an interview change as who, from and to, then the original booking", () => {
     const originalBooking = {
       uid: "booking-uid",
