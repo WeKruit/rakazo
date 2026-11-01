@@ -77,4 +77,11 @@ describe("chooseTurnModel", () => {
   it("does not re-route a bot already on the fast model", () => {
     expect(chooseTurnModel({ ...base, configured: fast }).reason).toBe("already_fast");
   });
+  it("opens a role without reasoning on a bot already on the fast model", () => {
+    expect(chooseTurnModel({ ...base, configured: fast, recruitingIntake: true })).toMatchObject({
+      routed: "configured",
+      reason: "recruiting_intake",
+      thinkingLevel: "off",
+    });
+  });
 });
