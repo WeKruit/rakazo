@@ -103,6 +103,15 @@ export function asksForOutreach(text: string): boolean {
 export const REPLY_IN_CHINESE_NOTE =
   "The recruiter wrote in Chinese: write every reply, summary, question and card of this turn in Chinese. Emails and drafts to candidates stay in English unless they ask otherwise.";
 
+/** Added when the recruiter's latest message is English: earlier Chinese turns pulled replies into Chinese. */
+export const REPLY_IN_ENGLISH_NOTE =
+  "The recruiter wrote in English: write every reply, summary, question and card of this turn in English, even where earlier messages were in Chinese.";
+
+/** Mostly English text: at least three English words and no Chinese. */
+export function isEnglishText(text: string): boolean {
+  return !/\p{Script=Han}/u.test(text) && (text.match(/[A-Za-z]{2,}/g)?.length ?? 0) >= 3;
+}
+
 /**
  * A draft request about "these people": the recruiter expects one named email per person, and a
  * general draft with [candidate name] placeholders is what they had to correct.

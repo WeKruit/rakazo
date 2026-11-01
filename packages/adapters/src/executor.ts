@@ -124,6 +124,7 @@ import {
   isBackgroundRunTrigger,
   isCallClientNonce,
   isChineseText,
+  isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -155,6 +156,7 @@ import {
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   REPLY_IN_CHINESE_NOTE,
+  REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -13127,8 +13129,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
               .join(" ")
           : "";
-        const languageNote =
-          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
+        const languageNote = !hideVendors
+          ? undefined
+          : isChineseText(lastRecruiterText)
+            ? REPLY_IN_CHINESE_NOTE
+            : isEnglishText(lastRecruiterText)
+              ? REPLY_IN_ENGLISH_NOTE
+              : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&

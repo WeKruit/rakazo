@@ -595,6 +595,34 @@ describe("buildApprovalAskBlock", () => {
     expect(`${block.text}\n${block.detail}`).not.toMatch(/cal-com|Cal-com|5852837/);
   });
 
+  it("shows a connected calendar's event as an interview booking, without the app's name", () => {
+    const block = buildApprovalAskBlock(
+      "event-effect",
+      "mcp__google-calendar__create_event",
+      {
+        calendarId: "primary",
+        summary: "Interview – Front Desk Supervisor",
+        start: { dateTime: "2026-11-03T14:00:00-06:00", timeZone: "America/Chicago" },
+        end: { dateTime: "2026-11-03T14:30:00-06:00", timeZone: "America/Chicago" },
+        attendees: [{ email: "adam@example.test", displayName: "Adam Test" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Adam Test");
+    expect(block.detail).toBe(
+      [
+        "Candidate: Adam Test <adam@example.test>",
+        "When: Tue, Nov 3, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Interview – Front Desk Supervisor",
+        "",
+        "The candidate gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+    expect(`${block.text}\n${block.detail}`).not.toMatch(/google|Google|primary/);
+  });
+
   it("shows an interview change as who, from and to, then the original booking", () => {
     const originalBooking = {
       uid: "booking-uid",

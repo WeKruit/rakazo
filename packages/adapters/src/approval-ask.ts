@@ -295,10 +295,11 @@ const OUTBOUND_TITLES: Record<string, string> = {
 };
 
 function outboundTitle(toolName: string): string | undefined {
-  const operation = (toolName.split("__").at(-1) ?? toolName)
-    .toLowerCase()
-    .replace(/^(native_)?(instantly_)*/, "");
-  return OUTBOUND_TITLES[operation];
+  const parts = toolName.toLowerCase().split("__");
+  const operation = (parts.at(-1) ?? "").replace(/^(native_)?(instantly_)*/, "");
+  // A connected calendar's own tool (mcp__google-calendar__create_event) is named without its app.
+  const app = parts.length > 2 ? parts.at(-2)!.replace(/[^a-z]/g, "") : "";
+  return OUTBOUND_TITLES[operation] ?? OUTBOUND_TITLES[`${app}_${operation}`];
 }
 
 /** The reply confirmation card body: recipient, sender mailbox, subject, original and full text; no vendor, no ids. */
@@ -527,6 +528,19 @@ type BookingAttendee = { name?: string; email?: string; timeZone?: string };
 /** The invitee of a calendar booking request, or of the booking a change or cancellation targets. */
 function bookingAttendee(toolName: string, args: Record<string, unknown>) {
   const original = args.originalBooking as { attendees?: unknown } | undefined;
+  if (calendarEvent(toolName) && Array.isArray(args.attendees)) {
+    const guest = args.attendees.find(
+      (item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === "object" && !(item as { organizer?: unknown }).organizer,
+    );
+    if (!guest && typeof args.attendees[0] === "string") return { email: args.attendees[0] };
+    if (!guest) return undefined;
+    const name = guest.displayName ?? guest.name;
+    return {
+      ...(typeof name === "string" ? { name } : {}),
+      ...(typeof guest.email === "string" ? { email: guest.email } : {}),
+    } satisfies BookingAttendee;
+  }
   const attendee = /create_booking$/i.test(toolName)
     ? args.attendee
     : /(reschedule|cancel)_booking$/i.test(toolName) && Array.isArray(original?.attendees)
@@ -603,7 +617,53 @@ function formatBookingChange(toolName: string, args: Record<string, unknown>) {
  * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
  * invite says. Every other field is still listed, so the card shows all that will be sent.
  */
+/** A calendar app's own event create or update tool, as opposed to a booking page's. */
+function calendarEvent(toolName: string) {
+  return /calendar.*__(create|update|patch)_event$|^googlecalendar_(create|update|patch)_event$/i.test(
+    toolName,
+  );
+}
+
+function eventTime(value: unknown): { at: string; zone?: string } | undefined {
+  const time = typeof value === "string" ? { dateTime: value } : (value as Record<string, unknown>);
+  const at = time?.dateTime ?? time?.date;
+  if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined;
+  return { at, ...(typeof time.timeZone === "string" ? { zone: time.timeZone } : {}) };
+}
+
+/** A calendar event the recruiter confirms: who, when and what, without the calendar's name or ids. */
+function formatCalendarEvent(toolName: string, args: Record<string, unknown>) {
+  if (!calendarEvent(toolName)) return undefined;
+  const start = eventTime(args.start ?? args.startTime);
+  if (!start) return undefined;
+  const end = eventTime(args.end ?? args.endTime);
+  const zone = start.zone ?? (typeof args.timeZone === "string" ? args.timeZone : "UTC");
+  const attendee = bookingAttendee(toolName, args);
+  const title = args.summary ?? args.title;
+  const length = end ? Math.round((Date.parse(end.at) - Date.parse(start.at)) / 60_000) : undefined;
+  const update = /(update|patch)_event$/i.test(toolName);
+  return [
+    ...(attendee
+      ? [
+          `Candidate: ${attendee.name ?? attendee.email ?? "unknown"}${attendee.name && attendee.email ? ` <${attendee.email}>` : ""}`,
+        ]
+      : []),
+    `${update ? "New time" : "When"}: ${bookingTime(start.at, zone)}`,
+    ...(length && length > 0 ? [`Length: ${length} min`] : []),
+    ...(typeof title === "string" && title ? [`Title: ${title}`] : []),
+    ...(typeof args.description === "string" && args.description
+      ? [`Notes: ${args.description}`]
+      : []),
+    "",
+    update
+      ? "The candidate gets the new time once you confirm."
+      : "The candidate gets a calendar invitation once you confirm.",
+  ].join("\n");
+}
+
 function formatBooking(toolName: string, args: Record<string, unknown>) {
+  const event = formatCalendarEvent(toolName, args);
+  if (event) return event;
   if (!/create_booking$/i.test(toolName)) return undefined;
   const attendee = bookingAttendee(toolName, args);
   if (!attendee || typeof args.start !== "string") return undefined;
