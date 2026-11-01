@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ListPager } from "../../components/ListPager";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { memoWithLatestHandlers } from "../../lib/memo-latest";
 import { retryTransientRead } from "../../lib/read-retry";
@@ -23,6 +24,7 @@ import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
 import { useSequenceLabels } from "../recruiting/SequenceStats";
+import { ARCHIVED_GROUPS_PER_PAGE } from "./useShellRoster";
 
 export type RecruitingWorkspaceView =
   | "home"
@@ -73,6 +75,9 @@ function waitsOnUser(group: Group) {
 export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNavigation({
   groups,
   archivedGroups,
+  archivedGroupTotal,
+  archivedGroupPage,
+  onArchivedGroupPage,
   archivedOpen,
   groupId,
   query,
@@ -122,6 +127,10 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   onOpenCrmRole?: (selection: CrmBrowseSelection, groupId?: string) => void;
   groups: Group[];
   archivedGroups: Group[];
+  /** Every archived role; `archivedGroups` holds only the page in view. */
+  archivedGroupTotal: number;
+  archivedGroupPage: number;
+  onArchivedGroupPage: (page: number) => void;
   archivedOpen: boolean;
   groupId?: string;
   query: string;
@@ -672,7 +681,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
             ) : null}
           </div>
         ) : null}
-        {archivedGroups.length > 0 ? (
+        {archivedGroupTotal > 0 || archivedGroups.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">
             <Button
               variant="ghost"
@@ -682,7 +691,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               onClick={onToggleArchived}
             >
               <Trans>Archived</Trans>
-              <span>{archivedGroups.length}</span>
+              <span>{Math.max(archivedGroupTotal, archivedGroups.length)}</span>
             </Button>
             {archivedOpen
               ? archivedGroups.map((group) => (
@@ -710,6 +719,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   </fieldset>
                 ))
               : null}
+            {archivedOpen ? (
+              <ListPager
+                page={archivedGroupPage}
+                pageCount={Math.ceil(archivedGroupTotal / ARCHIVED_GROUPS_PER_PAGE)}
+                onPage={onArchivedGroupPage}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>
