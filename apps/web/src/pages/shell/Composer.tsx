@@ -121,6 +121,7 @@ export const Composer = memo(function Composer({
   draftKey,
   contextKey,
   enterToSend,
+  suggestion,
 }: {
   ref?: Ref<ComposerHandle>;
   activeName?: string;
@@ -163,6 +164,8 @@ export const Composer = memo(function Composer({
   draftKey: string;
   contextKey?: string;
   enterToSend: boolean;
+  /** Likely next message, shown as gray text in an empty composer; Tab accepts it. */
+  suggestion?: string | null;
 }) {
   const { t } = useLingui();
   const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
@@ -531,6 +534,9 @@ export const Composer = memo(function Composer({
 
   const showComposerPlaceholder =
     draft.length === 0 && selectedSkill === null && selectedMentions.length === 0;
+  const showSuggestion = Boolean(
+    suggestion && !running && !disabled && showComposerPlaceholder && !replyTarget,
+  );
   const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
   const replyNameRef = useRef(replyName);
   replyNameRef.current = replyName;
@@ -852,6 +858,19 @@ export const Composer = memo(function Composer({
                 return;
               }
               if (
+                showSuggestion &&
+                event.key === "Tab" &&
+                !event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                updateDraft(suggestion ?? "");
+                return;
+              }
+              if (
                 event.key === "Backspace" &&
                 draft.length === 0 &&
                 (selectedSkill !== null || selectedMentions.length > 0)
@@ -895,11 +914,13 @@ export const Composer = memo(function Composer({
             }}
             disabled={disabled}
             placeholder={
-              showComposerPlaceholder
-                ? activeName && !compact
-                  ? t`Message ${activeName}`
-                  : t`Message…`
-                : undefined
+              showSuggestion
+                ? (suggestion ?? undefined)
+                : showComposerPlaceholder
+                  ? activeName && !compact
+                    ? t`Message ${activeName}`
+                    : t`Message…`
+                  : undefined
             }
             aria-label={activeName ? t`Message ${activeName}` : t`Message`}
             role="combobox"
