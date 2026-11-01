@@ -33,7 +33,7 @@ export function SequenceEditor({ roleId, serverId, execute, onAskAgent }: Sequen
       name: campaign?.name ?? result.roleTitle,
       eaccount: campaign?.eaccount ?? result.mailboxes[0] ?? "",
       steps: campaign?.steps.length ? campaign.steps : [emptyStep()],
-      timezone: campaign?.timezone ?? "America/Chicago",
+      timezone: campaign?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
       send_hours: campaign?.send_hours ?? "weekdays_9_to_5",
     });
   };

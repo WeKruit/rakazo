@@ -182,7 +182,7 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(query.sql.indexOf('floor(b."rankingValue" / 1000)')).toBeLessThan(
       query.sql.indexOf("candidate_page AS"),
     );
-    expect(query.sql).not.toContain('starts_with(r."clientNonce"');
+    expect(query.sql).toContain('starts_with(r."clientNonce"');
   });
   it.skipIf(
     !process.env.VERIFY_DATABASE ||
@@ -199,12 +199,13 @@ describe("candidate listing and shortlist boundaries", () => {
           CREATE TEMP TABLE recruiting_roles (id text, "currentRevisionId" text);
           CREATE TEMP TABLE recruiting_candidates ("roleId" text, "candidateKey" text, shortlisted boolean DEFAULT false, "shortlistedAt" timestamptz, revision int DEFAULT 0, consideration jsonb);
           CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "roleRevisionId" text, "observedAt" timestamptz, "actionId" text);
-          CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb);
+          CREATE TEMP TABLE runs (id text, "clientNonce" text);
+          CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, "runId" text);
           CREATE TEMP TABLE recruiting_assessments ("roleId" text, "candidateKey" text, version int, "roleRevisionId" text, "createdAt" timestamptz, judgments jsonb);
           CREATE TEMP TABLE recruiting_candidate_occurrences ("roleId" text, "candidateKey" text, "pageId" text, "rowIndex" int, "matchFields" jsonb, name text, title text, company text, location text, "linkedinUrl" text, "resumeUrl" text, "evidenceUrls" jsonb, issues jsonb DEFAULT '[]');
           INSERT INTO recruiting_roles VALUES ('role', 'revision');
-          INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-01', null);
-          INSERT INTO external_effects VALUES ('current', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('old', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('provider', 'recruiting_research', 'completed', '{"operation":"save_search"}');
+          INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-04', null);
+          INSERT INTO external_effects (id,kind,status,request) VALUES ('current', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('old', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('provider', 'recruiting_research', 'completed', '{"operation":"save_search"}');
         `);
         const candidates = [
           ["strong", "current", "Strong", 1],
@@ -269,7 +270,7 @@ describe("candidate listing and shortlist boundaries", () => {
               roleId: "role",
               roleRevisionId: "revision",
               sort: "ranking",
-              rankingProjection: 1,
+              rankingProjection: 2,
               rankingGroup: "worth_talking",
               query: "",
               assessmentState: null,
@@ -732,7 +733,8 @@ describe("candidate listing and shortlist boundaries", () => {
             roleId: "role",
             roleRevisionId: "revision",
             sort,
-            ...(["rank", "tier", "score"].includes(sort) ? { rankingProjection: 1 } : {}),
+            ...(sort === "rank" ? { rankProjection: 3 } : {}),
+            ...(sort === "score" ? { scoreProjection: 1 } : {}),
             ...(sourceEffectId !== undefined ? { sourceProjection: 2 } : {}),
             query: "",
             assessmentState: null,
@@ -812,7 +814,7 @@ describe("candidate listing and shortlist boundaries", () => {
     },
   );
   it.each(["rank", "tier", "score"] as const)(
-    "paginates grouped %s values with stable candidate ties and scoped cursors",
+    "paginates native %s values with unknowns last and isolated single-page rank cursors",
     async (sort) => {
       const f = fixture();
       if (sort !== "tier")
@@ -858,7 +860,10 @@ describe("candidate listing and shortlist boundaries", () => {
         },
       ];
       f.tx.$queryRaw.mockResolvedValueOnce(
-        candidateProjectionRows(counts, [row("a", "1002"), row("b", "10")]),
+        candidateProjectionRows(counts, [
+          row("a", sort === "score" ? "72.5" : "2"),
+          row("b", "10"),
+        ]),
       );
       const first = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",
@@ -870,7 +875,7 @@ describe("candidate listing and shortlist boundaries", () => {
       expect(first.items[0]).not.toHaveProperty("matchValue");
       const firstQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
       expect(firstQuery.sql).toContain(
-        `ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC`,
+        `ORDER BY "matchValue" ${sort === "score" ? "DESC" : "ASC"} NULLS LAST, "candidateKey" COLLATE "C" ASC`,
       );
       if (sort !== "tier") {
         expect(firstQuery.sql).toContain("ELSE returned.value -> 'rank_this_batch_only' END");
@@ -920,9 +925,11 @@ describe("candidate listing and shortlist boundaries", () => {
         // Tier sorting still reads the role's domain so rank and score availability stay true.
         expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledOnce();
       }
-      expect(firstQuery.sql).toContain(`reviewer."roleRevisionId" <>`);
+      expect(firstQuery.sql).toContain(`SELECT match."${sort}PageId"`);
       const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
-      for (const value of ["-1", "1.5", "NaN", "Infinity", "1e3", "9007199254740992", "6001"]) {
+      for (const value of sort === "score"
+        ? ["NaN", "Infinity", "-Infinity", "true", "72 points", "1e3", "1.2.3"]
+        : ["-1", "1.5", "NaN", "1e3", "9007199254740992", ...(sort === "tier" ? ["4"] : ["0"])]) {
         const invalid = Buffer.from(JSON.stringify({ ...decoded, value })).toString("base64url");
         await expect(
           recruiting.listRecruitingCandidates(f.prisma, actor, {
@@ -944,7 +951,7 @@ describe("candidate listing and shortlist boundaries", () => {
             }),
           ).rejects.toThrow(recruiting.RecruitingConflictError);
       if (sort === "score")
-        for (const value of ["0", "1002", "6000"]) {
+        for (const value of ["0", "-1.25", "72.5"]) {
           f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts, []));
           await expect(
             recruiting.listRecruitingCandidates(f.prisma, actor, {
@@ -967,7 +974,7 @@ describe("candidate listing and shortlist boundaries", () => {
       const nextQuery = f.tx.$queryRaw.mock.lastCall![0] as { sql: string; values: unknown[] };
       expect(nextQuery.sql).toContain('"matchValue" IS NULL OR');
       expect(nextQuery.sql).toContain("::numeric");
-      expect(nextQuery.sql).toContain(`"matchValue" > ?::numeric`);
+      expect(nextQuery.sql).toContain(`"matchValue" ${sort === "score" ? "<" : ">"} ?::numeric`);
       f.tx.$queryRaw.mockResolvedValueOnce(candidateProjectionRows(counts, [row("c", "")]));
       const last = await recruiting.listRecruitingCandidates(f.prisma, actor, {
         roleId: "role",

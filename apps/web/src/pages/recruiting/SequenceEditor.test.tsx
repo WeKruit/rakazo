@@ -110,3 +110,30 @@ it("ignores an earlier role read that resolves after changing role", async () =>
   expect(container.querySelector("textarea")!.value).toBe("");
   await act(async () => root.unmount());
 });
+
+it("uses the browser timezone for a new draft", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const resolved = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions");
+  const options = new Intl.DateTimeFormat().resolvedOptions();
+  resolved.mockReturnValue({ ...options, timeZone: "Asia/Tokyo" });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <SequenceEditor
+          roleId="role"
+          serverId="server"
+          execute={async () => ({ ...campaign, campaign: null })}
+        />,
+      ),
+    );
+    expect((host.querySelector('input[name="timezone"]') as HTMLInputElement).value).toBe(
+      "Asia/Tokyo",
+    );
+  } finally {
+    await act(async () => root.unmount());
+    resolved.mockRestore();
+  }
+});
