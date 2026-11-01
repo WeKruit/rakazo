@@ -205,3 +205,18 @@ test("narrow role chat resizes without losing drafts or scroll position", async 
   await expect(composer).toHaveValue("A draft to preserve while resizing");
   expect(fixture.unexpected).toEqual([]);
 });
+
+test("search criteria text matches the chat text size", async ({ page }, testInfo) => {
+  await recruitingChatFixture(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/app/g/group-fixture?view=brief");
+  const panel = page.getByRole("region", { name: "Search Criteria" });
+  const requirement = panel.getByText("Shipped perception systems on robots", { exact: true });
+  await expect(requirement).toBeVisible();
+  const size = (el: Element) => Number.parseFloat(getComputedStyle(el).fontSize);
+  expect(await requirement.evaluate(size)).toBeGreaterThanOrEqual(14);
+  expect(
+    await panel.getByText("From this role’s saved requirements").evaluate(size),
+  ).toBeGreaterThanOrEqual(12);
+  await captureScreenshot(page, testInfo, "search-criteria");
+});
