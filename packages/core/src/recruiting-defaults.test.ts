@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isChineseText,
+  isEnglishText,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -96,5 +97,13 @@ describe("isChineseText", () => {
       false,
     );
     expect(isChineseText("")).toBe(false);
+  });
+});
+
+describe("isEnglishText", () => {
+  it("reads an English request as English, and Chinese or a bare name as neither", () => {
+    expect(isEnglishText("Book Adam Test for Nov 3 at 2pm Central")).toBe(true);
+    expect(isEnglishText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(false);
+    expect(isEnglishText("Adam Test")).toBe(false);
   });
 });
