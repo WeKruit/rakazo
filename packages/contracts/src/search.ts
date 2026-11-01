@@ -36,3 +36,19 @@ export const SearchQueryOutputSchema = z.object({
   hits: z.array(SearchHitSchema).max(25),
 });
 export type SearchQueryOutput = z.infer<typeof SearchQueryOutputSchema>;
+
+/** Saved recruiting targets only; searching never refreshes a provider or sends mail. */
+export const RecruitingSearchTargetSchema = z.object({
+  kind: z.enum(["role", "sequence"]),
+  title: z.string(),
+  roleId: Id,
+  roleTitle: z.string(),
+  groupId: Id.nullable(),
+  botId: Id.nullable(),
+  campaignId: z.string().nullable(),
+  serverId: Id.nullable(),
+});
+export const RecruitingSearchTargetsOutputSchema = z.object({
+  items: z.array(RecruitingSearchTargetSchema).max(16),
+});
+export type RecruitingSearchTarget = z.infer<typeof RecruitingSearchTargetSchema>;
