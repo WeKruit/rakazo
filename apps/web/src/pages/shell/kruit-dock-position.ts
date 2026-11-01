@@ -4,7 +4,6 @@ export type Box = { width: number; height: number };
 const KEY = "kruit-dock-position";
 export const DOCK_MARGIN = 16;
 const STEP = 16;
-const SAMPLE = 16;
 /** Breathing room kept around the dock so it never touches a control. */
 const GAP = 8;
 
@@ -38,31 +37,33 @@ export function saveDockOffset(offset: DockOffset) {
   }
 }
 
+export type Rect = { left: number; top: number; right: number; bottom: number };
+
+const overlap = (a: Rect, b: Rect) =>
+  Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+  Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+
 /**
- * The spot along the right edge, then the left edge, going upward from the corner, with the
- * fewest points of the dock on a control: a clear spot when there is one, otherwise the least
- * covered. `blocked` tells whether a viewport point holds a control.
+ * The spot along the right edge, then the left edge, going upward from the corner, with the least
+ * area of the dock (plus its margin) on a control: a clear spot when there is one, otherwise the
+ * least covered. Works on the controls' rectangles, so it costs arithmetic, not page hit tests.
  */
-export function findFreeOffset(
-  box: Box,
-  viewport: Box,
-  blocked: (x: number, y: number) => boolean,
-): DockOffset {
+export function findFreeOffset(box: Box, viewport: Box, controls: Rect[]): DockOffset {
   const covered = (offset: DockOffset) => {
     const left = viewport.width - offset.right - box.width - GAP;
     const top = viewport.height - offset.bottom - box.height - GAP;
-    const width = box.width + GAP * 2;
-    const height = box.height + GAP * 2;
-    let count = 0;
-    for (let x = 0; x <= width; x += SAMPLE) {
-      for (let y = 0; y <= height; y += SAMPLE) {
-        if (blocked(left + Math.min(x, width - 1), top + Math.min(y, height - 1))) count += 1;
-      }
-    }
-    return count;
+    const spot = {
+      left,
+      top,
+      right: left + box.width + GAP * 2,
+      bottom: top + box.height + GAP * 2,
+    };
+    let area = 0;
+    for (const control of controls) area += overlap(spot, control);
+    return area;
   };
   let best = { right: DOCK_MARGIN, bottom: DOCK_MARGIN };
-  let bestCount = Number.POSITIVE_INFINITY;
+  let bestArea = Number.POSITIVE_INFINITY;
   const maxBottom = Math.max(DOCK_MARGIN, viewport.height - box.height - DOCK_MARGIN);
   for (const side of ["right", "left"] as const) {
     for (let bottom = DOCK_MARGIN; bottom <= maxBottom; bottom += STEP) {
@@ -70,19 +71,27 @@ export function findFreeOffset(
         right: side === "right" ? DOCK_MARGIN : viewport.width - box.width - DOCK_MARGIN,
         bottom,
       };
-      const count = covered(offset);
-      if (count === 0) return offset;
-      if (count < bestCount) {
+      const area = covered(offset);
+      if (area === 0) return offset;
+      if (area < bestArea) {
         best = offset;
-        bestCount = count;
+        bestArea = area;
       }
     }
   }
   return best;
 }
 
-export function controlAt(x: number, y: number, dock: Element | null): boolean {
-  return (document.elementsFromPoint?.(x, y) ?? []).some(
-    (el) => !dock?.contains(el) && el.closest(INTERACTIVE) !== null,
-  );
+/** Rectangles of the visible controls on the page, outside the dock itself. */
+export function controlRects(dock: Element | null): Rect[] {
+  const rects: Rect[] = [];
+  for (const el of document.querySelectorAll(INTERACTIVE)) {
+    if (dock?.contains(el)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    if (r.bottom < 0 || r.right < 0 || r.top > window.innerHeight || r.left > window.innerWidth)
+      continue;
+    rects.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+  }
+  return rects;
 }
