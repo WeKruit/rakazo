@@ -1028,6 +1028,10 @@ msgid "Checking email"
 msgstr ""
 
 #: src/components/LiveWork.tsx
+msgid "Checking recruiting records"
+msgstr ""
+
+#: src/components/LiveWork.tsx
 msgid "Checking saved context"
 msgstr ""
 
@@ -4924,10 +4928,6 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Reviewed"
-msgstr ""
-
-#: src/components/LiveWork.tsx
-msgid "Reviewing candidates"
 msgstr ""
 
 #: src/components/LiveWork.tsx

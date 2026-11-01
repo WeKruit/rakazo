@@ -177,7 +177,7 @@ const THINKING_SUMMARIES: Partial<Record<WorkActivity, string>> = {
   availability: "Reviewing availability",
   drafting: "Working on the draft",
   role: "Reviewing the role",
-  candidates: "Reviewing candidates",
+  candidates: "Checking recruiting records",
   research: "Reviewing research results",
   crm: "Reviewing CRM records",
 };

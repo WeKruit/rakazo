@@ -207,6 +207,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Message…": "Nachricht…",
   "No longer active": "Nicht mehr aktiv",
   "Opened its thread.": "Thread geöffnet.",
+  "Open role": "Stelle öffnen",
   "Photo library": "Fotomediathek",
   "Pull request": "Pull Request",
   React: "Reagieren",

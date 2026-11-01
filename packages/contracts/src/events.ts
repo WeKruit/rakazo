@@ -474,6 +474,12 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),
   }),
+  z.object({
+    /** Opens a role's conversation from another conversation. */
+    kind: z.literal("role_link"),
+    groupId: z.string(),
+    title: z.string(),
+  }),
   AskBlockSchema,
   z.object({
     kind: z.literal("choice"),

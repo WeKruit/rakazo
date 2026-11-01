@@ -38,7 +38,7 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     availability: t`Checking availability`,
     drafting: t`Drafting email`,
     role: t`Reviewing the role`,
-    candidates: t`Reviewing candidates`,
+    candidates: t`Checking recruiting records`,
     research: t`Searching candidates`,
     feedback: t`Recording feedback`,
     crm: t`Checking candidate records`,

@@ -1028,6 +1028,10 @@ msgid "Checking email"
 msgstr "正在查看邮件"
 
 #: src/components/LiveWork.tsx
+msgid "Checking recruiting records"
+msgstr "查看招聘记录"
+
+#: src/components/LiveWork.tsx
 msgid "Checking saved context"
 msgstr "正在查看已保存的上下文"
 
@@ -4925,10 +4929,6 @@ msgstr "评审已更新"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Reviewed"
 msgstr "已审核"
-
-#: src/components/LiveWork.tsx
-msgid "Reviewing candidates"
-msgstr "正在查看候选人"
 
 #: src/components/LiveWork.tsx
 msgid "Reviewing the role"

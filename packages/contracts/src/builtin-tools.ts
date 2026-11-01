@@ -88,6 +88,7 @@ export const BUILTIN_TOOL_NAMES = [
   "archive_bot",
   "message_bot",
   "delegate_to_role",
+  "start_role",
   "handoff_to_bot",
   "connect_agent",
   "respond_agent_connection",

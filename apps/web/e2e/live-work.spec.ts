@@ -17,7 +17,7 @@ test("a running turn shows its steps in plain words with a clock, then folds", a
     const live = page.getByTestId("live-work");
     await expect(live.getByRole("status")).toContainText("Searching candidates…");
     await expect(live).toContainText("Reviewing the role");
-    await expect(live).toContainText("Reviewing candidates");
+    await expect(live).toContainText("Checking recruiting records");
     await expect(live).toContainText(/0:4\d/);
     await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_/i);
     await captureScreenshot(page, testInfo, `live-work-running-${viewport.name}`);
@@ -25,10 +25,10 @@ test("a running turn shows its steps in plain words with a clock, then folds", a
     await page.goto(`${fixture}?phase=done`);
     const summary = page.getByTestId("work-summary");
     await expect(summary.locator("summary")).toHaveText("Worked for 1m 12s");
-    await expect(summary.getByText("Reviewing candidates")).toBeHidden();
+    await expect(summary.getByText("Checking recruiting records")).toBeHidden();
     await captureScreenshot(page, testInfo, `live-work-done-${viewport.name}`);
     await summary.locator("summary").click();
-    await expect(summary.getByText("Reviewing candidates")).toBeVisible();
+    await expect(summary.getByText("Checking recruiting records")).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_/i);
     await captureScreenshot(page, testInfo, `live-work-expanded-${viewport.name}`);
   }
@@ -45,7 +45,7 @@ test("work handed to a teammate shows as one entry named for its purpose", async
     await expect(stage.locator("summary")).toContainText("Finding candidates");
     await expect(stage).toHaveAttribute("data-running", "true");
     await expect(stage).toContainText("Searching candidates");
-    await expect(stage).toContainText("Reviewing candidates");
+    await expect(stage).toContainText("Checking recruiting records");
     await expect(live).toContainText("Reviewing the role");
     await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_|sourcer|bot-2/i);
     await captureScreenshot(page, testInfo, `work-stage-running-${viewport.name}`);
@@ -55,9 +55,9 @@ test("work handed to a teammate shows as one entry named for its purpose", async
     await summary.locator("summary").first().click();
     const done = summary.getByTestId("work-stage");
     await expect(done).not.toHaveAttribute("data-running");
-    await expect(done.getByText("Reviewing candidates")).toBeHidden();
+    await expect(done.getByText("Checking recruiting records")).toBeHidden();
     await done.locator("summary").click();
-    await expect(done.getByText("Reviewing candidates")).toBeVisible();
+    await expect(done.getByText("Checking recruiting records")).toBeVisible();
     await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_|sourcer|bot-2/i);
     await captureScreenshot(page, testInfo, `work-stage-done-${viewport.name}`);
   }

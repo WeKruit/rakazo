@@ -2375,6 +2375,10 @@ msgstr "In vollständigem Fenster öffnen"
 msgid "Open navigation"
 msgstr "Navigation öffnen"
 
+#: src/pages/ShellMessage.tsx
+msgid "Open role"
+msgstr ""
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open role chat"
 msgstr ""

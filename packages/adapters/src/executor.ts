@@ -222,6 +222,7 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
+  createGroupInTransaction,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -11858,11 +11859,63 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: role.sourceThread.groupId, title: role.title ?? "" },
+            ]);
             return finish({
               ok: true,
               team: sent.name,
-              roleGroupLink: `/app/g/${role.sourceThread.groupId}`,
-              note: sent.note,
+              note: `${sent.note ?? ""} A card that opens the role's conversation is already shown; do not paste a link.`.trim(),
+            });
+          }
+          if (name === "start_role") {
+            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
+            const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
+            if (!title || !request) return finish({ error: "title and message are required" });
+            if (!thread.groupId?.startsWith("recruiting-global-"))
+              return finish({ error: "start_role works only in the global conversation." });
+            const team = await deps.prisma.chatGroupMember.findMany({
+              where: { groupId: thread.groupId },
+              select: { botId: true },
+              orderBy: { createdAt: "asc" },
+            });
+            // One role per call, even when the call is retried.
+            const groupId = `role-${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const group = await deps.prisma.$transaction((tx) =>
+              createGroupInTransaction(
+                tx,
+                { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                {
+                  id: groupId,
+                  name: title.slice(0, 120),
+                  botIds: team.map((member) => member.botId),
+                },
+              ),
+            );
+            if (!group.thread)
+              return finish({ error: "The role conversation could not be opened." });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: group.thread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${title} team`,
+                message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                intent: "request",
+                deliveryKey: effectKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: group.id, title },
+            ]);
+            return finish({
+              ok: true,
+              team: `${title} team`,
+              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line that the team will ask its questions there; do not paste a link.",
             });
           }
           if (name === "render_view") {
@@ -15018,6 +15071,7 @@ export function selectBuiltinToolsForRun(options: {
           "message_user",
           "message_bot",
           "delegate_to_role",
+          "start_role",
           "handoff_to_bot",
           "message_agent",
           "create_poll",

@@ -90,6 +90,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "handoff_to_bot",
   "message_bot",
   "delegate_to_role",
+  "start_role",
 ]);
 
 const scheduleCreateProperties = {
@@ -1547,6 +1548,25 @@ export const builtinAgentTools: ConnectorTool[] = [
         message: { type: "string", description: "The request, in the recruiter's words." },
       },
       required: ["role_id", "message"],
+    },
+  },
+  {
+    name: "start_role",
+    description:
+      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's requirements, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet (check recruiting_candidates operation roles first). Pass a short title and everything the recruiter said about the role, in their own words (JD text, must-haves, preferences and what is only preferred). The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: 'Short role title, e.g. "Agent Engineer (new grad)".',
+        },
+        message: {
+          type: "string",
+          description: "The recruiter's requirements and JD, in their own words.",
+        },
+      },
+      required: ["title", "message"],
     },
   },
   {

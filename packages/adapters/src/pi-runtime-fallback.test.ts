@@ -3448,7 +3448,7 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
 
 it("derives the thinking summary from the last tool category only", () => {
   expect(thinkingSummary(undefined)).toBe("Thinking");
-  expect(thinkingSummary("recruiting_candidates")).toBe("Reviewing candidates");
+  expect(thinkingSummary("recruiting_candidates")).toBe("Checking recruiting records");
   expect(thinkingSummary("unknown_tool")).toBe("Thinking");
 });
 

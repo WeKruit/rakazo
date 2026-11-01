@@ -974,7 +974,7 @@ it("keeps when a thinking stretch began for the developer clock", () => {
       text: "",
       activity: true,
       phase: "thinking",
-      summary: "Reviewing candidates",
+      summary: "Checking recruiting records",
       thinkingSince: "2026-01-01T00:00:00.000Z",
     },
   });

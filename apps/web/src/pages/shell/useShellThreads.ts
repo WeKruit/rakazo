@@ -588,7 +588,7 @@ export function useShellThreads({
         }
         if (event.type === "thread.message.created") {
           const blocks = (event.payload.blocks as Array<{ kind?: string }>) ?? [];
-          if (blocks.some((block) => block.kind === "child_bot")) {
+          if (blocks.some((block) => block.kind === "child_bot" || block.kind === "role_link")) {
             void refreshBots().catch(() => undefined);
           }
           if (event.payload.role === "bot") markBotReadIfVisible(active.id);
