@@ -1884,7 +1884,13 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               );
             const { question, plannedSearches } = parsed.data;
             const known = await host.request.beforeAsk?.(question, plannedSearches);
-            if (known)
+            if (known) {
+              // Each bounce costs the person another model step before the card; say which check.
+              getLogger().info("ask.not_shown", {
+                runId: host.request.runId,
+                plannedSearches: plannedSearches?.length ?? null,
+                reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
+              });
               return {
                 content: [
                   {
@@ -1897,6 +1903,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 ],
                 details: args,
               };
+            }
             // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
             if ((question.match(/\?/g)?.length ?? 0) > 1 || /(^|\n)\s*2[.)]\s/.test(question))
               throw new Error(
