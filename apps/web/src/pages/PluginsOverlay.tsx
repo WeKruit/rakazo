@@ -100,6 +100,23 @@ function serviceHost(server: McpServer) {
   }
 }
 
+function serviceEndpoint(server: McpServer) {
+  if (!server.endpoint) return "";
+  const url = new URL(server.endpoint);
+  return `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+}
+
+/** Services that act on the recruiter's own account, so each specialist gets only what it needs. */
+const PERSONAL_ENDPOINTS = [
+  "https://gmailmcp.googleapis.com/mcp/v1",
+  "https://calendarmcp.googleapis.com/mcp/v1",
+  "https://mcp.cal.com/mcp",
+];
+
+function personalService(server: McpServer) {
+  return PERSONAL_ENDPOINTS.includes(serviceEndpoint(server));
+}
+
 function ServiceLogo({ server }: { server: McpServer }) {
   const host = serviceHost(server);
   const bundled = SERVICE_LOGOS[host];
@@ -325,6 +342,10 @@ export function PluginsOverlay({
           await connectProductServer(server.id);
           if (!current()) return;
         }
+      } else if (coordinatorBotId && personalService(server)) {
+        // A reconnect also gives specialists their narrow access, which older grants may lack.
+        await connectProductServer(server.id);
+        if (!current()) return;
       }
       const fresh = await refresh();
       if (!current()) return;
@@ -375,13 +396,8 @@ export function PluginsOverlay({
     if (!current()) return;
     if (!coordinatorBotId || !server?.enabled || !server.endpoint)
       throw new Error(t`Could not connect`);
-    const url = new URL(server.endpoint);
-    const endpoint = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
-    const personal = [
-      "https://gmailmcp.googleapis.com/mcp/v1",
-      "https://calendarmcp.googleapis.com/mcp/v1",
-      "https://mcp.cal.com/mcp",
-    ].includes(endpoint);
+    const endpoint = serviceEndpoint(server);
+    const personal = personalService(server);
     if (
       server.oauthStatus === "reconnect" ||
       (personal && server.oauthStatus !== "connected" && !server.hasSecret)
