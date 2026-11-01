@@ -11010,6 +11010,7 @@ export async function listRecruitingCandidates(
   raw: CandidatesInput,
 ): Promise<CandidatesOutput> {
   const input = ListRecruitingCandidatesInput.parse(raw);
+  if (input.cursor !== undefined && input.offset) throw new RecruitingConflictError();
   const afterRead: Array<() => void> = [];
   // Fill legacy NULL matchFields BEFORE the RepeatableRead snapshot, as its own autocommit
   // statement (page bodies parsed once per page, not per row), so the read never parses saved
@@ -11148,7 +11149,7 @@ export async function listRecruitingCandidates(
       >(Prisma.sql`${filtered}, ordered AS (
         SELECT *, ${sortValue} AS "sortValue" FROM filtered
       ), candidate_page AS (
-        SELECT * FROM ordered WHERE ${after} ORDER BY ${order} LIMIT ${limit + 1}
+        SELECT * FROM ordered WHERE ${after} ORDER BY ${order} LIMIT ${limit + 1} OFFSET ${input.offset ?? 0}
       ), totals AS (
         SELECT (SELECT count(*) FROM filtered) AS "total",
           (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
