@@ -959,7 +959,7 @@ msgstr "जारी नहीं रखा जा सका"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create group"
-msgstr ""
+msgstr "समूह नहीं बनाया जा सका"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create role"

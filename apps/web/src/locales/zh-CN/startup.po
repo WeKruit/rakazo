@@ -959,11 +959,11 @@ msgstr "无法继续"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create group"
-msgstr ""
+msgstr "无法创建群组"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create role"
-msgstr ""
+msgstr "无法创建岗位"
 
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx

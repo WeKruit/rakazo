@@ -959,7 +959,7 @@ msgstr "Devam edilemedi"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create group"
-msgstr ""
+msgstr "Grup oluşturulamadı"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create role"

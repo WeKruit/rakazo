@@ -959,7 +959,7 @@ msgstr "Не удалось продолжить"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create group"
-msgstr ""
+msgstr "Не удалось создать группу"
 
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not create role"
