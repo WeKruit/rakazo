@@ -11,6 +11,7 @@ export default defineConfig({
     "recruiting-app-routes.spec.ts",
     "mail-reply-cards.spec.ts",
     "sender-confirmation-cards.spec.ts",
+    "recruiting-mobile-directory.spec.ts",
   ],
   workers: 1,
   outputDir: "../../test-report/e2e/global-routes",
