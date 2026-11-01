@@ -83,6 +83,9 @@ async function requireRecruitingRun(
   if (run.threadId !== trusted.threadId || run.botId !== trusted.botId) throw new IsolationError();
 }
 
+/** People per numbered page of a candidate list read. */
+const PAGE_SIZE = 10;
+
 export async function executeRecruitingCandidatesTool(
   deps: {
     prisma: PrismaClient;
@@ -220,8 +223,12 @@ export async function executeRecruitingCandidatesTool(
         : result;
     }
     if (input.operation === "list") {
-      const { operation: _operation, roleId: namedRoleId, ...query } = input;
+      const { operation: _operation, roleId: namedRoleId, page, ...query } = input;
       const listRoleId = roleId ?? namedRoleId;
+      if (page !== undefined && query.cursor === undefined) {
+        query.limit ??= PAGE_SIZE;
+        Object.assign(query, { offset: (page - 1) * query.limit });
+      }
       if (!listRoleId) {
         succeeded = true;
         return { status: "no_current_role" as const };

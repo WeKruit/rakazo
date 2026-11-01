@@ -5944,7 +5944,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           args: Record<string, unknown>,
           result: unknown,
         ): Promise<object | undefined> => {
-          const items = (result as { items?: Array<{ candidateKey?: unknown }> } | null)?.items;
+          const page = result as {
+            items?: Array<{ candidateKey?: unknown }>;
+            total?: unknown;
+          } | null;
+          const items = page?.items;
           if (
             !thread.groupId?.startsWith("recruiting-global-") ||
             args.operation !== "list" ||
@@ -5959,24 +5963,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { title: true, sourceThreadId: true },
           });
           if (!role) return undefined;
+          const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
+          const shown = items.slice(0, size);
+          const first =
+            typeof args.page === "number" && args.cursor === undefined
+              ? (args.page - 1) * size + 1
+              : undefined;
+          const total = typeof page?.total === "number" ? page.total : undefined;
+          // Where this page sits, so the recruiter can ask for the next, previous or any page.
+          const range =
+            first !== undefined
+              ? ` · ${first}–${first + shown.length - 1}${total !== undefined ? ` / ${total}` : ""}`
+              : total !== undefined && total > shown.length
+                ? ` · 1–${shown.length} / ${total}`
+                : "";
           const text = await recruitingRoundListText(deps.prisma, {
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
-            candidateKeys: items
-              .slice(0, typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE)
-              .flatMap((item) =>
-                typeof item.candidateKey === "string" ? [item.candidateKey] : [],
-              ),
+            candidateKeys: shown.flatMap((item) =>
+              typeof item.candidateKey === "string" ? [item.candidateKey] : [],
+            ),
             knownOnly: true,
-            heading: `${role.title}:`,
+            heading: `${role.title}${range}:`,
           });
           if (!text) return undefined;
           await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
           return {
             ...(result as object),
             shownInChat:
-              "These people are already listed in chat as the role team lists them. Do not list them again; add at most one line, such as that nobody is graded yet.",
+              "These people are already listed in chat as the role team lists them, with their place in the list. Do not list them again; add at most one line, such as that nobody is graded yet. For the next, previous or any other page, call list again with the same roleId and page.",
           };
         };
         const showRoundList = async (text: string) => {

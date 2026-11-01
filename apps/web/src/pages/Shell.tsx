@@ -210,7 +210,9 @@ export function ShellPage() {
     function openLinkedConversation(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const anchor = (event.target as Element | null)?.closest?.(".rk-chat-markdown a[href]");
+      const anchor = (event.target as Element | null)?.closest?.(
+        ".rk-chat-markdown a[href], a[href][data-stacked-conversation]",
+      );
       if (!(anchor instanceof HTMLAnchorElement)) return;
       const target = stackedConversationTarget(anchor.href, window.location.origin);
       if (!target || !groups.some((group) => group.id === target.groupId)) return;
