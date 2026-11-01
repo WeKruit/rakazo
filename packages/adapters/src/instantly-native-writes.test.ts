@@ -4,7 +4,7 @@ import {
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
-  ownedInstantlyCampaigns,
+  ownedInstantly,
   ownedInstantlyRest,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
@@ -223,7 +223,10 @@ describe("shared mail account isolation", () => {
 
   it("reads and changes only this account's own campaigns", async () => {
     const rest = account();
-    const own = ownedInstantlyRest(rest as never, new Set([MINE]));
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(),
+    });
     await expect(own("GET", `/campaigns/${MINE}`)).resolves.toMatchObject({ ok: true });
     await expect(own("POST", `/campaigns/${MINE}/activate`)).resolves.toMatchObject({ ok: true });
     await expect(own("POST", "/leads/list", { campaign: MINE })).resolves.toMatchObject({
@@ -247,7 +250,7 @@ describe("shared mail account isolation", () => {
 
   it("never finds another account's campaign by name and owns the one it creates", async () => {
     const rest = account();
-    const own = ownedInstantlyRest(rest as never, new Set());
+    const own = ownedInstantlyRest(rest as never, { campaigns: new Set(), mailboxes: new Set() });
     await expect(own("GET", "/campaigns?search=Founding%20Engineer&limit=100")).resolves.toEqual({
       items: [],
     });
@@ -266,7 +269,7 @@ describe("shared mail account isolation", () => {
         "server",
         "native_instantly_create_campaign",
         {},
-        new Set(),
+        { campaigns: new Set(), mailboxes: new Set() },
       ),
     ).rejects.toThrow("ensure_role_campaign");
     await expect(
@@ -277,29 +280,58 @@ describe("shared mail account isolation", () => {
         "server",
         "native_instantly_get_campaign",
         { campaign_id: THEIRS },
-        new Set([MINE]),
+        { campaigns: new Set([MINE]), mailboxes: new Set() },
       ),
     ).rejects.toThrow("does not belong to this account");
     expect(rest).not.toHaveBeenCalled();
   });
 
-  it("lists the campaigns bound to this connection's roles", async () => {
+  it("lists and uses only this account's own sending mailboxes", async () => {
+    const rest = vi.fn(async (method: string, path: string) =>
+      path.startsWith("/accounts?")
+        ? { items: [{ email: "Me@Ours.test" }, { email: "them@other.test" }] }
+        : method === "POST" && path === "/campaigns"
+          ? { id: NEW }
+          : { ok: true },
+    );
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(["me@ours.test"]),
+    });
+    await expect(own("GET", "/accounts?limit=100")).resolves.toEqual({
+      items: [{ email: "Me@Ours.test" }],
+    });
+    await expect(own("GET", "/accounts/me%40ours.test")).resolves.toEqual({ ok: true });
+    await expect(own("POST", "/campaigns", { email_list: ["me@ours.test"] })).resolves.toEqual({
+      id: NEW,
+    });
+    for (const [method, path, body] of [
+      ["GET", "/accounts/them%40other.test"],
+      ["POST", "/campaigns", { email_list: ["them@other.test"] }],
+      ["PATCH", `/campaigns/${MINE}`, { email_list: ["me@ours.test", "them@other.test"] }],
+      ["POST", "/emails/reply", { eaccount: "them@other.test", reply_to_uuid: MINE }],
+    ] as const)
+      await expect(own(method, path, body)).rejects.toThrow("mailbox does not belong");
+  });
+
+  it("finds the campaigns and senders this connection owns", async () => {
     const findMany = vi.fn(async () => [
-      { result: { campaignId: MINE } },
-      { result: { campaignId: MINE } },
-      { result: null },
+      { kind: "instantly_role_campaign", result: { campaignId: MINE, eaccount: "Me@Ours.test" } },
+      { kind: "instantly_role_campaign", result: { campaignId: MINE } },
+      { kind: "instantly_sender_account", result: { email: "second@ours.test" } },
+      { kind: "instantly_role_campaign", result: null },
     ]);
     await expect(
-      ownedInstantlyCampaigns({ externalEffect: { findMany } } as never, "s", "server"),
-    ).resolves.toEqual([MINE]);
+      ownedInstantly({ externalEffect: { findMany } } as never, "s", "server"),
+    ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["me@ours.test", "second@ours.test"] });
     expect(findMany).toHaveBeenCalledWith({
       where: {
         spaceId: "s",
-        kind: "instantly_role_campaign",
+        kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
         status: "completed",
         request: { path: ["serverId"], equals: "server" },
       },
-      select: { result: true },
+      select: { kind: true, result: true },
     });
   });
 });

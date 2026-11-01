@@ -369,6 +369,8 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
   } catch (error) {
     if (error instanceof InstantlyRestError && error.status === 404)
       throw new Error(`${eaccount} is not one of your connected Instantly mailboxes`);
+    if (error instanceof IsolationError)
+      throw new Error(`${eaccount} is not one of this account's sending mailboxes`);
     throw error;
   }
 }
@@ -618,7 +620,10 @@ async function defaultMailbox(
     .filter((email): email is string => typeof email === "string");
   const last = await lastUsedMailbox(prisma, context.spaceId, serverId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked) throw new Error("No Instantly mailbox is connected; connect one in Instantly first");
+  if (!picked)
+    throw new Error(
+      "No sending mailbox is set up for this account yet; tell the recruiter instead of creating a campaign",
+    );
   return picked;
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -679,62 +684,94 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
   );
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
-/** Every campaign this mail connection's roles are bound to. */
-export async function ownedInstantlyCampaigns(
+/** What one connection owns on the shared mail account: its roles' campaigns and senders. */
+export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
+
+const mailboxKey = (email: string) => email.trim().toLowerCase();
+
+/**
+ * Every campaign this mail connection's roles are bound to, and every sending mailbox it has
+ * confirmed: one recorded as a sender for this connection, or one its own campaigns already use.
+ */
+export async function ownedInstantly(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
   serverId: string,
-): Promise<string[]> {
+): Promise<{ campaigns: string[]; mailboxes: string[] }> {
   const effects = await prisma.externalEffect.findMany({
     where: {
       spaceId,
-      kind: "instantly_role_campaign",
+      kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
       status: "completed",
       request: { path: ["serverId"], equals: serverId },
     },
-    select: { result: true },
+    select: { kind: true, result: true },
   });
-  const ids = effects.map(({ result }) => (result as Partial<RoleBinding> | null)?.campaignId);
-  return [...new Set(ids.filter((id): id is string => typeof id === "string"))].sort();
+  const campaigns = new Set<string>();
+  const mailboxes = new Set<string>();
+  for (const { kind, result } of effects) {
+    const value = (result ?? {}) as Partial<RoleBinding> & { email?: unknown };
+    if (kind === "instantly_role_campaign" && typeof value.campaignId === "string")
+      campaigns.add(value.campaignId);
+    const sender = kind === "instantly_sender_account" ? value.email : value.eaccount;
+    if (typeof sender === "string" && sender.includes("@")) mailboxes.add(mailboxKey(sender));
+  }
+  return { campaigns: [...campaigns].sort(), mailboxes: [...mailboxes].sort() };
 }
 
 const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause))?$/i;
 
 /**
  * The shared account's REST boundary: only this connection's own campaigns (and one it creates in
- * this call) can be read or changed, and nothing searches or deduplicates across the account.
+ * this call) can be read or changed, only its own sending mailboxes are listed or used, and
+ * nothing searches or deduplicates across the account.
  */
-export function ownedInstantlyRest(rest: InstantlyRest, owned: ReadonlySet<string>): InstantlyRest {
-  const mine = new Set(owned);
-  const refuse = () => {
-    throw new IsolationError("That campaign does not belong to this account");
+export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): InstantlyRest {
+  const mine = new Set(owned.campaigns);
+  const refuse = (what = "campaign") => {
+    throw new IsolationError(`That ${what} does not belong to this account`);
   };
   const own = (id: unknown) => {
     if (typeof id !== "string" || !mine.has(id)) refuse();
+  };
+  const sender = (email: unknown) =>
+    typeof email === "string" && owned.mailboxes.has(mailboxKey(email));
+  const senders = (list: unknown) => {
+    if (list !== undefined && (!Array.isArray(list) || !list.every(sender))) refuse("mailbox");
   };
   return async (method, path, body) => {
     const [route, query = ""] = path.split("?");
     const fields = (body ?? {}) as Record<string, unknown>;
     if (route === "/campaigns" && method === "GET") return { items: [] };
+    if (route === "/accounts" && method === "GET") {
+      const listed = await rest(method, path, body);
+      const items = Array.isArray(listed.items) ? (listed.items as { email?: unknown }[]) : [];
+      return { items: items.filter((item) => sender(item.email)) };
+    }
+    if (route!.startsWith("/accounts/")) {
+      if (method !== "GET" || !sender(decodeURIComponent(route!.slice("/accounts/".length))))
+        refuse("mailbox");
+      return rest(method, path, body);
+    }
     if (route === "/campaigns" && method === "POST") {
+      senders(fields.email_list);
       const created = await rest(method, path, body);
       if (typeof created.id === "string") mine.add(created.id);
       return created;
     }
     const campaign = CAMPAIGN_PATH.exec(route!);
-    if (campaign) own(campaign[1]);
-    else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
+    if (campaign) {
+      own(campaign[1]);
+      senders(fields.email_list);
+    } else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
     else if (route === "/leads/list") own(fields.campaign);
     else if (route === "/leads/add") {
       own(fields.campaign_id);
       if (fields.skip_if_in_workspace) refuse();
     } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
-    else if (
-      !route!.startsWith("/accounts") &&
-      !route!.startsWith("/emails") &&
-      !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)
-    )
-      refuse();
+    else if (route === "/emails/reply") {
+      if (!sender(fields.eaccount)) refuse("mailbox");
+    } else if (!route!.startsWith("/emails") && !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)) refuse();
     return rest(method, path, body);
   };
 }
@@ -2181,8 +2218,8 @@ export async function runInstantlyWrite(
   serverId: string,
   toolName: string,
   args: unknown,
-  /** Set on the shared account: the campaigns this connection owns. */
-  owned?: ReadonlySet<string>,
+  /** Set on the shared account: the campaigns and senders this connection owns. */
+  owned?: OwnedInstantly,
 ): Promise<unknown> {
   if (owned && toolName === "native_instantly_create_campaign")
     throw new IsolationError("Use ensure_role_campaign to create this role's campaign");

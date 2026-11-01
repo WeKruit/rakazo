@@ -49,7 +49,7 @@ import {
   instantlyRest,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
-  ownedInstantlyCampaigns,
+  ownedInstantly,
   readRoleCampaignBinding,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
@@ -1548,8 +1548,11 @@ export class McpConnector implements ConnectorProvider {
         call.route!.toolName,
         call.args,
         sharedInstantlyAccount(credential.server)
-          ? new Set(
-              await ownedInstantlyCampaigns(this.prisma, context.spaceId, credential.server.id),
+          ? await ownedInstantly(this.prisma, context.spaceId, credential.server.id).then(
+              (owned) => ({
+                campaigns: new Set(owned.campaigns),
+                mailboxes: new Set(owned.mailboxes),
+              }),
             )
           : undefined,
       );
@@ -1748,7 +1751,7 @@ export class McpConnector implements ConnectorProvider {
       select: { secretId: true, transport: true, endpoint: true },
     });
     if (!server || !sharedInstantlyAccount(server)) return null;
-    const campaignIds = await ownedInstantlyCampaigns(this.prisma, context.spaceId, serverId);
+    const { campaigns: campaignIds } = await ownedInstantly(this.prisma, context.spaceId, serverId);
     if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
   }

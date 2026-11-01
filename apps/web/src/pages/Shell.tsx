@@ -415,7 +415,6 @@ export function ShellPage() {
             model.workspaceBrief ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
-          start={visibleSidebarWidth}
           onOpen={(id) => openStacked(id)}
         />
       )}

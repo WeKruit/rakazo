@@ -27,6 +27,9 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     navigate,
     groups,
     archivedGroups,
+    archivedGroupTotal,
+    archivedGroupPage,
+    openArchivedGroupPage,
     archivedOpen,
     setArchivedOpen,
     query,
@@ -169,6 +172,9 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             }
             groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
             archivedGroups={archivedGroups}
+            archivedGroupTotal={archivedGroupTotal}
+            archivedGroupPage={archivedGroupPage}
+            onArchivedGroupPage={(page) => void openArchivedGroupPage(page).catch(() => undefined)}
             archivedOpen={archivedOpen}
             groupId={roleGroup ?? undefined}
             query={query}

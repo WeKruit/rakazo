@@ -25,6 +25,26 @@ import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
 import { getToolActivityEnabled, subscribeToolActivity } from "../../lib/tool-activity-preference";
 import { sidebarGroupsForSpaces } from "../shell/space-sidebar";
 
+export const ARCHIVED_GROUPS_PER_PAGE = 20;
+
+/** One page of archived roles and their total; a routed archived role is added so its link opens. */
+async function readArchivedGroups(page: number, routedId: string | null) {
+  const read = await rpc.groups.page({
+    archived: true,
+    offset: page * ARCHIVED_GROUPS_PER_PAGE,
+    limit: ARCHIVED_GROUPS_PER_PAGE,
+  });
+  let groups = read.items;
+  if (routedId && !groups.some((group) => group.id === routedId)) {
+    const routed = await rpc.groups.get({ groupId: routedId }).catch(() => null);
+    if (routed?.archivedAt) {
+      const { messages: _messages, ...group } = routed;
+      groups = [...groups, group];
+    }
+  }
+  return { groups, total: read.total ?? read.items.length, page };
+}
+
 function collapsedSidebarSectionsStorageKey(userId: string | null | undefined): string | null {
   if (!userId) return null;
   return `rakazo:collapsed-sidebar-sections:${userId}`;
@@ -124,6 +144,18 @@ export function useShellRoster({
   const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
   const archivedGroupsRef = useRef(archivedGroups);
   archivedGroupsRef.current = archivedGroups;
+  const [archivedGroupTotal, setArchivedGroupTotal] = useState(0);
+  const [archivedGroupPage, setArchivedGroupPage] = useState(0);
+  const archivedGroupPageRef = useRef(archivedGroupPage);
+  archivedGroupPageRef.current = archivedGroupPage;
+  const applyArchivedGroups = useCallback(
+    (read: Awaited<ReturnType<typeof readArchivedGroups>>) => {
+      setArchivedGroups(read.groups);
+      setArchivedGroupTotal(read.total);
+      setArchivedGroupPage(read.page);
+    },
+    [],
+  );
 
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState(() => new Set<string>());
   const [collapsedRosterParents, setCollapsedRosterParents] = useState(() => new Set<string>());
@@ -178,6 +210,18 @@ export function useShellRoster({
     (isAccountRecruitingView(searchParamsRef.current.get("view")) ||
       ["analytics", "roles"].includes(searchParamsRef.current.get("view") ?? ""));
 
+  const archivedPageRequest = useRef(0);
+  const openArchivedGroupPage = useCallback(
+    (page: number) => {
+      const request = ++archivedPageRequest.current;
+      const user = botsRefreshUser.current;
+      return readArchivedGroups(page, null).then((read) => {
+        if (request === archivedPageRequest.current && user === botsRefreshUser.current)
+          applyArchivedGroups(read);
+      });
+    },
+    [applyArchivedGroups, botsRefreshUser],
+  );
   const refreshBots = useCallback(
     (includeArchived = false, replaceBotOrder = false) => {
       const user = botsRefreshUser.current;
@@ -209,10 +253,19 @@ export function useShellRoster({
             const requests = [
               rpc.spaces.list(),
               includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
-              includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
+              includeArchived
+                ? readArchivedGroups(
+                    archivedGroupPageRef.current,
+                    routeGroupId.current &&
+                      !groupsRef.current.some((group) => group.id === routeGroupId.current)
+                      ? routeGroupId.current
+                      : null,
+                  )
+                : Promise.resolve(null),
             ] as const;
             try {
-              const [navigation, archived, archivedGroupList] = await Promise.all(requests);
+              const [navigation, archived, archivedGroupRead] = await Promise.all(requests);
+              const archivedGroupList = archivedGroupRead?.groups ?? null;
               if (user !== botsRefreshUser.current) continue;
               const { bots: list, botSections: sections, groups: groupList } = navigation.current;
               markOnce("rk:renderer:bots-response");
@@ -226,7 +279,7 @@ export function useShellRoster({
               }
               if (!botsFresh && !archivedFresh) continue;
               if (archivedFresh && archived) setArchivedBots(archived);
-              if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
+              if (archivedFresh && archivedGroupRead) applyArchivedGroups(archivedGroupRead);
               if (!botsFresh) continue;
               if (
                 botOrderEpoch === botOrderEpochRef.current &&
@@ -401,16 +454,19 @@ export function useShellRoster({
         }
         if (!applyBotLists) return;
         // The archived lists were left out of the first read and fill in behind it.
-        const archived = Promise.all([rpc.bots.listArchived(), rpc.groups.listArchived()]).then(
-          ([archivedBotList, archivedGroupList]) => {
-            if (cancelled || botsRefreshUser.current !== user) return null;
-            if (appliedAtStart === botsRefreshApplied.current) {
-              setArchivedBots(archivedBotList);
-              setArchivedGroups(archivedGroupList);
-            }
-            return archivedGroupList;
-          },
-        );
+        const routedArchived =
+          groupId && !groupList.some((group) => group.id === groupId) ? groupId : null;
+        const archived = Promise.all([
+          rpc.bots.listArchived(),
+          readArchivedGroups(0, routedArchived),
+        ]).then(([archivedBotList, archivedGroupRead]) => {
+          if (cancelled || botsRefreshUser.current !== user) return null;
+          if (appliedAtStart === botsRefreshApplied.current) {
+            setArchivedBots(archivedBotList);
+            applyArchivedGroups(archivedGroupRead);
+          }
+          return archivedGroupRead.groups;
+        });
         if (recruiting && isAccountRoute()) {
           void archived.catch(() => undefined);
           return;
@@ -629,6 +685,9 @@ export function useShellRoster({
     setSpaces,
     archivedBots,
     archivedGroups,
+    archivedGroupTotal,
+    archivedGroupPage,
+    openArchivedGroupPage,
     collapsedSidebarSections,
     collapsedRosterParents,
     query,

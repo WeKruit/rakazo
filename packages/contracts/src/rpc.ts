@@ -226,6 +226,7 @@ const listPageFields = { offset: z.number().int().min(0).max(1000000).optional()
 const sidebarPage = z.object({
   offset: z.number().int().min(0).default(0),
   archived: z.boolean().default(false),
+  limit: z.number().int().min(1).max(200).optional(),
 });
 
 const TurnMs = z.number().int().nonnegative().max(86_400_000);
@@ -559,11 +560,13 @@ export const appContract = {
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),
-    page: oc
-      .input(sidebarPage)
-      .output(
-        z.object({ items: z.array(GroupSchema).max(200), nextOffset: z.number().int().nullable() }),
-      ),
+    page: oc.input(sidebarPage).output(
+      z.object({
+        items: z.array(GroupSchema).max(200),
+        nextOffset: z.number().int().nullable(),
+        total: z.number().int().nonnegative().optional(),
+      }),
+    ),
     list: oc.output(z.array(GroupSchema).max(200)),
     listArchived: oc.output(z.array(GroupSchema).max(200)),
     get: oc.input(groupId).output(GroupDetailSchema),

@@ -199,6 +199,12 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       archive: shellApi.archiveGroup,
       restore: shellApi.restoreGroup,
       listArchived: shellApi.listArchivedGroups,
+      // Tests hold few archived roles; one page returns the same list the test mutates.
+      page: async () => {
+        const items = await shellApi.listArchivedGroups();
+        return { items, nextOffset: null, total: items.length };
+      },
+      get: vi.fn().mockRejectedValue(new Error("not found")),
     },
     bots: {
       listArchived: shellApi.listArchivedBots,
@@ -787,6 +793,9 @@ it("restarts the CRM role catalog after native invalidation without dispatching 
           kruitHref="/app?view=conversation"
           groups={[]}
           archivedGroups={[]}
+          archivedGroupTotal={0}
+          archivedGroupPage={0}
+          onArchivedGroupPage={vi.fn()}
           archivedOpen={false}
           query=""
           view="results"
@@ -1399,6 +1408,9 @@ async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingRea
         kruitHref="/app?view=conversation"
         groups={[]}
         archivedGroups={[]}
+        archivedGroupTotal={0}
+        archivedGroupPage={0}
+        onArchivedGroupPage={vi.fn()}
         archivedOpen={false}
         query=""
         view="results"
