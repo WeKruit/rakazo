@@ -4690,7 +4690,7 @@ describe("local native Instantly campaign and lead tools", () => {
     }));
     expect((await f.run("ensure_role_campaign", { role_id: "role-3" }))[0]).toMatchObject({
       type: "error",
-      message: expect.stringMatching(/No Instantly mailbox is connected/),
+      message: expect.stringMatching(/No sending mailbox is set up/),
     });
   });
 
