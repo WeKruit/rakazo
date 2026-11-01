@@ -99,15 +99,13 @@ for (const width of [320, 1440]) {
     await page.getByRole("combobox", { name: "Sequence", exact: true }).selectOption({ index: 1 });
     await page.getByRole("button", { name: "Preview steps", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("Actual saved sequence email for review.");
-    await test
-      .info()
-      .attach(`enrollment-preview-${width}`, {
-        body: await page.screenshot({
-          path: test.info().outputPath(`enrollment-preview-${width}.png`),
-          fullPage: true,
-        }),
-        contentType: "image/png",
-      });
+    await test.info().attach(`enrollment-preview-${width}`, {
+      body: await page.screenshot({
+        path: test.info().outputPath(`enrollment-preview-${width}.png`),
+        fullPage: true,
+      }),
+      contentType: "image/png",
+    });
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(commands).toEqual(["read"]);
     await page

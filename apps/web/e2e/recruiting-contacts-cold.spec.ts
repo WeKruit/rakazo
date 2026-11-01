@@ -27,15 +27,13 @@ test("cold contacts retain directory, keyboard detail navigation, and return foc
     "deployment scale is not stated",
   );
   await panel.getByRole("button", { name: "Collapse profile", exact: true }).click();
-  await test
-    .info()
-    .attach("profile-drawer-1440", {
-      body: await page.screenshot({
-        path: test.info().outputPath("profile-drawer-1440.png"),
-        fullPage: true,
-      }),
-      contentType: "image/png",
-    });
+  await test.info().attach("profile-drawer-1440", {
+    body: await page.screenshot({
+      path: test.info().outputPath("profile-drawer-1440.png"),
+      fullPage: true,
+    }),
+    contentType: "image/png",
+  });
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await expect(person).toBeFocused();

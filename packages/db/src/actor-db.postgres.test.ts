@@ -55,9 +55,15 @@ suite("first-batch RLS with a real restricted role", () => {
         "utf8",
       ),
     );
-    await sql.query('DROP POLICY rakazo_actor_isolation ON recruiting_inbox_messages');
-    await sql.query('ALTER TABLE recruiting_inbox_messages DISABLE ROW LEVEL SECURITY');
-    const projectionMigration = await readFile(new URL("../prisma/migrations/20261101150000_recruiting_inbox_projection/migration.sql", import.meta.url), "utf8");
+    await sql.query("DROP POLICY rakazo_actor_isolation ON recruiting_inbox_messages");
+    await sql.query("ALTER TABLE recruiting_inbox_messages DISABLE ROW LEVEL SECURITY");
+    const projectionMigration = await readFile(
+      new URL(
+        "../prisma/migrations/20261101150000_recruiting_inbox_projection/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     await sql.query(projectionMigration.slice(projectionMigration.indexOf("DO $rls$")));
     await sql.query(`CREATE ROLE ${role} LOGIN NOSUPERUSER NOBYPASSRLS`);
     await sql.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
@@ -808,7 +814,7 @@ suite("first-batch RLS with a real restricted role", () => {
     client.release();
     for (let round = 0; round < 4; round++) {
       const results = await Promise.all(
-        actors.map((actor, index) =>
+        actors.map((_actor, index) =>
           run(
             index,
             () =>

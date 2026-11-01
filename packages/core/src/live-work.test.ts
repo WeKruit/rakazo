@@ -19,8 +19,8 @@ import {
   workStageLabel,
   workStageMessages,
   workStepDetail,
-  writesChinese,
   workTimeline,
+  writesChinese,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
