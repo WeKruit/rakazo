@@ -4211,9 +4211,24 @@ export function reliableStreamOptions(
       onPayload: async (payload, payloadModel) => {
         const shaped = (await callerPayload?.(payload, payloadModel)) ?? payload;
         if (!shaped || typeof shaped !== "object" || !("prompt_cache_key" in shaped)) return shaped;
-        const body = shaped as { prompt_cache_key?: unknown; tools?: unknown };
+        const body = shaped as { prompt_cache_key?: unknown; tools?: unknown; input?: unknown };
         if (!body.prompt_cache_key) return shaped;
-        return { ...body, prompt_cache_key: promptCacheKey(body.tools) };
+        const key = promptCacheKey(body.tools);
+        // Which part of the prefix changed when a new run misses the cache.
+        const first = Array.isArray(body.input) ? body.input[0] : undefined;
+        const digest = (value: unknown) =>
+          createHash("sha256")
+            .update(JSON.stringify(value ?? null))
+            .digest("hex")
+            .slice(0, 12);
+        getLogger().info("model.prompt.prefix", {
+          sessionId: next.sessionId,
+          promptCacheKey: key,
+          systemSha: digest(first),
+          systemChars: JSON.stringify(first ?? null).length,
+          inputItems: Array.isArray(body.input) ? body.input.length : null,
+        });
+        return { ...body, prompt_cache_key: key };
       },
     };
   }
