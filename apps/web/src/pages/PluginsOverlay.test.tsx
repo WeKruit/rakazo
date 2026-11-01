@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   connect: vi.fn(),
   approve: vi.fn(),
   setup: vi.fn(),
+  disconnect: vi.fn(),
 }));
 vi.mock("../lib/rpc", () => ({
   rpc: {
@@ -22,6 +23,7 @@ vi.mock("../lib/rpc", () => ({
     mcp: {
       servers: { list: api.servers },
       assignments: { all: api.assignments, approve: api.approve },
+      oauth: { disconnect: api.disconnect },
     },
   },
 }));
@@ -295,6 +297,27 @@ it("checks fresh native state after OAuth rather than treating its completion si
   expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain("Configured");
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(api.approve).not.toHaveBeenCalled();
+});
+
+it("disconnects a personal service so it can be connected again, and shows each service's logo", async () => {
+  const endpoint = "https://gmailmcp.googleapis.com/mcp/v1";
+  api.servers.mockResolvedValue([
+    server("Mailbox", { endpoint, oauthStatus: "connected", hasSecret: true }),
+    server("Research", { platformCredentialConfigured: true }),
+  ]);
+  api.assignments.mockResolvedValue([assignment("Mailbox"), assignment("Research")]);
+  api.disconnect.mockResolvedValue({ ok: true });
+  const host = await open();
+  const mailbox = () => host.querySelector('[data-service-id="Mailbox"]')!;
+  expect(mailbox().querySelector("img")?.getAttribute("src")).toBe("/connectors/gmail.png");
+  expect(host.querySelector('[data-service-id="Research"]')?.textContent).not.toContain(
+    "Disconnect",
+  );
+  api.servers.mockResolvedValue([server("Mailbox", { endpoint })]);
+  await act(async () => button(host, "Disconnect").click());
+  expect(api.disconnect).toHaveBeenCalledWith({ serverId: "Mailbox" });
+  expect(mailbox().textContent).toContain("Needs connection");
+  expect(mailbox().textContent).toContain("Connect");
 });
 
 it("keeps an unassigned service unconfigured when its account authorization fails", async () => {
