@@ -235,7 +235,10 @@ try {
   await check("title", async (page, failures) => {
     const before = new Set(all.map((group) => group.id));
     await page.goto(`${ORIGIN}/`);
-    await page.getByRole("button", { name: /^New role$/i }).first().click();
+    await page
+      .getByRole("button", { name: /^New role$/i })
+      .first()
+      .click();
     const title = `${FIXTURE_MARK}仓库主管 ${new Date().toISOString().slice(5, 16)}`;
     const jd = `${title}\n地点：Dallas，现场办公。要求：3 年以上仓库主管经验，带过 20 人以上的团队。`;
     const box = page.getByRole("textbox", { name: "Job description", exact: true });
@@ -274,24 +277,32 @@ try {
 
   await check("reminder", async (page, failures) => {
     if (!fixtureRole) return failures.push(`no ${FIXTURE_MARK}role on this account`);
-    await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}`);
-    const composer = page.locator('fieldset[aria-label="Message composer"]').first();
-    await composer.waitFor({ timeout: 20_000 });
-    await sleep(3_000);
-    const box = await composer.boundingBox();
-    // The dock: the reminder pill or the Kruit button, whichever shows.
-    const dock = page
-      .locator('[role="status"]', { hasText: /need(s)? your attention/i })
-      .or(page.getByRole("button", { name: /^Kruit/ }));
-    for (const item of await dock.all()) {
-      const corner = await item.boundingBox();
-      if (!box || !corner) continue;
-      const overlap =
-        corner.x < box.x + box.width &&
-        corner.x + corner.width > box.x &&
-        corner.y < box.y + box.height &&
-        corner.y + corner.height > box.y;
-      if (overlap) failures.push("the corner reminder covers the composer");
+    // Desktop and phone: the composer reaches the right edge on a phone, where the dock is most
+    // likely to land on it.
+    for (const [label, viewport] of [
+      ["desktop", { width: 1440, height: 900 }],
+      ["phone", { width: 390, height: 844 }],
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}`);
+      const composer = page.locator('fieldset[aria-label="Message composer"]').first();
+      await composer.waitFor({ timeout: 20_000 });
+      await sleep(3_000);
+      const box = await composer.boundingBox();
+      // The dock: the reminder pill or the Kruit button, whichever shows.
+      const dock = page
+        .locator('[role="status"]', { hasText: /need(s)? your attention/i })
+        .or(page.getByRole("button", { name: /^Kruit/ }));
+      for (const item of await dock.all()) {
+        const corner = await item.boundingBox();
+        if (!box || !corner) continue;
+        const overlap =
+          corner.x < box.x + box.width &&
+          corner.x + corner.width > box.x &&
+          corner.y < box.y + box.height &&
+          corner.y + corner.height > box.y;
+        if (overlap) failures.push(`the corner reminder covers the composer (${label})`);
+      }
     }
   });
 } finally {
