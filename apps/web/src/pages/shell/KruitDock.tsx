@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -14,13 +14,16 @@ export function KruitDock({
   groupId,
   chatting = false,
   onOpen,
+  onBack,
 }: {
   groups: Group[];
   /** The open conversation: its own card is already in view. */
   groupId?: string;
-  /** A conversation is open: no button over its composer, only cards from elsewhere. */
+  /** A chat is on screen: no button over its composer, and cards sit at the top instead. */
   chatting?: boolean;
   onOpen: (groupId: string) => void;
+  /** Return to where the recruiter was before opening a card from here. */
+  onBack?: () => void;
 }) {
   const { t } = useLingui();
   const kruit = groups.find((group) => group.id.startsWith("recruiting-global-"));
@@ -31,13 +34,18 @@ export function KruitDock({
   // The card pops up for each new wait; closing it keeps it closed until something changes.
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
-  if (chatting ? !waiting.length : !kruit && !waiting.length) return null;
   const showCard = waiting.length > 0 && (opened || closedFor !== key);
-  if (chatting && !showCard) return null;
+  if (!onBack && (chatting ? !showCard : !kruit && !waiting.length)) return null;
   return (
     <div
-      className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "bottom-28" : "bottom-4"}`}
+      className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "top-20" : "bottom-4"}`}
     >
+      {onBack ? (
+        <Button variant="outline" size="sm" className="shadow-lg" onClick={onBack}>
+          <ArrowLeft aria-hidden="true" />
+          <Trans>Back</Trans>
+        </Button>
+      ) : null}
       {showCard ? (
         <div
           role="status"

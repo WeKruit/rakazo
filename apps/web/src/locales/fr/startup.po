@@ -453,6 +453,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
+#: src/pages/shell/KruitDock.tsx
 msgid "Back"
 msgstr "Retour"
 
