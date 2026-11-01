@@ -113,12 +113,16 @@ export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
 });
 export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
 
-export const ThreadSuggestionPayloadSchema = z.object({ text: z.string().min(1).max(200) });
+export const ThreadSuggestionPayloadSchema = z.object({
+  text: z.string().min(1).max(200),
+});
 
 export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
   activeMs: z.number().int().nonnegative().optional(),
-  steps: z.array(z.object({ category: z.string(), count: z.number().int().positive() })),
+  steps: z.array(
+    z.object({ category: z.string(), count: z.number().int().positive() }),
+  ),
   /** Model calls retried after a stalled stream; absent when none were. */
   modelRetries: z.number().int().positive().optional(),
 });
@@ -135,7 +139,13 @@ export const UsageRecordedPayloadSchema = z.object({
 });
 export type UsageRecordedPayload = z.infer<typeof UsageRecordedPayloadSchema>;
 
-export const BotMessageIntent = z.enum(["request", "result", "question", "status", "fyi"]);
+export const BotMessageIntent = z.enum([
+  "request",
+  "result",
+  "question",
+  "status",
+  "fyi",
+]);
 export type BotMessageIntent = z.infer<typeof BotMessageIntent>;
 
 export const MAX_CHART_DATA_ROWS = 5_000;
@@ -146,7 +156,8 @@ function embeddedChartRowCount(spec: Record<string, unknown>): number {
   const specData = Array.isArray(spec.data) ? spec.data.length : 0;
   const markData = Array.isArray(spec.marks)
     ? spec.marks.reduce((total, mark) => {
-        if (!mark || typeof mark !== "object" || !Array.isArray(mark.data)) return total;
+        if (!mark || typeof mark !== "object" || !Array.isArray(mark.data))
+          return total;
         return total + mark.data.length;
       }, 0)
     : 0;
@@ -163,7 +174,11 @@ const ChartBlock = z
     data: z.array(z.any()).max(MAX_CHART_DATA_ROWS),
   })
   .superRefine((block, ctx) => {
-    if (block.data.length + embeddedChartRowCount(block.spec) <= MAX_CHART_DATA_ROWS) return;
+    if (
+      block.data.length + embeddedChartRowCount(block.spec) <=
+      MAX_CHART_DATA_ROWS
+    )
+      return;
     ctx.addIssue({
       code: "custom",
       message: `Chart data exceeds the ${MAX_CHART_DATA_ROWS.toLocaleString("en-US")}-row limit`,
@@ -175,7 +190,10 @@ export type SecretAskPurpose = z.infer<typeof SecretAskPurpose>;
 
 // ponytail: MCP form-mode's flat vocabulary; expand with upstream fields rather
 // than a separate schema engine. Zod's native importer validates formats/bounds.
-const formTitle = { title: z.string().optional(), description: z.string().optional() };
+const formTitle = {
+  title: z.string().optional(),
+  description: z.string().optional(),
+};
 const formOption = z.strictObject({ const: z.string(), title: z.string() });
 const formString = z.strictObject({
   ...formTitle,
@@ -207,14 +225,21 @@ export const AskFormFieldSchema = z.union([
     maximum: z.number().optional(),
     default: z.number().optional(),
   }),
-  z.strictObject({ ...formTitle, type: z.literal("boolean"), default: z.boolean().optional() }),
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("boolean"),
+    default: z.boolean().optional(),
+  }),
   z.strictObject({
     ...formTitle,
     type: z.literal("array"),
     minItems: z.number().int().nonnegative().optional(),
     maxItems: z.number().int().nonnegative().optional(),
     items: z.union([
-      z.strictObject({ type: z.literal("string"), enum: z.array(z.string()).min(1) }),
+      z.strictObject({
+        type: z.literal("string"),
+        enum: z.array(z.string()).min(1),
+      }),
       z.strictObject({ anyOf: z.array(formOption).min(1) }),
     ]),
     default: z.array(z.string()).optional(),
@@ -228,7 +253,10 @@ export const AskRequestedSchema = z
     required: z.array(z.string()).optional(),
   })
   .refine(
-    (schema) => schema.required?.every((name) => Object.hasOwn(schema.properties, name)) ?? true,
+    (schema) =>
+      schema.required?.every((name) =>
+        Object.hasOwn(schema.properties, name),
+      ) ?? true,
     "Required fields must exist",
   );
 export type AskRequestedSchema = z.infer<typeof AskRequestedSchema>;
@@ -243,7 +271,10 @@ export const AskFormResponseSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("decline") }),
 ]);
 export type AskFormResponse = z.infer<typeof AskFormResponseSchema>;
-export const AskAnswerSchema = z.union([z.string().min(1), AskFormResponseSchema]);
+export const AskAnswerSchema = z.union([
+  z.string().min(1),
+  AskFormResponseSchema,
+]);
 export type AskAnswer = z.infer<typeof AskAnswerSchema>;
 
 export function parseAskFormResponse(
@@ -254,17 +285,18 @@ export function parseAskFormResponse(
   if (parsed.action !== "accept") return parsed;
   // JSON Schema defaults are UI suggestions, not implicit user answers.
   const properties = Object.fromEntries(
-    Object.entries(schema.properties).map(([name, { default: _default, ...field }]) => [
-      name,
-      field,
-    ]),
+    Object.entries(schema.properties).map(
+      ([name, { default: _default, ...field }]) => [name, field],
+    ),
   );
   const result = z
     .fromJSONSchema({ ...schema, properties, additionalProperties: false })
     .safeParse(parsed.content);
   if (!result.success)
     throw new Error(
-      result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("\n"),
+      result.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join("\n"),
     );
   const content = result.data;
   return { action: "accept", content: AskFormContent.parse(content) };
@@ -278,7 +310,9 @@ export const AskMultiple = z
   );
 
 /** People-search queries planned on the last recruiting question, run the moment it is answered. */
-export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).max(4);
+export const PlannedPeopleSearchesSchema = z
+  .array(z.string().trim().min(3).max(300))
+  .max(4);
 const askQuestion = {
   question: z
     .string()
@@ -287,6 +321,9 @@ const askQuestion = {
     .describe(
       "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
     ),
+};
+// Last, so the question and its choices stream to the person before the search plan is written.
+const askPlannedSearches = {
   plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
     "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
   ),
@@ -300,8 +337,13 @@ export const AskUserInputSchema = z.union([
       .max(4)
       .refine((values) => new Set(values).size === values.length),
     multiple: AskMultiple.optional(),
+    ...askPlannedSearches,
   }),
-  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
+  z.strictObject({
+    ...askQuestion,
+    requestedSchema: AskRequestedSchema,
+    ...askPlannedSearches,
+  }),
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 
@@ -313,7 +355,10 @@ export const AskConnectionSchema = z.strictObject({
   iconUrl: z
     .string()
     .url()
-    .refine((value) => value.startsWith("https://"), "Expected an HTTPS icon URL")
+    .refine(
+      (value) => value.startsWith("https://"),
+      "Expected an HTTPS icon URL",
+    )
     .optional(),
   /** One sentence on why the agent needs it. */
   reason: z.string().trim().min(1).max(240),
@@ -408,7 +453,13 @@ export const ViewBlockSchema = z.object({
   /** Board layout: the column whose values name the lanes. */
   groupBy: z.string().optional(),
   metrics: z
-    .array(z.object({ label: z.string(), value: z.string(), detail: z.string().optional() }))
+    .array(
+      z.object({
+        label: z.string(),
+        value: z.string(),
+        detail: z.string().optional(),
+      }),
+    )
     .max(8)
     .default([]),
 });
@@ -430,7 +481,9 @@ export const AskBlockSchema = z
     // Records what the runtime could produce under either deployment mode, so
     // an ask persisted before an owner toggles the private-HTTP flag still
     // validates on replay.
-    credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
+    credential: botSecretDestinationSchema({
+      allowPrivateHttpOrigin: true,
+    }).optional(),
     /** expired: the wait ended before anyone answered; the card is closed. */
     status: z.enum(["pending", "answered", "expired"]).optional(),
     /** The options are checkboxes: the answer is every picked label plus any typed text. */
@@ -471,7 +524,9 @@ export const AskBlockSchema = z
     "A connect card cannot be a form, approval, secret or choice card",
   )
   .refine(
-    (block) => !block.formResponse || Boolean(block.requestedSchema && block.status === "answered"),
+    (block) =>
+      !block.formResponse ||
+      Boolean(block.requestedSchema && block.status === "answered"),
     "A form response belongs to an answered form",
   );
 
@@ -499,7 +554,9 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     kind: z.literal("choice"),
     question: z.string(),
     subtitle: z.string().optional(),
-    options: z.array(z.object({ id: z.string(), letter: z.string(), label: z.string() })),
+    options: z.array(
+      z.object({ id: z.string(), letter: z.string(), label: z.string() }),
+    ),
     /** Set once the user picks an option; renders the picker as answered. */
     answerId: z.string().optional(),
   }),
@@ -659,7 +716,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     name: z.string(),
     size: z.number().int().nonnegative(),
     preview: z
-      .object({ label: z.string(), source: ReadRecruitingSourceInput.nullable() })
+      .object({
+        label: z.string(),
+        source: ReadRecruitingSourceInput.nullable(),
+      })
       .optional(),
   }),
   z.object({
@@ -714,14 +774,18 @@ export type MessageBlock = z.infer<typeof MessageBlock>;
 export const RecruitingChangedPayloadSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
 });
-export type RecruitingChangedPayload = z.infer<typeof RecruitingChangedPayloadSchema>;
+export type RecruitingChangedPayload = z.infer<
+  typeof RecruitingChangedPayloadSchema
+>;
 
 export const RecruitingContextAdoptedPayloadSchema = z.strictObject({
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
   contextArtifact: RecruitingArtifactRefSchema,
 });
-export type RecruitingContextAdoptedPayload = z.infer<typeof RecruitingContextAdoptedPayloadSchema>;
+export type RecruitingContextAdoptedPayload = z.infer<
+  typeof RecruitingContextAdoptedPayloadSchema
+>;
 
 export const RecruitingActionTransitionedPayloadSchema = z.strictObject({
   taskId: RecruitingId,
@@ -772,7 +836,9 @@ export const RecruitingMaterialReadPayloadSchema = z.strictObject({
   url: z.httpUrl(),
   readAt: IsoDate,
 });
-export type RecruitingMaterialReadPayload = z.infer<typeof RecruitingMaterialReadPayloadSchema>;
+export type RecruitingMaterialReadPayload = z.infer<
+  typeof RecruitingMaterialReadPayloadSchema
+>;
 
 export const RecruitingSearchesPlannedPayloadSchema = z.strictObject({
   queries: PlannedPeopleSearchesSchema,
@@ -797,17 +863,20 @@ export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
 });
-export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
+export type RecruitingQuestionAskedPayload = z.infer<
+  typeof RecruitingQuestionAskedPayloadSchema
+>;
 
-export const RecruitingProfileViewedPayloadSchema = RecruitingProfileActivityInput.extend({
-  roleTitle: z.string(),
-  /** Exact imported attachment provenance; never an execution or approval receipt. */
-  crmSource: RecruitingCrmRoleReferenceSchema.optional(),
-  crmBindingEffectId: Id.nullable(),
-  viewId: z.uuid(),
-  actorUserId: Id,
-  actorName: z.string().nullable(),
-});
+export const RecruitingProfileViewedPayloadSchema =
+  RecruitingProfileActivityInput.extend({
+    roleTitle: z.string(),
+    /** Exact imported attachment provenance; never an execution or approval receipt. */
+    crmSource: RecruitingCrmRoleReferenceSchema.optional(),
+    crmBindingEffectId: Id.nullable(),
+    viewId: z.uuid(),
+    actorUserId: Id,
+    actorName: z.string().nullable(),
+  });
 
 export const NativeAskAnswerPayloadSchema = z.strictObject({
   messageId: Id,
@@ -815,7 +884,9 @@ export const NativeAskAnswerPayloadSchema = z.strictObject({
   answerMessageId: Id,
   answeredByUserId: Id,
 });
-export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
+export type NativeAskAnswerPayload = z.infer<
+  typeof NativeAskAnswerPayloadSchema
+>;
 
 export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
   approvalEvidenceHash: z
@@ -829,7 +900,9 @@ export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
   answer: z.enum(["allow", "always", "deny"]),
   requestHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
-export type EffectApprovalAnsweredPayload = z.infer<typeof EffectApprovalAnsweredPayloadSchema>;
+export type EffectApprovalAnsweredPayload = z.infer<
+  typeof EffectApprovalAnsweredPayloadSchema
+>;
 
 const RunRequeuedPayloadSchema = z.strictObject({
   status: z.enum(["queued", "waiting_takeover"]),
@@ -839,7 +912,9 @@ const RunRequeuedPayloadSchema = z.strictObject({
  * Typed payloads of stored events. Rows are kept forever and replayed, so a change here (or to
  * the event types or message blocks) must bump EVENT_FORMAT_VERSION; the golden test enforces it.
  */
-export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.ZodType>> = {
+export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<
+  Record<ProductEventType, z.ZodType>
+> = {
   "recruiting.profile.viewed": RecruitingProfileViewedPayloadSchema,
   "recruiting.changed": RecruitingChangedPayloadSchema,
   "recruiting.context.adopted": RecruitingContextAdoptedPayloadSchema,
@@ -875,7 +950,11 @@ export const ProductEventSchema = z
   })
   .superRefine((event, ctx) => {
     if (event.type === "run.requeued" && !event.runId) {
-      ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["runId"],
+        message: "Requeue requires its run",
+      });
     }
     const schema = PRODUCT_EVENT_PAYLOAD_SCHEMAS[event.type];
     if (!schema) return;
