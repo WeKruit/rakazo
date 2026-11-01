@@ -14595,6 +14595,58 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // Gray next-message text in the composer. It starts as soon as the reply text is final,
+          // beside the checkpoint and finalize below, so it is ready about when the reply lands.
+          const suggestionPending =
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            text.trim() &&
+            !blocks.some((block) => block.kind === "ask")
+              ? suggestNextMessage({
+                  runtime: deps.runtime,
+                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+                  earlier: historyMessages
+                    .filter(
+                      (message) =>
+                        message.id !== currentTurnMessage?.id &&
+                        (message.role === "user" || message.role === "bot"),
+                    )
+                    .map((message) => ({
+                      role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                      text: message.blocks
+                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                        .join("\n"),
+                    })),
+                  userText: turnUserText,
+                  replyText: text,
+                  runId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  threadId: thread.id,
+                  onUsage: (event) =>
+                    recordUsage(
+                      deps.prisma,
+                      event,
+                      {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                        parentRunId: runId,
+                        runId,
+                        operationId: `suggestion:${runId}`,
+                        operationKind: "setup",
+                      },
+                      estimateCatalogTokenCostUsd,
+                    ),
+                }).catch((error) => {
+                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+                  return null;
+                })
+              : null;
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -14640,6 +14692,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
+          // only while this reply is the newest message and nothing is running.
+          if (suggestionPending && !completed.continuationRunId) {
+            void suggestionPending
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+              );
+          }
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
@@ -14742,71 +14814,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
-          }
-          // Gray next-message text in the composer, sent after the reply so it never delays it.
-          if (
-            deps.replySuggestions &&
-            !scripted &&
-            run.trigger === "user" &&
-            !messagingChannelRun &&
-            !handedOff &&
-            !completed.continuationRunId &&
-            !recruitingContinued &&
-            text.trim()
-          ) {
-            void suggestNextMessage({
-              runtime: deps.runtime,
-              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-              earlier: historyMessages
-                .filter(
-                  (message) =>
-                    message.id !== currentTurnMessage?.id &&
-                    (message.role === "user" || message.role === "bot"),
-                )
-                .map((message) => ({
-                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                  text: message.blocks
-                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                    .join("\n"),
-                })),
-              userText: turnUserText,
-              replyText: text,
-              runId,
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `suggestion:${runId}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
-                ),
-            })
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.publishTransient({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
-              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (
