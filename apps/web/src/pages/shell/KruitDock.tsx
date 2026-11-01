@@ -40,7 +40,7 @@ export function KruitDock({
       {showCard ? (
         <div
           role="status"
-          className="w-80 max-w-full rounded-xl border border-border bg-card p-2 text-card-foreground shadow-lg"
+          className="w-80 max-w-full rounded-xl border border-border/60 bg-card/80 p-2 text-card-foreground shadow-2xl ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150"
         >
           <div className="flex items-center justify-between ps-2">
             <span className="text-sm font-medium">
@@ -63,7 +63,7 @@ export function KruitDock({
               <li key={group.id}>
                 <button
                   type="button"
-                  className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-accent"
+                  className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-foreground/5"
                   onClick={() => {
                     setClosedFor(key);
                     setOpened(false);
@@ -94,7 +94,7 @@ export function KruitDock({
               ? t`${RECRUITING_GLOBAL_AGENT_NAME}, ${waiting.length} waiting`
               : RECRUITING_GLOBAL_AGENT_NAME
           }
-          className="relative grid size-12 place-items-center rounded-full border border-border bg-card shadow-lg hover:bg-accent"
+          className="relative grid size-12 place-items-center rounded-full border border-border/60 bg-card/80 shadow-xl ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-accent"
           onClick={() => {
             // With something waiting the button shows it; otherwise it opens Kruit.
             if (waiting.length) setOpened((open) => !open || closedFor !== key);
