@@ -81,6 +81,32 @@ import {
   createRecruitingCandidateReportReader,
   isRecruitingCandidateReportField,
 } from "./recruiting-research.js";
+
+/**
+ * Some imported CRM sources carry a mail workspace id in their company field. It names no
+ * employer, so it is dropped and the next source with a real company is used instead.
+ */
+const ID_ONLY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const realCompany = (company: string | null | undefined) =>
+  company?.trim() && !ID_ONLY.test(company.trim()) ? company : null;
+
+function crmCompanyAndProfile<P extends { sources: { company: string | null }[] }>(row: {
+  company?: string | null | undefined;
+  profile?: P | undefined;
+}): { company?: string | null; profile?: P } {
+  if (row.company === undefined && row.profile === undefined) return {};
+  const sources = row.profile?.sources.map((source) => ({
+    ...source,
+    company: realCompany(source.company),
+  }));
+  const company =
+    realCompany(row.company) ?? sources?.find((source) => source.company)?.company ?? null;
+  return {
+    ...(row.company !== undefined || sources?.length ? { company } : {}),
+    ...(row.profile && sources ? { profile: { ...row.profile, sources } } : {}),
+  };
+}
+
 export type RecruitingThreadTarget =
   | { kind: "bot"; botId: string; threadId: string }
   | { kind: "group"; groupId: string; threadId: string; memberBotIds: string[] };
@@ -3442,8 +3468,7 @@ export async function getRecruitingCrmData(
       ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
       ...(row.last_reply_at !== undefined ? { lastReplyAt: row.last_reply_at } : {}),
       ...(row.resume_received !== undefined ? { resumeReceived: row.resume_received } : {}),
-      ...(row.company !== undefined ? { company: row.company } : {}),
-      ...(row.profile !== undefined ? { profile: row.profile } : {}),
+      ...crmCompanyAndProfile(row),
     });
     const tracking = (
       row: Omit<

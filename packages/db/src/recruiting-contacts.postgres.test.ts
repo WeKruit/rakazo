@@ -176,7 +176,7 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
       },
       {
         key: "linkedin:/in/bob",
-        name: "Bob Stone",
+        name: "✨ Bob Stone",
         title: "Backend Engineer",
         company: "Globex",
         location: "New York",
@@ -250,7 +250,7 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
         mcpServerId: server.id,
         organizationId: "org",
         crmCandidateId: "22222222-2222-4222-8222-222222222222",
-        name: "Dee Only",
+        name: "2026-10-12 11:15",
         identityKey: "em:dee@example.test",
         email: "dee@example.test",
         contactStatus: "new",
@@ -290,9 +290,9 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     expect(page.total).toBe(4);
     expect(page.items.map((item) => item.name)).toEqual([
       "Ada Lovelace",
-      "Bob Stone",
+      "✨ Bob Stone",
       "Cy 100%_off",
-      "Dee Only",
+      "2026-10-12 11:15",
     ]);
     const ada = page.items[0]!;
     expect(ada.roles.map((role) => role.title)).toEqual([
@@ -318,20 +318,24 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
       limit: 2,
       cursor: first.nextCursor!,
     });
-    expect(second.items.map((item) => item.name)).toEqual(["Cy 100%_off", "Dee Only"]);
+    expect(second.items.map((item) => item.name)).toEqual(["Cy 100%_off", "2026-10-12 11:15"]);
     expect(second.nextCursor).toBeNull();
     const names = async (filters: Parameters<typeof listRecruitingContacts>[2]["filters"]) =>
       (await listRecruitingContacts(prisma, actor, { filters })).items.map((item) => item.name);
     expect(await names({ roleIds: [`${suffix}-sales`] })).toEqual(["Ada Lovelace", "Cy 100%_off"]);
-    expect(await names({ company: "glob" })).toEqual(["Bob Stone"]);
+    expect(await names({ company: "glob" })).toEqual(["✨ Bob Stone"]);
     expect(await names({ location: "los angeles" })).toEqual(["Ada Lovelace"]);
-    expect(await names({ title: "engineer" })).toEqual(["Ada Lovelace", "Bob Stone"]);
+    expect(await names({ title: "engineer" })).toEqual(["Ada Lovelace", "✨ Bob Stone"]);
     expect(await names({ skills: "kafka" })).toEqual(["Ada Lovelace"]);
     expect(await names({ query: "100%" })).toEqual(["Cy 100%_off"]);
     expect(await names({ query: "%" })).toEqual(["Cy 100%_off"]);
     expect(await names({ contacted: true })).toEqual(["Ada Lovelace"]);
-    expect(await names({ replied: false })).toEqual(["Bob Stone", "Cy 100%_off", "Dee Only"]);
-    expect(await names({ statuses: ["saved"] })).toEqual(["Bob Stone", "Cy 100%_off"]);
+    expect(await names({ replied: false })).toEqual([
+      "✨ Bob Stone",
+      "Cy 100%_off",
+      "2026-10-12 11:15",
+    ]);
+    expect(await names({ statuses: ["saved"] })).toEqual(["✨ Bob Stone", "Cy 100%_off"]);
     expect(await names({ shortlisted: true })).toEqual(["Ada Lovelace"]);
     expect(
       await names({ addedAfter: "2026-10-02T00:00:00Z", addedBefore: "2026-10-30T00:00:00Z" }),
@@ -358,7 +362,7 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     });
     const tagged = await listRecruitingContacts(prisma, actor, { filters: { tags: ["Hot"] } });
     expect(tagged.items.map((item) => [item.name, item.tags])).toEqual([
-      ["Bob Stone", ["Hot"]],
+      ["✨ Bob Stone", ["Hot"]],
       ["Cy 100%_off", ["Hot"]],
     ]);
     await updateRecruitingContactTags(prisma, actor, {
