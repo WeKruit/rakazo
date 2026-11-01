@@ -8610,10 +8610,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const replayRole = async () => {
             try {
-              return await deliverRecruitingRoleResult(
-                await executeRole(),
+              // Timing for the role save that runs before the first question; the rest of the
+              // call's duration is approval gating and the effect claim.
+              const executeAt = Date.now();
+              const executed = await executeRole();
+              const deliverAt = Date.now();
+              const delivered = await deliverRecruitingRoleResult(
+                executed,
                 args.operation === "read",
               );
+              getLogger().info("recruiting.role.timing", {
+                runId,
+                operation: args.operation,
+                executeMs: deliverAt - executeAt,
+                deliverMs: Date.now() - deliverAt,
+              });
+              return delivered;
             } catch (error) {
               return roleError(error);
             }

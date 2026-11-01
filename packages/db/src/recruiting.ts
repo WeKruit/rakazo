@@ -2956,9 +2956,11 @@ export async function executeRecruitingRoleMutation(
       definitionInput = mergeRecruitingRoleUpdate(current, input);
     materialSource = definitionInput?.operation === "revise" ? definitionInput : current.revision;
   }
+  const materialsAt = Date.now();
   const artifacts = materialSource
     ? await loadRoleMaterials(prisma, actor, materialSource, material)
     : new Map<string, Uint8Array>();
+  const transactionAt = Date.now();
   return prisma.$transaction(async (tx) => {
     const { run, thread } = await lockLiveRecruitingRun(tx, actor, context.runId, false);
     if (run.threadId !== context.threadId || run.botId !== context.botId)
@@ -3192,6 +3194,12 @@ export async function executeRecruitingRoleMutation(
         roleId: result.workspace?.role.id ?? null,
         roleRevisionId: result.workspace?.revision.id ?? null,
       },
+    });
+    getLogger().info("recruiting.role.mutation.timing", {
+      runId: context.runId,
+      operation: input.operation,
+      materialsMs: transactionAt - materialsAt,
+      transactionMs: Date.now() - transactionAt,
     });
     return result;
   });
