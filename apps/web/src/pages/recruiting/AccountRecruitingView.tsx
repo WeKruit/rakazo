@@ -176,6 +176,7 @@ export function AccountRecruitingView({
             view: "roles",
             ...(pageIndex ? { offset: pageIndex * ROLES_PER_PAGE } : {}),
             limit: ROLES_PER_PAGE,
+            ...(view === "sequence" ? { briefedOnly: true } : {}),
           },
           { signal: abort.signal },
         );
@@ -915,11 +916,13 @@ export function AccountRecruitingView({
                         .length ? (
                         (item.campaigns ?? [item.campaign!]).map((campaign) => (
                           <div key={campaign.campaign?.id} className="space-y-2">
-                            <h3 className="text-sm font-medium">
-                              {campaign.campaign?.name
-                                ? hideVendorNames(campaign.campaign.name)
-                                : null}
-                            </h3>
+                            {campaign.campaign?.name &&
+                            hideVendorNames(campaign.campaign.name).trim() !==
+                              info?.title.trim() ? (
+                              <h3 className="text-sm font-medium">
+                                {hideVendorNames(campaign.campaign.name)}
+                              </h3>
+                            ) : null}
                             {campaign.status === "unavailable" ? (
                               <RetryNotice onRetry={() => setReload((value) => value + 1)}>
                                 <Trans>Could not read this campaign.</Trans>
@@ -1082,7 +1085,7 @@ export function AccountRecruitingView({
                 pageCount={
                   globalInbox
                     ? Math.ceil((mailTotal ?? 0) / MAIL_PER_PAGE)
-                    : Math.ceil((page?.roles.length ?? 0) / ROLES_PER_PAGE)
+                    : Math.ceil((page?.total ?? page?.roles.length ?? 0) / ROLES_PER_PAGE)
                 }
                 onPage={(next) => setPagination({ key: pageKey, page: next })}
                 disabled={loading}

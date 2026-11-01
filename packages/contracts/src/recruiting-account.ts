@@ -40,6 +40,8 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
   offset: z.number().int().min(0).max(10_000).optional(),
   limit: z.number().int().min(1).max(50).default(20),
   since: IsoDate.optional(),
+  /** Leave out roles whose brief has not been written yet (placeholder "New role"). */
+  briefedOnly: z.boolean().optional(),
 });
 export const RecruitingAccountRoleSchema = z.strictObject({
   id: Id,
@@ -91,6 +93,8 @@ export const RecruitingAccountViewOutputSchema = z.strictObject({
     }),
   ),
   nextCursor: Id.nullable(),
+  /** Roles matching an offset-paged list read, for numbered pages. */
+  total: z.number().int().nonnegative().optional(),
 });
 export type RecruitingAccountViewInput = z.infer<typeof RecruitingAccountViewInputSchema>;
 export type RecruitingAccountViewOutput = z.infer<typeof RecruitingAccountViewOutputSchema>;
