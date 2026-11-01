@@ -123,11 +123,17 @@ describe("real Pi against an offline model HTTP endpoint", () => {
         personAnswered();
       },
     );
+    // Fake clock that still moves with real time, so the ten-second promotion is reached at once.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    cleanups.push(async () => {
+      vi.useRealTimers();
+    });
     const originalRequest = runRequest(server.model, { executeTool: calls, onSlowTool: promote });
     const original = collect(runtime.run(originalRequest));
     try {
       await started;
       steer = "Use the revised scope";
+      await vi.advanceTimersByTimeAsync(10_000);
       await answered;
       expect(personEvents.at(-1)).toEqual({ type: "done", text: "I have the revised scope." });
       expect(calls).toHaveBeenCalledOnce();

@@ -2,7 +2,12 @@ import type { JobPublisher } from "@rakazo/adapter-kit";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import type { WorkEstimate, WorkEstimateKind } from "@rakazo/core";
-import { estimateWorkMs, peopleNamedIn, workCountdownsElapsed } from "@rakazo/core";
+import {
+  estimateWorkMs,
+  peopleNamedIn,
+  workCountdownLeftMs,
+  workCountdownsElapsed,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { COMPLETION_EMAIL_TOOL } from "./completion-email.js";
 import { mcpObject } from "./recruiting-research.js";
@@ -16,6 +21,8 @@ export const WORK_ESTIMATE_KIND = "work_estimate";
 /** Work nobody finished after this long is not shown any more. */
 const MAX_AGE_MS = 12 * 60 * 60_000;
 const BUSY = ["queued", "leased", "running"];
+/** A new wave of the same search within this long continues its countdown. */
+const SAME_ASK_MS = 60 * 60_000;
 
 type Turn = { id: string; spaceId: string; threadId: string };
 type Request = {
@@ -26,11 +33,16 @@ type Request = {
   /** A search's role and how many people its Results held when the search started. */
   roleId?: string;
   saved?: number;
+  /** When the countdown started, for a search that continues an earlier one. */
+  since?: string;
 };
 
 const key = (ref: string) => `${WORK_ESTIMATE_KIND}:${ref}`;
 
-/** Start the countdown for one piece of work; returns it only the first time. */
+/**
+ * Start the countdown for one piece of work; returns it only the first time. A search that
+ * continues the same ask (same role, same Results target) keeps the countdown already running.
+ */
 export async function startWorkEstimate(
   prisma: PrismaClient,
   run: Turn,
@@ -41,12 +53,15 @@ export async function startWorkEstimate(
     select: { id: true },
   });
   if (existing) return null;
-  const request: Request = {
+  const saved =
+    work.kind === "search" ? await savedSoFar(prisma, run.threadId).catch(() => ({})) : {};
+  const earlier = await sameAsk(prisma, run, saved, work.people).catch(() => null);
+  const request: Request = earlier?.request ?? {
     threadId: run.threadId,
     kind: work.kind,
     people: work.people,
     estimateMs: estimateWorkMs(work.kind, work.people),
-    ...(work.kind === "search" ? await savedSoFar(prisma, run.threadId).catch(() => ({})) : {}),
+    ...saved,
   };
   const row = await prisma.externalEffect
     .create({
@@ -57,18 +72,69 @@ export async function startWorkEstimate(
         idempotencyKey: key(work.ref),
         status: "running",
         request,
+        ...(earlier ? { result: { reported: earlier.reported } } : {}),
       },
       select: { createdAt: true },
     })
     .catch(() => null);
-  return row
-    ? {
-        kind: request.kind,
-        people: request.people,
-        estimateMs: request.estimateMs,
-        startedAt: row.createdAt.toISOString(),
-      }
-    : null;
+  if (!row || earlier) return null;
+  return {
+    kind: request.kind,
+    people: request.people,
+    estimateMs: request.estimateMs,
+    startedAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * The countdown of an earlier search for the same ask in this conversation: a new wave toward
+ * the same Results target, with no new message from the recruiter since, continues it instead
+ * of starting over; the earlier one stops counting so each run-out countdown is reported once.
+ */
+async function sameAsk(
+  prisma: PrismaClient,
+  run: Turn,
+  saved: { roleId?: string; saved?: number },
+  people: number,
+): Promise<{ request: Request; reported: number } | null> {
+  if (!saved.roleId || saved.saved === undefined) return null;
+  // A new message from the recruiter is a new ask with its own countdown.
+  const asked = await prisma.message.findFirst({
+    where: { threadId: run.threadId, role: "user" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const since = Math.max(Date.now() - SAME_ASK_MS, asked?.createdAt.getTime() ?? 0);
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      kind: WORK_ESTIMATE_KIND,
+      spaceId: run.spaceId,
+      status: { in: ["running", "done"] },
+      createdAt: { gte: new Date(since) },
+      run: { threadId: run.threadId },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { id: true, request: true, result: true, createdAt: true },
+  });
+  for (const row of rows) {
+    const request = row.request as Partial<Request> | null;
+    if (request?.kind !== "search" || request.roleId !== saved.roleId) continue;
+    if (typeof request.saved !== "number") continue;
+    // Still short of the earlier target, and this wave stays within it.
+    const target = request.saved + (Number(request.people) || 0);
+    if (saved.saved >= target || saved.saved + people > target) continue;
+    await prisma.externalEffect.updateMany({
+      where: { id: row.id, status: "running" },
+      data: { status: "done" },
+    });
+    const open = openEstimate(row);
+    return {
+      request: { ...(request as Request), since: open?.startedAt },
+      reported: open?.reported ?? 0,
+    };
+  }
+  return null;
 }
 
 /** Whether the recruiter stopped this work; a stopped search is not followed any more. */
@@ -163,7 +229,10 @@ function openEstimate(row: {
     kind: request.kind,
     people: Number(request.people) || 0,
     estimateMs: typeof request.estimateMs === "number" ? request.estimateMs : null,
-    startedAt: row.createdAt.toISOString(),
+    startedAt:
+      typeof request.since === "string" && !Number.isNaN(Date.parse(request.since))
+        ? request.since
+        : row.createdAt.toISOString(),
     reported: Number.isFinite(reported) ? reported : 0,
   };
 }
@@ -191,6 +260,17 @@ export async function currentWorkEstimate(
   thread: { spaceId: string; threadId: string },
   now = Date.now(),
 ): Promise<WorkEstimate | null> {
+  const open = await currentOpenEstimate(prisma, thread, now);
+  if (!open) return null;
+  const { id: _id, reported: _reported, ...estimate } = open;
+  return estimate;
+}
+
+async function currentOpenEstimate(
+  prisma: PrismaClient,
+  thread: { spaceId: string; threadId: string },
+  now: number,
+): Promise<Open | null> {
   const rows = await prisma.externalEffect.findMany({
     where: {
       kind: WORK_ESTIMATE_KIND,
@@ -225,10 +305,39 @@ export async function currentWorkEstimate(
     )
       continue;
     if (await finishReached(prisma, row)) continue;
-    const { id: _id, reported: _reported, ...estimate } = open;
-    return estimate;
+    return open;
   }
   return null;
+}
+
+/**
+ * Waiting on background work lasts until the recruiter's countdown runs out, never longer, like
+ * Workloop's wait: the agent then reports progress and waits again. Without a countdown the
+ * requested wait stands.
+ */
+export async function waitWithCountdown<T extends { timedOut: boolean }>(
+  prisma: PrismaClient,
+  thread: { spaceId: string; threadId: string },
+  requestedSeconds: number | undefined,
+  wait: (timeoutSeconds: number | undefined) => Promise<T>,
+  clock: () => number = Date.now,
+): Promise<T | (T & { countdown: string })> {
+  const open = await currentOpenEstimate(prisma, thread, clock()).catch(() => null);
+  const left = open ? workCountdownLeftMs(open, clock()) : null;
+  if (!open?.estimateMs || left === null) return wait(requestedSeconds);
+  // A couple of seconds past the end, so the run-out countdown is counted as elapsed.
+  const untilEnd = Math.ceil(left / 1000) + 2;
+  const capped = requestedSeconds === undefined || untilEnd <= requestedSeconds;
+  const result = await wait(capped ? untilEnd : requestedSeconds);
+  if (!result.timedOut || !capped) return result;
+  const due = countdownReportDue(open, clock());
+  if (!due) return result;
+  await markCountdownReported(prisma, open.id, due).catch(() => undefined);
+  const more = minutes(open.estimateMs);
+  return {
+    ...result,
+    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over. Tell them in one line how many people the role has in Results now and that the work keeps going, about ${more} more minutes; ask nothing. Then wait again.`,
+  };
 }
 
 /** Countdowns run out since the last report, or null when none is owed. */

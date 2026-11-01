@@ -549,6 +549,80 @@ describe("Pi connector tool dispatch", () => {
     );
   });
 
+  it("passes a partial memory edit through to the save", async () => {
+    fakeAgentState.mode = "empty";
+    for await (const _event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "remember",
+        history: [],
+        instructions: "Remember",
+        tools: [builtinAgentTools.find((tool) => tool.name === "remember")!],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      /* Exhaust the runtime. */
+    }
+    const remember = fakeAgentState.tools.find((tool) => tool.name === "remember")!;
+    const edit = { find: "Reply in English", replace: "Reply in Chinese" };
+    expect(remember.prepareArguments!({ edit, expectedRevision: 2 })).toMatchObject({
+      edit,
+      path: "MEMORY.md",
+      expectedRevision: 2,
+    });
+  });
+
+  it("rewrites a preference citation written in another tool's shape", async () => {
+    fakeAgentState.mode = "empty";
+    for await (const _event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "save",
+        history: [],
+        instructions: "Save",
+        tools: [builtinAgentTools.find((tool) => tool.name === "recruiting_feedback")!],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      /* Exhaust the runtime. */
+    }
+    const feedback = fakeAgentState.tools.find((tool) => tool.name === "recruiting_feedback")!;
+    const prepared = feedback.prepareArguments!({
+      target: "preference",
+      text: "Chinese is preferred",
+      sourceRefs: [
+        {
+          id: "jd",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "m1", locator: "blocks[0].text" },
+          readState: "read",
+          readAt: "2026-11-01T00:00:00.000Z",
+          quote: "Chinese preferred",
+          selection: { kind: "message_text", blockIndex: 0, start: 0, end: 17 },
+        },
+      ],
+    });
+    expect(prepared.sourceRefs).toEqual([
+      {
+        id: "jd",
+        kind: "original_material",
+        anchor: { kind: "message", messageId: "m1", locator: "blocks[0].text" },
+        readState: "read",
+        readAt: "2026-11-01T00:00:00.000Z",
+        quote: "Chinese preferred",
+      },
+    ]);
+    expect(prepared.text).toBe("Chinese is preferred");
+  });
+
   it("shortens an over-long question option instead of failing the card", async () => {
     fakeAgentState.mode = "empty";
     for await (const _event of new PiAgentRuntime().run(

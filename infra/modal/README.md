@@ -139,6 +139,12 @@ The upstream token HTTP endpoints are closed; server-side native refresh remains
 available. Verify real OIDC-to-service calls, concurrent refresh and new-user
 isolation separately before calling this integration accepted.
 
+When the CRM shares the product's identity provider, also set
+`FIRST_PARTY_MCP_SERVICE_KEY` to that provider's server key. The backend then opens
+the CRM session for the signed-in user's verified email itself, so nobody signs in
+twice and no sign-in email is sent. A linked OIDC Account still takes precedence;
+the CRM still authorizes the user's own organization and rows.
+
 ## Shared artifact storage
 
 The native API and worker can use Supabase private object storage through the same

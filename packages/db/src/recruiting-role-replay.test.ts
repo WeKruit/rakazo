@@ -284,7 +284,14 @@ describe("native role creation after clarification", () => {
         return;
       }
       if (
-        !["valid", "latest hint", "latest intent", "explicit criterion source"].includes(boundary)
+        ![
+          "valid",
+          "latest hint",
+          "latest intent",
+          "explicit criterion source",
+          // A detail the recruiter added while the role was being written keeps the request.
+          "new steering",
+        ].includes(boundary)
       ) {
         await expect(result).rejects.toThrow(IsolationError);
         expect(create).not.toHaveBeenCalled();

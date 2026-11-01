@@ -332,7 +332,7 @@ export function InterviewCalendar({
           ) : null}
           <section
             ref={scroll}
-            className={`rk-scroll ${layout.segments.length ? "max-h-[34rem]" : "max-h-64"} overflow-y-auto focus-visible:outline-2 focus-visible:outline-ring`}
+            className="rk-scroll h-[calc(100dvh-17rem)] min-h-64 overflow-y-auto focus-visible:outline-2 focus-visible:outline-ring"
             data-testid="calendar-hours"
             aria-label={t`Calendar hours`}
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus and scroll the calendar hours.

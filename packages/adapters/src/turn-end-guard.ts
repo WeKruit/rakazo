@@ -693,6 +693,8 @@ const REFUSAL_QUESTION =
   "The recruiter asked `request`; the assistant's final message is `reply`. Does the reply refuse, fail to do, or put off doing what was asked (says it can't or won't, asks permission or offers to do it instead of doing it)? Answer no when the reply delivers the requested result or report and only notes a limit of its sources (for example a calendar or record that isn't connected or is incomplete) as a caveat. A confirmation or approval card waiting for the recruiter counts as doing the request, and a plain answer to a yes/no question is not a refusal.";
 /** Below this probability of a refusal the judge keeps the reply. */
 const JUDGE_KEEPS_BELOW = 0.3;
+const MEMORY_SAVE_FAILED_NOTE =
+  "Your memory save failed, so nothing was saved. Read the error it returned, fix the call (read_memory first for the current revision, or send the whole content) and save again now. If it still fails, tell the recruiter in one sentence that it was not saved.";
 
 /** Stages whose own questions and lists are the turn's deliverable: an offer there is not a deferral. */
 const QUESTION_STAGES = new Set(["intake", "calibration_10"]);
@@ -727,6 +729,8 @@ export async function planDeclineRetry(
     stage?: () => Promise<string | undefined>;
     /** Work the turn left unfinished by the server's own count (e.g. people still to look up). */
     owedWork?: string;
+    /** Every memory save this attempt tried failed, so the reply must not say it was saved. */
+    memorySaveFailed?: boolean;
     /** An optional judge that can overrule the wording check when a reply only reads as a refusal. */
     judge?: () => Promise<TextJudge | undefined>;
   },
@@ -752,6 +756,13 @@ export async function planDeclineRetry(
     return (await recentContinues()) < LONG_TASK_RETRIES
       ? { sentence: "", note: input.owedWork }
       : undefined;
+  // A failed save told as saved is lost silently: one more try, or say plainly it wasn't saved.
+  if (
+    input.memorySaveFailed &&
+    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
+    (await recentContinues()) < 1
+  )
+    return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
   const variables = draftVariables(input.reply);
   const declined = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)

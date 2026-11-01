@@ -123,6 +123,7 @@ import {
   isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
+  isChineseText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -153,7 +154,7 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_ENGLISH_NOTE,
+  REPLY_IN_CHINESE_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -162,7 +163,6 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
-  recruiterQuestionNotInEnglish,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
@@ -189,6 +189,7 @@ import {
   waitingApprovalNote,
   withoutHiddenTools,
   workActivityForTool,
+  workStepDetail,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -222,6 +223,7 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
+  createGroupInTransaction,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -332,6 +334,7 @@ import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.j
 import {
   loadBotMessageContext,
   messageBot,
+  reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
@@ -425,6 +428,7 @@ import {
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import { loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -592,6 +596,7 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import { lazyRunComputer } from "./run-computer.js";
@@ -704,6 +709,7 @@ import {
   contactLookupCountdownNote,
   finishWorkEstimate,
   startWorkEstimate,
+  waitWithCountdown,
   withWorkNote,
   workEstimateAfterAgentRun,
   workEstimateForResearch,
@@ -836,6 +842,36 @@ async function savedRoleCandidateKeys(
   });
 }
 
+/**
+ * A note computed beside the turn that must never hold it up: taken into the opening context
+ * when already back, else handed to the run's next model step with its other context notices.
+ */
+export function lateNote(pending: Promise<string | undefined>) {
+  let ready: string | undefined;
+  let delivered = false;
+  void pending.then(
+    (note) => {
+      ready = note;
+    },
+    () => undefined,
+  );
+  const take = () => {
+    if (delivered || !ready) return undefined;
+    delivered = true;
+    return ready;
+  };
+  return {
+    takeReady: take,
+    async withNotice(notice: Promise<string | undefined> | undefined) {
+      const context = await notice;
+      const note = take();
+      return [context, note].filter(Boolean).join("\n\n") || undefined;
+    },
+  };
+}
+
+/** The working title of a role saved before the recruiter has named it. */
+const NEW_ROLE_TITLE = "New role";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -979,6 +1015,12 @@ export async function unsavedRoundFeedback(
   });
   if (saved) return undefined;
   return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they turned down or praised, and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
+}
+
+/** The topic a step may show beside its label, as a payload field. */
+function stepDetail(name: string, args: unknown): { detail?: string } {
+  const detail = workStepDetail(name, args);
+  return detail ? { detail } : {};
 }
 
 /** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
@@ -1134,7 +1176,7 @@ const ASK_DECLINES =
 const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
 
 /** A message typed while an approval card waits is its own request, never the card's answer. */
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
@@ -1145,7 +1187,7 @@ const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
-  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines with message_user and end the turn without a question.`;
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
 
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
@@ -1185,8 +1227,8 @@ export const STEERING_ACK =
 
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
-const ASK_IN_ENGLISH =
-  "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
+const ASK_IN_RECRUITER_LANGUAGE =
+  "Not asked: questions and options to the recruiter are written in the language of their own latest message, not the JD's. Ask the same question again in that language, with the same options and plannedSearches.";
 
 const PLANNED_SEARCHES_EMPTY =
   "Not asked yet: plannedSearches: [] means the recruiter said not to look for people outside their own list. If they did not, ask the same question again with four plannedSearches; when the question is about the location, use the JD's location, since the answer only narrows or widens it. If they did say so, ask again with [] unchanged.";
@@ -1271,7 +1313,7 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never create or bind a role in global Main.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -3573,6 +3615,8 @@ export interface ExecutorDeps {
   cloudAgent?: CloudAgentConnection | null;
   /** Optional Auto Review verifier. When omitted, the factory selects from env (llm | jev | scripted). */
   autoReview?: AutoReviewProvider;
+  /** Suggest the user's next message after each reply (one extra small model call). */
+  replySuggestions?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -4571,7 +4615,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const listing = await loadLivePluginSlugs(deps.listConnectedPluginSlugs, run.userId);
           if (listing.ok) {
             liveSlugs = listing.slugs;
-            await persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
+            // Bookkeeping for the next run; this run already uses the live list.
+            void persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
               () => undefined,
             );
           }
@@ -4836,6 +4881,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ),
                 )
                 .catch(() => undefined)
+            : Promise.resolve(undefined),
+        );
+        const lateNotes = lateNote(preferenceNotePromise);
+        // The global agent sees what each role team did lately. It never holds up the turn:
+        // it joins the first step if already read, otherwise the next one.
+        const crossRoleNotes = lateNote(
+          !messagingChannelRun && thread.groupId?.startsWith("recruiting-global-")
+            ? ownTime(
+                "crossRoleDigest",
+                loadCrossRoleDigest(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  (text) => redactSecrets(text, runSecrets),
+                ).catch((error) => {
+                  getLogger().warn("cross-role digest failed", { error: String(error) });
+                  return undefined;
+                }),
+              )
             : Promise.resolve(undefined),
         );
         const memoryContextPromise = ownTime(
@@ -5140,6 +5203,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((error) => getLogger().error("group handoff report", error));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (error) => getLogger().error("delegated team failure report", error),
+              );
           }
           if (run.trigger === "bot_message") {
             await returnBotMessageOutcome(
@@ -5302,15 +5370,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           resolved.acceptsImages,
         );
         const acceptsImages = deps.runtime.describe().capabilities.scripted || modelSeesImages;
-        const groupContext = thread.groupId
-          ? await loadGroupContext(deps.prisma, thread.groupId, {
-              id: bot.id,
-              name: bot.name,
-            })
-          : undefined;
-        const hasMessagingIdentity = deps.messaging
-          ? await deps.messaging.hasIdentity(bot.id)
-          : false;
+        // Independent reads for the prompt run together rather than one after another.
+        const [groupContext, hasMessagingIdentity, sourceClientNonce] = await Promise.all([
+          thread.groupId
+            ? loadGroupContext(deps.prisma, thread.groupId, { id: bot.id, name: bot.name })
+            : undefined,
+          deps.messaging ? deps.messaging.hasIdentity(bot.id) : false,
+          // Calls carry no schema flag: the sending client encodes them in the clientNonce.
+          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
+            ? deps.prisma.message
+                .findUnique({
+                  where: { id: run.sourceMessageId },
+                  select: { clientNonce: true },
+                })
+                .then((row) => row?.clientNonce ?? null)
+            : null,
+        ]);
         const messagingContext = hasMessagingIdentity
           ? [messagingDmSurfaceNote(), messagingChannelRun ? messagingChannelPrivacyBlock() : null]
               .filter(Boolean)
@@ -5329,16 +5404,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ));
           }
         }
-        // Calls carry no schema flag: the sending client encodes them in the clientNonce.
-        const sourceClientNonce =
-          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
-            ? ((
-                await deps.prisma.message.findUnique({
-                  where: { id: run.sourceMessageId },
-                  select: { clientNonce: true },
-                })
-              )?.clientNonce ?? null)
-            : null;
         // A hang-up run has no source message: its own nonce carries the call it closes.
         const callEndRun = run.trigger === "call_end";
         const callClientNonceForRun = callEndRun ? run.clientNonce : sourceClientNonce;
@@ -5571,6 +5636,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           name: string;
           executionId: string;
           startedAt: string;
+          activity?: string;
+          detail?: string;
           completion?: Record<string, unknown>;
         }[] = [];
         const flushPendingTools = () => {
@@ -6338,8 +6405,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             plannedEarlyRefusalAt ??= now;
             return now - plannedEarlyRefusalAt < 3_000;
           };
+          // A people-search agent run takes minutes, so it too waits until the first picks
+          // from the planned rows are on screen; after them it is the way to fill the ten.
+          const quickSearch = name.endsWith("web_search_advanced_exa") || name === "web_search";
           if (
-            (name.endsWith("web_search_advanced_exa") || name === "web_search") &&
+            (quickSearch || (name.endsWith("agent_run") && !firstPicksShown)) &&
             plannedNewPeople >= PLANNED_POOL_ENOUGH &&
             !executionId.startsWith(`${runId}:planned-search:`) &&
             !(await deps.prisma.externalEffect.findFirst({
@@ -6369,8 +6439,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // The model's first tools run once the role from a job link is saved.
-          if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
+          // Tools that use the role from a job wait for its save; the first question and progress
+          // lines do not, so the save never holds them up. The turn still ends after the save.
+          if (
+            !executionId.startsWith(`${runId}:job-`) &&
+            name !== "ask_user" &&
+            name !== "message_user"
+          )
+            await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           // import_csv still names its role, so it gets the thread's role instead.
@@ -8609,10 +8685,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const replayRole = async () => {
             try {
-              return await deliverRecruitingRoleResult(
-                await executeRole(),
+              // Timing for the role save that runs before the first question; the rest of the
+              // call's duration is approval gating and the effect claim.
+              const executeAt = Date.now();
+              const executed = await executeRole();
+              const deliverAt = Date.now();
+              const delivered = await deliverRecruitingRoleResult(
+                executed,
                 args.operation === "read",
               );
+              getLogger().info("recruiting.role.timing", {
+                runId,
+                operation: args.operation,
+                executeMs: deliverAt - executeAt,
+                deliverMs: Date.now() - deliverAt,
+              });
+              return delivered;
             } catch (error) {
               return roleError(error);
             }
@@ -10844,15 +10932,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "wait_for_work") {
-            return waitForBackgroundWork(deps.prisma, {
-              threadId: run.threadId,
-              selfRunId: run.id,
-              ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
-              mode: args.mode === "any" ? "any" : "all",
-              timeoutSeconds:
-                typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
-              signal: context.signal,
-            });
+            return waitWithCountdown(
+              deps.prisma,
+              { spaceId: run.spaceId, threadId: run.threadId },
+              typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
+              (timeoutSeconds) =>
+                waitForBackgroundWork(deps.prisma, {
+                  threadId: run.threadId,
+                  selfRunId: run.id,
+                  ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
+                  mode: args.mode === "any" ? "any" : "all",
+                  timeoutSeconds,
+                  signal: context.signal,
+                }),
+            );
           }
           if (name === "task_catalog") {
             return taskCatalogFromTool(deps, {
@@ -11778,40 +11871,140 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "delegate_to_role") {
-            const role = await deps.prisma.recruitingRole.findFirst({
-              where: {
-                id: String(args.role_id ?? ""),
-                spaceId: run.spaceId,
-                userId: run.userId,
-                archivedAt: null,
-              },
-              select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
-            });
-            if (!role?.sourceThread.groupId)
+            // A saved role by roleId, or a role conversation not saved yet by its groupId.
+            const role = args.role_id
+              ? await deps.prisma.recruitingRole.findFirst({
+                  where: {
+                    id: String(args.role_id),
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    archivedAt: null,
+                  },
+                  select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
+                })
+              : null;
+            const group = role?.sourceThread.groupId
+              ? null
+              : args.group_id && !String(args.group_id).startsWith("recruiting-global-")
+                ? await deps.prisma.chatGroup.findFirst({
+                    where: {
+                      id: String(args.group_id),
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      archivedAt: null,
+                    },
+                    select: { id: true, name: true, thread: { select: { id: true } } },
+                  })
+                : null;
+            const target = role?.sourceThread.groupId
+              ? {
+                  groupId: role.sourceThread.groupId,
+                  threadId: role.sourceThread.id,
+                  title: role.title ?? "",
+                }
+              : group?.thread
+                ? { groupId: group.id, threadId: group.thread.id, title: group.name }
+                : null;
+            if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId. Read recruiting_candidates operation roles and pass its id.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
               });
+            // Work can go straight to a named teammate of that role team; otherwise to its lead.
+            const teammateName = String(args.teammate ?? "")
+              .trim()
+              .toLowerCase();
+            let recipient = bot.id;
+            if (teammateName) {
+              const members = await deps.prisma.chatGroupMember.findMany({
+                where: { groupId: target.groupId },
+                select: { bot: { select: { id: true, name: true, archivedAt: true } } },
+              });
+              const match = members.find(
+                (member) =>
+                  !member.bot.archivedAt && member.bot.name.toLowerCase() === teammateName,
+              );
+              if (!match)
+                return finish({
+                  error: `No teammate named ${String(args.teammate)} on that role team. Teammates: ${members
+                    .filter((member) => !member.bot.archivedAt)
+                    .map((member) => member.bot.name)
+                    .join(", ")}.`,
+                });
+              recipient = match.bot.id;
+            }
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
               { id: bot.id, name: bot.name },
               {
-                bot_id: bot.id,
-                thread_id: role.sourceThread.id,
+                bot_id: recipient,
+                thread_id: target.threadId,
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${role.title} team`,
+                target_label: `${target.title} team`,
                 message: redactSecrets(String(args.message ?? ""), runSecrets),
                 intent: "request",
                 deliveryKey: effectKey,
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: target.groupId, title: target.title },
+            ]);
             return finish({
               ok: true,
               team: sent.name,
-              roleGroupLink: `/app/g/${role.sourceThread.groupId}`,
-              note: sent.note,
+              note: `${sent.note ?? ""} A card that opens the role's conversation is already shown; do not paste a link.`.trim(),
+            });
+          }
+          if (name === "start_role") {
+            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
+            const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
+            if (!title || !request) return finish({ error: "title and message are required" });
+            if (!thread.groupId?.startsWith("recruiting-global-"))
+              return finish({ error: "start_role works only in the global conversation." });
+            const team = await deps.prisma.chatGroupMember.findMany({
+              where: { groupId: thread.groupId },
+              select: { botId: true },
+              orderBy: { createdAt: "asc" },
+            });
+            // One role per call, even when the call is retried.
+            const groupId = `role-${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const group = await deps.prisma.$transaction((tx) =>
+              createGroupInTransaction(
+                tx,
+                { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                {
+                  id: groupId,
+                  name: title.slice(0, 120),
+                  botIds: team.map((member) => member.botId),
+                },
+              ),
+            );
+            if (!group.thread)
+              return finish({ error: "The role conversation could not be opened." });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: group.thread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${title} team`,
+                message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                intent: "request",
+                deliveryKey: effectKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: group.id, title },
+            ]);
+            return finish({
+              ok: true,
+              team: `${title} team`,
+              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line that the team will ask its questions there; do not paste a link.",
             });
           }
           if (name === "render_view") {
@@ -12442,7 +12635,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : currentTurnMessage.blocks.find(
                 (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
               );
-          if (!block && !file) return undefined;
+          // A role team opened without a JD ("new grads from USC, CS") still gets its role saved
+          // now, under a working title, so every later step has a role to save to.
+          const request =
+            !block && !file && thread.groupId && recruitingBotKey(bot)
+              ? texts
+                  .map((item) => item.text)
+                  .join("\n")
+                  .trim()
+              : "";
+          if (!block && !file && !request) return undefined;
           // These calls run before the model's first step, so they report themselves like the
           // model's own calls: the recruiter sees the file or link being read and the role saved.
           const step = async (
@@ -12460,7 +12662,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   name,
                   executionId,
                   startedAt: new Date(startedAt).toISOString(),
-                  category: workActivityForTool(name),
+                  category: workActivityForTool(name, args),
+                  ...stepDetail(name, args),
                   argsSummary: toolArgsSummary(args, runSecrets),
                 },
               })
@@ -12500,7 +12703,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          if (request)
+            return {
+              saving: create(NEW_ROLE_TITLE, [], request),
+              note: `This role team's role is being saved now as "${NEW_ROLE_TITLE}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
+            };
           try {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
@@ -12692,6 +12900,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const outside = outsideOf(onTime);
           addFresh(inArea(onTime, outside));
+          // The people are already in Results; chat says so at once instead of staying on the
+          // last activity until the model's picks.
+          if (plannedNewPeople > 0 && !isBackgroundRunTrigger(run.trigger))
+            void deps.events
+              .publishTransient({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: {
+                  // In the recruiter's own language, like every other recruiter-facing line.
+                  text: isChineseText(
+                    (currentTurnMessage?.blocks ?? [])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  )
+                    ? `找到 ${plannedNewPeople} 人`
+                    : `Found ${plannedNewPeople} people`,
+                  activity: true,
+                },
+              })
+              .catch(() => undefined);
           // A search still running at the pick adds its people when it returns; a refused extra
           // search hands them to the model instead of searching again.
           results.forEach((result, index) => {
@@ -12820,11 +13051,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .join(" ")
           : "";
         const languageNote =
-          hideVendors &&
-          lastRecruiterText &&
-          recruiterQuestionNotInEnglish(lastRecruiterText, messages)
-            ? REPLY_IN_ENGLISH_NOTE
-            : undefined;
+          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -12939,7 +13166,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
-          preferenceNote: await preferenceNotePromise,
+          // The judge's preference nudge never holds up the turn: it joins now only if already
+          // back, otherwise at the run's next model step.
+          preferenceNote: lateNotes.takeReady(),
+          crossRoleDigest: crossRoleNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13053,6 +13283,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             : undefined,
         };
+        const turnUserText = turnBlocks
+          ? turnBlocks
+              .filter((block) => block.kind === "text")
+              .map((block) => block.text)
+              .join("\n")
+          : taskPrompt;
         // Light turns run on the fast model; the configured model becomes the first backup.
         let turnModel = scripted
           ? {
@@ -13065,17 +13301,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               trigger: run.trigger,
               answersQuestion: Boolean(nativeSources?.currentAnswer),
               peerIntent: peerMessage?.intent,
-              userText: turnBlocks
-                ? turnBlocks
-                    .filter((block) => block.kind === "text")
-                    .map((block) => block.text)
-                    .join("\n")
-                : taskPrompt,
+              userText: turnUserText,
               hasAttachments:
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
               pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
-              recruitingIntake: Boolean(linkRole) || firstRoundPending,
+              // A role team whose role is not saved yet is still in intake: its questions
+              // are what the recruiter waits on, so they skip reasoning too.
+              recruitingIntake:
+                Boolean(linkRole) ||
+                firstRoundPending ||
+                (Boolean(thread.groupId) &&
+                  !thread.activeRecruitingRoleId &&
+                  recruitingSearch &&
+                  Boolean(recruitingBotKey(bot))),
             });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
@@ -13118,7 +13357,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
         if (runModel === configuredRunModel) {
-          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+          runModel = {
+            ...configuredRunModel,
+            ...(turnModel.thinkingLevel ? { thinkingLevel: turnModel.thinkingLevel } : {}),
+            routed: "configured",
+            routeReason: turnModel.reason,
+          };
         }
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
@@ -13143,6 +13387,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (usage.inputTokens ?? 0) +
               (usage.cacheReadTokens ?? 0) +
               (usage.cacheWriteTokens ?? 0);
+          };
+          // Spend is counted in memory above; the usage row and timing audit are written in the
+          // background so a model call's end never waits on the database.
+          const recordUsageInBackground = (
+            event: Extract<AgentRuntimeEvent, { type: "usage" }>,
+          ) => {
+            void recordUsage(
+              deps.prisma,
+              event,
+              {
+                spaceId: run.spaceId,
+                botId: bot.id,
+                userId: run.userId,
+                runId,
+                parentRunId: runId,
+                operationId: runId,
+              },
+              estimateCatalogTokenCostUsd,
+            )
+              .then(() =>
+                appendUsageTimingAudit(
+                  deps,
+                  { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                  event,
+                ),
+              )
+              .catch((error) =>
+                getLogger().warn("usage record failed", { runId, error: String(error) }),
+              );
           };
           let firstModelEventMs: number | null = null;
           // Logged for a turn that ends with a question too, not only a completed one.
@@ -13199,27 +13472,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   threadId: thread.id,
                   runId,
                   sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
-                  onUsage: async (event) => {
+                  onUsage: (event) => {
                     runCostUsd += event.costUsd ?? 0;
                     countPromptCache(event);
-                    await recordUsage(
-                      deps.prisma,
-                      event,
-                      {
-                        spaceId: run.spaceId,
-                        botId: bot.id,
-                        userId: run.userId,
-                        runId,
-                        parentRunId: runId,
-                        operationId: runId,
-                      },
-                      estimateCatalogTokenCostUsd,
-                    );
-                    await appendUsageTimingAudit(
-                      deps,
-                      { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                      event,
-                    );
+                    recordUsageInBackground(event);
                   },
                   prompt,
                   contextStrategy,
@@ -13395,14 +13651,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
                     if (known) return `"${known.key}" → "${known.value}"`;
-                    // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
+                    // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
                       !askLanguageBounced &&
-                      recruiterQuestionNotInEnglish(question, messages)
+                      isChineseText(question) !== isChineseText(lastRecruiterText)
                     ) {
                       askLanguageBounced = true;
-                      return { instead: ASK_IN_ENGLISH };
+                      return { instead: ASK_IN_RECRUITER_LANGUAGE };
                     }
                     // Any intake answer may be the last one, and the first people come from the searches
                     // planned with it; without four of them the answer turn waits on its own searches.
@@ -13440,7 +13696,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       completeRunStep,
                     );
                   },
-                  claimContextNotice: scripted ? undefined : contextWatch?.claimNotice,
+                  claimContextNotice: scripted
+                    ? undefined
+                    : () =>
+                        lateNotes.withNotice(
+                          crossRoleNotes.withNotice(contextWatch?.claimNotice()),
+                        ),
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
@@ -13663,6 +13924,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   turnReport.report();
                   event.text = card.text;
                   event.detail = undefined;
+                  event.multiple = undefined;
                   event.actions = card.options.map((label, index) => ({
                     id: `choice-${index + 1}`,
                     label,
@@ -13735,6 +13997,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     detail: safeDetail,
                     status: "pending",
                     actions: safeActions,
+                    ...(event.multiple && safeActions?.length ? { multiple: true } : {}),
                     requestedSchema: event.requestedSchema,
                   },
                 ],
@@ -13743,6 +14006,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
+              // Delegated work waiting on the recruiter tells the delegating conversation now.
+              if (thread.groupId)
+                void reportDelegatedTeamBlocked(deps, run, {
+                  kind: "waiting",
+                  text: safeText,
+                }).catch((error) => getLogger().error("delegated team wait report", error));
               // A recruiter message that arrived while this turn was finishing answers the card.
               const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
                 spaceId: run.spaceId,
@@ -13862,6 +14131,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await publishMidTurnNarration();
               }
               const toolStartedAt = new Date().toISOString();
+              const toolActivity = workActivityForTool(event.name, event.args);
+              const toolDetail = stepDetail(event.name, event.args);
               try {
                 await deps.events.append({
                   spaceId: run.spaceId,
@@ -13873,7 +14144,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     name: event.name,
                     executionId: event.executionId,
                     startedAt: toolStartedAt,
-                    category: workActivityForTool(event.name),
+                    category: toolActivity,
+                    ...toolDetail,
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
                 });
@@ -13884,6 +14156,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 name: event.name,
                 executionId: event.executionId,
                 startedAt: toolStartedAt,
+                activity: toolActivity,
+                ...toolDetail,
               });
               if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();
@@ -14023,24 +14297,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } else if (event.type === "usage" && !event.accounted) {
               runCostUsd += event.costUsd ?? 0;
               countPromptCache(event);
-              await recordUsage(
-                deps.prisma,
-                event,
-                {
-                  spaceId: run.spaceId,
-                  botId: bot.id,
-                  userId: run.userId,
-                  runId,
-                  parentRunId: runId,
-                  operationId: runId,
-                },
-                estimateCatalogTokenCostUsd,
-              );
-              await appendUsageTimingAudit(
-                deps,
-                { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                event,
-              );
+              recordUsageInBackground(event);
             } else if (event.type === "thinking") {
               const { type: _type, ...thinking } = event;
               lastThinking = thinking;
@@ -14169,6 +14426,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   worked: turnReport.worked(),
                   read: turnReport.read(),
+                  memorySaveFailed: turnReport.memorySaveFailed(),
                   judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
@@ -14237,7 +14495,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // run's last saved message counts too.
           if (
             run.trigger !== "bot_message" &&
-            blocks.every((block) => block.kind === "text") &&
+            blocks.some((block) => block.kind === "text") &&
+            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
             (restatesUpdate(text, midTurnUserTexts.at(-1)) ||
               restatesUpdate(text, await lastRunMessageText()))
           ) {
@@ -14391,6 +14650,71 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
+          }
+          // Gray next-message text in the composer, sent after the reply so it never delays it.
+          if (
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            !completed.continuationRunId &&
+            !recruitingContinued &&
+            text.trim()
+          ) {
+            void suggestNextMessage({
+              runtime: deps.runtime,
+              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+              earlier: historyMessages
+                .filter(
+                  (message) =>
+                    message.id !== currentTurnMessage?.id &&
+                    (message.role === "user" || message.role === "bot"),
+                )
+                .map((message) => ({
+                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                  text: message.blocks
+                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                    .join("\n"),
+                })),
+              userText: turnUserText,
+              replyText: text,
+              runId,
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `suggestion:${runId}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            })
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.publishTransient({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
+              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (
@@ -14547,6 +14871,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((reportError) => getLogger().error("group handoff report", reportError));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (reportError) => getLogger().error("delegated team failure report", reportError),
+              );
           }
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {
@@ -14965,6 +15294,7 @@ export function selectBuiltinToolsForRun(options: {
           "message_user",
           "message_bot",
           "delegate_to_role",
+          "start_role",
           "handoff_to_bot",
           "message_agent",
           "create_poll",
@@ -15343,10 +15673,12 @@ export function userTurnContext(parts: {
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
   preferenceNote?: string | undefined;
+  crossRoleDigest?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
     parts.redactedRecruitingContext ?? parts.redactedMemoryContext,
+    parts.crossRoleDigest,
     parts.redactedScratchpadContext,
     parts.redactedTicketContext,
     parts.stoppedRunNotice,

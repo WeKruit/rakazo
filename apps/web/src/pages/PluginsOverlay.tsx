@@ -1,4 +1,5 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import { useLinkFavicon } from "@rakazo/chat-ui/web-contexts";
 import type {
   BotMcpServer,
   CapabilityInstall,
@@ -13,6 +14,9 @@ import {
   buildFeaturedConnectorTiles,
   CONNECTION_CATALOG_PAGE_SIZE,
   filterConnectionCatalogItems,
+  GOOGLE_CALENDAR_ENDPOINT,
+  GOOGLE_CALENDAR_READ_TOOLS,
+  GOOGLE_CALENDAR_SCHEDULING_TOOLS,
   humanizeToolName,
   isVendorService,
 } from "@rakazo/core";
@@ -80,6 +84,61 @@ function nativeServerConfigured(server: McpServer) {
     (server.platformCredentialConfigured ||
       server.oauthStatus === "connected" ||
       (server.hasSecret && server.oauthStatus === "none"))
+  );
+}
+
+/** Bundled marks for the services we provision; any other server shows its own site's icon. */
+const SERVICE_LOGOS: Record<string, string> = {
+  "gmailmcp.googleapis.com": "/connectors/gmail.png",
+  "calendarmcp.googleapis.com": "/connectors/google-calendar.png",
+  "mcp.cal.com": "/connectors/cal-com.png",
+  "mcp.hubspot.com": "/connectors/hubspot.png",
+};
+
+function serviceHost(server: McpServer) {
+  try {
+    return server.endpoint ? new URL(server.endpoint).hostname : "";
+  } catch {
+    return "";
+  }
+}
+
+function serviceEndpoint(server: McpServer) {
+  if (!server.endpoint) return "";
+  const url = new URL(server.endpoint);
+  return `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+}
+
+/** Services that act on the recruiter's own account, so each specialist gets only what it needs. */
+const PERSONAL_ENDPOINTS = [
+  "https://gmailmcp.googleapis.com/mcp/v1",
+  GOOGLE_CALENDAR_ENDPOINT,
+  "https://mcp.cal.com/mcp",
+];
+
+const CALENDAR_ENDPOINTS = [GOOGLE_CALENDAR_ENDPOINT, "https://mcp.cal.com/mcp"];
+
+function personalService(server: McpServer) {
+  return PERSONAL_ENDPOINTS.includes(serviceEndpoint(server));
+}
+
+function ServiceLogo({ server }: { server: McpServer }) {
+  const host = serviceHost(server);
+  const bundled = SERVICE_LOGOS[host];
+  const site = !bundled && host ? `https://${host.replace(/^(mcp|api)\./, "")}/` : "";
+  const { icon, unusable } = useLinkFavicon(site);
+  const src = bundled ?? icon;
+  return src ? (
+    <img
+      src={src}
+      alt=""
+      onError={bundled ? undefined : unusable}
+      className="h-9 w-9 shrink-0 rounded-xl bg-accent object-contain p-1.5"
+    />
+  ) : (
+    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-sm font-semibold text-foreground">
+      {server.name[0]}
+    </div>
   );
 }
 
@@ -216,6 +275,8 @@ export function PluginsOverlay({
   const nativeServices = servers.flatMap((server) => {
     // Services the platform runs for the recruiter are not theirs to manage or see by brand.
     if (!developerView && isVendorService(server)) return [];
+    // The recruiting records come with every account; there is nothing for the recruiter to connect.
+    if (!developerView && server.slug === "recruiting-crm") return [];
     const access = assignments.filter(
       (assignment) => assignment.serverId === server.id && appliesToCurrentAssistant(assignment),
     );
@@ -286,6 +347,10 @@ export function PluginsOverlay({
           await connectProductServer(server.id);
           if (!current()) return;
         }
+      } else if (coordinatorBotId && personalService(server)) {
+        // A reconnect also gives specialists their narrow access, which older grants may lack.
+        await connectProductServer(server.id);
+        if (!current()) return;
       }
       const fresh = await refresh();
       if (!current()) return;
@@ -314,20 +379,31 @@ export function PluginsOverlay({
     }
   }
 
+  async function disconnectNative(server: McpServer) {
+    const scope = connectionScope;
+    const current = () => mounted.current && activeScope.current === scope;
+    setPending(server.id);
+    setCatalogError(null);
+    try {
+      await rpc.mcp.oauth.disconnect({ serverId: server.id });
+      if (current()) await refresh();
+    } catch (error) {
+      if (current()) setCatalogError(errorText(error, t`Could not disconnect`));
+    } finally {
+      if (current()) setPending(null);
+    }
+  }
+
   async function connectProductServer(serverId: string) {
     const scope = connectionScope;
     const current = () => mounted.current && activeScope.current === scope;
-    const server = (await rpc.mcp.servers.list()).find((row) => row.id === serverId);
+    const all = await rpc.mcp.servers.list();
+    const server = all.find((row) => row.id === serverId);
     if (!current()) return;
     if (!coordinatorBotId || !server?.enabled || !server.endpoint)
       throw new Error(t`Could not connect`);
-    const url = new URL(server.endpoint);
-    const endpoint = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
-    const personal = [
-      "https://gmailmcp.googleapis.com/mcp/v1",
-      "https://calendarmcp.googleapis.com/mcp/v1",
-      "https://mcp.cal.com/mcp",
-    ].includes(endpoint);
+    const endpoint = serviceEndpoint(server);
+    const personal = personalService(server);
     if (
       server.oauthStatus === "reconnect" ||
       (personal && server.oauthStatus !== "connected" && !server.hasSecret)
@@ -339,17 +415,10 @@ export function PluginsOverlay({
       recipients.set(coordinatorBotId, mailReads);
       for (const id of [recruitingBotIds?.outreach, recruitingBotIds?.scheduling])
         if (id) recipients.set(id, [...mailReads, "list_drafts", "get_draft", "create_draft"]);
-    } else if (endpoint === "https://calendarmcp.googleapis.com/mcp/v1") {
-      const reads = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"];
-      recipients.set(coordinatorBotId, reads);
+    } else if (endpoint === GOOGLE_CALENDAR_ENDPOINT) {
+      recipients.set(coordinatorBotId, GOOGLE_CALENDAR_READ_TOOLS);
       if (recruitingBotIds?.scheduling)
-        recipients.set(recruitingBotIds.scheduling, [
-          ...reads,
-          "create_event",
-          "update_event",
-          "delete_event",
-          "respond_to_event",
-        ]);
+        recipients.set(recruitingBotIds.scheduling, GOOGLE_CALENDAR_SCHEDULING_TOOLS);
     } else if (endpoint === "https://mcp.cal.com/mcp") {
       const reads = [
         "get_bookings",
@@ -384,6 +453,17 @@ export function PluginsOverlay({
       if (!assignment.allowAllTools && !assignment.allowedTools.length)
         throw new Error(t`Could not connect`);
     }
+    // A recruiter books on one calendar: connecting it disconnects the other.
+    if (CALENDAR_ENDPOINTS.includes(endpoint))
+      for (const other of all)
+        if (
+          other.id !== serverId &&
+          other.hasSecret &&
+          CALENDAR_ENDPOINTS.includes(serviceEndpoint(other))
+        ) {
+          if (!current()) return;
+          await rpc.mcp.oauth.disconnect({ serverId: other.id });
+        }
     if (current()) await refresh();
   }
 
@@ -989,9 +1069,7 @@ export function PluginsOverlay({
                     data-service-id={server.id}
                     className="flex min-w-0 items-center gap-3 rounded-xl px-2.5 py-2"
                   >
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-accent text-sm font-semibold text-foreground">
-                      {server.name[0]}
-                    </div>
+                    <ServiceLogo server={server} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-medium text-foreground">
                         {server.name}
@@ -1019,6 +1097,19 @@ export function PluginsOverlay({
                           <Trans>Reconnect</Trans>
                         ) : (
                           <Trans>Connect</Trans>
+                        )}
+                      </Button>
+                    ) : accessible && server.hasSecret && !server.platformCredentialConfigured ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={pending !== null}
+                        onClick={() => void disconnectNative(server)}
+                      >
+                        {pending === server.id ? (
+                          <Trans>Disconnecting…</Trans>
+                        ) : (
+                          <Trans>Disconnect</Trans>
                         )}
                       </Button>
                     ) : null}

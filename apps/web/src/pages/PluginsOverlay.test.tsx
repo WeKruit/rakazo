@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   connect: vi.fn(),
   approve: vi.fn(),
   setup: vi.fn(),
+  disconnect: vi.fn(),
 }));
 vi.mock("../lib/rpc", () => ({
   rpc: {
@@ -22,6 +23,7 @@ vi.mock("../lib/rpc", () => ({
     mcp: {
       servers: { list: api.servers },
       assignments: { all: api.assignments, approve: api.approve },
+      oauth: { disconnect: api.disconnect },
     },
   },
 }));
@@ -295,6 +297,33 @@ it("checks fresh native state after OAuth rather than treating its completion si
   expect(host.querySelector('[data-service-id="Mailbox"]')?.textContent).toContain("Configured");
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(api.approve).not.toHaveBeenCalled();
+});
+
+it("disconnects a personal service, shows each service's logo and leaves built-in records out", async () => {
+  const endpoint = "https://gmailmcp.googleapis.com/mcp/v1";
+  api.servers.mockResolvedValue([
+    server("Mailbox", { endpoint, oauthStatus: "connected", hasSecret: true }),
+    server("Research", { platformCredentialConfigured: true }),
+    server("Records", { slug: "recruiting-crm", oauthStatus: "connected", hasSecret: true }),
+  ]);
+  api.assignments.mockResolvedValue([
+    assignment("Mailbox"),
+    assignment("Research"),
+    assignment("Records"),
+  ]);
+  api.disconnect.mockResolvedValue({ ok: true });
+  const host = await open();
+  const mailbox = () => host.querySelector('[data-service-id="Mailbox"]')!;
+  expect(host.querySelector('[data-service-id="Records"]')).toBeNull();
+  expect(mailbox().querySelector("img")?.getAttribute("src")).toBe("/connectors/gmail.png");
+  expect(host.querySelector('[data-service-id="Research"]')?.textContent).not.toContain(
+    "Disconnect",
+  );
+  api.servers.mockResolvedValue([server("Mailbox", { endpoint })]);
+  await act(async () => button(host, "Disconnect").click());
+  expect(api.disconnect).toHaveBeenCalledWith({ serverId: "Mailbox" });
+  expect(mailbox().textContent).toContain("Needs connection");
+  expect(mailbox().textContent).toContain("Connect");
 });
 
 it("keeps an unassigned service unconfigured when its account authorization fails", async () => {
@@ -584,6 +613,40 @@ it.each([
   expect(scheduling).toContain(write);
   expect(main).not.toContain("call_api_operation");
   expect(scheduling).not.toContain("call_api_operation");
+});
+
+it("gives Scheduling its calendar access on reconnect and keeps only one calendar connected", async () => {
+  const endpoint = "https://calendarmcp.googleapis.com/mcp/v1";
+  const booking = server("Booking", {
+    endpoint: "https://mcp.cal.com/mcp",
+    oauthStatus: "connected",
+    hasSecret: true,
+  });
+  const mailbox = server("Mailbox", {
+    endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+    oauthStatus: "connected",
+    hasSecret: true,
+  });
+  api.servers.mockResolvedValue([server("Calendar", { endpoint }), booking, mailbox]);
+  api.assignments.mockResolvedValue([{ ...assignment("Calendar"), allowAllTools: true }]);
+  api.disconnect.mockResolvedValue({ ok: true });
+  api.connect.mockImplementation(async () => {
+    api.servers.mockResolvedValue([
+      server("Calendar", { endpoint, oauthStatus: "connected", hasSecret: true }),
+      booking,
+      mailbox,
+    ]);
+    return "connected";
+  });
+  api.approve.mockImplementation(async (input) => ({ ...input, allowAllTools: false }));
+  const host = await open("main", false, {
+    coordinatorBotId: "main",
+    recruitingBotIds: { scheduling: "scheduling" },
+  });
+  await act(async () => button(host, "Connect").click());
+  expect(api.approve.mock.calls.map(([input]) => input.botId)).toEqual(["main", "scheduling"]);
+  expect(api.approve.mock.calls[1]![0].allowedTools).toContain("create_event");
+  expect(api.disconnect.mock.calls).toEqual([[{ serverId: "Booking" }]]);
 });
 
 it("reuses an explicit generic app Connect on the actual coordinator only", async () => {

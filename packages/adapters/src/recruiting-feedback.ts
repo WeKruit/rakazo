@@ -146,6 +146,9 @@ export async function executeRecruitingFeedback(
       ? {}
       : { roleId: feedback.roleId, expectedRoleRevision: feedback.expectedRoleRevision }),
     ...(feedback.target === "candidate" ? { candidateKeys: feedback.candidateKeys } : {}),
+    ...(feedback.target === "round" && feedback.operation === "approve"
+      ? { acceptEarlierQuote: true }
+      : {}),
   });
   if (runBotId !== botId)
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");

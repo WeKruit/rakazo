@@ -3,7 +3,7 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import { ArtifactReadInputSchema } from "@rakazo/contracts";
 import { parseCsv, readRecruitingJsonString } from "@rakazo/core";
-import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, Prisma } from "@rakazo/db";
 
@@ -101,9 +101,8 @@ export async function artifactReadFromTool(
   if (
     !(
       mime.startsWith("text/") ||
-      ["application/json", "application/xml", "application/javascript", "application/pdf"].includes(
-        mime,
-      )
+      ["application/json", "application/xml", "application/javascript"].includes(mime) ||
+      isExtractedDocumentMimeType(mime)
     )
   )
     return { artifact: metadata, error: "This artifact format does not support text reading." };
@@ -118,11 +117,11 @@ export async function artifactReadFromTool(
     } catch {
       return { artifact: metadata, error: "Artifact path does not select a valid JSON string." };
     }
-  } else if (mime === "application/pdf") {
+  } else if (isExtractedDocumentMimeType(mime)) {
     try {
-      text = await extractPdfText(bytes);
+      text = await extractDocumentText(bytes, mime);
     } catch {
-      return { artifact: metadata, error: "PDF text could not be read or verified." };
+      return { artifact: metadata, error: "Document text could not be read or verified." };
     }
   } else {
     try {

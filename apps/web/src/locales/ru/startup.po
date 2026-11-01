@@ -31,21 +31,6 @@ msgstr ""
 msgid "{0, plural, one {# person with email} other {# people with email}}"
 msgstr ""
 
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
-msgstr "{0} (макс. {ATTACHMENT_MAX_COUNT} вложений)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (over 10 MiB)"
-msgstr "{0} (более 10 МБ)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
-msgstr ""
-
 #. placeholder {0}: archivedRouteGroup.name
 #: src/pages/shell/ShellConversation.tsx
 msgid "{0} is archived."
@@ -144,6 +129,11 @@ msgstr ""
 #: src/pages/shell/ShellConversation.tsx
 msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
 msgstr "{peopleAdded, plural, one {Добавлен # человек} few {Добавлено # человека} many {Добавлено # человек} other {Добавлено # человека}}"
+
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{RECRUITING_GLOBAL_AGENT_NAME}, {0} waiting"
+msgstr "{RECRUITING_GLOBAL_AGENT_NAME}, ожидает: {0}"
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
@@ -426,7 +416,6 @@ msgstr ""
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "Вложение"
 
@@ -584,10 +573,6 @@ msgstr "Не удаётся связаться с сервером."
 msgid "Cancel"
 msgstr "Отмена"
 
-#: src/pages/shell/queued-messages.tsx
-msgid "Cancel edit"
-msgstr ""
-
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
 msgstr "Отменить ответ"
@@ -737,6 +722,7 @@ msgstr "Секрет клиента"
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "Закрыть"
@@ -1150,10 +1136,6 @@ msgid "Could not update computer"
 msgstr "Не удалось обновить компьютер"
 
 #: src/pages/shell/useShellMessages.ts
-msgid "Could not update message"
-msgstr ""
-
-#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "Не удалось обновить реакцию"
 
@@ -1402,10 +1384,6 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: src/pages/shell/queued-messages.tsx
-msgid "Edit queued message"
-msgstr ""
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
@@ -1600,10 +1578,6 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
-msgstr ""
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
 msgstr ""
 
 #: src/pages/Auth.tsx
@@ -1995,6 +1969,10 @@ msgstr ""
 msgid "Max"
 msgstr "Макс"
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Max {ATTACHMENT_MAX_COUNT} files"
+msgstr "Не более {ATTACHMENT_MAX_COUNT} файлов"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "MCP endpoint"
 msgstr ""
@@ -2128,6 +2106,10 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs approval"
+msgstr "Нужно подтверждение"
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
 msgstr ""
@@ -2144,6 +2126,14 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Needs you"
 msgstr "Требуется ваше участие"
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your attention"
+msgstr "Требует вашего внимания"
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your response"
+msgstr "Нужен ваш ответ"
 
 #: src/pages/Auth.tsx
 msgid "New password"
@@ -2375,6 +2365,10 @@ msgstr "Открыть в полном окне"
 msgid "Open navigation"
 msgstr "Открыть навигацию"
 
+#: src/pages/ShellMessage.tsx
+msgid "Open role"
+msgstr ""
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open role chat"
 msgstr ""
@@ -2450,6 +2444,10 @@ msgstr "Outreach drafts"
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Outreach status"
 msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Over {maxMegabytes} MB"
+msgstr "Больше {maxMegabytes} МБ"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Overall direction"
@@ -2563,13 +2561,8 @@ msgid "Qualifying work"
 msgstr ""
 
 #: src/lib/roster-status.ts
-#: src/pages/shell/queued-messages.tsx
 msgid "Queued"
 msgstr "В очереди"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Queued messages"
-msgstr ""
 
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
@@ -2739,7 +2732,9 @@ msgid "Reminder"
 msgstr ""
 
 #. placeholder {0}: attachment.file.name
+#. placeholder {0}: item.name
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/skipped-attachments.tsx
 msgid "Remove {0}"
 msgstr "Удалить {0}"
 
@@ -2757,10 +2752,6 @@ msgstr ""
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "Удалить упоминание {0}"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Remove queued message"
-msgstr ""
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -3006,9 +2997,12 @@ msgstr ""
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "Сохранить"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Save as CSV"
+msgstr "Сохраните как CSV"
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
@@ -3137,10 +3131,6 @@ msgstr "Отправить код удаления"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
-msgstr ""
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Send now"
 msgstr ""
 
 #: src/pages/recruiting/CrmWorkbench.tsx
@@ -3344,11 +3334,6 @@ msgstr "Пропустить или добавить ключ"
 msgid "Skipped"
 msgstr ""
 
-#. placeholder {0}: skipped.join(", ")
-#: src/pages/shell/useShellMessages.ts
-msgid "Skipped {0}"
-msgstr "Пропущен {0}"
-
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "Обновление программного обеспечения"
@@ -3412,10 +3397,6 @@ msgstr ""
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Status"
-msgstr ""
-
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
 msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
@@ -3493,10 +3474,6 @@ msgstr ""
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
 msgstr "Сменить бота"
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
-msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -3777,6 +3754,10 @@ msgstr ""
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Unsupported file type: {0}"
 msgstr "Неподдерживаемый тип файла: {0}."
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Unsupported format"
+msgstr "Формат не поддерживается"
 
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx

@@ -45,7 +45,8 @@ case "$TARGET" in
       MODAL_VOLUME_NAME=wekruit-recruiting-files MODAL_ENVIRONMENT=main ;;
   test)
     URL=${RAKAZO_TEST_URL:?set RAKAZO_TEST_URL to the test Modal app URL}
-    ORIGIN=$URL
+    # The test app trusts its own public origin (RAKAZO_TEST_ORIGIN), not the Modal URL.
+    ORIGIN=${RAKAZO_TEST_ORIGIN:-$URL}
     export MODAL_APP_NAME=wekruit-recruiting-test MODAL_SECRET_NAME=wekruit-recruiting-test-config \
       MODAL_VOLUME_NAME=wekruit-recruiting-test-files MODAL_ENVIRONMENT=test
     # Release logs and builds stay apart from production's.
@@ -205,6 +206,11 @@ if [ "$MODE" = journeys ]; then
   staging_journeys "$J" staging
   log "JOURNEYS OK $SHORT"; exit 0
 fi
+# Staging → production sync: every config key the test app has must exist in production, and no
+# production value may point at the test environment. Prints key names only.
+if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
+  python3 "$REPO/docs/deploy/promote-check.py" | sed 's/^/  /' || die "staging → production config sync is incomplete (see above)"
+fi
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = premerge ] && { run_tests; log "PREMERGE OK $SHA_IN on main ${SHORT} (safe to merge)"; exit 0; }
 if [ "$MODE" = prebuild ]; then
@@ -277,6 +283,8 @@ fi
 # 5) Deploy, sampling public /health every 2 s to measure the outage window.
 ( while sleep 2; do printf '%s %s\n' "$(date +%s)" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health")"; done ) > "$WORK/health-$SHORT.log" &
 PROBE=$!; trap 'kill $PROBE 2>/dev/null || true' EXIT
+# Uses this script's own checkout, so the guard also covers older releases and rollbacks' targets.
+(cd "$(dirname "$0")/../.." && modal run -q infra/modal/db_url_check.py) || die "database URLs are misconfigured for $TARGET; fix the Secret before deploying"
 log "deploying $SHORT (recreate)"
 (cd "$DIR" && modal deploy --strategy recreate infra/modal/app.py) || die "modal deploy failed for $SHORT"
 

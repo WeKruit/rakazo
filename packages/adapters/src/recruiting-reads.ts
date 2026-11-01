@@ -58,7 +58,7 @@ import {
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
@@ -81,6 +81,32 @@ import {
   createRecruitingCandidateReportReader,
   isRecruitingCandidateReportField,
 } from "./recruiting-research.js";
+
+/**
+ * Some imported CRM sources carry a mail workspace id in their company field. It names no
+ * employer, so it is dropped and the next source with a real company is used instead.
+ */
+const ID_ONLY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const realCompany = (company: string | null | undefined) =>
+  company?.trim() && !ID_ONLY.test(company.trim()) ? company : null;
+
+function crmCompanyAndProfile<P extends { sources: { company: string | null }[] }>(row: {
+  company?: string | null | undefined;
+  profile?: P | undefined;
+}): { company?: string | null; profile?: P } {
+  if (row.company === undefined && row.profile === undefined) return {};
+  const sources = row.profile?.sources.map((source) => ({
+    ...source,
+    company: realCompany(source.company),
+  }));
+  const company =
+    realCompany(row.company) ?? sources?.find((source) => source.company)?.company ?? null;
+  return {
+    ...(row.company !== undefined || sources?.length ? { company } : {}),
+    ...(row.profile && sources ? { profile: { ...row.profile, sources } } : {}),
+  };
+}
+
 export type RecruitingThreadTarget =
   | { kind: "bot"; botId: string; threadId: string }
   | { kind: "group"; groupId: string; threadId: string; memberBotIds: string[] };
@@ -2806,7 +2832,7 @@ export const readRecruitingSource = (
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new IsolationError();
       const json = row.mimeType === "application/json" || row.mimeType.endsWith("+json");
-      const pdf = row.mimeType === "application/pdf";
+      const pdf = isExtractedDocumentMimeType(row.mimeType);
       const path =
         selection?.kind === "artifact_json_string"
           ? selection.path
@@ -2818,7 +2844,7 @@ export const readRecruitingSource = (
       const text = path
         ? readRecruitingJsonString(bytes, path)
         : pdf
-          ? await extractPdfText(bytes)
+          ? await extractDocumentText(bytes, row.mimeType)
           : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const start = selection?.start ?? text.indexOf(source.quote);
       const end = selection?.end ?? start + source.quote.length;
@@ -3442,8 +3468,7 @@ export async function getRecruitingCrmData(
       ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
       ...(row.last_reply_at !== undefined ? { lastReplyAt: row.last_reply_at } : {}),
       ...(row.resume_received !== undefined ? { resumeReceived: row.resume_received } : {}),
-      ...(row.company !== undefined ? { company: row.company } : {}),
-      ...(row.profile !== undefined ? { profile: row.profile } : {}),
+      ...crmCompanyAndProfile(row),
     });
     const tracking = (
       row: Omit<

@@ -7,7 +7,6 @@ import { t } from "./i18n";
 import type { PickedAttachment } from "./pick-attachments";
 
 export type ComposerSnapshot = {
-  queueMode: "steer" | "follow_up";
   promptText: string;
   mentions: ComposerMention[];
   skill: AgentSkillCatalogEntry | null;
@@ -23,7 +22,6 @@ export function settleComposer(submitted: ComposerSnapshot, current: ComposerSna
 }
 
 export type SendPayload = {
-  queueMode: "steer" | "follow_up";
   originThreadKey: string;
   displayText: string;
   replyPreview: string | null;
@@ -96,7 +94,8 @@ export async function deliverSend(
     request<{ seq: number }>("threads/send", {
       ...(groupTarget ? { groupId: groupTarget } : { botId: botTarget! }),
       clientNonce: attempt.clientNonce,
-      queueMode: payload.queueMode,
+      // A message sent while a reply works goes in right away instead of waiting.
+      interrupt: true,
       text: plan.trimmed || undefined,
       mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
       artifactIds: artifactIds.length ? artifactIds : undefined,

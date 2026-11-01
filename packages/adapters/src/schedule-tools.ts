@@ -49,7 +49,7 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot") &&
       // Only the account-wide conversation sits above the role teams.
-      (tool.name !== "delegate_to_role" || global),
+      ((tool.name !== "delegate_to_role" && tool.name !== "start_role") || global),
   );
 }
 

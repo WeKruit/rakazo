@@ -30,6 +30,7 @@ import {
   isActive,
   isConversationalRun,
   isStatusQuestion,
+  isWorkActivity,
   ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
@@ -44,6 +45,7 @@ import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db
 import {
   answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
+  cancelFormAskInTransaction,
   cancelRunsInTransaction,
   createGroupRepos,
   createRepos,
@@ -152,13 +154,18 @@ async function answerStatusQuestion(
       select: { startedAt: true, completedAt: true },
     }),
   ]);
-  const tool = (called?.payload as { name?: unknown } | null)?.name;
+  const calledPayload = called?.payload as { name?: unknown; category?: unknown } | null;
+  const tool = calledPayload?.name;
   const since = timing?.startedAt ?? timing?.createdAt;
   const blocks: MessageBlock[] = [
     {
       kind: "text",
       text: statusAnswer({
-        activity: typeof tool === "string" ? workActivityForTool(tool) : "working",
+        activity: isWorkActivity(calledPayload?.category)
+          ? calledPayload.category
+          : typeof tool === "string"
+            ? workActivityForTool(tool)
+            : "working",
         elapsedMs: since ? Date.now() - since.getTime() : 0,
         typicalMs: typicalDurationMs(
           past.flatMap((done) =>
@@ -186,7 +193,10 @@ async function answerStatusQuestion(
   return true;
 }
 
-/** A typed message moves past an open connect card; its run resumes and the message steers it. */
+/**
+ * A typed message moves past an open connect or form card: the card closes (not connected, or
+ * cancelled), its run resumes and the message steers it. Approval and secret cards stay open.
+ */
 async function declineConnectionAsks(
   tx: Prisma.TransactionClient,
   actor: Actor,
@@ -196,12 +206,18 @@ async function declineConnectionAsks(
   for (const run of runs)
     if (
       run.status === "waiting_input" &&
-      (await declineConnectionAskInTransaction(tx, {
+      ((await declineConnectionAskInTransaction(tx, {
         spaceId: actor.spaceId,
         threadId,
         runId: run.id,
         answeredByUserId: actor.userId,
-      }))
+      })) ||
+        (await cancelFormAskInTransaction(tx, {
+          spaceId: actor.spaceId,
+          threadId,
+          runId: run.id,
+          answeredByUserId: actor.userId,
+        })))
     )
       run.status = "queued";
 }
@@ -1018,14 +1034,14 @@ export async function sendThreadMessage(
             yielded,
             target.botId,
           );
+          if (input.queueMode !== "follow_up")
+            await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const queueMode = await queueBehindCards(
             tx,
             target.threadId,
             activeRuns,
             input.queueMode,
           );
-          if (queueMode !== "follow_up")
-            await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (
             queueMode !== "follow_up" &&
@@ -1272,9 +1288,9 @@ export async function sendThreadMessage(
           },
         });
         const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
-        const queueMode = await queueBehindCards(tx, target.threadId, activeRuns, input.queueMode);
-        if (queueMode !== "follow_up")
+        if (input.queueMode !== "follow_up")
           await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
+        const queueMode = await queueBehindCards(tx, target.threadId, activeRuns, input.queueMode);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
         const conversationalBotIds = new Set(

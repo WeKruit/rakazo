@@ -62,7 +62,6 @@ function attempt(nonce = "nonce-a"): SendAttempt {
     clientNonce: nonce,
     artifactIds: new Map([["attachment-a", "artifact-a"]]),
     payload: {
-      queueMode: "follow_up",
       originThreadKey: "bot-a",
       displayText: "Hello",
       replyPreview: null,
@@ -93,7 +92,7 @@ it("restores payload, uploaded ids and nonce for an idempotent retry", async () 
     state: "queued",
     session: 2,
     clientNonce: original.clientNonce,
-    payload: { queueMode: "follow_up" },
+    payload: { displayText: "Hello" },
   });
   expect(files.has("cache/outbox/delivered/0")).toBe(false);
   expect(restored?.artifactIds).toEqual(original.artifactIds);

@@ -5,20 +5,7 @@ name: publish-server-image
 # cache, so untrusted code can validate the images without receiving package-publish authority.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
-    paths:
-      - ".dockerignore"
-      - ".github/workflows/publish-server-image.yml"
-      - "apps/**"
-      - "infra/compose/**"
-      - "infra/sandboxes/computer/**"
-      - "infra/updater/**"
-      - "packages/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
   workflow_dispatch:
 
 permissions:

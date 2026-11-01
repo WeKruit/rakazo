@@ -147,8 +147,13 @@ import {
   verifyMcpInstall,
 } from "@rakazo/adapters";
 import type { CrmMembershipReads } from "@rakazo/adapters/recruiting-reads";
-import type { Auth, OidcConfig } from "@rakazo/auth";
-import { createOwnerVouchedAccount, getOidcAccountStatus, OwnerAccountError } from "@rakazo/auth";
+import type { Auth, FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
+import {
+  createOwnerVouchedAccount,
+  firstPartySessionEmail,
+  getOidcAccountStatus,
+  OwnerAccountError,
+} from "@rakazo/auth";
 import type {
   ActionApprovalRule,
   Actor,
@@ -733,6 +738,7 @@ export interface RouterDeps {
     integrationsCatalogUrl?: string;
     mcpAllowPrivateEndpoint?: boolean;
     firstPartyMcpUrl?: string;
+    firstPartySession?: FirstPartySessionConfig;
     oidc?: Pick<OidcConfig, "issuer" | "clientId">;
     signupsEnabled?: string;
     signupAllowlist?: string;
@@ -908,10 +914,13 @@ export function createRouter(deps: RouterDeps) {
         row.endpoint === deps.env.firstPartyMcpUrl &&
         !row.secretId,
     );
-  const productIdentityStatus = (actor: Actor) =>
-    deps.env.oidc
-      ? getOidcAccountStatus(deps.prisma, deps.env.oidc, actor)
-      : Promise.resolve("reconnect" as const);
+  const productIdentityStatus = async (actor: Actor): Promise<"connected" | "reconnect"> => {
+    if (!deps.env.oidc) return "reconnect";
+    const linked = await getOidcAccountStatus(deps.prisma, deps.env.oidc, actor);
+    if (linked === "connected" || !deps.env.firstPartySession) return linked;
+    // The backend signs a verified product email in to the CRM; nothing to connect.
+    return (await firstPartySessionEmail(deps.prisma, actor)) ? "connected" : "reconnect";
+  };
   async function mcpServerForActor(row: Parameters<typeof mcpServerDto>[0], actor: Actor) {
     return mcpServerDto(
       row,
