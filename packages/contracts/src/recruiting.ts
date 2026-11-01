@@ -1585,8 +1585,10 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     // A role conversation always reads its own role; elsewhere the agent names one.
     roleId: RecruitingId.optional(),
   }),
-  ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
+  ListRecruitingCandidateSourcesInput.extend({
     operation: z.literal("sources"),
+    // As for list: a role conversation always reads its own role.
+    roleId: RecruitingId.optional(),
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
