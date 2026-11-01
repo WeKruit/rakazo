@@ -2098,6 +2098,43 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     expect(f.effects).toHaveLength(1);
   });
 
+  it.each(["approved", "executing", "uncertain", "completed"])(
+    "settles a consumed blocked replay only while still approved: %s",
+    async (statusAtSettlement) => {
+      const f = replyFixture();
+      await f.run();
+      const effect = f.effects[0]!;
+      const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+        .mailReplyApproval;
+      effect.status = "approved";
+      effect.result = {
+        mailReplyApproval: { ...draft, status: "sending" },
+        schedulingApprovalEvidence: { invalid: true },
+      };
+      const update = f.prisma.externalEffect.updateMany.getMockImplementation()!;
+      f.prisma.externalEffect.updateMany.mockImplementation(async (input) => {
+        if (input.where.id === effect.id && input.data.status === "failed")
+          effect.status = statusAtSettlement;
+        return update(input);
+      });
+      f.runtimeRun.mockClear();
+      await f.run({ expectModel: false });
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.effects).toHaveLength(1);
+      if (statusAtSettlement === "approved")
+        expect(effect).toMatchObject({
+          status: "failed",
+          result: { dispatched: false, error: expect.any(String) },
+        });
+      else expect(effect.status).toBe(statusAtSettlement);
+      expect(f.prisma.externalEffect.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: effect.id, spaceId: "space-1", runId: "run-1", status: "approved" },
+          data: expect.objectContaining({ status: "failed" }),
+        }),
+      );
+    },
+  );
   it("dispatches a clicked edited reply through the same effect before any model call", async () => {
     const editedBody = "The recruiter edited this sentence.";
     const f = replyFixture({

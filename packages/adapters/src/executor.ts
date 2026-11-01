@@ -13582,28 +13582,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             catalog?.args ?? direct!.args,
             `reply-approval:${effect.id}`,
           );
-          if (approvedEffectReplays.nextRequest() === request) {
-            await deps.prisma.externalEffect.updateMany({
-              where: { id: effect.id, status: "approved" },
+          const replayPending = approvedEffectReplays.nextRequest() === request;
+          const replayError = toolResultError(outcome);
+          if (replayPending || replayError) {
+            const failed = await deps.prisma.externalEffect.updateMany({
+              where: { id: effect.id, spaceId: run.spaceId, runId, status: "approved" },
               data: {
                 status: "failed",
                 result: {
                   error:
-                    toolResultError(outcome) ??
+                    replayError ??
                     "The approved reply could not be verified. No email was dispatched.",
                   dispatched: false,
                 } as never,
               },
             });
-            approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
-            await deps.events.append({
-              spaceId: run.spaceId,
-              threadId: thread.id,
-              botId: bot.id,
-              runId,
-              type: "effect.recorded",
-              payload: { effectId: effect.id, tool: name },
-            });
+            if (replayPending) approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
+            if (failed.count === 1)
+              await deps.events.append({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+                type: "effect.recorded",
+                payload: { effectId: effect.id, tool: name },
+              });
           }
           await publishMailReplyCard(
             deps.prisma,
