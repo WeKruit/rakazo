@@ -8,7 +8,7 @@
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_ORIGIN=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
-//   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
+//   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-20
 //                  (which must end with a report stating the new count), pasted English JD
 //                  (needs <cases>/t3.txt), contacts (找contact twice and send-20 on a fresh first
 //                  ten of <cases>/t1.pdf, ending on the unanswered send card). cards (full suite or --only cards; it searches, so it costs
@@ -16,7 +16,7 @@
 //                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
 //                  {"sendGroup","sendRoleMark","bookingGroup"})
 //   --suite full   gate plus midwork (a new requirement and an after-you-finish message sent
-//                  during find-100 each get their own reply), first10 (long JD), attached JD with drafts, contacts and send-20
+//                  during find-20 each get their own reply), first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
 //                  in the same chat, or --ambiguous-group <id>: an action or one question card,
@@ -26,11 +26,12 @@
 //   --suite staging  the test environment's release gate (with --paid --staging): smoke, pages
 //                  (Home and the left-nav pages in a browser, no supplier names), memory (a preference told
 //                  to Kruit is saved and recalled in the <cases>/t5.json chat), progress, midwork,
-//                  and resume (a find-100 whose server is restarted mid-search reaches its target,
-//                  reports when its countdown runs out and answers a bare "再来点"). Cases in a
+//                  and resume (a find-20 whose server is restarted mid-search reaches its target,
+//                  reports at its countdown if one shows and answers a bare "再来点"). Cases in a
 //                  wave run side by side; resume runs alone. approval (--only approval: a new
 //                  message never answers a waiting booking card) needs a calendar connection.
-//   --suite staging-quick  only the first, free wave (smoke, pages, memory): the deploy gate
+//   --suite staging-quick  only the first, free wave (smoke, pages, memory, ui, approval): the
+//                  deploy gate. ui runs ui-regressions.mjs in a browser.
 //   --staging      allows the cases that touch shared state or restart the test server
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
 //   --paid         required for any case that searches (first10, progress, t1, t3, contacts, cards,
@@ -188,11 +189,25 @@ const cards = (messages) =>
   );
 const messagesOf = async (groupId) =>
   (await rpc("threads/messages", { groupId, includePeerRuns: true })).messages ?? [];
+/** A reply turn is running, apart from background search runs (what Stop ends). */
+const foregroundTurn = async (groupId) => {
+  const [tasks, snapshot] = await Promise.all([
+    rpc("threads/backgroundTasks", { groupId }),
+    rpc("threads/get", { groupId }),
+  ]);
+  const background = new Set(tasks.filter((task) => task.kind === "run").map((task) => task.id));
+  return (snapshot.activeRuns ?? []).some(
+    (run) => !background.has(run.id) && ["queued", "leased", "running"].includes(run.status),
+  );
+};
 const working = async (groupId) =>
   ((await rpc("threads/get", { groupId })).activeRuns ?? []).some(
     (activeRun) => activeRun.status !== "waiting_input",
   );
 
+// Internal tool names never reach the recruiter either.
+const TOOL_NAMES =
+  /\b(?:agent_run|ask_user|delegate_to_role|handoff_to_bot|start_role|search_history|work_estimate|mcp__\w+)\b/;
 const VENDORS =
   /\b(autumn|exa|coresignal|fullenrich|contactout|leadmagic|instantly|composio|cal\.com|apollo|openai|codex)\b/i;
 // "Which people…?" asks the recruiter to pick instead of doing it; "I'll check which people…" is fine.
@@ -200,15 +215,25 @@ const REFUSAL =
   /\b(?:unassessed|not (?:send-)?ready|which (?:\d+(?![-:])|people|candidates)\b[^.!?\n]*\?|can(?:no|['’])t (?:send|look up|choose))/i;
 // The model thinking aloud in a reply, seen while it spelled unusual email addresses.
 const SELF_TALK = /\?\s*Wait\.|\bNeed correctly\b/;
+const mostlyChinese = (text) =>
+  (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]/g)?.length ?? 0);
 /** Checks every recruiter-visible message must pass, whatever the case. */
-function commonChecks(messages, failures, { english = true } = {}) {
+function commonChecks(messages, failures) {
   for (const message of recruiterSees(messages)) {
     const text = botText(message);
-    const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
-    const latin = text.match(/[A-Za-z]/g)?.length ?? 0;
-    if (english && han > latin) failures.push(`not English: "${text.slice(0, 80)}"`);
-    if (text.includes("、")) failures.push(`Chinese list separator: "${text.slice(0, 80)}"`);
+    // Replies follow the recruiter's language: English unless their last message was Chinese.
+    const asked = messages.findLast(
+      (item) =>
+        item.role === "user" &&
+        !item.internal &&
+        Date.parse(item.createdAt) <= Date.parse(message.createdAt),
+    );
+    const chinese = asked ? mostlyChinese(botText(asked)) : false;
+    if (!chinese && mostlyChinese(text)) failures.push(`not English: "${text.slice(0, 80)}"`);
+    if (!chinese && text.includes("、"))
+      failures.push(`Chinese list separator: "${text.slice(0, 80)}"`);
     if (VENDORS.test(text)) failures.push(`vendor name: "${text.match(VENDORS)[0]}"`);
+    if (TOOL_NAMES.test(text)) failures.push(`internal tool name: "${text.match(TOOL_NAMES)[0]}"`);
     const selfTalk = text.match(SELF_TALK);
     if (selfTalk)
       failures.push(
@@ -550,10 +575,13 @@ async function stage(name, body) {
 const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.json`), "utf8"));
 // Cases in one wave run side by side, like recruiters working at once; resume restarts the
 // server, so it runs alone after the others.
-// approval joins once the test environment has a calendar connection of its own: today Scheduling
-// cannot read a calendar there, so no booking card appears.
-const STAGING_WAVES = [["smoke", "pages", "memory"], ["progress", "midwork"], ["resume"]];
-// The release gate's quick part: free and about three minutes. The full suite runs beside it.
+const STAGING_WAVES = [
+  ["smoke", "pages", "memory", "ui", "approval"],
+  ["progress", "midwork"],
+  ["resume"],
+];
+// The release gate's quick part: free, about six minutes. The full suite searches, so it is the
+// release thread's one paid run a day.
 const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 1) : STAGING_WAVES;
 const wanted = new Set(
   option("--only")?.split(",") ??
@@ -603,7 +631,7 @@ if (paid.length && !args.includes("--paid"))
 
 // These touch shared state (the account's Kruit memory, a fixture chat's card, the server itself),
 // so they run only on the test environment, whose data the next sync replaces.
-const STAGING_ONLY = ["memory", "approval", "resume"].filter((name) => wanted.has(name));
+const STAGING_ONLY = ["memory", "approval", "resume", "ui"].filter((name) => wanted.has(name));
 if (STAGING_ONLY.length && !args.includes("--staging"))
   throw new Error(`${STAGING_ONLY.join(", ")} run only on the test environment; pass --staging`);
 
@@ -695,11 +723,11 @@ try {
   });
 
   define("progress", async (failures) => {
-    // find-50 on the built-in role; a progress question is sent while it scales.
+    // find-20 on the built-in role; a progress question is sent while it scales.
     const out = path.join(OUT, "progress.json");
     const finding = run("progress", "recruiting-latency.mjs", [
       "--target",
-      "50",
+      "20",
       "--out",
       out,
       "--keep",
@@ -731,6 +759,17 @@ try {
         )
       ) {
         await testCopy(report.groupId);
+        // The progress answer is instant, so a reply to a new message is the turn Stop ends,
+        // as when a recruiter stops a reply they no longer want while the search keeps going.
+        if (!(await foregroundTurn(report.groupId))) {
+          await rpc("threads/send", {
+            groupId: report.groupId,
+            addressing: "coordinator",
+            text: "顺便说一下，有电商仓库背景的人优先。",
+          });
+          for (let end = Date.now() + 15_000; Date.now() < end; await sleep(500))
+            if (await foregroundTurn(report.groupId)) break;
+        }
         await assertStopKeepsBackground(rpc, report.groupId);
         stoppedCurrent = true;
       }
@@ -763,7 +802,7 @@ try {
     if (!stoppedCurrent)
       failures.push("Stop mid-search was not exercised against running background work");
     if (exit !== 0)
-      failures.push("find-50 did not pass after the progress question; see progress.log");
+      failures.push("find-20 did not pass after the progress question; see progress.log");
     const report = reportOf("progress");
     if (report.groupId) {
       const messages = await settled(report.groupId);
@@ -783,13 +822,13 @@ try {
   });
 
   define("midwork", async (failures) => {
-    // Workloop's busy-input contract on a find-100: a new requirement sent mid-search is
+    // Workloop's busy-input contract on a find-20: a new requirement sent mid-search is
     // answered within a minute and shapes the rest of the work, an "after you finish" message
     // waits for the answer, and every message the recruiter sent gets its own reply.
     const out = path.join(OUT, "midwork.json");
     const finding = run("midwork", "recruiting-latency.mjs", [
       "--target",
-      "100",
+      "20",
       "--out",
       out,
       "--keep",
@@ -830,7 +869,7 @@ try {
         });
       }
     }
-    if (!groupId) return failures.push("find-100 never started scaling; see midwork.log");
+    if (!groupId) return failures.push("find-20 never started scaling; see midwork.log");
     if (!steer) return failures.push("the search finished before a mid-work message was sent");
     const messages = await settled(groupId, { limitMs: 10 * 60_000 });
     const events = await readEvents(groupId);
@@ -929,14 +968,14 @@ try {
       "--jd-file",
       pdf,
       "--target",
-      "50",
+      "20",
       "--scale-text",
       "lets find 50 ",
       "--keep",
       "--out",
       path.join(OUT, "t1.json"),
     ]);
-    if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
+    if (code !== 0) failures.push("start or find-20 did not pass; see t1.log");
     const groupId = reportOf("t1").groupId;
     // The scale message goes in right after the ten, so no next-step card is expected here, and
     // the scale-out ends with its own report.
@@ -1420,6 +1459,13 @@ try {
     if (code !== 0) failures.push(`pages did not pass (exit ${code}); see pages.log`);
   });
 
+  define("ui", async (failures) => {
+    // Bugs that were fixed and came back, checked in the browser: multi-select cards, Kruit's
+    // people list, new role titles, the corner reminder, raw ID chips and internal names.
+    const code = await run("ui", "ui-regressions.mjs", ["--out", path.join(OUT, "ui")]);
+    if (code !== 0) failures.push(`browser checks did not pass (exit ${code}); see ui.log`);
+  });
+
   define("memory", async (failures) => {
     // A lasting preference told to Kruit is saved to memory and recalled in a role chat.
     const kruit = (await allGroups()).find((group) => group.name === "Kruit");
@@ -1432,7 +1478,7 @@ try {
       `记住一个长期偏好：以后给我汇报时，把我的团队叫做「${team}」组。`,
       { fixture: true, limitMs: 3 * 60_000, until: answered },
     );
-    commonChecks(told.replies, failures, { english: false });
+    commonChecks(told.replies, failures);
     let saved;
     for (const end = Date.now() + 90_000; !saved && Date.now() < end; await sleep(5_000))
       saved = (await memoryDocs()).find((doc) => doc.content.includes(team));
@@ -1462,21 +1508,55 @@ try {
   define("approval", async (failures) => {
     // A booking card waits for the recruiter: a new message while it waits is answered on its own
     // and never taken as the card's answer, and no agent tells another the card was approved.
-    const groupId = await fixtureChat();
+    const fixture = await fixtureChat();
     const saved = CASES ? JSON.parse(fs.readFileSync(path.join(CASES, "t5.json"), "utf8")) : {};
-    if (!groupId || !saved.say) return failures.push("approval needs <cases>/t5.json");
+    if (!fixture || !saved.say) return failures.push("approval needs <cases>/t5.json");
+    // A fresh copy of the booking chat: the fixture may still hold an earlier run's card, and the
+    // agent rightly declines to book the same interview twice.
+    const copy = await rpc("groups/duplicate", { groupId: fixture });
+    const groupId = copy.id;
+    await rpc("groups/update", { groupId, name: `${COPY_MARK}${copy.name}`.slice(0, 80) });
+    fs.writeFileSync(path.join(OUT, "approval.json"), JSON.stringify({ groupId }));
+    const booking = (replies) => cards(replies).some((block) => block.approvalEffectId);
+    const question = (replies) =>
+      cards(replies).find(
+        (block) => block.status === "pending" && !block.approvalEffectId && block.actions?.length,
+      );
     const booked = await say(groupId, withFutureDate(saved.say), {
-      fixture: true,
       limitMs: 5 * 60_000,
-      until: (replies) => cards(replies).some((block) => block.approvalEffectId),
+      until: (replies) => booking(replies) || Boolean(question(replies)),
     });
+    // A clarifying question first (time zone, length) is fine: take its first choice, as a
+    // recruiter would, and wait for the booking card.
+    for (let round = 0; round < 2 && !booking(booked.replies); round += 1) {
+      const open = question(booked.replies);
+      if (!open) break;
+      const message = booked.replies.find((item) =>
+        (item.blocks ?? []).some((block) => block.kind === "ask" && block.text === open.text),
+      );
+      const before = new Set((await messagesOf(groupId)).map((item) => item.id));
+      await rpc("threads/answer", {
+        groupId,
+        runId: message.runId,
+        messageId: message.id,
+        answer: open.actions[0].id,
+      });
+      for (let end = Date.now() + 5 * 60_000; Date.now() < end; await sleep(3_000)) {
+        const added = (await messagesOf(groupId)).filter(
+          (item) => !before.has(item.id) && item.role !== "user",
+        );
+        booked.replies.push(
+          ...added.filter((item) => !booked.replies.some((r) => r.id === item.id)),
+        );
+        if (booking(added) || question(added)) break;
+      }
+    }
     const card = cards(booked.replies).find((block) => block.approvalEffectId);
     if (!card) return failures.push("no booking confirmation card");
     const asked = await say(
       groupId,
       "While that waits: how many people does this role have in Results right now?",
       {
-        fixture: true,
         limitMs: 5 * 60_000,
         until: (replies) => /\d/.test(replies.map(botText).join("")),
       },
@@ -1516,13 +1596,13 @@ try {
   });
 
   define("resume", async (failures) => {
-    // A find-100 role whose server restarts mid-search: the search carries on to the target, the
+    // A find-20 role whose server restarts mid-search: the search carries on to the target, the
     // countdown still ends with a progress report, the scale ends with a report of the new count,
     // and a bare "再来点" right after is taken up instead of refused.
     const out = path.join(OUT, "resume.json");
     const finding = run("resume", "recruiting-latency.mjs", [
       "--target",
-      "100",
+      "20",
       "--out",
       out,
       "--keep",
@@ -1556,7 +1636,7 @@ try {
       if (countdown && countdown.running === undefined && Date.now() >= countdown.endsAt)
         countdown.running = tasks.some((task) => task.id === countdown.id);
       const sinceScale = Date.now() - Date.parse(report.milestones.scale_sent.at);
-      if (!restart && sinceScale > 20_000 && tasks.length) {
+      if (!restart && sinceScale > 3_000 && tasks.length) {
         log("resume: restarting the test server mid-search");
         restart = { at: Date.now() };
         try {
@@ -1567,16 +1647,17 @@ try {
         }
       }
     }
-    if (!groupId) return failures.push("find-100 never started scaling; see resume.log");
+    if (!groupId) return failures.push("find-20 never started scaling; see resume.log");
     if (!restart) failures.push("the search ended before the server could be restarted");
     const messages = await settled(groupId, { limitMs: 10 * 60_000 });
     const report = reportOf("resume");
     if (exit !== 0 && !report.milestones?.target_reached)
-      failures.push("find-100 did not reach its target after the restart; see resume.log");
+      failures.push("find-20 did not reach its target after the restart; see resume.log");
     for (const item of report.violations ?? []) failures.push(`${item.kind}: ${item.detail}`);
     scaleReportChecks(messages, failures, report.milestones?.scale_sent);
-    if (!countdown) failures.push("the 100-person search showed no countdown");
-    else if (countdown.running) {
+    // Searches here stay at 20 people (the cost rule); a countdown starts at 100, so its check
+    // runs only when one showed.
+    if (countdown?.running) {
       // Work still going when the countdown ran out must say where it stands within 90 s.
       const reported = recruiterSees(messages).some((message) => {
         const at = Date.parse(message.createdAt);
