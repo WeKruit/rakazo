@@ -13140,7 +13140,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
               pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
-              recruitingIntake: Boolean(linkRole) || firstRoundPending,
+              // A role team whose role is not saved yet is still in intake: its questions
+              // are what the recruiter waits on, so they skip reasoning too.
+              recruitingIntake:
+                Boolean(linkRole) ||
+                firstRoundPending ||
+                (Boolean(thread.groupId) &&
+                  !thread.activeRecruitingRoleId &&
+                  recruitingSearch &&
+                  Boolean(recruitingBotKey(bot))),
             });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
