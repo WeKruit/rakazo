@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isChineseText,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -9,7 +10,6 @@ import {
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  recruiterQuestionNotInEnglish,
   recruitingBriefConfirmedNextStep,
 } from "./recruiting-defaults.js";
 
@@ -84,31 +84,16 @@ describe("maintained recruiting defaults", () => {
   });
 });
 
-describe("recruiterQuestionNotInEnglish", () => {
-  const jd = { role: "user", blocks: [{ kind: "text", text: "新岗位：仓库运营经理（亚特兰大）" }] };
-
-  it("flags a Chinese question for a Chinese JD", () => {
-    expect(
-      recruiterQuestionNotInEnglish("仓库运营经理职位的中文要求应如何设定？我建议设为加分项。", [
-        jd,
-      ]),
-    ).toBe(true);
+describe("isChineseText", () => {
+  it("reads mostly-Han text as Chinese", () => {
+    expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
+    expect(isChineseText("以后都用中文回复我")).toBe(true);
   });
 
-  it("passes an English question that quotes a Chinese phrase", () => {
-    expect(
-      recruiterQuestionNotInEnglish("Should Chinese (中文) be required, preferred or not needed?", [
-        jd,
-      ]),
-    ).toBe(false);
-  });
-
-  it("passes Chinese once the recruiter asked for it", () => {
-    expect(
-      recruiterQuestionNotInEnglish("中文要求怎么定？", [
-        jd,
-        { role: "user", blocks: [{ kind: "text", text: "请用中文回复我" }] },
-      ]),
-    ).toBe(false);
+  it("reads English that quotes a Chinese phrase as English", () => {
+    expect(isChineseText("Should Chinese (中文) be required, preferred or not needed?")).toBe(
+      false,
+    );
+    expect(isChineseText("")).toBe(false);
   });
 });
