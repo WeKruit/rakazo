@@ -87,12 +87,14 @@ def dump_production():
     if result.returncode:
         raise RuntimeError("production dump failed")
     dumps.commit()
-    return {"user": user_of(url), "bytes": os.path.getsize(DUMP)}
+    return {"user": user_of(url), "bytes": os.path.getsize(DUMP),
+            "first_party_mcp_url": os.environ.get("FIRST_PARTY_MCP_URL", "")}
 
 
 @app.function(image=image, volumes={"/dumps": dumps}, timeout=3600, cpu=2, memory=4096,
-              secrets=[modal.Secret.from_name("wekruit-recruiting-test-db", environment_name="test")])
-def restore_into_test(production_user):
+              secrets=[modal.Secret.from_name("wekruit-recruiting-test-db", environment_name="test"),
+                       modal.Secret.from_name("wekruit-recruiting-test-config", environment_name="test")])
+def restore_into_test(production_user, production_first_party_mcp_url=""):
     import os, subprocess, psycopg2
     url = os.environ["DATABASE_URL"]
     # Supabase pooler user names carry the project ref, so equal names mean the same database.
@@ -114,6 +116,12 @@ def restore_into_test(production_user):
         cursor.execute(statement)
         counts[name] = cursor.rowcount
     counts.update(restore_test_connections(cursor))
+    # Copied CRM connections point at the production CRM; the test environment has its own.
+    test_first_party = os.environ.get("FIRST_PARTY_MCP_URL", "")
+    if production_first_party_mcp_url and test_first_party:
+        cursor.execute("update mcp_servers set endpoint = %s where endpoint = %s",
+                       (test_first_party, production_first_party_mcp_url))
+        counts["crm_connections_repointed"] = cursor.rowcount
     cursor.execute('select (select count(*) from "user"), (select count(*) from runs), '
                    "(select count(*) from routines where active)")
     counts["users"], counts["runs"], counts["active_routines"] = cursor.fetchone()
@@ -125,4 +133,4 @@ def restore_into_test(production_user):
 def main():
     dumped = dump_production.remote()
     print(f"production read: {dumped['bytes'] // 1_000_000} MB")
-    print("test copy:", restore_into_test.remote(dumped["user"]))
+    print("test copy:", restore_into_test.remote(dumped["user"], dumped["first_party_mcp_url"]))
