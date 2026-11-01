@@ -958,6 +958,14 @@ msgstr ""
 msgid "Could not continue"
 msgstr "계속 진행하지 못했습니다."
 
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create group"
+msgstr "그룹을 만들지 못했습니다."
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create role"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."

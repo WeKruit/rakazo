@@ -459,7 +459,12 @@ export function createGroupRepos(prisma: PrismaClient) {
 
     async createGroup(
       actor: Actor,
-      input: { name: string; botIds: string[]; crmRoleReference?: RecruitingCrmRoleReference },
+      input: {
+        id?: string;
+        name: string;
+        botIds: string[];
+        crmRoleReference?: RecruitingCrmRoleReference;
+      },
     ): Promise<Group> {
       const created = await prisma.$transaction((tx) =>
         createGroupInTransaction(tx, actor, {

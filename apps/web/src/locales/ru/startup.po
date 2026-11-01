@@ -958,6 +958,14 @@ msgstr "Не удалось подключиться к экрану компь�
 msgid "Could not continue"
 msgstr "Не удалось продолжить"
 
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create group"
+msgstr "Не удалось создать группу"
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create role"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."

@@ -64,6 +64,11 @@ function sameAccount(previousKey: string, nextKey: string) {
 
 /** The supplied WeKruit /hire navigation over native recruiting conversations. */
 /** The role waits on the recruiter: a confirmation, an answer, or a paused reply. */
+/** Opened from its proxy; the server has not created it yet. */
+function creating(group: Group) {
+  return !group.threadId;
+}
+
 function waitsOnUser(group: Group) {
   return Boolean(group.attention ?? group.needsInput);
 }
@@ -74,7 +79,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   archivedGroups,
   archivedOpen,
   groupId,
-  pendingRoleName,
   query,
   canCreateRole,
   onQueryChange,
@@ -112,8 +116,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   archivedGroups: Group[];
   archivedOpen: boolean;
   groupId?: string;
-  /** A role being created: shown at once, before the server returns it. */
-  pendingRoleName?: string | null;
   query: string;
   canOpenDashboard: boolean;
   canCreateRole: boolean;
@@ -261,7 +263,11 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   // Roles waiting on the recruiter come first; the rest keep their order.
   const visibleGroups = groups
     .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    .sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)));
+    .sort(
+      (a, b) =>
+        Number(creating(b)) - Number(creating(a)) ||
+        Number(waitsOnUser(b)) - Number(waitsOnUser(a)),
+    );
   const titleCounts = new Map<string, number>();
   for (const group of groups) {
     const title = group.name.trim().toLocaleLowerCase();
@@ -383,31 +389,18 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           </p>
         ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
-          {pendingRoleName ? (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                aria-current="page"
-                aria-busy="true"
-                disabled
-                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal disabled:opacity-100"
-              >
-                <span
-                  className="size-2 shrink-0 animate-pulse rounded-full bg-link"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate" dir="auto">
-                  {pendingRoleName}
-                </span>
-              </Button>
-            </div>
-          ) : null}
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
               <Button
                 variant="ghost"
-                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
-                aria-current={group.id === groupId && view === "results" ? "page" : undefined}
+                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal disabled:opacity-100"
+                aria-current={
+                  group.id === groupId && (view === "results" || creating(group))
+                    ? "page"
+                    : undefined
+                }
+                aria-busy={creating(group) || undefined}
+                disabled={creating(group)}
                 onMouseEnter={() => onPrefetchRole?.(group.id)}
                 onFocus={() => onPrefetchRole?.(group.id)}
                 onClick={() => {
@@ -425,7 +418,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
                 }}
               >
-                <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
+                <span
+                  className={cn(
+                    "size-2 shrink-0 rounded-full bg-link",
+                    creating(group) && "animate-pulse",
+                  )}
+                  aria-hidden="true"
+                />
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
@@ -467,6 +466,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               <Button
                 variant="ghost"
                 size="icon-sm"
+                disabled={creating(group)}
                 aria-label={t`Actions for ${group.name}`}
                 onClick={(event) => {
                   const bounds = event.currentTarget.getBoundingClientRect();
