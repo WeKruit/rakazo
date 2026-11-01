@@ -314,14 +314,14 @@ body,
 }
 [data-product-view="recruiting"] .hire-panel-heading strong {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
 }
 [data-product-view="recruiting"] .hire-panel-heading span {
   display: block;
   margin-top: 3px;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 12px;
 }
 [data-product-view="recruiting"] .hire-chat-panel > .hire-panel-heading {
   padding: 12px 4px;
@@ -330,8 +330,12 @@ body,
 }
 [data-product-view="recruiting"] .hire-assistant-identity {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
+}
+[data-product-view="recruiting"] .hire-assistant-identity > svg {
+  flex-shrink: 0;
 }
 [data-product-view="recruiting"] .hire-live-criteria {
   padding-bottom: 15px;
@@ -341,7 +345,7 @@ body,
   overflow-y: auto;
   border-bottom: 1px solid var(--border);
   padding: 17px 20px;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
 }
 [data-product-view="recruiting"] .hire-criterion-row {
@@ -351,12 +355,12 @@ body,
   border-bottom: 1px solid var(--border);
   padding: 12px 20px;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
 }
 [data-product-view="recruiting"] .hire-criterion-row > span {
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 12px;
 }
 [data-product-view="recruiting"] .hire-criterion-row strong {
   font-weight: 600;
@@ -367,7 +371,7 @@ body,
   gap: 7px;
   padding: 15px 20px 0;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.6;
 }
 [data-product-view="recruiting"] .hire-source-hint svg {
@@ -1279,4 +1283,11 @@ body,
 .hire-contacts-view::-webkit-scrollbar,
 .hire-contacts-view .candidate-viewport::-webkit-scrollbar {
   display: none;
+}
+
+/* A link typed or pasted into the chat composer. */
+.composer-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }

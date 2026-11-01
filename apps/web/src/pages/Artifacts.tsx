@@ -1,7 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web-lazy";
 import type { Artifact, ArtifactVersion, Bot } from "@rakazo/contracts";
-import { isAttachmentImageMimeType } from "@rakazo/contracts";
+import { DOCX_MIME_TYPE, isAttachmentImageMimeType } from "@rakazo/contracts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -807,6 +807,7 @@ function mimeLabel(mimeType: string): string {
   if (mimeType === "text/html") return "HTML";
   if (mimeType === "text/markdown") return "MD";
   if (mimeType === "application/pdf") return "PDF";
+  if (mimeType === DOCX_MIME_TYPE) return "DOCX";
   const slash = mimeType.indexOf("/");
   return (slash === -1 ? mimeType : mimeType.slice(slash + 1)).toUpperCase().slice(0, 6);
 }

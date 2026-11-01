@@ -56,6 +56,7 @@ import {
   userVisibleMessages,
   withLiveStreamingProgress,
   workStageKind,
+  writesChinese,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -610,7 +611,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const [replyTarget, setReplyTarget] = useState<MobileMessage | null>(null);
   const [replyQuote, setReplyQuote] = useState<string | null>(null);
   const [quoteTarget, setQuoteTarget] = useState<MobileMessage | null>(null);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [skippedAttachments, setSkippedAttachments] = useState<
+    Array<{ id: string; name: string; label: string }>
+  >([]);
   const [sending, setSending] = useState(false);
   const backgroundTasks = snap?.backgroundTasks ?? [];
   const [openStage, setOpenStage] = useState<{
@@ -737,6 +740,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   };
   const workSession = workTracker.current.tracker.session;
   const liveWorkSession = workSession?.endedAt ? null : workSession;
+  const threadMessages = snap?.messages;
+  const recruiterWritesChinese = useMemo(
+    () => writesChinese(threadMessages ?? []),
+    [threadMessages],
+  );
   const stageKind = useCallback(
     (stageBotId: string) =>
       workStageKind(
@@ -1629,7 +1637,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     setReplyQuote(null);
     setQuoteTarget(null);
     setMarkdownPreview(null);
-    setAttachmentNotice(null);
+    setSkippedAttachments([]);
     setError(null);
   }, [threadKey]);
 
@@ -1693,7 +1701,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     let attempt: SendAttempt;
     try {
       attempt = feedback.sendAttempt({
-        queueMode: submitted.queueMode,
         originThreadKey: originThreadKey!,
         displayText: submitted.promptText,
         replyPreview: replyQuote ?? (replyTarget ? previewMessageText(replyTarget) : null),
@@ -1716,7 +1723,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
     setReplyTarget(null);
     setReplyQuote(null);
-    setAttachmentNotice(null);
+    setSkippedAttachments([]);
     if (pinnedAroundRef.current) showLatest();
     performScroll(scrollBehavior.current.jumpToLatest());
     publishThreadScrollState(scrollBehavior.current.state());
@@ -1757,7 +1764,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       const attempt = feedback.sendAttempt({
         originThreadKey: threadKey!,
         displayText: "Try again",
-        queueMode: "steer",
         replyPreview: null,
         initialBotTarget,
         botTarget: initialBotTarget,
@@ -2049,12 +2055,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         })),
       ]);
     }
-    setAttachmentNotice(
-      result.skipped.length
-        ? t("Skipped {items}", {
-            items: result.skipped.map((item) => formatAttachmentSkip(item)).join(", "),
-          })
-        : null,
+    setSkippedAttachments(
+      result.skipped.map((item, index) => ({
+        id: `${Date.now()}-${index}`,
+        name: item.name,
+        label: formatAttachmentSkip(item),
+      })),
     );
   }
 
@@ -2410,6 +2416,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
@@ -2442,11 +2449,17 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
-      <WorkingIndicator session={workSession} stageKind={stageKind} onOpenStage={openWorkStage} />
+      <WorkingIndicator
+        session={workSession}
+        stageKind={stageKind}
+        onOpenStage={openWorkStage}
+        chinese={recruiterWritesChinese}
+      />
     ) : null;
 
   const loadEarlierControl =
@@ -2731,10 +2744,41 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             />
           </GlassSurface>
         ) : null}
-        {attachmentNotice ? (
-          <Text style={{ color: tokens.warning, marginTop: 12, fontSize: 13 }}>
-            {attachmentNotice}
-          </Text>
+        {skippedAttachments.length ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+            {skippedAttachments.map((item) => (
+              <View
+                key={item.id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: tokens.warning,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text
+                  style={{ color: tokens.warning, fontSize: 13, maxWidth: 220 }}
+                  numberOfLines={1}
+                >
+                  {item.label}
+                </Text>
+                <Pressable
+                  accessibilityLabel={t("Remove {name}", { name: item.name })}
+                  onPress={() =>
+                    setSkippedAttachments((current) =>
+                      current.filter((skipped) => skipped.id !== item.id),
+                    )
+                  }
+                >
+                  <NativeSymbol ios="xmark" android="close" size={14} color={tokens.warning} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
         ) : null}
         {activePendingAttachments.length ? (
           <View
@@ -3395,6 +3439,7 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const colorScheme = useResolvedAppearance();
   const tokens = mobileTokens();
+  const router = useRouter();
   const { t } = useI18n();
   const artifactTarget: MobileArtifactTarget = groupId ? { groupId } : { botId };
   const cardBotId = message.botId ?? botId;
@@ -3590,8 +3635,42 @@ const MessageBubble = memo(function MessageBubble({
   }
   const special = message.blocks.find(
     (block) =>
-      block.kind === "subagent" || block.kind === "child_bot" || block.kind === "cloud_agent",
+      block.kind === "subagent" ||
+      block.kind === "child_bot" ||
+      block.kind === "cloud_agent" ||
+      block.kind === "role_link",
   );
+  if (special?.kind === "role_link") {
+    return (
+      <Pressable
+        {...actionProps}
+        accessibilityRole="link"
+        onPress={() =>
+          router.push({
+            pathname: "/group-thread",
+            params: { groupId: special.groupId, name: special.title },
+          })
+        }
+        style={{
+          width: "90%",
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: tokens.border,
+          backgroundColor: tokens.card,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <Text style={{ color: tokens.foreground, fontSize: 15, fontWeight: "600", flexShrink: 1 }}>
+          {special.title}
+        </Text>
+        <Text style={{ color: tokens.primary, fontSize: 15 }}>{t("Open role")}</Text>
+      </Pressable>
+    );
+  }
   if (special?.kind === "subagent") {
     const running = special.status === "running";
     const failed = special.status === "failed";
@@ -3809,6 +3888,7 @@ const MessageBubble = memo(function MessageBubble({
             <AskActions
               actions={askBlock.actions}
               allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
+              multiple={Boolean(askBlock.multiple) && !isApprovalAskBlock(askBlock)}
               accessibilityActions={actionProps.accessibilityActions}
               onAccessibilityAction={actionProps.onAccessibilityAction}
               onAnswer={(answer) => onAnswer(message, answer)}

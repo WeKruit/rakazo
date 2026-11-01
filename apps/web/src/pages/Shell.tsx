@@ -5,7 +5,6 @@ const ShellPanelContent = lazyPanel(() =>
   withFeatureMessages(() => import("./shell/ShellPanelContent")).then((m) => m.ShellPanelContent),
 );
 
-import { ATTACHMENT_ACCEPT } from "./shell/Composer";
 import { ShellConversation } from "./shell/ShellConversation";
 
 const ShellOverlays = lazyPanel(() => import("./shell/ShellOverlays").then((m) => m.ShellOverlays));
@@ -65,6 +64,7 @@ import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingReadCacheContext } from "./recruiting/shared";
+import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 
 const CreateGroupForm = lazyPanel(() =>
@@ -129,6 +129,7 @@ export function ShellPage() {
     sendError,
     attachmentNotice,
     setAttachmentNotice,
+    removeSkippedAttachment,
     panel,
     recruitingRefresh,
     recruitingReadCache,
@@ -199,7 +200,7 @@ export function ShellPage() {
       initialDescription={newRoleDescription}
       attachments={showToolActivity ? undefined : newRoleAttachments}
       attachmentNotice={attachmentNotice}
-      attachmentAccept={ATTACHMENT_ACCEPT}
+      onRemoveSkippedAttachment={removeSkippedAttachment}
       onAttachmentPick={
         showToolActivity ? undefined : (files) => onAttachmentPick(files, newRoleAttachmentKey)
       }
@@ -209,7 +210,7 @@ export function ShellPage() {
       }}
       onCancel={() => {
         for (const attachment of newRoleAttachments) removeAttachment(attachment);
-        setAttachmentNotice(null);
+        setAttachmentNotice([]);
         setPanel(null);
         setNewRoleSourceId(null);
         setNewRoleDescription("");
@@ -346,6 +347,18 @@ export function ShellPage() {
         />
       ) : null}
       <ShellSidebar model={model} />
+      {showToolActivity ? null : (
+        <KruitDock
+          groups={groups}
+          groupId={model.groupId}
+          chatting={model.recruitingWorkspaceView === "conversation"}
+          onOpen={(id) => {
+            setPanel(null);
+            setMobileSidebarOpen(false);
+            navigate(`/app/g/${encodeURIComponent(id)}?view=conversation`);
+          }}
+        />
+      )}
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
       {computerOpen || booting || !botsSidebarCollapsed ? null : (

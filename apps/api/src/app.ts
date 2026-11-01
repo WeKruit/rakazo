@@ -77,7 +77,7 @@ import {
 } from "@rakazo/adapters";
 import {
   createAuth,
-  getOidcAccessToken,
+  createFirstPartyAccessToken,
   isBlockedAuthPath,
   loopbackTwinOrigins,
   withoutBrowserToken,
@@ -341,6 +341,7 @@ export async function createApp(
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
   const firstPartyOidc = env.oidc;
+  let firstPartyToken: ReturnType<typeof createFirstPartyAccessToken> | undefined;
   const mcp = new McpConnector(
     prisma,
     secrets,
@@ -354,8 +355,16 @@ export async function createApp(
         env.firstPartyMcpUrl && firstPartyOidc
           ? {
               endpoint: env.firstPartyMcpUrl,
-              accessToken: (context, rejectedToken) =>
-                getOidcAccessToken(prisma, auth, firstPartyOidc, context, rejectedToken),
+              // Created on first use: the native auth instance is built after the connectors.
+              accessToken: (context, rejectedToken) => {
+                firstPartyToken ??= createFirstPartyAccessToken({
+                  prisma,
+                  auth,
+                  oidc: firstPartyOidc,
+                  session: env.firstPartySession,
+                });
+                return firstPartyToken(context, rejectedToken);
+              },
             }
           : undefined,
     },
@@ -525,6 +534,7 @@ export async function createApp(
     prisma,
     runtime,
     codexCatalog,
+    replySuggestions: true,
     sandbox,
     memory,
     memoryProviders,
@@ -669,6 +679,7 @@ export async function createApp(
       integrationsCatalogUrl: env.integrationsCatalogUrl,
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
       firstPartyMcpUrl: env.firstPartyMcpUrl,
+      firstPartySession: env.firstPartySession,
       oidc: env.oidc ? { issuer: env.oidc.issuer, clientId: env.oidc.clientId } : undefined,
       signupsEnabled: env.signupsEnabled,
       signupAllowlist: env.signupAllowlist,

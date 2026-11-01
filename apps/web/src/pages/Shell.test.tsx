@@ -55,7 +55,6 @@ const shellApi = vi.hoisted(() => ({
   messages: vi.fn(),
   followUp: vi.fn(),
   send: vi.fn(),
-  updateQueued: vi.fn(),
   answer: vi.fn(),
   stop: vi.fn(),
   createArtifact: vi.fn(),
@@ -144,7 +143,6 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       messages: shellApi.messages,
       followUp: shellApi.followUp,
       send: shellApi.send,
-      updateQueued: shellApi.updateQueued,
       answer: shellApi.answer,
       stop: shellApi.stop,
       reportTiming: vi.fn(async () => ({ ok: true as const })),
@@ -270,7 +268,8 @@ function renderComposer(
     activeName: "Ada",
     running: false,
     pendingAttachments: [],
-    attachmentNotice: null,
+    attachmentNotice: [],
+    onRemoveSkippedAttachment: vi.fn(),
     sendError: null,
     runError: null,
     runErrorId: null,
@@ -2597,6 +2596,33 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
   expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
 });
 
+it("shows a new role in the sidebar the moment it is submitted", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    allGroupsArchived: true,
+  });
+  await view.click("New Role");
+  const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
+  const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "New role",
+  )!;
+  await act(async () => useCrew.click());
+  type(
+    container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Job description"]')!,
+    "Fresh systems role",
+  );
+  let create!: (group: unknown) => void;
+  shellApi.createGroup.mockImplementation(() => new Promise((resolve) => (create = resolve)));
+  await view.click("Continue");
+  const pending = () =>
+    container!.querySelector('nav[aria-label="Role conversations"] [aria-busy="true"]');
+  expect(pending()?.textContent).toBe("New role");
+  await act(async () => create({ ...view.group, id: "group-new", name: "New role" }));
+  expect(pending()).toBeNull();
+});
+
 it("resets an archived source's draft and error, then keeps its team fixed during creation", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("bot", undefined, {
@@ -3744,6 +3770,31 @@ it.each(["user", "thread", "view"] as const)(
   },
 );
 
+it("shows each skipped attachment with its reason and lets it be removed", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const input = container!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  expect(input.accept).toContain(".md");
+  const big = new File(["x"], "huge.pdf", { type: "application/pdf" });
+  Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 });
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File(["x"], "Untitled.blend"), big],
+  });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  const skipped = container!.querySelector('[data-testid="skipped-attachments"]');
+  expect(skipped?.textContent).toContain("Untitled.blendUnsupported format");
+  expect(skipped?.textContent).toContain("huge.pdfOver 10 MB");
+  await act(async () =>
+    container!
+      .querySelector<HTMLButtonElement>('button[aria-label="Remove Untitled.blend"]')!
+      .click(),
+  );
+  expect(container?.textContent).not.toContain("Untitled.blend");
+  expect(container?.textContent).toContain("huge.pdf");
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+});
+
 it("keeps the original chat attachment when the same file is removed with a cancelled new role", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
@@ -4853,24 +4904,14 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
 });
 
 describe("Composer", () => {
-  it("uses Tab during work to queue the message until the reply finishes", async () => {
+  it("sends right away during work, with no queue mode to pick", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend, { running: true });
+    expect(container?.textContent).not.toContain("Steer");
     type(textarea, "Then check the next role");
-    act(() =>
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
-      ),
-    );
-    expect(container?.textContent).toContain("Follow up");
     pressEnter(textarea);
     await act(async () => {});
-    expect(onSend).toHaveBeenCalledWith(
-      "Then check the next role",
-      [],
-      expect.any(String),
-      "follow_up",
-    );
+    expect(onSend).toHaveBeenCalledWith("Then check the next role", [], expect.any(String));
   });
 
   it("lets Shift+Tab leave the composer and Tab complete a mention", () => {
@@ -4891,6 +4932,33 @@ describe("Composer", () => {
     );
     expect(container?.querySelector("[data-testid='mention-chip']")?.textContent).toContain("Bob");
     expect(container?.textContent).not.toContain("Follow up");
+  });
+  it("shows the suggested next message as gray text and Tab fills it in", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more" });
+    expect(textarea.placeholder).toBe("Find 20 more");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(textarea.value).toBe("Find 20 more");
+  });
+
+  it("styles a pasted link in the draft and still sends it with Enter", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const textarea = renderComposer(onSend);
+    expect(container?.querySelector("[data-testid='composer-highlight']")).toBeNull();
+    type(textarea, "see https://example.com/jobs/1 please");
+    const link = container?.querySelector("[data-testid='composer-highlight'] .composer-link");
+    expect(link?.textContent).toBe("https://example.com/jobs/1");
+    pressEnter(textarea);
+    await act(async () => {});
+    expect(onSend.mock.calls[0]?.[0]).toBe("see https://example.com/jobs/1 please");
+  });
+
+  it("hides the suggestion while a reply is running", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
+    expect(textarea.placeholder).not.toBe("Find 20 more");
   });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
@@ -5744,7 +5812,7 @@ it.each(["busy", "background", "card", "reconnect"] as const)(
   },
 );
 
-it("queues a message sent during a working reply above the composer until the reply reads it", async () => {
+it("sends a message during a working reply right away and shows it in the transcript", async () => {
   const streams: Array<{
     options: Parameters<typeof CoreModule.runThreadSubscription>[0];
     head: { threadId: string; cursor: number };
@@ -5779,14 +5847,12 @@ it("queues a message sent during a working reply above the composer until the re
     });
   await emit(event(100, "run.started", { trigger: "user" }));
   shellApi.send.mockResolvedValue({ runId: "run-steer", taskId: "task-steer", seq: 101 });
-  shellApi.updateQueued.mockResolvedValue({ ok: true });
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   type(composer, "Only senior people please");
   await view.click("Send");
-  // It waits for the next step; Send now is the interjection.
-  expect(shellApi.send).toHaveBeenLastCalledWith(
-    expect.not.objectContaining({ interrupt: expect.anything() }),
-  );
+  // It goes in right away and shows in the transcript at once.
+  expect(shellApi.send).toHaveBeenLastCalledWith(expect.objectContaining({ interrupt: true }));
+  expect(container!.textContent).toContain("Only senior people please");
   await emit(
     event(101, "thread.message.created", {
       messageId: "queued-1",
@@ -5795,13 +5861,8 @@ it("queues a message sent during a working reply above the composer until the re
       queued: true,
     }),
   );
-  const queue = () => container!.querySelector('ul[aria-label="Queued messages"]');
-  expect(queue()?.textContent).toContain("Only senior people please");
-  expect(container!.querySelector('[data-message-id="queued-1"]')).toBeNull();
-  await view.click("Send now");
-  expect(shellApi.updateQueued).toHaveBeenLastCalledWith(
-    expect.objectContaining({ messageId: "queued-1", change: { action: "send_now" } }),
-  );
+  expect(container!.querySelector('ul[aria-label="Queued messages"]')).toBeNull();
+  expect(container!.querySelector('[data-message-id="queued-1"]')).not.toBeNull();
   await emit(
     event(102, "run.steering.claimed", {
       steeringIds: ["s-1"],
@@ -5809,7 +5870,6 @@ it("queues a message sent during a working reply above the composer until the re
       nextMessageSeq: 3,
     }),
   );
-  expect(queue()).toBeNull();
   expect(container!.textContent).toContain("Only senior people please");
   await emit(event(103, "run.requeued", { status: "queued" }));
   expect(container!.textContent).toContain("Interrupted, resuming…");
@@ -6152,7 +6212,7 @@ it("retries a failed reply without sending or clearing the recruiter's new draft
   expect(shellApi.send).toHaveBeenCalledExactlyOnceWith({
     groupId: "group-1",
     text: "Try again",
-    queueMode: "steer",
+    interrupt: true,
     clientNonce: expect.any(String),
     addressing: "coordinator",
   });

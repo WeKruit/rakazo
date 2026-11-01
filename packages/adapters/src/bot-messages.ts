@@ -458,23 +458,9 @@ export async function returnDelegatedTeamOutcome(
     select: { activeRecruitingRoleId: true, group: { select: { name: true } } },
   });
   if (!thread?.group) return;
-  const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
-  const delegated = await deps.prisma.message.findFirst({
-    where: {
-      threadId: run.threadId,
-      role: "user",
-      createdAt: { gte: since },
-      blocks: { array_contains: [{ kind: "bot_message_received" }] },
-    },
-    orderBy: { seq: "desc" },
-    select: { id: true, seq: true, blocks: true },
-  });
-  const root = botMessageContext(
-    Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
-  );
-  // Only a request answers back; a returned result never bounces to the team again.
-  if (!delegated || !root?.returnThreadId) return;
-  if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question") return;
+  const found = await openDelegation(deps.prisma, run.threadId);
+  if (!found) return;
+  const { delegated, root } = found;
   const busy = await deps.prisma.run.findFirst({
     where: {
       threadId: run.threadId,
@@ -525,6 +511,77 @@ export async function returnDelegatedTeamOutcome(
   );
   if (!sent.ok)
     getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
+}
+
+/** The latest request another conversation delegated to this role team, if it still answers back. */
+async function openDelegation(prisma: PrismaClient, threadId: string) {
+  const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
+  const delegated = await prisma.message.findFirst({
+    where: {
+      threadId,
+      role: "user",
+      createdAt: { gte: since },
+      blocks: { array_contains: [{ kind: "bot_message_received" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { id: true, seq: true, blocks: true },
+  });
+  const root = botMessageContext(
+    Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
+  );
+  // Only a request answers back; a returned result never bounces to the team again.
+  if (!delegated || !root?.returnThreadId) return null;
+  if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question")
+    return null;
+  return { delegated, root: { ...root, returnThreadId: root.returnThreadId } };
+}
+
+/**
+ * A role team working on delegated work stopped to wait on the recruiter (an approval or a
+ * question card) or failed: tell the conversation that delegated it right away, once per
+ * turn, so it never waits silently behind the card.
+ */
+export async function reportDelegatedTeamBlocked(
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  run: {
+    id: string;
+    spaceId: string;
+    threadId: string;
+    botId: string;
+    userId: string;
+    sourceMessageId?: string | null;
+  },
+  blocked: { kind: "waiting" | "failed"; text: string },
+): Promise<void> {
+  const thread = await deps.prisma.thread.findFirst({
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
+    select: { group: { select: { name: true } } },
+  });
+  if (!thread?.group) return;
+  const found = await openDelegation(deps.prisma, run.threadId);
+  if (!found) return;
+  const detail = blocked.text.trim().slice(0, 600);
+  const message =
+    blocked.kind === "waiting"
+      ? `Waiting on the recruiter in the ${thread.group.name} conversation, on its card: "${detail}". The work continues there once they answer.`
+      : `The ${thread.group.name} team could not finish: ${detail}`;
+  const sent = await messageBot(
+    deps,
+    run,
+    { id: run.botId, name: thread.group.name },
+    {
+      bot_id: found.root.fromBotId,
+      thread_id: found.root.returnThreadId,
+      sender_label: `${thread.group.name} team`,
+      target_label: found.root.fromBotName,
+      message: clampBotMessage(message),
+      intent: "status",
+      deliveryKey: `delegation-${blocked.kind}:${run.id}`,
+    },
+    { allowTerminalSource: true },
+  );
+  if (!sent.ok)
+    getLogger().warn("delegated team block not reported", { runId: run.id, error: sent.error });
 }
 
 /** Only a recent delegation is still waiting for its team's result. */

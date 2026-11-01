@@ -189,6 +189,7 @@ import {
   waitingApprovalNote,
   withoutHiddenTools,
   workActivityForTool,
+  workStepDetail,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -222,6 +223,7 @@ import {
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
+  createGroupInTransaction,
   createRecruitingSchedulingPlan,
   createRunHistoryCache,
   createSpaceForMember,
@@ -332,6 +334,7 @@ import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.j
 import {
   loadBotMessageContext,
   messageBot,
+  reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
@@ -425,6 +428,7 @@ import {
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import { loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -592,6 +596,7 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import { lazyRunComputer } from "./run-computer.js";
@@ -1012,6 +1017,12 @@ export async function unsavedRoundFeedback(
   return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they turned down or praised, and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
 }
 
+/** The topic a step may show beside its label, as a payload field. */
+function stepDetail(name: string, args: unknown): { detail?: string } {
+  const detail = workStepDetail(name, args);
+  return detail ? { detail } : {};
+}
+
 /** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
 function nameSlug(name: string) {
   return name
@@ -1304,7 +1315,7 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never create or bind a role in global Main.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -3606,6 +3617,8 @@ export interface ExecutorDeps {
   cloudAgent?: CloudAgentConnection | null;
   /** Optional Auto Review verifier. When omitted, the factory selects from env (llm | jev | scripted). */
   autoReview?: AutoReviewProvider;
+  /** Suggest the user's next message after each reply (one extra small model call). */
+  replySuggestions?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -4873,6 +4886,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : Promise.resolve(undefined),
         );
         const lateNotes = lateNote(preferenceNotePromise);
+        // The global agent sees what each role team did lately. It never holds up the turn:
+        // it joins the first step if already read, otherwise the next one.
+        const crossRoleNotes = lateNote(
+          !messagingChannelRun && thread.groupId?.startsWith("recruiting-global-")
+            ? ownTime(
+                "crossRoleDigest",
+                loadCrossRoleDigest(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  (text) => redactSecrets(text, runSecrets),
+                ).catch((error) => {
+                  getLogger().warn("cross-role digest failed", { error: String(error) });
+                  return undefined;
+                }),
+              )
+            : Promise.resolve(undefined),
+        );
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -5175,6 +5205,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((error) => getLogger().error("group handoff report", error));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (error) => getLogger().error("delegated team failure report", error),
+              );
           }
           if (run.trigger === "bot_message") {
             await returnBotMessageOutcome(
@@ -5603,6 +5638,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           name: string;
           executionId: string;
           startedAt: string;
+          activity?: string;
+          detail?: string;
           completion?: Record<string, unknown>;
         }[] = [];
         const flushPendingTools = () => {
@@ -11837,40 +11874,140 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "delegate_to_role") {
-            const role = await deps.prisma.recruitingRole.findFirst({
-              where: {
-                id: String(args.role_id ?? ""),
-                spaceId: run.spaceId,
-                userId: run.userId,
-                archivedAt: null,
-              },
-              select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
-            });
-            if (!role?.sourceThread.groupId)
+            // A saved role by roleId, or a role conversation not saved yet by its groupId.
+            const role = args.role_id
+              ? await deps.prisma.recruitingRole.findFirst({
+                  where: {
+                    id: String(args.role_id),
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    archivedAt: null,
+                  },
+                  select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
+                })
+              : null;
+            const group = role?.sourceThread.groupId
+              ? null
+              : args.group_id && !String(args.group_id).startsWith("recruiting-global-")
+                ? await deps.prisma.chatGroup.findFirst({
+                    where: {
+                      id: String(args.group_id),
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      archivedAt: null,
+                    },
+                    select: { id: true, name: true, thread: { select: { id: true } } },
+                  })
+                : null;
+            const target = role?.sourceThread.groupId
+              ? {
+                  groupId: role.sourceThread.groupId,
+                  threadId: role.sourceThread.id,
+                  title: role.title ?? "",
+                }
+              : group?.thread
+                ? { groupId: group.id, threadId: group.thread.id, title: group.name }
+                : null;
+            if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId. Read recruiting_candidates operation roles and pass its id.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
               });
+            // Work can go straight to a named teammate of that role team; otherwise to its lead.
+            const teammateName = String(args.teammate ?? "")
+              .trim()
+              .toLowerCase();
+            let recipient = bot.id;
+            if (teammateName) {
+              const members = await deps.prisma.chatGroupMember.findMany({
+                where: { groupId: target.groupId },
+                select: { bot: { select: { id: true, name: true, archivedAt: true } } },
+              });
+              const match = members.find(
+                (member) =>
+                  !member.bot.archivedAt && member.bot.name.toLowerCase() === teammateName,
+              );
+              if (!match)
+                return finish({
+                  error: `No teammate named ${String(args.teammate)} on that role team. Teammates: ${members
+                    .filter((member) => !member.bot.archivedAt)
+                    .map((member) => member.bot.name)
+                    .join(", ")}.`,
+                });
+              recipient = match.bot.id;
+            }
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
               { id: bot.id, name: bot.name },
               {
-                bot_id: bot.id,
-                thread_id: role.sourceThread.id,
+                bot_id: recipient,
+                thread_id: target.threadId,
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${role.title} team`,
+                target_label: `${target.title} team`,
                 message: redactSecrets(String(args.message ?? ""), runSecrets),
                 intent: "request",
                 deliveryKey: effectKey,
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: target.groupId, title: target.title },
+            ]);
             return finish({
               ok: true,
               team: sent.name,
-              roleGroupLink: `/app/g/${role.sourceThread.groupId}`,
-              note: sent.note,
+              note: `${sent.note ?? ""} A card that opens the role's conversation is already shown; do not paste a link.`.trim(),
+            });
+          }
+          if (name === "start_role") {
+            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
+            const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
+            if (!title || !request) return finish({ error: "title and message are required" });
+            if (!thread.groupId?.startsWith("recruiting-global-"))
+              return finish({ error: "start_role works only in the global conversation." });
+            const team = await deps.prisma.chatGroupMember.findMany({
+              where: { groupId: thread.groupId },
+              select: { botId: true },
+              orderBy: { createdAt: "asc" },
+            });
+            // One role per call, even when the call is retried.
+            const groupId = `role-${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const group = await deps.prisma.$transaction((tx) =>
+              createGroupInTransaction(
+                tx,
+                { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                {
+                  id: groupId,
+                  name: title.slice(0, 120),
+                  botIds: team.map((member) => member.botId),
+                },
+              ),
+            );
+            if (!group.thread)
+              return finish({ error: "The role conversation could not be opened." });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: group.thread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${title} team`,
+                message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                intent: "request",
+                deliveryKey: effectKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
+            await publishMessage(deps, run, "bot", [
+              { kind: "role_link", groupId: group.id, title },
+            ]);
+            return finish({
+              ok: true,
+              team: `${title} team`,
+              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line that the team will ask its questions there; do not paste a link.",
             });
           }
           if (name === "render_view") {
@@ -12534,7 +12671,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   name,
                   executionId,
                   startedAt: new Date(startedAt).toISOString(),
-                  category: workActivityForTool(name),
+                  category: workActivityForTool(name, args),
+                  ...stepDetail(name, args),
                   argsSummary: toolArgsSummary(args, runSecrets),
                 },
               })
@@ -13040,6 +13178,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The judge's preference nudge never holds up the turn: it joins now only if already
           // back, otherwise at the run's next model step.
           preferenceNote: lateNotes.takeReady(),
+          crossRoleDigest: crossRoleNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13153,6 +13292,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             : undefined,
         };
+        const turnUserText = turnBlocks
+          ? turnBlocks
+              .filter((block) => block.kind === "text")
+              .map((block) => block.text)
+              .join("\n")
+          : taskPrompt;
         // Light turns run on the fast model; the configured model becomes the first backup.
         let turnModel = scripted
           ? {
@@ -13165,12 +13310,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               trigger: run.trigger,
               answersQuestion: Boolean(nativeSources?.currentAnswer),
               peerIntent: peerMessage?.intent,
-              userText: turnBlocks
-                ? turnBlocks
-                    .filter((block) => block.kind === "text")
-                    .map((block) => block.text)
-                    .join("\n")
-                : taskPrompt,
+              userText: turnUserText,
               hasAttachments:
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
@@ -13567,7 +13707,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   claimContextNotice: scripted
                     ? undefined
-                    : () => lateNotes.withNotice(contextWatch?.claimNotice()),
+                    : () =>
+                        lateNotes.withNotice(
+                          crossRoleNotes.withNotice(contextWatch?.claimNotice()),
+                        ),
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
@@ -13790,6 +13933,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   turnReport.report();
                   event.text = card.text;
                   event.detail = undefined;
+                  event.multiple = undefined;
                   event.actions = card.options.map((label, index) => ({
                     id: `choice-${index + 1}`,
                     label,
@@ -13862,6 +14006,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     detail: safeDetail,
                     status: "pending",
                     actions: safeActions,
+                    ...(event.multiple && safeActions?.length ? { multiple: true } : {}),
                     requestedSchema: event.requestedSchema,
                   },
                 ],
@@ -13870,6 +14015,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
+              // Delegated work waiting on the recruiter tells the delegating conversation now.
+              if (thread.groupId)
+                void reportDelegatedTeamBlocked(deps, run, {
+                  kind: "waiting",
+                  text: safeText,
+                }).catch((error) => getLogger().error("delegated team wait report", error));
               // A recruiter message that arrived while this turn was finishing answers the card.
               const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
                 spaceId: run.spaceId,
@@ -13989,6 +14140,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await publishMidTurnNarration();
               }
               const toolStartedAt = new Date().toISOString();
+              const toolActivity = workActivityForTool(event.name, event.args);
+              const toolDetail = stepDetail(event.name, event.args);
               try {
                 await deps.events.append({
                   spaceId: run.spaceId,
@@ -14000,7 +14153,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     name: event.name,
                     executionId: event.executionId,
                     startedAt: toolStartedAt,
-                    category: workActivityForTool(event.name),
+                    category: toolActivity,
+                    ...toolDetail,
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
                 });
@@ -14011,6 +14165,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 name: event.name,
                 executionId: event.executionId,
                 startedAt: toolStartedAt,
+                activity: toolActivity,
+                ...toolDetail,
               });
               if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();
@@ -14504,6 +14660,71 @@ export function createRunExecutor(deps: ExecutorDeps) {
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
+          // Gray next-message text in the composer, sent after the reply so it never delays it.
+          if (
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            !completed.continuationRunId &&
+            !recruitingContinued &&
+            text.trim()
+          ) {
+            void suggestNextMessage({
+              runtime: deps.runtime,
+              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+              earlier: historyMessages
+                .filter(
+                  (message) =>
+                    message.id !== currentTurnMessage?.id &&
+                    (message.role === "user" || message.role === "bot"),
+                )
+                .map((message) => ({
+                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                  text: message.blocks
+                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                    .join("\n"),
+                })),
+              userText: turnUserText,
+              replyText: text,
+              runId,
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `suggestion:${runId}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            })
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.publishTransient({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
+              );
+          }
           const notifyBody = completionNotificationPreview(text);
           if (
             runSendsFinishNotification(
@@ -14659,6 +14880,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((reportError) => getLogger().error("group handoff report", reportError));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (reportError) => getLogger().error("delegated team failure report", reportError),
+              );
           }
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {
@@ -15077,6 +15303,7 @@ export function selectBuiltinToolsForRun(options: {
           "message_user",
           "message_bot",
           "delegate_to_role",
+          "start_role",
           "handoff_to_bot",
           "message_agent",
           "create_poll",
@@ -15455,10 +15682,12 @@ export function userTurnContext(parts: {
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
   preferenceNote?: string | undefined;
+  crossRoleDigest?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
     parts.redactedRecruitingContext ?? parts.redactedMemoryContext,
+    parts.crossRoleDigest,
     parts.redactedScratchpadContext,
     parts.redactedTicketContext,
     parts.stoppedRunNotice,

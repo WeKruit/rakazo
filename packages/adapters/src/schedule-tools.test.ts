@@ -396,10 +396,10 @@ describe("filterBuiltinToolsForThread", () => {
   it("offers role-team delegation, not in-room handoff, only in the account-wide conversation", () => {
     const names = (groupId: string | null) =>
       filterBuiltinToolsForThread(
-        [{ name: "delegate_to_role" }, { name: "handoff_to_bot" }],
+        [{ name: "delegate_to_role" }, { name: "start_role" }, { name: "handoff_to_bot" }],
         groupId,
       ).map((t) => t.name);
-    expect(names("recruiting-global-abc")).toEqual(["delegate_to_role"]);
+    expect(names("recruiting-global-abc")).toEqual(["delegate_to_role", "start_role"]);
     expect(names("role-group")).toEqual(["handoff_to_bot"]);
     expect(names(null)).toEqual([]);
   });
