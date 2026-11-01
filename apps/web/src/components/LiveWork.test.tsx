@@ -87,6 +87,17 @@ it("shows plain-language steps, the step in flight and a clock from the run's st
   expect(text).not.toMatch(/mcp|autumn|recruiting_role|get_rows|private/i);
 });
 
+it("follows a recruiter who writes Chinese even when the app is in English", () => {
+  const session = observeWorkSession(
+    null,
+    { runs: [{ id: "r1", status: "running", startedAt: at(0) }], messages: [liveRow] },
+    at(42),
+  );
+  act(() => root.render(<LiveWork session={session} live label="Working…" chinese />));
+  expect(container.textContent).toContain("查看岗位");
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("搜索候选人…");
+});
+
 it("folds into a 'Worked for' line that expands to the steps", () => {
   const running = observeWorkSession(
     null,

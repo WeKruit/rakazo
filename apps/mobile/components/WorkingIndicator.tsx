@@ -1,7 +1,8 @@
-import type { WorkSession, WorkStageKind, WorkStep } from "@rakazo/core";
+import type { WorkActivity, WorkSession, WorkStageKind, WorkStep } from "@rakazo/core";
 import {
   formatWorkClock,
   formatWorkDuration,
+  WORK_LABELS_ZH,
   workActivityLabel,
   workProgressLabel,
   workSessionElapsedMs,
@@ -9,7 +10,7 @@ import {
   workStageLabel,
   workTimeline,
 } from "@rakazo/core";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, {
@@ -27,6 +28,21 @@ import { useMobileTokens } from "../lib/native";
 import { NativeActionButton } from "./native-action-button";
 
 const CYCLE_MS = 1100;
+
+/** The recruiter writes Chinese: work rows follow them even when the app is in English. */
+const ChineseWork = createContext(false);
+
+function useWorkText() {
+  const chinese = useContext(ChineseWork);
+  const { t } = useI18n();
+  return {
+    chinese,
+    activity: (activity: WorkActivity) =>
+      chinese ? WORK_LABELS_ZH.activity[activity] : t(workActivityLabel(activity)),
+    stage: (kind: WorkStageKind) =>
+      chinese ? WORK_LABELS_ZH.stage[kind] : t(workStageLabel(kind)),
+  };
+}
 const DOTS = [0, 1, 2];
 
 function Dot({
@@ -76,6 +92,7 @@ function StepClock({ startedAt }: { startedAt: string }) {
 function StepRows({ steps }: { steps: readonly WorkStep[] }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
+  const text = useWorkText();
   return steps.map((step, index) => (
     <Text key={index} style={{ color: tokens.mutedForeground, fontSize: 13 }}>
       <Text
@@ -90,7 +107,7 @@ function StepRows({ steps }: { steps: readonly WorkStep[] }) {
       >
         {step.status ? "! " : "✓ "}
       </Text>
-      {t(workActivityLabel(step.activity))}
+      {text.activity(step.activity)}
       {step.detail ? ` · ${step.detail}` : ""}
       {step.count > 1 ? ` ×${step.count}` : ""}
       {step.peopleWithEmail !== undefined
@@ -178,13 +195,13 @@ function Stages({
   onOpenStage?: (botId: string) => void;
   onCancelStage?: (botId: string) => void;
 }) {
-  const { t } = useI18n();
+  const text = useWorkText();
   return (
     <>
       {workSessionStages(session).stages.map((stage) => (
         <StageRow
           key={stage.botId}
-          label={t(workStageLabel(stageKind(stage.botId)))}
+          label={text.stage(stageKind(stage.botId))}
           running={stage.running}
           steps={stage.steps}
           onOpen={onOpenStage ? () => onOpenStage(stage.botId) : undefined}
@@ -205,7 +222,7 @@ function StageTimeline({
   stageKind: (botId: string) => WorkStageKind;
 }) {
   const tokens = useMobileTokens();
-  const { t } = useI18n();
+  const text = useWorkText();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -221,7 +238,7 @@ function StageTimeline({
             numberOfLines={1}
             style={{ color: tokens.mutedForeground, fontSize: 12, width: 112 }}
           >
-            {t(workStageLabel(stageKind(row.botId)))}
+            {text.stage(stageKind(row.botId))}
           </Text>
           <View style={{ flex: 1, height: 6, borderRadius: 3, backgroundColor: tokens.muted }}>
             <View
@@ -266,6 +283,7 @@ export function WorkingIndicator({
   label: feedbackLabel,
   onOpenStage,
   onCancelStage,
+  chinese = false,
 }: {
   compact?: boolean;
   tint?: string;
@@ -275,6 +293,8 @@ export function WorkingIndicator({
   label?: string;
   onOpenStage?: (botId: string) => void;
   onCancelStage?: (botId: string) => void;
+  /** The recruiter's own latest message is mostly Chinese. */
+  chinese?: boolean;
 }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
@@ -284,9 +304,11 @@ export function WorkingIndicator({
   const label =
     feedbackLabel ??
     (workProgress
-      ? t(workProgressLabel(workProgress))
+      ? chinese && !/\p{Script=Han}/u.test(workProgress.summary ?? "")
+        ? WORK_LABELS_ZH.progress[workProgress.phase]
+        : t(workProgressLabel(workProgress))
       : session?.current
-        ? `${t(workActivityLabel(session.current))}${session.currentDetail ? ` · ${session.currentDetail}` : ""}…`
+        ? `${chinese ? WORK_LABELS_ZH.activity[session.current] : t(workActivityLabel(session.current))}${session.currentDetail ? ` · ${session.currentDetail}` : ""}…`
         : t("Working…"));
 
   useEffect(() => {
@@ -313,66 +335,69 @@ export function WorkingIndicator({
     );
   }
   if (session?.endedAt) {
+    const duration = formatWorkDuration(workSessionElapsedMs(session, Date.now()));
     return (
-      <View style={{ gap: 4, marginTop: 8 }}>
-        <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
-          {t("Worked for {duration}", {
-            duration: formatWorkDuration(workSessionElapsedMs(session, Date.now())),
-          })}
-        </Text>
-        <Stages
-          session={session}
-          stageKind={stageKind}
-          onOpenStage={onOpenStage}
-          onCancelStage={onCancelStage}
-        />
-      </View>
+      <ChineseWork.Provider value={chinese}>
+        <View style={{ gap: 4, marginTop: 8 }}>
+          <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+            {chinese ? `用时 ${duration}` : t("Worked for {duration}", { duration })}
+          </Text>
+          <Stages
+            session={session}
+            stageKind={stageKind}
+            onOpenStage={onOpenStage}
+            onCancelStage={onCancelStage}
+          />
+        </View>
+      </ChineseWork.Provider>
     );
   }
   // ponytail: cap live rows like web; completed history remains in the shared session.
   const steps = workSessionStages(session ?? null).own.slice(-LIVE_STEP_WINDOW);
   return (
-    <View style={{ flexShrink: 1, gap: 4 }}>
-      <StepRows steps={steps} />
-      <Stages
-        session={session ?? null}
-        stageKind={stageKind}
-        onOpenStage={onOpenStage}
-        onCancelStage={onCancelStage}
-      />
-      <View
-        accessibilityLabel={label}
-        accessibilityRole="text"
-        accessibilityLiveRegion="polite"
-        style={{
-          alignSelf: "flex-start",
-          flexShrink: 1,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          backgroundColor: tokens.muted,
-          paddingHorizontal: 14,
-          paddingVertical: 12,
-          borderRadius: 20,
-        }}
-      >
-        {DOTS.map((index) => (
-          <Dot
-            key={index}
-            progress={progress}
-            offset={index / DOTS.length}
-            size={7}
-            still={reducedMotion}
-            color={tokens.mutedForeground}
-          />
-        ))}
-        {session ? (
-          <Text style={{ color: tokens.mutedForeground, fontSize: 13, flexShrink: 1 }}>
-            {label}
-          </Text>
-        ) : null}
-        {session?.currentStartedAt ? <StepClock startedAt={session.currentStartedAt} /> : null}
+    <ChineseWork.Provider value={chinese}>
+      <View style={{ flexShrink: 1, gap: 4 }}>
+        <StepRows steps={steps} />
+        <Stages
+          session={session ?? null}
+          stageKind={stageKind}
+          onOpenStage={onOpenStage}
+          onCancelStage={onCancelStage}
+        />
+        <View
+          accessibilityLabel={label}
+          accessibilityRole="text"
+          accessibilityLiveRegion="polite"
+          style={{
+            alignSelf: "flex-start",
+            flexShrink: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            backgroundColor: tokens.muted,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            borderRadius: 20,
+          }}
+        >
+          {DOTS.map((index) => (
+            <Dot
+              key={index}
+              progress={progress}
+              offset={index / DOTS.length}
+              size={7}
+              still={reducedMotion}
+              color={tokens.mutedForeground}
+            />
+          ))}
+          {session ? (
+            <Text style={{ color: tokens.mutedForeground, fontSize: 13, flexShrink: 1 }}>
+              {label}
+            </Text>
+          ) : null}
+          {session?.currentStartedAt ? <StepClock startedAt={session.currentStartedAt} /> : null}
+        </View>
       </View>
-    </View>
+    </ChineseWork.Provider>
   );
 }
