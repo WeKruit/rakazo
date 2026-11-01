@@ -4892,6 +4892,33 @@ describe("Composer", () => {
     expect(container?.querySelector("[data-testid='mention-chip']")?.textContent).toContain("Bob");
     expect(container?.textContent).not.toContain("Follow up");
   });
+  it("shows the suggested next message as gray text and Tab fills it in", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more" });
+    expect(textarea.placeholder).toBe("Find 20 more");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(textarea.value).toBe("Find 20 more");
+  });
+
+  it("styles a pasted link in the draft and still sends it with Enter", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const textarea = renderComposer(onSend);
+    expect(container?.querySelector("[data-testid='composer-highlight']")).toBeNull();
+    type(textarea, "see https://example.com/jobs/1 please");
+    const link = container?.querySelector("[data-testid='composer-highlight'] .composer-link");
+    expect(link?.textContent).toBe("https://example.com/jobs/1");
+    pressEnter(textarea);
+    await act(async () => {});
+    expect(onSend.mock.calls[0]?.[0]).toBe("see https://example.com/jobs/1 please");
+  });
+
+  it("hides the suggestion while a reply is running", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
+    expect(textarea.placeholder).not.toBe("Find 20 more");
+  });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend);

@@ -1280,3 +1280,10 @@ body,
 .hire-contacts-view .candidate-viewport::-webkit-scrollbar {
   display: none;
 }
+
+/* A link typed or pasted into the chat composer. */
+.composer-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
