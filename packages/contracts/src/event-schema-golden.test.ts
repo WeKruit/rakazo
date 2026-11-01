@@ -21,8 +21,12 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
   // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
   5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
-  // 6: role_link block (a card that opens a role's conversation).
-  6: "0d539930c42fe6f2197e44f76e0abb1a3a6081d2a9fec2fc59fb850aa91390ef",
+  // 6: thread.suggestion, a live-only guess at the user's next message.
+  6: "0bd043f12c8e8d6d8596eed263ace437610f90f6bae258354dd5ca4130ceb805",
+  // 7: optional activity and detail on steps and pending tool calls (specific step labels).
+  7: "2fc5725ccacec492105af88ca7f2a4dffff499de8284794d58090ba9f66ed3e2",
+  // 8: role_link block (a card that opens a role's conversation).
+  8: "162594fd87dc255f76a962a97eca1922f919e4ecc1808f719b6206538e84b8d1",
 };
 
 const OLD_ROWS: unknown[] = [

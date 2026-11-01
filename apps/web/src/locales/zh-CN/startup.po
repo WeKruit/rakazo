@@ -426,7 +426,6 @@ msgstr "已附加 {path}"
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "附件"
 
@@ -583,10 +582,6 @@ msgstr "无法连接服务器。"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Cancel"
 msgstr "取消"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Cancel edit"
-msgstr "取消编辑"
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -1150,10 +1145,6 @@ msgid "Could not update computer"
 msgstr "无法更新电脑"
 
 #: src/pages/shell/useShellMessages.ts
-msgid "Could not update message"
-msgstr "无法更新消息"
-
-#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "无法更新反应"
 
@@ -1402,10 +1393,6 @@ msgstr "未记录耗时"
 msgid "Edit"
 msgstr "编辑"
 
-#: src/pages/shell/queued-messages.tsx
-msgid "Edit queued message"
-msgstr "编辑排队消息"
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
@@ -1601,10 +1588,6 @@ msgstr "匹配度"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
 msgstr "固定日期"
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
-msgstr "稍后发送"
 
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
@@ -2567,13 +2550,8 @@ msgid "Qualifying work"
 msgstr "符合条件的工作"
 
 #: src/lib/roster-status.ts
-#: src/pages/shell/queued-messages.tsx
 msgid "Queued"
 msgstr "排队中"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Queued messages"
-msgstr "排队消息"
 
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
@@ -2761,10 +2739,6 @@ msgstr "将{name}移出候选名单"
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "移除提及 {0}"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Remove queued message"
-msgstr "移除排队消息"
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -3010,7 +2984,6 @@ msgstr "薪资范围"
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "保存"
 
@@ -3142,10 +3115,6 @@ msgstr "发送删除验证码"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
 msgstr "发送反馈"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Send now"
-msgstr "立即发送"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 msgid "Send outcome unknown"
@@ -3418,10 +3387,6 @@ msgstr "陈述"
 msgid "Status"
 msgstr "状态"
 
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
-msgstr "立即引导"
-
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr "步骤失败"
@@ -3497,10 +3462,6 @@ msgstr "成功"
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
 msgstr "切换助手"
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
-msgstr "按 Tab 切换"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx

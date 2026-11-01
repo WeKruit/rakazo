@@ -231,37 +231,6 @@ export function useShellMessages({
     },
     [t],
   );
-  // A message sent while a reply works waits as steering; this edits, removes or sends it now.
-  const changeQueuedMessage = useCallback(
-    async (
-      messageId: string,
-      change: { action: "edit"; text: string } | { action: "remove" } | { action: "send_now" },
-    ) => {
-      const botId = activeBotId.current;
-      const groupId = activeGroupId.current;
-      if (!botId && !groupId) return;
-      const stillHere = () =>
-        groupId ? activeGroupId.current === groupId : activeBotId.current === botId;
-      try {
-        await rpc.threads.updateQueued({
-          ...(groupId ? { groupId } : { botId: botId! }),
-          messageId,
-          change,
-        });
-      } catch (error) {
-        if (!stillHere()) return;
-        // The reply already took it in: re-read so it shows where it went.
-        if (isConflict(error)) {
-          if (groupId) await refreshGroupThreadRef.current(groupId).catch(() => undefined);
-          else await refreshThreadRef.current(botId!).catch(() => undefined);
-          return;
-        }
-        setSendError(errorText(error, t`Could not update message`));
-        throw error;
-      }
-    },
-    [t],
-  );
   const attachmentUploads = useRef(
     createAttachmentUploads(async (file, contentBase64, target, options) => {
       const mimeType = inferAttachmentMimeType(file.name, file.type);
@@ -331,13 +300,7 @@ export function useShellMessages({
     );
   }, []);
   const sendMessage = useCallback(
-    async (
-      text: string,
-      mentions: ComposerMention[],
-      clientNonce: string,
-      queueMode?: "steer" | "follow_up",
-      retry = false,
-    ) => {
+    async (text: string, mentions: ComposerMention[], clientNonce: string, retry = false) => {
       const initialBotTarget = activeBotId.current;
       const initialGroupTarget = activeGroupId.current;
       if ((!initialBotTarget && !initialGroupTarget) || sending) return false;
@@ -473,7 +436,7 @@ export function useShellMessages({
             () =>
               rpc.threads.send({
                 groupId: groupTarget,
-                ...(queueMode ? { queueMode } : {}),
+                interrupt: true,
                 addressing: showToolActivity ? undefined : "coordinator",
                 clientNonce,
                 text: trimmed || undefined,
@@ -493,7 +456,7 @@ export function useShellMessages({
             () =>
               rpc.threads.send({
                 botId: botTarget,
-                ...(queueMode ? { queueMode } : {}),
+                interrupt: true,
                 clientNonce,
                 text: trimmed || undefined,
                 ...(correspondenceReference ? { correspondenceReference } : {}),
@@ -595,16 +558,9 @@ export function useShellMessages({
     jumpToReplyMessage,
     answerMessage,
     reactToMessage,
-    changeQueuedMessage,
     attachmentUploads,
     onAttachmentPick,
     removeAttachment,
     sendMessage,
   };
-}
-
-function isConflict(error: unknown): boolean {
-  return (
-    error !== null && typeof error === "object" && "code" in error && error.code === "CONFLICT"
-  );
 }

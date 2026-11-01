@@ -18,6 +18,7 @@ import {
   timeSeparatorIds,
   trackWork,
   workStageKind,
+  writesChinese,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
 import { cn } from "@rakazo/ui-web";
@@ -212,6 +213,7 @@ export const Transcript = memo(function Transcript({
     new Date(Date.now()).toISOString(),
   );
   const workSession = workTracker.current.session;
+  const recruiterWritesChinese = useMemo(() => writesChinese(messages), [messages]);
   const [openStage, setOpenStage] = useState<{
     botId: string;
     runIds: string[];
@@ -723,6 +725,7 @@ export const Transcript = memo(function Transcript({
               stageKind={stageKind}
               estimate={workEstimate}
               onOpenStage={openWorkStage}
+              chinese={recruiterWritesChinese}
               onCancelStage={cancelWorkStage}
             />
           ) : (
@@ -747,6 +750,7 @@ export const Transcript = memo(function Transcript({
                 label=""
                 stageKind={stageKind}
                 onOpenStage={openWorkStage}
+                chinese={recruiterWritesChinese}
               />
             ) : null}
             {workEstimate && !tailPhase ? <BackgroundWork estimate={workEstimate} /> : null}

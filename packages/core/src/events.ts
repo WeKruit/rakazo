@@ -105,6 +105,7 @@ export function projectMessages(
         name: String(payload.name ?? ""),
         startedAt: typeof payload.startedAt === "string" ? payload.startedAt : createdAt,
         executionId: typeof payload.executionId === "string" ? payload.executionId : undefined,
+        ...toolCallStepFields(payload),
       });
       live.meta = {
         ...live.meta,
@@ -247,7 +248,29 @@ export function runFailureError(event: {
 
 export type LiveMessageUpdate =
   | { type: "progress"; payload: Record<string, unknown> | undefined }
-  | { type: "tool"; name: string; startedAt?: string; executionId?: string };
+  | {
+      type: "tool";
+      name: string;
+      startedAt?: string;
+      executionId?: string;
+      activity?: string;
+      detail?: string;
+    };
+
+/** The category and topic an `agent.tool.called` payload carries for its step. */
+export function toolCallStepFields(payload: Record<string, unknown> | undefined): {
+  activity?: string;
+  detail?: string;
+} {
+  return {
+    ...(typeof payload?.category === "string" && payload.category
+      ? { activity: payload.category.slice(0, 40) }
+      : {}),
+    ...(typeof payload?.detail === "string" && payload.detail
+      ? { detail: payload.detail.slice(0, 80) }
+      : {}),
+  };
+}
 
 export function reduceLiveMessageBlocks(
   blocks: readonly MessageBlock[],
@@ -269,7 +292,15 @@ export function reduceLiveMessageBlocks(
       ? (tail.pendingToolCalls ?? tail.pendingToolNames?.map((name) => ({ name })) ?? [])
       : []),
     ...(update.type === "tool"
-      ? [{ name: update.name, startedAt: update.startedAt, executionId: update.executionId }]
+      ? [
+          {
+            name: update.name,
+            startedAt: update.startedAt,
+            executionId: update.executionId,
+            ...(update.activity ? { activity: update.activity } : {}),
+            ...(update.detail ? { detail: update.detail } : {}),
+          },
+        ]
       : []),
   ];
   const pendingToolNames = pendingToolCalls.map((call) => call.name);
@@ -397,16 +428,24 @@ export function completeToolStep(
   return [...blocks];
 }
 
+type ToolStepTiming = Pick<ToolStep, "startedAt" | "executionId" | "activity" | "detail"> & {
+  name?: string;
+};
+
 export function appendToolStep(
   steps: readonly ToolStep[],
   toolName: string,
-  timing: Pick<ToolStep, "startedAt" | "executionId"> & { name?: string } = {},
+  timing: ToolStepTiming = {},
 ): ToolStep[] {
   const label = humanizeToolName(toolName);
   const last = steps.at(-1);
   if (
     last &&
     last.label === label &&
+    !last.activity &&
+    !last.detail &&
+    !timing.activity &&
+    !timing.detail &&
     !last.status &&
     last.peopleWithEmail === undefined &&
     !last.startedAt &&
@@ -424,6 +463,8 @@ export function appendToolStep(
       count: 1,
       ...(timing.startedAt ? { startedAt: timing.startedAt } : {}),
       ...(timing.executionId ? { executionId: timing.executionId } : {}),
+      ...(timing.activity ? { activity: timing.activity } : {}),
+      ...(timing.detail ? { detail: timing.detail } : {}),
     },
   ];
 }
@@ -464,7 +505,7 @@ export function appendTextSegment(segments: readonly MessageBlock[], text: strin
 export function appendToolCallSegment(
   segments: readonly MessageBlock[],
   toolName: string,
-  timing: Pick<ToolStep, "startedAt" | "executionId"> & { name?: string } = {},
+  timing: ToolStepTiming = {},
 ): MessageBlock[] {
   const last = segments.at(-1);
   const priorSteps = last?.kind === "steps" ? last.steps : [];

@@ -236,7 +236,7 @@ describe("contracts", () => {
       text: "",
       activity: true,
       phase: "thinking",
-      summary: "Checking recruiting records",
+      summary: "Reviewing candidates",
       at: "2026-10-23T00:00:00.000Z",
     };
     expect(MessageBlock.parse(block)).toEqual(block);

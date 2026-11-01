@@ -56,6 +56,7 @@ import {
   userVisibleMessages,
   withLiveStreamingProgress,
   workStageKind,
+  writesChinese,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -737,6 +738,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   };
   const workSession = workTracker.current.tracker.session;
   const liveWorkSession = workSession?.endedAt ? null : workSession;
+  const threadMessages = snap?.messages;
+  const recruiterWritesChinese = useMemo(
+    () => writesChinese(threadMessages ?? []),
+    [threadMessages],
+  );
   const stageKind = useCallback(
     (stageBotId: string) =>
       workStageKind(
@@ -1693,7 +1699,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     let attempt: SendAttempt;
     try {
       attempt = feedback.sendAttempt({
-        queueMode: submitted.queueMode,
         originThreadKey: originThreadKey!,
         displayText: submitted.promptText,
         replyPreview: replyQuote ?? (replyTarget ? previewMessageText(replyTarget) : null),
@@ -1757,7 +1762,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       const attempt = feedback.sendAttempt({
         originThreadKey: threadKey!,
         displayText: "Try again",
-        queueMode: "steer",
         replyPreview: null,
         initialBotTarget,
         botTarget: initialBotTarget,
@@ -2410,6 +2414,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
@@ -2442,11 +2447,17 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
-      <WorkingIndicator session={workSession} stageKind={stageKind} onOpenStage={openWorkStage} />
+      <WorkingIndicator
+        session={workSession}
+        stageKind={stageKind}
+        onOpenStage={openWorkStage}
+        chinese={recruiterWritesChinese}
+      />
     ) : null;
 
   const loadEarlierControl =
