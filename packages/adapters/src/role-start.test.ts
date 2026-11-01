@@ -21,7 +21,7 @@ function deps(source: unknown, already: unknown = null) {
     tx,
     deps: {
       prisma: {
-        message: { findFirst: vi.fn(async () => source) },
+        message: { findMany: vi.fn(async () => (source ? [source] : [])) },
         $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
       },
       events: { notify: vi.fn(async () => undefined) },
@@ -80,6 +80,37 @@ describe("startRoleFromRecruiterMessage", () => {
     expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
     expect(tx.run.create).not.toHaveBeenCalled();
     expect(d.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("uses the recruiter's latest message, skipping teammates' messages", async () => {
+    const { deps: d, tx } = deps(null);
+    d.prisma.message.findMany = vi.fn(async () => [
+      {
+        role: "user",
+        botId: null,
+        clientNonce: null,
+        externalTranscriptFor: null,
+        blocks: [{ kind: "bot_message_received", text: "x" }],
+      },
+      {
+        role: "user",
+        botId: null,
+        clientNonce: null,
+        externalTranscriptFor: null,
+        blocks: [{ kind: "text", text: "Open role 5" }],
+      },
+      {
+        role: "user",
+        botId: null,
+        clientNonce: null,
+        externalTranscriptFor: null,
+        blocks: [{ kind: "text", text: "Open role 4" }],
+      },
+    ]) as never;
+    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
+    expect(tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ prompt: "Open role 5" }) }),
+    );
   });
 
   it("refuses a source the recruiter did not write", async () => {
