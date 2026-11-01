@@ -124,12 +124,17 @@ describe("the existing reply approval", () => {
     },
   );
   it.each(["reply_to_email", "native_instantly_reply_to_email"])(
-    "omits an empty Cc field from the canonical %s request",
+    "keeps same-address sender edits scoped and omits empty Cc from the %s request",
     (toolName) => {
       const route = { connectorId: "mcp", resourceId: "source", resourceRevision: 1, toolName };
       const request = boundDirectApprovalRequest(
         route,
-        { ...args, body: { text: "Draft" }, cc_address_email_list: "old-copy@example.test" },
+        {
+          ...args,
+          eaccount: " MAILBOX@EXAMPLE.TEST ",
+          body: { text: "Draft" },
+          cc_address_email_list: "old-copy@example.test",
+        },
         "__rakazoCatalogTool",
       );
       const edited = editMailReplyRequest(request, draft, {
@@ -143,6 +148,7 @@ describe("the existing reply approval", () => {
       expect(details?.args).toMatchObject({
         reply_to_uuid: "anchor",
         eaccount: draft.from,
+        to: draft.to[0],
         subject: draft.subject,
       });
     },

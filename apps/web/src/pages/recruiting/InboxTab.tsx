@@ -564,7 +564,7 @@ export function InboxTab({
                       : undefined
                   }
                 />
-                {props.conversation && selected.sourceId ? (
+                {props.conversation && selected.sourceId && selected.eaccount?.trim() ? (
                   <MailReplyCards
                     key={JSON.stringify([
                       selected.sourceId,
@@ -575,6 +575,7 @@ export function InboxTab({
                     refreshSignal={props.refreshSignal}
                     filter={{
                       sourceId: selected.sourceId,
+                      mailbox: selected.eaccount,
                       ...(selected.threadId ? { threadId: selected.threadId } : {}),
                       emailIds: [selected.providerMessageId ?? selected.id],
                     }}

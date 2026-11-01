@@ -674,7 +674,9 @@ export function AccountInbox({
                   readState={readState}
                 />
               ) : null}
-              {email.sourceId && roles.find((role) => role.id === selected.roleId)?.groupId ? (
+              {email.sourceId &&
+              email.eaccount?.trim() &&
+              roles.find((role) => role.id === selected.roleId)?.groupId ? (
                 <MailReplyCards
                   key={JSON.stringify([
                     selected.key,
@@ -687,11 +689,14 @@ export function AccountInbox({
                   readCacheScope={accountKey}
                   filter={{
                     sourceId: email.sourceId,
+                    mailbox: email.eaccount,
                     ...(email.threadId ? { threadId: email.threadId } : {}),
                     emailIds: [email.providerMessageId ?? email.id],
                   }}
                 />
-              ) : email.sourceId && roles.find((role) => role.id === selected.roleId)?.botId ? (
+              ) : email.sourceId &&
+                email.eaccount?.trim() &&
+                roles.find((role) => role.id === selected.roleId)?.botId ? (
                 <MailReplyCards
                   key={JSON.stringify([
                     selected.key,
@@ -704,6 +709,7 @@ export function AccountInbox({
                   readCacheScope={accountKey}
                   filter={{
                     sourceId: email.sourceId,
+                    mailbox: email.eaccount,
                     ...(email.threadId ? { threadId: email.threadId } : {}),
                     emailIds: [email.providerMessageId ?? email.id],
                   }}

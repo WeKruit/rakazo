@@ -72,7 +72,12 @@ describe("mail reply provenance", () => {
     ).toThrow();
   });
   it("reads the actual Gmail profile and exact anchor again before dispatch", async () => {
-    const draft = await readGmailReplyCard(connector(), route, args, context);
+    const draft = await readGmailReplyCard(
+      connector(" MAILBOX@EXAMPLE.TEST "),
+      route,
+      args,
+      context,
+    );
     expect(draft).toMatchObject({
       from: "mailbox@example.test",
       to: ["candidate@example.test"],
@@ -95,7 +100,7 @@ describe("mail reply provenance", () => {
       { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
       {
         reply_to_uuid: "email",
-        eaccount: "sender@EXAMPLE.TEST",
+        eaccount: " sender@EXAMPLE.TEST ",
         body: { text: "Full draft" },
         cc_address_email_list: "copy@example.test",
       },
@@ -109,7 +114,7 @@ describe("mail reply provenance", () => {
       },
     );
     expect(draft).toMatchObject({
-      from: "sender@EXAMPLE.TEST",
+      from: "sender@example.test",
       to: ["candidate@example.test"],
       cc: ["copy@example.test"],
       body: "Full draft",

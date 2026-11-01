@@ -43,7 +43,11 @@ vi.mock("../../components/AskCard", () => ({
 import { MailReplyCards } from "./MailReplyCards";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const block = (body: string, sourceId = "mail"): Extract<MessageBlock, { kind: "ask" }> => ({
+const block = (
+  body: string,
+  sourceId = "mail",
+  mailbox = "sender@example.test",
+): Extract<MessageBlock, { kind: "ask" }> => ({
   kind: "ask",
   text: "Review reply",
   status: "pending",
@@ -53,7 +57,7 @@ const block = (body: string, sourceId = "mail"): Extract<MessageBlock, { kind: "
     { id: "deny", label: "Discard" },
   ],
   mailReply: {
-    from: "sender@example.test",
+    from: mailbox,
     to: ["recipient@example.test"],
     cc: [],
     bcc: [],
@@ -98,6 +102,7 @@ it("server-pages the same stored cards, filters each block, and clears accumulat
               ? message("latest-a", 10, [
                   block("Role A draft"),
                   block("Other source must stay hidden", "other-mail"),
+                  block("Other mailbox must stay hidden", "mail", "other@example.test"),
                 ])
               : message("older-a", 5, [block("Older role A draft")]),
           ],
@@ -112,7 +117,12 @@ it("server-pages the same stored cards, filters each block, and clears accumulat
       root.render(
         <MailReplyCards
           conversation={{ groupId }}
-          filter={{ sourceId: "mail", threadId: "email-thread", emailIds: ["anchor"] }}
+          filter={{
+            sourceId: "mail",
+            mailbox: " SENDER@EXAMPLE.TEST ",
+            threadId: "email-thread",
+            emailIds: ["anchor"],
+          }}
           readCacheScope="actor:space"
         />,
       ),
@@ -126,6 +136,7 @@ it("server-pages the same stored cards, filters each block, and clears accumulat
     await render("role-a");
     await settled("Role A draft");
     expect(container.textContent).not.toContain("Other source");
+    expect(container.textContent).not.toContain("Other mailbox");
     await act(async () =>
       [...container.querySelectorAll<HTMLButtonElement>("button")]
         .find((item) => item.textContent === "Earlier drafts")!
@@ -136,7 +147,12 @@ it("server-pages the same stored cards, filters each block, and clears accumulat
       expect.objectContaining({
         groupId: "role-a",
         before: 10,
-        mailReplyFor: { sourceId: "mail", threadId: "email-thread", emailIds: ["anchor"] },
+        mailReplyFor: {
+          sourceId: "mail",
+          mailbox: " SENDER@EXAMPLE.TEST ",
+          threadId: "email-thread",
+          emailIds: ["anchor"],
+        },
       }),
     );
     await render("role-b");
@@ -181,7 +197,7 @@ it("updates a loaded older card from its terminal event beyond the latest fifty 
       root.render(
         <MailReplyCards
           conversation={{ groupId: "role-a" }}
-          filter={{ sourceId: "mail", threadId: "email-thread" }}
+          filter={{ sourceId: "mail", mailbox: " SENDER@EXAMPLE.TEST ", threadId: "email-thread" }}
         />,
       ),
     );

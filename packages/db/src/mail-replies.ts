@@ -33,11 +33,13 @@ export function editMailReplyRequest(
   if (route.connectorId === "mcp" && route.toolName === "reply_to_email") {
     if (
       args.reply_to_uuid !== draft.inReplyTo.emailId ||
-      args.eaccount !== draft.from ||
+      typeof args.eaccount !== "string" ||
+      args.eaccount.trim().toLowerCase() !== draft.from ||
       args.to !== draft.to[0] ||
       args.subject !== draft.subject
     )
       throw new IsolationError();
+    args.eaccount = draft.from;
     args.body_text = answer.body;
     delete args.body_html;
     if (answer.cc.length) args.cc_address_email_list = answer.cc.join(", ");
@@ -45,7 +47,8 @@ export function editMailReplyRequest(
   } else if (route.connectorId === "mcp" && route.toolName === "native_instantly_reply_to_email") {
     if (
       args.reply_to_uuid !== draft.inReplyTo.emailId ||
-      (args.eaccount !== undefined && args.eaccount !== draft.from) ||
+      (args.eaccount !== undefined &&
+        (typeof args.eaccount !== "string" || args.eaccount.trim().toLowerCase() !== draft.from)) ||
       (args.subject !== undefined && args.subject !== draft.subject)
     )
       throw new IsolationError();

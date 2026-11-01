@@ -1,6 +1,6 @@
 import type { AdapterContext, ConnectorProvider, ConnectorRoute } from "@rakazo/adapter-kit";
 import type { MailReply } from "@rakazo/contracts";
-import { inboxThreadKey } from "@rakazo/contracts";
+import { inboxThreadKey, MailReplySchema } from "@rakazo/contracts";
 import addressparser from "nodemailer/lib/addressparser";
 import { htmlToPlainText } from "./keyless-http-web.js";
 
@@ -35,7 +35,7 @@ export function mailReplyFromAnchor(
   const organizationId = null;
   const indexedMailbox = typeof original.eaccount === "string" ? original.eaccount : null;
   return {
-    from,
+    from: MailReplySchema.shape.from.parse(from),
     to,
     cc: replyAddresses(args.cc_address_email_list),
     bcc: replyAddresses(args.bcc_address_email_list),
@@ -127,9 +127,9 @@ export async function readGmailReplyCard(
   const profile = await read("GMAIL_GET_PROFILE", { user_id: userId });
   const email =
     typeof profile?.emailAddress === "string"
-      ? profile.emailAddress
+      ? profile.emailAddress.trim().toLowerCase()
       : typeof profile?.email_address === "string"
-        ? profile.email_address
+        ? profile.email_address.trim().toLowerCase()
         : null;
   const thread = await read("GMAIL_FETCH_MESSAGE_BY_THREAD_ID", {
     thread_id: args.thread_id,
@@ -144,7 +144,13 @@ export async function readGmailReplyCard(
     );
   });
   const original = object(anchor);
-  if (!email || !original || !replyAddresses(original.to ?? original.to_address).includes(email))
+  if (
+    !email ||
+    !original ||
+    !replyAddresses(original.to ?? original.to_address).some(
+      (address) => address.trim().toLowerCase() === email,
+    )
+  )
     throw new Error("The original email does not match this mailbox and recipient.");
   const emailId = original.messageId ?? original.id;
   if (typeof emailId !== "string" || typeof original.subject !== "string")

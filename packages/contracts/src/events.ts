@@ -254,7 +254,7 @@ export const MailReplySendAnswerSchema = z.strictObject({
 });
 export type MailReplySendAnswer = z.infer<typeof MailReplySendAnswerSchema>;
 export const MailReplySchema = z.strictObject({
-  from: z.string().nullable(),
+  from: z.string().trim().toLowerCase().nullable(),
   to: z.array(z.string()),
   cc: z.array(z.string()),
   bcc: z.array(z.string()),

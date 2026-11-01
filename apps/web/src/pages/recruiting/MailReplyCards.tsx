@@ -128,6 +128,7 @@ function MailReplyCardPage({ conversation, filter, readCacheScope, refreshSignal
       block.mailReply &&
       message.runId &&
       block.mailReply.inReplyTo.sourceId === filter.sourceId &&
+      block.mailReply.from?.trim().toLowerCase() === filter.mailbox.trim().toLowerCase() &&
       ((filter.threadId && block.mailReply.inReplyTo.threadId === filter.threadId) ||
         filter.emailIds?.includes(block.mailReply.inReplyTo.emailId))
         ? [

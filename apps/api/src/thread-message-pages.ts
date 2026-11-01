@@ -475,7 +475,10 @@ export async function loadMessagePage(
             array_contains: [
               {
                 kind: "ask",
-                mailReply: { inReplyTo: { sourceId: mailReplyFor.sourceId, ...anchor } },
+                mailReply: {
+                  from: mailReplyFor.mailbox.trim().toLowerCase(),
+                  inReplyTo: { sourceId: mailReplyFor.sourceId, ...anchor },
+                },
               },
             ],
           },

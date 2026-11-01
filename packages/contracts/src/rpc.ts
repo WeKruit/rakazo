@@ -288,6 +288,7 @@ export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 export const MailReplyMessageFilterSchema = z
   .strictObject({
     sourceId: Id,
+    mailbox: z.string().trim().toLowerCase().min(1).max(512),
     threadId: Id.optional(),
     emailIds: z.array(Id).min(1).max(50).optional(),
   })
