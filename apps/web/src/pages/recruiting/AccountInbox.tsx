@@ -81,7 +81,6 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
     {
       key: string;
       roleId: string;
-      sourceName: string;
       emails: EmailConversationItem[];
       person?: RecruitingRoleCandidate;
       ambiguous?: boolean;
@@ -104,7 +103,6 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
       const row: NonNullable<ReturnType<typeof rows.get>> = rows.get(key) ?? {
         key,
         roleId: item.roleId,
-        sourceName: email.sourceName,
         emails: [],
       };
       const person = accountInboxPerson(item, email);
@@ -484,13 +482,14 @@ export function AccountInbox({
                           </span>
                         ) : null}
                       </span>
-                      <span
-                        className="block truncate text-xs text-muted-foreground"
-                        title={`${row.sourceName} · ${latest.eaccount ?? ""}`}
-                      >
-                        {row.sourceName}
-                        {latest.eaccount ? ` · ${latest.eaccount}` : ""}
-                      </span>
+                      {latest.eaccount ? (
+                        <span
+                          className="block truncate text-xs text-muted-foreground"
+                          title={latest.eaccount}
+                        >
+                          {latest.eaccount}
+                        </span>
+                      ) : null}
                     </span>
                   </button>
                 </li>
@@ -575,7 +574,7 @@ export function AccountInbox({
           <>
             <div className="flex min-h-16 flex-wrap items-center justify-between gap-2 border-b bg-card px-4 py-3 text-xs text-muted-foreground">
               <span className="min-w-0 break-words">
-                {roleTitle(selected.roleId)} · {selected.sourceName}
+                {roleTitle(selected.roleId)}
                 {email.eaccount ? ` · ${email.eaccount}` : ""}
               </span>
               {roles.find((role) => role.id === selected.roleId)?.groupId ? (
