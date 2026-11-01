@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ListPager } from "../../components/ListPager";
+import { retryTransientRead } from "../../lib/read-retry";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
 import { AccountInbox } from "./AccountInbox";
@@ -109,20 +110,25 @@ export function AccountRecruitingView({
     setLoading(true);
     setFailed(false);
     if (globalInbox) {
-      if (!spaceId) {
-        setLoading(false);
-        setFailed(true);
-        return;
-      }
-      void rpc.recruiting
-        .globalInbox({
-          spaceId,
-          ...(role !== "all" ? { roleId: role } : {}),
-          ...(mailSearch ? { query: mailSearch } : {}),
-          unreadOnly: mailUnread,
-          ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
-          limit: MAIL_PER_PAGE,
-        })
+      // The account is still loading; the page remounts once it is known.
+      if (!spaceId) return;
+      const abort = new AbortController();
+      // Right after a deploy the first reads can fail; keep loading through that window.
+      void retryTransientRead(
+        () =>
+          rpc.recruiting.globalInbox(
+            {
+              spaceId,
+              ...(role !== "all" ? { roleId: role } : {}),
+              ...(mailSearch ? { query: mailSearch } : {}),
+              unreadOnly: mailUnread,
+              ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+              limit: MAIL_PER_PAGE,
+            },
+            { signal: abort.signal },
+          ),
+        abort.signal,
+      )
         .then((data) => {
           if (cancelled) return;
           const items: AccountPage["items"] = [];
@@ -176,6 +182,7 @@ export function AccountRecruitingView({
         });
       return () => {
         cancelled = true;
+        abort.abort();
       };
     }
     if (PER_ROLE_VIEWS.has(view) && role === "all" && !scopedGroupId) {
