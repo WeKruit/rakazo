@@ -251,6 +251,8 @@ fi
 # 5) Deploy, sampling public /health every 2 s to measure the outage window.
 ( while sleep 2; do printf '%s %s\n' "$(date +%s)" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health")"; done ) > "$WORK/health-$SHORT.log" &
 PROBE=$!; trap 'kill $PROBE 2>/dev/null || true' EXIT
+# Uses this script's own checkout, so the guard also covers older releases and rollbacks' targets.
+(cd "$(dirname "$0")/../.." && modal run -q infra/modal/db_url_check.py) || die "database URLs are misconfigured for $TARGET; fix the Secret before deploying"
 log "deploying $SHORT (recreate)"
 (cd "$DIR" && modal deploy --strategy recreate infra/modal/app.py) || die "modal deploy failed for $SHORT"
 
