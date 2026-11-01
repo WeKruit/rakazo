@@ -837,6 +837,8 @@ async function savedRoleCandidateKeys(
   });
 }
 
+/** How long a turn waits past its own setup for the judge's lasting-preference nudge. */
+const PREFERENCE_NOTE_GRACE_MS = 150;
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -12963,7 +12965,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
-          preferenceNote: await preferenceNotePromise,
+          // The judge's preference nudge never holds up the turn: it joins only if ready by now.
+          preferenceNote: await Promise.race([
+            preferenceNotePromise,
+            new Promise<undefined>((resolve) => setTimeout(resolve, PREFERENCE_NOTE_GRACE_MS)),
+          ]),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
