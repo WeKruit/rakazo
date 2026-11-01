@@ -68,7 +68,8 @@ export async function readSavedRecruitingSequences(
     ), tool_reads AS MATERIALIZED (
       SELECT DISTINCT ON(x.role_id,b.server_id,b.result->>'campaignId',x.route->>'toolName')
         x.role_id,b.server_id,b.result->>'campaignId' campaign_id,x.route->>'toolName' tool,
-        CASE WHEN x.route->>'toolName' IN ('native_instantly_get_role_draft','native_instantly_create_role_draft','native_instantly_clone_role_draft','native_instantly_update_role_draft') THEN x.body->'campaign' ELSE x.body END body,x."updatedAt",x.id
+        CASE WHEN x.route->>'toolName' IN ('native_instantly_get_role_draft','native_instantly_create_role_draft','native_instantly_clone_role_draft','native_instantly_update_role_draft') THEN x.body->'campaign' ELSE x.body END body,
+        CASE WHEN x.body->>'observedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (x.body->>'observedAt')::timestamp ELSE x."updatedAt" END "updatedAt",x.id
       FROM read_bodies x JOIN bindings b ON b.role_id=x.role_id
         AND x.route->>'connectorId'='mcp' AND x.route->>'resourceId'=b.server_id
         AND x.route->>'resourceRevision'=b.revision::text
@@ -76,7 +77,7 @@ export async function readSavedRecruitingSequences(
           THEN x.body->'campaign'->>'id'=b.result->>'campaignId' AND x.args->>'role_id'=b.role_id AND x.body->>'roleId'=b.role_id
           ELSE COALESCE(x.args->>'campaign_id',x.args->>'id')=b.result->>'campaignId' END
       WHERE COALESCE(x.result->>'isError','false')<>'true' AND x.result->>'error' IS NULL
-      ORDER BY x.role_id,b.server_id,b.result->>'campaignId',x.route->>'toolName',x."updatedAt" DESC,x.id DESC
+      ORDER BY x.role_id,b.server_id,b.result->>'campaignId',x.route->>'toolName',"updatedAt" DESC,x.id DESC
     ), cached_observations AS (
       SELECT b.role_id,b.server_id,b.revision,b.result->>'campaignId' campaign_id,b.result->'__rakazoSequenceObservation' observation
       FROM bindings b
@@ -192,7 +193,7 @@ export async function readSavedRecruitingSequences(
 /** Derived display cache only. The provider action and its existing receipt remain canonical. */
 export async function rememberRecruitingSequenceObservation(
   prisma: Pick<PrismaClient, "$executeRaw">,
-  actor: Actor,
+  actor: Pick<Actor, "userId" | "spaceId">,
   input: {
     botId: string;
     roleId: string;

@@ -237,6 +237,8 @@ const local = url && ["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL
               observedAt: "2029-01-01T00:00:00.000Z",
             }),
           ).toBe(0);
+          // A pre-pause GET finishes later after its mailbox/lead reads; completion is not observation time.
+          await tx.$executeRaw`INSERT INTO external_effects VALUES ('slow-role-draft','run-1','space','native_instantly_get_role_draft','completed','["__rakazoCatalogTool","direct",{"route":{"connectorId":"mcp","resourceId":"native","resourceRevision":2,"toolName":"native_instantly_get_role_draft"},"args":{"role_id":"role-1","campaign_id":"campaign-1"}}]','{"structuredContent":{"result":{"roleId":"role-1","observedAt":"2030-01-01T00:00:00.500Z","campaign":{"id":"campaign-1","name":"Stale active name","status":1}}}}','2032-01-01')`;
           const saved = (
             await readSavedRecruitingSequences(tx, actor, {
               ...input,

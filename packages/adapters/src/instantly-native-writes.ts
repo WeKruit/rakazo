@@ -2154,11 +2154,12 @@ async function roleDraft(
   const existing = await roleDraftBinding(prisma, context, serverId, role.id, args.campaign_id);
   if (args.campaign_id && args.campaign_id !== existing?.binding.campaignId)
     throw new IsolationError();
+  const observedAt = new Date().toISOString();
   if (existing)
     context.onRecruitingCampaignRead?.({
       roleId: role.id,
       campaignId: existing.binding.campaignId,
-      observedAt: new Date().toISOString(),
+      observedAt,
     });
   const campaign = existing ? await rest("GET", `/campaigns/${existing.binding.campaignId}`) : null;
   if (expected && campaign) requireSavedConfiguration(campaign, expected);
@@ -2239,6 +2240,8 @@ async function roleDraft(
   return {
     roleId: role.id,
     roleTitle: role.title,
+    sourceRevision: context.recruitingCampaignSourceRevision,
+    observedAt,
     mailboxes,
     campaigns,
     unconfirmedDrafts,
@@ -2431,15 +2434,22 @@ export async function runInstantlyWrite(
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
     }
-    case "native_instantly_get_campaign_analytics":
-      return rest(
-        "GET",
-        `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
-      );
+    case "native_instantly_get_campaign_analytics": {
+      const observedAt = new Date().toISOString();
+      return {
+        ...(await rest(
+          "GET",
+          `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
+        )),
+        observedAt,
+      };
+    }
     case "native_instantly_get_campaign": {
+      const observedAt = new Date().toISOString();
       const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
       return {
         id: campaign.id,
+        observedAt,
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,

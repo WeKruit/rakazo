@@ -208,8 +208,39 @@ describe("native campaign analytics", () => {
       { campaign_id: id },
     );
     expect(rest).toHaveBeenCalledWith("GET", `/campaigns/analytics/overview?id=${id}`);
-    expect(result).toEqual({ emails_sent_count: 3, open_count_unique: 2, reply_count_unique: 1 });
+    expect(result).toEqual({
+      emails_sent_count: 3,
+      open_count_unique: 2,
+      reply_count_unique: 1,
+      observedAt: expect.any(String),
+    });
   });
+});
+
+it("timestamps a campaign GET before slower lead reads finish", async () => {
+  vi.useFakeTimers();
+  const started = "2030-01-01T00:00:00.000Z";
+  vi.setSystemTime(new Date(started));
+  const id = "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69";
+  try {
+    const rest = vi.fn(async (_method: string, path: string) => {
+      if (path === `/campaigns/${id}`) return { id, name: "Before pause", status: 1 };
+      vi.setSystemTime(new Date("2030-01-01T00:00:10.000Z"));
+      return { items: [] };
+    });
+    expect(
+      await runInstantlyWrite(
+        {} as never,
+        rest,
+        context,
+        "server",
+        "native_instantly_get_campaign",
+        { campaign_id: id },
+      ),
+    ).toMatchObject({ id, status: 1, observedAt: started });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 describe("shared mail account isolation", () => {
