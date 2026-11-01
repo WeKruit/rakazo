@@ -6,7 +6,12 @@ const port = Number(process.env.WEB_PORT ?? 5199);
 const outDir = "../../test-report/e2e/recruiting-web-build";
 export default defineConfig({
   ...base,
-  testMatch: ["recruiting-global.spec.ts", "recruiting-app-routes.spec.ts"],
+  testMatch: [
+    "recruiting-global.spec.ts",
+    "recruiting-app-routes.spec.ts",
+    "recruiting-search-focus.spec.ts",
+    "recruiting-mobile-directory.spec.ts",
+  ],
   workers: 1,
   outputDir: "../../test-report/e2e/global-routes",
   webServer: {
