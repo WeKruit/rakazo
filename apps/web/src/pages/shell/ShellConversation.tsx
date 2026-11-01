@@ -351,6 +351,7 @@ export function ShellConversation({
         >
           {effectiveCrmSelection ? (
             <RecruitingPanel
+              onAskChat={(text) => openRoleChat(text)}
               workspaceRead={currentWorkspaceRead}
               threadId={activeSnapshot.threadId}
               botId={inGroup ? undefined : active?.id}
@@ -402,6 +403,7 @@ export function ShellConversation({
               {recruitingWorkspaceView === "sequence" ? (
                 <>
                   <SequenceTab
+                    onAskChat={(text) => openRoleChat(text)}
                     roleId={currentBindingRead.workspace.role.id}
                     spaceId={currentBindingRead.workspace.role.spaceId}
                     conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
@@ -455,6 +457,7 @@ export function ShellConversation({
               />
             ) : null}
             <RecruitingPanel
+              onAskChat={(text) => openRoleChat(text)}
               workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
               presentation="workspace"
@@ -1042,6 +1045,7 @@ export function ShellConversation({
                 />
               ) : null}
               <RecruitingPanel
+                onAskChat={(text) => openRoleChat(text)}
                 workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"

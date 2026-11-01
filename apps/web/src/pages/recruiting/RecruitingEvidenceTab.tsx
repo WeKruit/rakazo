@@ -116,6 +116,44 @@ export function RecruitingEvidenceTab({
                 }))
               }
             />
+            <NativeSelect
+              aria-label={t`Match group`}
+              value={candidateFilters.rankingGroup ?? "all"}
+              onChange={(event) =>
+                setCandidateFilters((current) => ({
+                  ...current,
+                  rankingGroup:
+                    event.target.value === "all"
+                      ? undefined
+                      : (event.target.value as ListRecruitingCandidatesInput["rankingGroup"]),
+                }))
+              }
+            >
+              <NativeSelectOption value="all">
+                <Trans>All matches</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="strong_match">
+                <Trans>Strong Match</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="worth_talking">
+                <Trans>Worth Talking</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="partial">
+                <Trans>Partial</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="uncertain">
+                <Trans>Uncertain</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="outdated">
+                <Trans>Outdated review</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="unreviewed">
+                <Trans>Unreviewed</Trans>
+              </NativeSelectOption>
+              <NativeSelectOption value="unscored">
+                <Trans>Unscored</Trans>
+              </NativeSelectOption>
+            </NativeSelect>
             {showInternalAssessments ? (
               <>
                 <NativeSelect
@@ -174,7 +212,7 @@ export function RecruitingEvidenceTab({
             {candidatePage ? (
               <NativeSelect
                 aria-label={t`Candidate sort`}
-                value={candidateFilters.sort ?? "score"}
+                value={candidateFilters.sort ?? "ranking"}
                 onChange={(event) => {
                   setCandidateFilters((current) => ({
                     ...current,
@@ -183,21 +221,9 @@ export function RecruitingEvidenceTab({
                   setCandidateList((current) => ({ ...current, userSort: true }));
                 }}
               >
-                {candidatePage.sortAvailability.rank ? (
-                  <NativeSelectOption value="rank">
-                    <Trans>Rank</Trans>
-                  </NativeSelectOption>
-                ) : null}
-                {candidatePage.sortAvailability.tier ? (
-                  <NativeSelectOption value="tier">
-                    <Trans>Match tier</Trans>
-                  </NativeSelectOption>
-                ) : null}
-                {candidatePage.sortAvailability.score ? (
-                  <NativeSelectOption value="score">
-                    <Trans>Match score</Trans>
-                  </NativeSelectOption>
-                ) : null}
+                <NativeSelectOption value="ranking">
+                  <Trans>Best match</Trans>
+                </NativeSelectOption>
                 <NativeSelectOption value="name">
                   <Trans>Name</Trans>
                 </NativeSelectOption>
@@ -320,8 +346,10 @@ export function RecruitingEvidenceTab({
                 total: candidatePage?.total ?? null,
                 hasMore: Boolean(candidatePage?.nextCursor),
                 loadMore: () => void loadMoreCandidates(),
-                sortByScore: (candidateFilters.sort ?? "score") === "score",
+                sortByScore: false,
                 includeCrm:
+                  (!candidateFilters.rankingGroup ||
+                    candidateFilters.rankingGroup === "unscored") &&
                   !candidateFilters.shortlisted &&
                   !candidateFilters.actionId &&
                   !candidateFilters.sourceEffectId &&

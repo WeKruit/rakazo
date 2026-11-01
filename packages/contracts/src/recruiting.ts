@@ -8,6 +8,13 @@ import {
 export * from "./recruiting-candidate-text.js";
 export * from "./recruiting-employment.js";
 
+import {
+  RecruitingCandidateRankingGroupSchema,
+  RecruitingCandidateRankingSchema,
+} from "./recruiting-candidate-ranking.js";
+
+export * from "./recruiting-candidate-ranking.js";
+
 import { ListRecruitingCandidatesInput } from "./recruiting-candidate-filters.js";
 import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
 
@@ -1385,6 +1392,7 @@ export const RecruitingProfilesToolInputSchema = z.discriminatedUnion("operation
 export type RecruitingProfilesToolInput = z.infer<typeof RecruitingProfilesToolInputSchema>;
 
 export const RecruitingCandidateSchema = z.strictObject({
+  ranking: RecruitingCandidateRankingSchema.optional(),
   latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
   savedProfile: RecruitingSavedProfileSchema.nullable().optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
@@ -1444,7 +1452,8 @@ export const RecruitingRoleCandidatesInputFields = {
   threadId: RecruitingId,
   limit: z.number().int().min(1).max(100).optional(),
   cursor: Text.optional(),
-  sort: z.enum(["score", "rank", "name", "recent"]).optional(),
+  sort: z.enum(["score", "rank", "name", "recent", "ranking"]).optional(),
+  rankingGroup: RecruitingCandidateRankingGroupSchema.optional(),
   query: z.string().max(240).optional(),
   shortlistedOnly: z.boolean().optional(),
 };
@@ -1472,6 +1481,7 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
   autumn: z
     .strictObject({
       candidateKey: RecruitingId,
+      ranking: RecruitingCandidateRankingSchema.optional(),
       score: z.number().nullable(),
       rank: z.number().nullable(),
       tier: z.string().nullable(),

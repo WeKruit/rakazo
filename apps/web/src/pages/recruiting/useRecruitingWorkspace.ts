@@ -496,21 +496,9 @@ export function useRecruitingWorkspace({
     roleRevisionId,
     selection,
   };
-  const userSortRef = useRef(candidateList.userSort === true);
-  userSortRef.current = candidateList.userSort === true;
   const resetUnavailableCandidateSort = useCallback(
     (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
-      const sort = filters.sort ?? "score";
-      // A list that was sorted by a fallback returns to score order once scores exist.
-      if (!userSortRef.current && sort !== "score" && page.sortAvailability.score) {
-        setCandidatePage(null);
-        setCandidateList((current) => ({
-          ...current,
-          filters: { ...current.filters, sort: "score" },
-          pageCount: 1,
-        }));
-        return true;
-      }
+      const sort = filters.sort ?? "ranking";
       if (
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]

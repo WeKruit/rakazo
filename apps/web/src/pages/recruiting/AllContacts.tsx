@@ -29,15 +29,24 @@ import {
 } from "@rakazo/ui-web";
 import { ChevronDown, ListFilter, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
+import { CompanyLogo } from "./CompanyLogo";
+import { LinkedInIcon } from "./LinkedInIcon";
+import { PersonAvatar } from "./ProfileImage";
+import { profileImageUrl } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
 import { statusText, TabLoading } from "./shared";
 
 const PAGE_SIZE = 50;
 const EXPORT_MAX = 5000;
 const DAY_MS = 86_400_000;
+
+function websiteHost(value: string | null) {
+  const url = profileImageUrl(value);
+  return url ? new URL(url).hostname : null;
+}
 
 type Facets = Awaited<ReturnType<typeof rpc.recruiting.contacts.facets>>;
 type TextKey = "location" | "company" | "title" | "school" | "skills";
@@ -61,7 +70,10 @@ export function AllContacts({
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
-  const [page, setPage] = useState<{ key: string; data: ListRecruitingContactsOutput }>();
+  const [page, setPage] = useState<{
+    key: string;
+    data: ListRecruitingContactsOutput;
+  }>();
   const [failed, setFailed] = useState(false);
   const [facets, setFacets] = useState<Facets>();
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());
@@ -273,7 +285,9 @@ export function AllContacts({
         ]),
       ].map((line) => line.map(cell).join(","));
       const url = URL.createObjectURL(
-        new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" }),
+        new Blob([`﻿${lines.join("\r\n")}`], {
+          type: "text/csv;charset=utf-8",
+        }),
       );
       const link = document.createElement("a");
       link.href = url;
@@ -323,7 +337,10 @@ export function AllContacts({
         return t`Tagged ${people.length} contacts.`;
       }
       for (const person of people)
-        await rpc.recruiting.notes.create({ candidateKey: person.noteKey, body: value });
+        await rpc.recruiting.notes.create({
+          candidateKey: person.noteKey,
+          body: value,
+        });
       return t`Logged for ${people.length} contacts.`;
     });
 
@@ -436,7 +453,12 @@ export function AllContacts({
             {(Object.keys(textLabels) as TextKey[]).map((key) => (
               <DropdownMenuItem
                 key={key}
-                onClick={() => setText((current) => ({ ...current, [key]: current[key] ?? "" }))}
+                onClick={() =>
+                  setText((current) => ({
+                    ...current,
+                    [key]: current[key] ?? "",
+                  }))
+                }
               >
                 {textLabels[key]}
               </DropdownMenuItem>
@@ -449,7 +471,10 @@ export function AllContacts({
                   <DropdownMenuRadioGroup
                     value={String(days[key] ?? 0)}
                     onValueChange={(value) =>
-                      setDays((current) => ({ ...current, [key]: Number(value) || undefined }))
+                      setDays((current) => ({
+                        ...current,
+                        [key]: Number(value) || undefined,
+                      }))
                     }
                   >
                     {[7, 30, 90].map((count) => (
@@ -554,7 +579,10 @@ export function AllContacts({
                 aria-label={textLabels[key]}
                 value={text[key] ?? ""}
                 onChange={(event) =>
-                  setText((current) => ({ ...current, [key]: event.target.value }))
+                  setText((current) => ({
+                    ...current,
+                    [key]: event.target.value,
+                  }))
                 }
               />
               <Button
@@ -671,6 +699,7 @@ export function AllContacts({
                 <tbody>
                   {rows.map((person) => {
                     const name = person.name ?? person.email ?? t`Unnamed`;
+                    const linkedinUrl = profileImageUrl(person.linkedinUrl);
                     const home = person.roles.find((role) => role.groupId && role.candidateKey);
                     return (
                       <tr key={person.personKey} className="border-t border-border align-top">
@@ -689,36 +718,38 @@ export function AllContacts({
                           />
                         </td>
                         <td className="px-3 py-2 font-medium">
-                          {home ? (
-                            <button
-                              type="button"
-                              className="text-left hover:underline"
-                              onClick={() =>
-                                navigate(
-                                  `/app/g/${encodeURIComponent(home.groupId!)}?${new URLSearchParams(
-                                    {
-                                      view: "contacts",
-                                      detail: `contact.${home.candidateKey!.replace(/^crm:/, "")}`,
-                                    },
-                                  )}`,
-                                )
-                              }
-                            >
-                              {name}
-                            </button>
-                          ) : (
-                            name
-                          )}
-                          {person.linkedinUrl ? (
-                            <a
-                              className="block text-xs font-normal text-muted-foreground hover:underline"
-                              href={person.linkedinUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              LinkedIn
-                            </a>
-                          ) : null}
+                          <div className="flex w-56 min-w-0 items-center gap-2">
+                            <PersonAvatar name={name} src={person.profileImageUrl} size="sm" />
+                            {home ? (
+                              <Link
+                                className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                                title={name}
+                                to={`/app/g/${encodeURIComponent(home.groupId!)}?${new URLSearchParams(
+                                  {
+                                    view: "contacts",
+                                    detail: `contact.${home.candidateKey!.replace(/^crm:/, "")}`,
+                                  },
+                                )}`}
+                              >
+                                {name}
+                              </Link>
+                            ) : (
+                              <span className="min-w-0 flex-1 truncate" title={name}>
+                                {name}
+                              </span>
+                            )}
+                            {linkedinUrl ? (
+                              <a
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={linkedinUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={t`Open ${name} on LinkedIn`}
+                              >
+                                <LinkedInIcon className="size-4" />
+                              </a>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex max-w-56 flex-wrap gap-1">
@@ -745,8 +776,40 @@ export function AllContacts({
                           </div>
                         </td>
                         <td className="max-w-56 px-3 py-2">{person.title ?? "—"}</td>
-                        <td className="px-3 py-2">{person.company ?? "—"}</td>
-                        <td className="px-3 py-2">{person.school ?? "—"}</td>
+                        <td className="px-3 py-2">
+                          {person.company ? (
+                            <div className="flex w-40 min-w-0 items-center gap-2">
+                              <CompanyLogo
+                                name={person.company}
+                                src={person.companyLogoUrl}
+                                host={websiteHost(person.companyWebsiteUrl)}
+                                small
+                              />
+                              <span className="truncate" title={person.company}>
+                                {person.company}
+                              </span>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {person.school ? (
+                            <div className="flex w-40 min-w-0 items-center gap-2">
+                              <CompanyLogo
+                                name={person.school}
+                                src={person.schoolLogoUrl}
+                                host={websiteHost(person.schoolWebsiteUrl)}
+                                small
+                              />
+                              <span className="truncate" title={person.school}>
+                                {person.school}
+                              </span>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="px-3 py-2">{person.location ?? "—"}</td>
                         <td className="px-3 py-2">{statusLabel(person.status)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">

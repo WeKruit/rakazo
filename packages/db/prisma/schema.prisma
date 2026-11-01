@@ -22,6 +22,8 @@ model AiDataConsent {
 }
 
 model User {
+  recruitingInboxInitializations RecruitingInboxInitialization[]
+  recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
   recruitingCrmLeads RecruitingCrmLead[]
@@ -220,6 +222,8 @@ model Member {
 }
 
 model Space {
+  recruitingInboxInitializations RecruitingInboxInitialization[]
+  recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
   recruitingCrmLeads RecruitingCrmLead[]
@@ -2247,4 +2251,26 @@ model SessionAdmissionBudget {
   cutoverId String @default("verified")
   cutover HomeAuthorityCutover @relation(fields:[cutoverId], references:[id], onDelete:NoAction,onUpdate:NoAction)
   @@map("session_admission_budget")
+}
+
+model RecruitingInboxInitialization {
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  initializedAt DateTime @default(now()) @map("initialized_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  @@id([userId, spaceId])
+  @@map("recruiting_inbox_initializations")
+}
+
+model RecruitingInboxCursor {
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  threadKey String @map("thread_key")
+  lastReadAt DateTime? @map("last_read_at")
+  unread Boolean @default(false)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  @@id([userId, spaceId, threadKey])
+  @@map("recruiting_inbox_cursors")
 }

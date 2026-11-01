@@ -138,6 +138,7 @@ export {
   projectRecruitingCandidateReport,
 } from "./recruiting-research.js";
 export { recruitingResearchWakeNonce } from "./recruiting-research-poll.js";
+export * from "./recruiting-sequences.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";
 export * from "./run-secret.js";

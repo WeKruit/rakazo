@@ -683,6 +683,7 @@ export function CrmRecruitingPanel(
       ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
         <>
           <CorrespondenceTabMount
+            onAskChat={props.onAskChat}
             threadId={threadId}
             onReviewSchedulingPlan={onReviewSchedulingPlan}
             view={browse.view}
@@ -731,6 +732,7 @@ function CorrespondenceTabMount({
   conversation,
   refreshSignal,
   onDraftReply,
+  onAskChat,
   loading,
   fallback,
 }: {
@@ -741,6 +743,7 @@ function CorrespondenceTabMount({
   conversation: { groupId: string } | { botId: string };
   refreshSignal: number;
   onDraftReply?: (email: RecruitingInboxEmail) => void;
+  onAskChat?: (text: string) => void;
   /** The role binding is still being read. */
   loading: boolean;
   fallback: ReactNode;
@@ -748,7 +751,7 @@ function CorrespondenceTabMount({
   if (!role && loading) return <TabLoading />;
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
-  if (view === "sequence") return <SequenceTab {...props} />;
+  if (view === "sequence") return <SequenceTab {...props} onAskChat={onAskChat} />;
   if (view === "interview")
     return (
       <InterviewTab

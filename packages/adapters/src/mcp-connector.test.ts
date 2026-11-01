@@ -3761,6 +3761,7 @@ describe("local native Instantly campaign and lead tools", () => {
       botId: "bot-1",
       runId: "run-1",
       signal: new AbortController().signal,
+      reauthorize: undefined as (() => Promise<void>) | undefined,
     };
     const server = {
       ...SERVER,
@@ -3964,8 +3965,85 @@ describe("local native Instantly campaign and lead tools", () => {
     const result = (events: unknown[]) =>
       (events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }).data
         .structuredContent.result;
-    return { state, run, result, prisma };
+    return { state, run, result, prisma, context };
   }
+
+  it.each(["assignment", "credential"])(
+    "refuses a native draft write when %s changes during its mailbox read",
+    async (change) => {
+      const f = fixture();
+      const fetch = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          const response = await fetch(input, init);
+          if (new URL(logicalHref(input, init)).pathname.includes("/accounts/")) {
+            if (change === "assignment")
+              f.prisma.botMcpServer.findFirst.mockResolvedValue(null as never);
+            else f.state.key = "rotated-private-key";
+          }
+          return response;
+        }),
+      );
+      const events = await f.run("create_campaign", {
+        name: "Draft",
+        eaccount: "team@example.test",
+      });
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.state.requests).toEqual([
+        { method: "GET", path: "/api/v2/accounts/team%40example.test" },
+      ]);
+      expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
+    },
+  );
+
+  it.each(["create_campaign", "create_role_draft", "update_role_draft"])(
+    "rechecks trusted role authorization after provider reads before %s writes",
+    async (name) => {
+      const f = fixture();
+      f.context.reauthorize = vi.fn(async () => {
+        throw new IsolationError("Role authorization changed");
+      });
+      f.state.campaign = {
+        ...f.state.campaign,
+        email_list: ["team@example.test"],
+        sequences: [],
+        campaign_schedule: {
+          schedules: [
+            {
+              name: "Weekdays",
+              timezone: "America/Chicago",
+              timing: { from: "09:00", to: "17:00" },
+              days: {
+                "0": false,
+                "1": true,
+                "2": true,
+                "3": true,
+                "4": true,
+                "5": true,
+                "6": false,
+              },
+            },
+          ],
+        },
+      };
+      if (name === "update_role_draft")
+        f.state.effects.set(`instantly-role-campaign:${SERVER.id}:role-1`, {
+          spaceId: "w1",
+          result: { campaignId: CAMPAIGN },
+        });
+      const events = await f.run(name, {
+        name: "Draft",
+        eaccount: "team@example.test",
+        ...(name === "create_campaign" ? {} : { role_id: "role-1" }),
+        ...(name === "update_role_draft" ? { campaign_id: CAMPAIGN } : {}),
+      });
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.context.reauthorize).toHaveBeenCalledOnce();
+      expect(f.state.requests.length).toBeGreaterThan(0);
+      expect(f.state.requests.every((request) => request.method === "GET")).toBe(true);
+    },
+  );
 
   it("creates a draft stop-on-reply campaign from an own mailbox", async () => {
     const f = fixture();

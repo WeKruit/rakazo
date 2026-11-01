@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { RecruitingCandidateRankingGroupSchema } from "./recruiting-candidate-ranking.js";
 import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
 
 const Text = z.string().trim().min(1);
@@ -14,6 +15,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   shortlistedSince: z.iso.datetime().optional(),
   actionId: RecruitingId.optional(),
   sourceEffectId: RecruitingId.optional(),
-  sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
+  rankingGroup: RecruitingCandidateRankingGroupSchema.optional(),
+  sort: z.enum(["name", "recent", "rank", "tier", "score", "ranking"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;

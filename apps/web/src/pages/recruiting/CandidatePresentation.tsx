@@ -22,6 +22,7 @@ import {
 import type { Ref } from "react";
 import { quickOutput } from "../recruiting/quickOutput";
 import type { Snapshot } from "../recruiting/workspace-types";
+import { LinkedInIcon } from "./LinkedInIcon";
 import { VerdictLabel } from "./VerdictLabel";
 
 export function CandidateDecision({ decision }: Pick<RecruitingCandidate, "decision">) {
@@ -95,7 +96,13 @@ export function CandidateProfile({
       ) : null}
       <div className="flex flex-wrap gap-x-3 gap-y-1">
         {candidate.linkedinUrl ? (
-          <a className="underline" href={candidate.linkedinUrl} target="_blank" rel="noreferrer">
+          <a
+            className="inline-flex items-center gap-1 underline"
+            href={candidate.linkedinUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <LinkedInIcon className="size-3" />
             <Trans>LinkedIn</Trans>
           </a>
         ) : (
