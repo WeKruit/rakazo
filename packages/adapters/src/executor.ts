@@ -12681,6 +12681,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         async function startRoleFromJob() {
           if (
             thread.activeRecruitingRoleId ||
+            // Kruit's account-wide conversation never holds a role; it opens one with start_role.
+            thread.groupId?.startsWith("recruiting-global-") ||
             nativeSources?.currentAnswer ||
             currentTurnMessage?.role !== "user" ||
             !deps.artifacts ||
