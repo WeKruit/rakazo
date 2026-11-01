@@ -10,6 +10,7 @@ import type {
 import {
   formatWorkClock,
   formatWorkDuration,
+  WORK_LABELS_ZH,
   workCountdownLeftMs,
   workProgressLabel,
   workSessionElapsedMs,
@@ -342,6 +343,7 @@ export function LiveWork({
   estimate,
   onOpenStage,
   onCancelStage,
+  chinese = false,
 }: {
   session: WorkSession | null;
   live: boolean;
@@ -357,10 +359,15 @@ export function LiveWork({
   estimate?: WorkEstimate | null;
   onOpenStage?: (botId: string) => void;
   onCancelStage?: (botId: string) => Promise<void>;
+  /** The recruiter writes Chinese: work rows follow them even when the app is in English. */
+  chinese?: boolean;
 }) {
-  const labels = useWorkActivityLabels();
-  const thinkingLabels = useWorkThinkingLabels();
-  const stageLabels = useWorkStageLabels();
+  const appLabels = useWorkActivityLabels();
+  const appThinkingLabels = useWorkThinkingLabels();
+  const appStageLabels = useWorkStageLabels();
+  const labels = chinese ? WORK_LABELS_ZH.activity : appLabels;
+  const thinkingLabels = chinese ? WORK_LABELS_ZH.thinking : appThinkingLabels;
+  const stageLabels = chinese ? WORK_LABELS_ZH.stage : appStageLabels;
   const labelSteps = (list: readonly WorkStep[]) =>
     list.map((step) => ({ ...step, label: stepLabel(labels[step.activity], step.detail) }));
   const split = showSteps ? workSessionStages(session) : { own: [], stages: [] as WorkStage[] };
@@ -384,14 +391,21 @@ export function LiveWork({
   ) : null;
   if (live) {
     const lastStep = (split.stages.findLast((stage) => stage.running)?.steps ?? split.own).at(-1);
+    const weighing = (lastStep && thinkingLabels[lastStep.activity]) ?? labels.thinking;
     const current =
       session?.current === "thinking"
-        ? ((lastStep && thinkingLabels[lastStep.activity]) ?? labels.thinking)
+        ? weighing
         : session?.current
           ? stepLabel(labels[session.current], session.currentDetail)
           : null;
-    const headline = session?.progress
-      ? workProgressLabel(session.progress)
+    const progress = session?.progress;
+    // The runtime's summary is the model's own words; a Chinese thread never shows it in English.
+    const headline = progress
+      ? chinese && !/\p{Script=Han}/u.test(progress.summary ?? "")
+        ? progress.phase === "thinking"
+          ? `${weighing}…`
+          : WORK_LABELS_ZH.progress[progress.phase]
+        : workProgressLabel(progress)
       : current
         ? `${current}…`
         : label;
@@ -431,7 +445,7 @@ export function LiveWork({
   if (!steps.length && !stages)
     return (
       <div data-testid="work-summary" className="text-[13px] text-muted-foreground">
-        <Trans>Worked for {duration}</Trans>
+        {chinese ? `用时 ${duration}` : <Trans>Worked for {duration}</Trans>}
       </div>
     );
   return (
@@ -443,7 +457,7 @@ export function LiveWork({
           strokeWidth={1.8}
           className="transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
         />
-        <Trans>Worked for {duration}</Trans>
+        {chinese ? `用时 ${duration}` : <Trans>Worked for {duration}</Trans>}
       </summary>
       <div className="ms-[7px] mt-0.5 border-s border-border ps-3">
         {steps.length ? <ToolSteps steps={steps} /> : null}

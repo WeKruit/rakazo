@@ -19,6 +19,7 @@ import {
   workStageLabel,
   workStageMessages,
   workStepDetail,
+  writesChinese,
   workTimeline,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
@@ -900,4 +901,16 @@ describe("specific step labels", () => {
     expect(result).toMatchObject({ current: "history", currentDetail: "SWE" });
     expect(workActivityLabel("history")).toBe("Looking back at earlier conversations");
   });
+});
+
+it("follows the language of the recruiter's own latest message", () => {
+  const user = (text: string, internal = false) => ({
+    role: "user",
+    internal,
+    blocks: [{ kind: "text" as const, text }],
+  });
+  expect(writesChinese([user("Find SWE"), user("在专属岗位对话里继续")])).toBe(true);
+  expect(writesChinese([user("在专属岗位对话里继续"), user("ok, go ahead")])).toBe(false);
+  expect(writesChinese([user("找人"), user("internal wake", true)])).toBe(true);
+  expect(writesChinese([])).toBe(false);
 });

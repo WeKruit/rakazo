@@ -1,5 +1,5 @@
 import type { BackgroundWorkTiming, MessageBlock } from "@rakazo/contracts";
-import { recruitingBotKey } from "./recruiting-defaults.js";
+import { isChineseText, recruitingBotKey } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
 /**
@@ -987,4 +987,89 @@ export function workProgressLabel(progress?: WorkSession["progress"]): string {
         ? "Trying again…"
         : "Reviewing context…")
   );
+}
+
+/**
+ * Work labels in Chinese for a recruiter who writes Chinese while the app language is
+ * another one: like assistant replies, work rows follow the recruiter's own latest message.
+ */
+export const WORK_LABELS_ZH: {
+  activity: Record<WorkActivity, string>;
+  thinking: Partial<Record<WorkActivity, string>>;
+  stage: Record<WorkStageKind, string>;
+  progress: Record<NonNullable<WorkSession["progress"]>["phase"], string>;
+} = {
+  activity: {
+    files: "读取文件",
+    search: "网上搜索",
+    page: "阅读网页",
+    playbook: "阅读招聘手册",
+    recall: "回顾你的偏好",
+    history: "翻看之前的对话",
+    memory: "记下要点",
+    connections: "检查已连接的应用",
+    connected_action: "使用已连接的应用",
+    emails: "查看邮件",
+    availability: "查看空闲时间",
+    drafting: "起草邮件",
+    role: "查看岗位",
+    role_save: "保存岗位",
+    roles: "查找你的岗位",
+    candidates: "查看候选人",
+    candidate_lookup: "查找这位候选人",
+    replies: "查看候选人回复",
+    assess: "评估候选人",
+    profiles_save: "保存候选人",
+    notes: "查看候选人备注",
+    reminders: "查看提醒",
+    interview: "安排面试",
+    research: "搜索候选人",
+    feedback: "记录反馈",
+    crm: "查看候选人记录",
+    question: "准备问题",
+    specialist: "请同事帮忙",
+    delegating: "交给岗位团队",
+    routine: "设置定时任务",
+    waiting: "等待后台任务",
+    writing: "给你回复",
+    thinking: "想下一步怎么做",
+    working: "执行一步操作",
+  },
+  thinking: {
+    playbook: "按招聘手册梳理",
+    recall: "结合你的偏好",
+    history: "整理之前的对话",
+    search: "查看搜索结果",
+    page: "查看页面",
+    role: "查看岗位",
+    role_save: "查看岗位",
+    roles: "确定是哪个岗位",
+    candidates: "整理候选人",
+    candidate_lookup: "整理这位候选人的信息",
+    replies: "整理候选人回复",
+    research: "整理搜索结果",
+    crm: "整理候选人记录",
+    emails: "整理邮件",
+    availability: "找合适的时间",
+  },
+  stage: {
+    sourcing: "寻找候选人",
+    quality: "核查候选人",
+    outreach: "准备联系候选人",
+    scheduling: "安排面试",
+    other: "交办的任务",
+  },
+  progress: { thinking: "思考中…", retrying: "重试中…", compacting: "整理上下文…" },
+};
+
+/** Whether the recruiter's own latest message is mostly Chinese. */
+export function writesChinese(
+  messages: readonly { role?: string; internal?: boolean; blocks: readonly MessageBlock[] }[],
+): boolean {
+  const latest = messages.findLast((message) => message.role === "user" && !message.internal);
+  const text = latest?.blocks
+    .map((block) => (block.kind === "text" ? block.text : ""))
+    .join("")
+    .trim();
+  return !!text && isChineseText(text);
 }
