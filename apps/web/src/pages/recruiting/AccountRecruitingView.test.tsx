@@ -757,11 +757,13 @@ it("lists every role's people in one server-paged table", async () => {
     expect(container.textContent).toContain("UCLA");
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Next")!
-        .click(),
+      container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),
     );
     expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
   } finally {
     await act(async () => pageRoot.unmount());
     container.remove();
