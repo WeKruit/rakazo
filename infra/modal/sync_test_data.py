@@ -2,9 +2,10 @@
 
 Run through docs/deploy/sync-test-data.sh, which stops the test app first and redeploys it after.
 Production is only read (read-only transaction). The test copy is made safe to run: scheduled
-routines are paused, unfinished runs cancelled, queued jobs dropped, and sign-in sessions and push
-tokens removed. Connections stay encrypted with the production key, which the test environment
-does not have, so they cannot send anything. Nothing is printed except counts.
+routines are paused, unfinished runs cancelled, queued jobs dropped, sign-in sessions and push
+tokens removed, and personal model credentials dropped so runs use the platform key. Connections
+stay encrypted with the production key, which the test environment does not have, so they cannot
+send anything. Nothing is printed except counts.
 """
 
 import modal
@@ -21,6 +22,9 @@ SANITIZE = [
                        "('completed','cancelled','canceled','failed','waiting_input','interrupted')"),
     ("sessions_removed", 'delete from "session"'),
     ("push_tokens_removed", "delete from push_tokens"),
+    # Sealed with the production key, so they cannot be opened here; runs then use the platform key.
+    ("model_credentials_removed", "delete from user_model_credentials"),
+    ("voice_credentials_removed", "delete from user_voice_credentials"),
 ]
 
 
