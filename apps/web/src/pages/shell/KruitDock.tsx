@@ -40,7 +40,7 @@ export function KruitDock({
       {showCard ? (
         <div
           role="status"
-          className="w-80 max-w-full rounded-2xl border border-border/60 bg-popover/80 p-2 text-popover-foreground shadow-2xl ring-1 ring-foreground/5 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
+          className="w-80 max-w-full rounded-xl border border-border bg-card p-2 text-card-foreground shadow-lg"
         >
           <div className="flex items-center justify-between ps-2">
             <span className="text-sm font-medium">
@@ -94,7 +94,7 @@ export function KruitDock({
               ? t`${RECRUITING_GLOBAL_AGENT_NAME}, ${waiting.length} waiting`
               : RECRUITING_GLOBAL_AGENT_NAME
           }
-          className="relative grid size-12 place-items-center rounded-full border border-border/60 bg-popover/80 shadow-2xl backdrop-blur-xl hover:bg-accent"
+          className="relative grid size-12 place-items-center rounded-full border border-border bg-card shadow-lg hover:bg-accent"
           onClick={() => {
             // With something waiting the button shows it; otherwise it opens Kruit.
             if (waiting.length) setOpened((open) => !open || closedFor !== key);
