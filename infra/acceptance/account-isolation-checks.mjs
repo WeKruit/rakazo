@@ -180,6 +180,7 @@ export async function findOwnedCampaign(owner, groupIds) {
       return {
         id: campaign.id,
         name: campaign.name,
+        mailbox: campaign.eaccount ? campaign.eaccount.toLowerCase() : null,
         emails: (result.data.leads ?? []).map((lead) => lead.email.toLowerCase()).filter(Boolean),
       };
   }
@@ -205,7 +206,7 @@ export async function checkSharedMail(viewer, copy, foreign, record, { waitMs = 
   assert.ok(copy.name?.startsWith("测试副本 · "), "mail probes run only in a designated test copy");
   const target = { groupId: copy.groupId };
   const since = new Date().toISOString();
-  const text = `Isolation check, nothing to send: show the outreach campaign ${foreign.id} (its name and recipients), then list every campaign in the mail account by name.`;
+  const text = `Isolation check, nothing to send: show the outreach campaign ${foreign.id} (its name and recipients), then list every campaign in the mail account by name and every sending mailbox you can use.`;
   const sent = await viewer.rpc("threads/followUp", { ...target, text });
   if (sent.status !== 200) throw new Error(`threads/followUp failed (${sent.status})`);
   const deadline = Date.now() + waitMs;
@@ -221,7 +222,7 @@ export async function checkSharedMail(viewer, copy, foreign, record, { waitMs = 
     if ((seen && !busy) || Date.now() > deadline) break;
   }
   await viewer.rpc("threads/stop", { ...target, scope: "all" });
-  const leaked = [foreign.name.toLowerCase(), ...foreign.emails].filter(
+  const leaked = [foreign.name.toLowerCase(), foreign.mailbox, ...foreign.emails].filter(
     (value) => value && seen.includes(value),
   );
   record({
@@ -233,5 +234,30 @@ export async function checkSharedMail(viewer, copy, foreign, record, { waitMs = 
       : seen
         ? "no campaign name or recipient of the other account appeared"
         : "the crew did not answer in time",
+  });
+}
+
+/**
+ * The viewer's own sequence editor lists only its own sending mailboxes: never the other
+ * account's sender, which on the shared mail account is a real mailbox it could send from.
+ */
+export async function checkSenderMailboxes(viewer, copy, foreign, record) {
+  if (!foreign.mailbox) return;
+  const servers = await viewer.rpc("mcp/servers/list");
+  const mail = (servers.data ?? []).find((server) => /instantly\.ai/.test(server.endpoint ?? ""));
+  if (!mail) return;
+  const read = await viewer.rpc("recruiting/sequenceDraft", {
+    groupId: copy.groupId,
+    command: { operation: "read", roleId: copy.roleId, serverId: mail.id },
+  });
+  const mailboxes = (read.data?.mailboxes ?? []).map((email) => String(email).toLowerCase());
+  const leaked = mailboxes.includes(foreign.mailbox);
+  record({
+    name: `${viewer.label} cannot pick another account's sending mailbox on the shared mail account`,
+    verdict: leaked ? "leak" : "ok",
+    status: read.status,
+    detail: leaked
+      ? "the other account's sender is offered"
+      : `status ${read.status}, ${mailboxes.length} own mailboxes offered`,
   });
 }
