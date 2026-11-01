@@ -1960,6 +1960,7 @@ async function requireCurrentHumanSource(
   quote: string,
   allowOriginalIntent = false,
   ancestors = new Set<string>(),
+  acceptEarlierQuote = false,
 ): Promise<{ source: RecruitingSourceRef; message: SourceMessage }> {
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
@@ -1989,6 +1990,7 @@ async function requireCurrentHumanSource(
         quote,
         allowOriginalIntent,
         ancestors,
+        acceptEarlierQuote,
       );
       if (
         human.message.threadId !== delegator.threadId ||
@@ -2016,6 +2018,7 @@ async function requireCurrentHumanSource(
       quote,
       allowOriginalIntent,
       ancestors,
+      acceptEarlierQuote,
     );
     if (human.message.threadId !== latest.threadId || human.message.seq >= latest.seq)
       throw new IsolationError();
@@ -2030,21 +2033,33 @@ async function requireCurrentHumanSource(
         });
   if (allowOriginalIntent && original && answers.some((answer) => answer.seq <= original.seq))
     throw new IsolationError();
-  const latestHasQuote = (latest.blocks as { kind: string; text?: string }[]).some(
-    (block) =>
-      block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-  );
+  const hasQuote = (message: SourceMessage) =>
+    (message.blocks as { kind: string; text?: string }[]).some(
+      (block) =>
+        block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
+    );
+  const latestHasQuote = hasQuote(latest);
+  // An acceptance stays the recruiter's decision when they write again right after it, such as
+  // "also prioritize the Bay Area": it may cite their own earlier message from this run.
+  const earlier =
+    acceptEarlierQuote && !latestHasQuote
+      ? [hint, original, ...steering.map((item) => item.message), ...answers].find(
+          (message): message is SourceMessage =>
+            !!message &&
+            message.threadId === run.threadId &&
+            isNativeHumanMessage(message) &&
+            hasQuote(message),
+        )
+      : undefined;
   const source =
-    !latestHasQuote &&
+    earlier ??
+    (!latestHasQuote &&
     allowOriginalIntent &&
     original?.threadId === run.threadId &&
     isNativeHumanMessage(original) &&
-    (original.blocks as { kind: string; text?: string }[]).some(
-      (block) =>
-        block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
-    )
+    hasQuote(original)
       ? original
-      : latest;
+      : latest);
   if (
     !isNativeHumanMessage(source) ||
     (source.id === run.sourceMessageId &&
@@ -2055,7 +2070,8 @@ async function requireCurrentHumanSource(
       isNativeHumanMessage(original) &&
       original.threadId === latest.threadId &&
       original.seq > latest.seq) ||
-    steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
+    (!acceptEarlierQuote &&
+      steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq))
   )
     throw new IsolationError();
   const sourceBlocks = source.blocks as { kind: string; text?: string }[];
@@ -2290,6 +2306,8 @@ export async function readRecruitingFeedbackContext(
     expectedRoleRevision?: number;
     sourceRefs: readonly RecruitingSourceRef[];
     candidateKeys?: readonly string[];
+    /** A round acceptance may cite the recruiter's earlier message from this run. */
+    acceptEarlierQuote?: boolean;
   },
 ): Promise<{
   source: RecruitingSourceRef;
@@ -2319,6 +2337,9 @@ async function feedbackContextInTransaction(
     run,
     input.sourceMessageId,
     intent.quote,
+    false,
+    new Set(),
+    input.acceptEarlierQuote,
   );
   const workspace = thread.activeRecruitingRoleId
     ? await roleSnapshot(
@@ -11802,6 +11823,7 @@ export async function approveRecruitingCalibrationRoundFromMessage(
     const { message } = await feedbackContextInTransaction(tx, actor, {
       ...input,
       sourceRefs: [],
+      acceptEarlierQuote: true,
     });
     await requireRole(tx, actor, input.roleId, true);
     return approveLatestCalibrationRound(tx, actor, input.roleId, null, {
