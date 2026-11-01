@@ -2499,8 +2499,9 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       page: authed.groups.page.handler(async ({ context, input }) => {
+        const limit = input.limit ?? 200;
         const [items, total] = await Promise.all([
-          groupRepos.listGroups(context.actor, { ...input, limit: 200 }),
+          groupRepos.listGroups(context.actor, { ...input, limit }),
           deps.prisma.chatGroup.count({
             where: {
               spaceId: context.actor.spaceId,
@@ -2511,7 +2512,8 @@ export function createRouter(deps: RouterDeps) {
         ]);
         // Some persisted groups have fewer than two active members and are filtered out.
         // Advance by database rows, not returned rows, so a sparse page is not the last page.
-        return { items, nextOffset: input.offset + 200 < total ? input.offset + 200 : null };
+        const next = input.offset + limit;
+        return { items, nextOffset: next < total ? next : null, total };
       }),
       list: authed.groups.list.handler(async ({ context }) =>
         groupRepos.listGroups(context.actor, { limit: 200 }),

@@ -55,6 +55,9 @@ it("distinguishes duplicate role titles by creation time without showing interna
           kruitHref="/app?view=conversation"
           groups={groups}
           archivedGroups={[]}
+          archivedGroupTotal={0}
+          archivedGroupPage={0}
+          onArchivedGroupPage={vi.fn()}
           archivedOpen={false}
           query=""
           canOpenDashboard
@@ -158,6 +161,9 @@ it("lists saved sequences without a role, in business wording, and hides them wh
         }}
         groups={[]}
         archivedGroups={[]}
+        archivedGroupTotal={0}
+        archivedGroupPage={0}
+        onArchivedGroupPage={vi.fn()}
         archivedOpen={false}
         query=""
         canOpenDashboard
@@ -186,6 +192,65 @@ it("lists saved sequences without a role, in business wording, and hides them wh
     expect(container.textContent).toContain("Spring outreach");
     expect(container.textContent).toContain("Paused · 12 people · Replied 3");
     expect(container.textContent).not.toContain("sequence-1");
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it("counts every archived role and pages through them twenty at a time", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const archived = Array.from(
+    { length: 20 },
+    (_, index): Group => ({
+      id: `archived-${index}`,
+      name: `Archived role ${index}`,
+      createdAt: "2026-01-01T10:00:00Z",
+      updatedAt: "2026-01-01T10:00:00Z",
+      spaceId: "space-test",
+      threadId: `thread-archived-${index}`,
+      members: [],
+      pinned: false,
+      sectionId: null,
+      archivedAt: "2026-01-02T10:00:00Z",
+      preview: "",
+      unread: false,
+    }),
+  );
+  const onArchivedGroupPage = vi.fn();
+  try {
+    act(() =>
+      root.render(
+        <RecruitingNavigation
+          viewHref={(view) => `/app?view=${view}`}
+          kruitHref="/app?view=conversation"
+          groups={[]}
+          archivedGroups={archived}
+          archivedGroupTotal={45}
+          archivedGroupPage={0}
+          onArchivedGroupPage={onArchivedGroupPage}
+          archivedOpen
+          query=""
+          canOpenDashboard
+          canCreateRole
+          onQueryChange={vi.fn()}
+          view="results"
+          onView={vi.fn()}
+          onCollapse={vi.fn()}
+          onOpenRole={vi.fn()}
+          onNewRole={vi.fn()}
+          canCreateRoleFrom={() => true}
+          onNewRoleFrom={vi.fn()}
+          onRoleMenu={vi.fn()}
+          onToggleArchived={vi.fn()}
+          onRestoreRole={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.querySelector('button[aria-label="Archived"]')?.textContent).toContain("45");
+    expect(container.querySelectorAll("fieldset")).toHaveLength(20);
+    act(() => container.querySelector<HTMLElement>('[aria-label="Page 3"]')!.click());
+    expect(onArchivedGroupPage).toHaveBeenCalledExactlyOnceWith(2);
   } finally {
     act(() => root.unmount());
   }
