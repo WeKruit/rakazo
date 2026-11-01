@@ -19,6 +19,7 @@ import {
   listRecruitingReminders,
   listRecruitingSchedulingPlans,
   listRoutinesDto,
+  Prisma,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
@@ -183,6 +184,7 @@ export async function readRecruitingAccountView(
         ...scope,
         ...(input.roleId ? { id: input.roleId } : {}),
         ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
+        ...(input.briefedOnly ? { currentRevision: { brief: { not: Prisma.AnyNull } } } : {}),
       },
       orderBy: { id: "asc" },
       take: input.limit + 1,

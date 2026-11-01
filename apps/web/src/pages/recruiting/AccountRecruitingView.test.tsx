@@ -211,6 +211,11 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
         </MemoryRouter>,
       ),
     );
+    // Roles still waiting for a brief have nothing to send, so Sequence leaves them out.
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ view: "roles", briefedOnly: true }),
+      expect.anything(),
+    );
     await act(async () =>
       [...container.querySelectorAll("button")]
         .find((button) => button.textContent === "Load more")!
