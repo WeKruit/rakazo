@@ -1607,10 +1607,6 @@ msgstr "जारी रखें"
 msgid "Continue in Background"
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Continue loading saved mail"
-msgstr ""
-
 #: src/pages/RoutineEditor.tsx
 msgid "Continue the conversation each run"
 msgstr ""
@@ -5687,6 +5683,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Saved mail · partial source coverage"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Saved mail is indexing in the background."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx

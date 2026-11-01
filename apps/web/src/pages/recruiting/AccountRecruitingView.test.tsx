@@ -305,11 +305,9 @@ it.each([
       expect(container.textContent?.includes("Could not load recruiting records.")).toBe(retry);
       expect(container.textContent).not.toContain("0 replies");
       expect(container.textContent).not.toContain("0 unread");
-      expect(
-        [...container.querySelectorAll("button")].some(
-          (button) => button.textContent === "Continue loading saved mail",
-        ),
-      ).toBe(!retry && (partial || !!nextCursor));
+      expect(container.textContent?.includes("Saved mail is indexing in the background.")).toBe(
+        !retry && (partial || !!nextCursor),
+      );
       if (!retry) expect(container.textContent).toContain("Saved mail · partial source coverage");
     } finally {
       await act(async () => pageRoot.unmount());

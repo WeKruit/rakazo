@@ -41,6 +41,7 @@ export const actorRlsTables = [
   "recruiting_inbox_initializations",
   "recruiting_inbox_cursors",
   "recruiting_inbox_messages",
+  "recruiting_inbox_index_progress",
   "recruiting_research_tasks",
   "recruiting_assessments",
   "recruiting_candidate_pages",

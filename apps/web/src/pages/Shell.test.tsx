@@ -75,6 +75,16 @@ const shellApi = vi.hoisted(() => ({
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
     accountView: vi.fn().mockResolvedValue({ roles: [], items: [], nextCursor: null }),
+    globalInboxSummary: vi.fn().mockResolvedValue({
+      unread: { count: 0, unknownThreads: 0, scope: "indexed_stored_mail" },
+      coverage: {
+        importsComplete: true,
+        crmComplete: true,
+        native: "observed",
+        providerComplete: false,
+        checkedAt: "2026-11-01T00:00:00.000Z",
+      },
+    }),
     globalInbox: vi.fn().mockResolvedValue({
       roles: [],
       items: [],

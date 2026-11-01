@@ -58,3 +58,9 @@ export const GlobalRecruitingInboxOutputSchema = z.strictObject({
   }),
 });
 export type GlobalRecruitingInboxOutput = z.infer<typeof GlobalRecruitingInboxOutputSchema>;
+
+export const GlobalRecruitingInboxSummaryOutputSchema = GlobalRecruitingInboxOutputSchema.pick({
+  unread: true,
+  coverage: true,
+});
+export type GlobalRecruitingInboxSummary = z.infer<typeof GlobalRecruitingInboxSummaryOutputSchema>;

@@ -65,6 +65,16 @@ suite("first-batch RLS with a real restricted role", () => {
       "utf8",
     );
     await sql.query(projectionMigration.slice(projectionMigration.indexOf("DO $rls$")));
+    await sql.query("DROP POLICY rakazo_actor_isolation ON recruiting_inbox_index_progress");
+    await sql.query("ALTER TABLE recruiting_inbox_index_progress DISABLE ROW LEVEL SECURITY");
+    const indexMigration = await readFile(
+      new URL(
+        "../prisma/migrations/20261101160000_recruiting_inbox_background_index/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await sql.query(indexMigration.slice(indexMigration.indexOf("DO $rls$")));
     await sql.query(`CREATE ROLE ${role} LOGIN NOSUPERUSER NOBYPASSRLS`);
     await sql.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
     await sql.query(
@@ -161,6 +171,7 @@ suite("first-batch RLS with a real restricted role", () => {
         await db.recruitingContactTag.create({
           data: { spaceId, ownerUserId: id, personKey: "synthetic", tag: "synthetic" },
         });
+        await db.recruitingInboxIndexProgress.create({ data: { userId: id, spaceId } });
         await db.$executeRaw`INSERT INTO recruiting_inbox_initializations (user_id, space_id) VALUES (${id}, ${spaceId})`;
         await db.$executeRaw`INSERT INTO recruiting_inbox_cursors (user_id, space_id, thread_key) VALUES (${id}, ${spaceId}, 'synthetic')`;
         await db.$executeRaw`INSERT INTO recruiting_inbox_messages (id,user_id,space_id,role_id,origin_key,dedupe_key,source_id,source_kind,observed_at,search_text,email) VALUES (${id},${id},${spaceId},${id},'synthetic','synthetic','synthetic','observed',CURRENT_TIMESTAMP,'synthetic','{}'::jsonb)`;

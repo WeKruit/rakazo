@@ -197,6 +197,7 @@ import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import {
   GlobalRecruitingInboxInputSchema,
   GlobalRecruitingInboxOutputSchema,
+  GlobalRecruitingInboxSummaryOutputSchema,
 } from "./recruiting-global-inbox.js";
 import {
   ListRecruitingInboxInputSchema,
@@ -792,6 +793,9 @@ export const appContract = {
     globalInbox: oc
       .input(GlobalRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
       .output(GlobalRecruitingInboxOutputSchema),
+    globalInboxSummary: oc
+      .input(z.strictObject({ spaceId: Id }))
+      .output(GlobalRecruitingInboxSummaryOutputSchema),
     analyticsPeople: oc
       .input(RecruitingAnalyticsPeopleInputSchema)
       .output(RecruitingAnalyticsPeopleOutputSchema),

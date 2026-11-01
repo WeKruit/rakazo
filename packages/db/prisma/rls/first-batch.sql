@@ -235,4 +235,9 @@ DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_inbox_messages;
 CREATE POLICY rakazo_actor_isolation ON recruiting_inbox_messages FOR ALL
 USING (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM recruiting_roles r WHERE r.id=role_id AND r."userId"=user_id AND r."spaceId"=space_id))
 WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM recruiting_roles r WHERE r.id=role_id AND r."userId"=user_id AND r."spaceId"=space_id));
+ALTER TABLE recruiting_inbox_index_progress ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_inbox_index_progress;
+CREATE POLICY rakazo_actor_isolation ON recruiting_inbox_index_progress FOR ALL
+USING (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 COMMIT;

@@ -1,6 +1,6 @@
 > **评审定稿口径**：以 [实施合同](IMPLEMENTATION-CONTRACTS.md) 和 [当前基线增量](CURRENT-BASELINE-DELTA.md) 为准。Sequence复用现有原生草稿campaign，不新增Sequence表或复制状态。
 
-> 实施口径更新（2026-11-01）：下文保留原始基线盘点，后续评审以 [实施合同](IMPLEMENTATION-CONTRACTS.md) 为准。Sequence 复用已有原生零收件人 draft campaign，不新增 Sequence 表；Worth Talking 复用当前职位版本 Reviewer 分组，不引入本地评分器。完整页面、接口、存储和验收映射见 [实施验收清单](../../REA-IMPLEMENTATION-ACCEPTANCE.md)。本批新增持久结构为 Notes 附件引用和可检索的已保存邮件投影，个人阅读游标继续复用上一批实现。
+> 实施口径更新（2026-11-01）：下文保留原始基线盘点，后续评审以 [实施合同](IMPLEMENTATION-CONTRACTS.md) 为准。Sequence 复用已有原生零收件人 draft campaign，不新增 Sequence 表；Worth Talking 复用当前职位版本 Reviewer 分组，不引入本地评分器。完整页面、接口、存储和验收映射见 [实施验收清单](../../REA-IMPLEMENTATION-ACCEPTANCE.md)。本批新增持久结构为 Notes 附件引用、可检索的已保存邮件投影，以及独立于首次阅读基线的后台索引覆盖/续跑记录。个人阅读游标继续复用上一批实现；邮件回填只在已有后台同步循环运行，页面与角标只读。
 
 > **公开评审版本**：保留需求、交互、实测几何与样式；内容槽已匿名化。所有公开布局图均由 DOM 测量生成，**不是原始截图**。原始登录态截图、AX、媒体及完整历史静态证据单独保留，未公开。
 

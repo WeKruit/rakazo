@@ -22,6 +22,7 @@ model AiDataConsent {
 }
 
 model User {
+  recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
   recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
   recruitingInboxCursors RecruitingInboxCursor[]
@@ -223,6 +224,7 @@ model Member {
 }
 
 model Space {
+  recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
   recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
   recruitingInboxCursors RecruitingInboxCursor[]
@@ -2306,4 +2308,18 @@ model RecruitingInboxMessage {
   @@index([userId, spaceId, roleId, messageAt, id])
   @@index([userId, spaceId, sourceKind, receiptId])
   @@map("recruiting_inbox_messages")
+}
+
+/// Background projection coverage, independent of the person's first-enable read baseline.
+model RecruitingInboxIndexProgress {
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  nativeCursor Json? @map("native_cursor")
+  importsComplete Boolean @default(false) @map("imports_complete")
+  crmComplete Boolean @default(false) @map("crm_complete")
+  checkedAt DateTime @default(now()) @map("checked_at")
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  space Space @relation(fields:[spaceId],references:[id],onDelete:Cascade)
+  @@id([userId,spaceId])
+  @@map("recruiting_inbox_index_progress")
 }

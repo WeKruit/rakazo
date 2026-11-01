@@ -564,7 +564,7 @@ export async function mockRecruitingApp(
       input = { ...((viewInput.query as Record<string, unknown>) ?? {}), roleId: viewInput.roleId };
     }
     let value: unknown;
-    if (method === "recruiting/globalInbox") {
+    if (method === "recruiting/globalInbox" || method === "recruiting/globalInboxSummary") {
       const roles = accountRolesData().slice(0, 1);
       const rows = roles.flatMap((role) => {
         const item = fixtureAccountItem(role);
@@ -613,6 +613,10 @@ export async function mockRecruitingApp(
           checkedAt,
         },
       };
+      if (method === "recruiting/globalInboxSummary") {
+        const summary = value as { unread: unknown; coverage: unknown };
+        value = { unread: summary.unread, coverage: summary.coverage };
+      }
     } else if (method === "recruiting/inboxReadState") {
       value = {
         initializedAt: inboxBaseline,

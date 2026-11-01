@@ -731,14 +731,9 @@ export function AccountRecruitingView({
                     </span>
                     {!indexedMail.data.coverage.importsComplete ||
                     !indexedMail.data.coverage.crmComplete ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={loading}
-                        onClick={() => setReload((value) => value + 1)}
-                      >
-                        <Trans>Continue loading saved mail</Trans>
-                      </Button>
+                      <span role="status">
+                        <Trans>Saved mail is indexing in the background.</Trans>
+                      </span>
                     ) : null}
                   </div>
                 ) : null}

@@ -72,7 +72,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     !showToolActivity && model.userId && bootstrapMe?.spaceId
       ? JSON.stringify([inboxScope, recruitingRefresh])
       : null,
-    () => rpc.recruiting.globalInbox({ spaceId: bootstrapMe!.spaceId, limit: 1 }),
+    () => rpc.recruiting.globalInboxSummary({ spaceId: bootstrapMe!.spaceId }),
     { cache: recruitingReadCache.current, key: `global-inbox:${inboxScope}` },
   );
   const selectedRoleId = model.searchParams.get("role");

@@ -86,11 +86,11 @@ async function put(
   await tx.$executeRaw`INSERT INTO recruiting_inbox_messages
     (id,user_id,space_id,role_id,origin_key,dedupe_key,thread_key,source_id,organization_id,source_kind,receipt_id,receipt_ordinal,observed_at,message_at,direction,search_text,email,person)
     VALUES (${id},${actor.userId},${actor.spaceId},${input.roleId},${originKey},${inboxMessageDedupeKey(email, organizationId)},${thread},${email.sourceId},${organizationId},${input.kind},${input.receiptId ?? null},${input.ordinal ?? null},${input.observedAt},${date(email.date)},${email.direction ?? email.crm?.direction ?? null},${search},${JSON.stringify(email)}::jsonb,${input.person ? JSON.stringify(input.person) : null}::jsonb)
-    ON CONFLICT (id) DO UPDATE SET dedupe_key=CASE WHEN EXCLUDED.source_kind='observed' AND (EXCLUDED.email->>'eaccount') IS NULL THEN recruiting_inbox_messages.dedupe_key ELSE EXCLUDED.dedupe_key END,thread_key=CASE WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.thread_key,recruiting_inbox_messages.thread_key) ELSE EXCLUDED.thread_key END,source_id=EXCLUDED.source_id,observed_at=EXCLUDED.observed_at,message_at=CASE WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.message_at,recruiting_inbox_messages.message_at) ELSE EXCLUDED.message_at END,direction=CASE WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.direction,recruiting_inbox_messages.direction) ELSE EXCLUDED.direction END,search_text=CASE WHEN EXCLUDED.source_kind='observed' AND COALESCE((EXCLUDED.email->>'snippet')::boolean,false) AND NOT COALESCE((recruiting_inbox_messages.email->>'snippet')::boolean,false) THEN recruiting_inbox_messages.search_text ELSE EXCLUDED.search_text END,email=(CASE WHEN EXCLUDED.source_kind='observed' AND COALESCE((EXCLUDED.email->>'snippet')::boolean,false) AND NOT COALESCE((recruiting_inbox_messages.email->>'snippet')::boolean,false)
+    ON CONFLICT (id) DO UPDATE SET dedupe_key=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.dedupe_key WHEN EXCLUDED.source_kind='observed' AND (EXCLUDED.email->>'eaccount') IS NULL THEN recruiting_inbox_messages.dedupe_key ELSE EXCLUDED.dedupe_key END,thread_key=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.thread_key WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.thread_key,recruiting_inbox_messages.thread_key) ELSE EXCLUDED.thread_key END,source_id=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.source_id ELSE EXCLUDED.source_id END,observed_at=GREATEST(recruiting_inbox_messages.observed_at,EXCLUDED.observed_at),message_at=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.message_at WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.message_at,recruiting_inbox_messages.message_at) ELSE EXCLUDED.message_at END,direction=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.direction WHEN EXCLUDED.source_kind='observed' THEN COALESCE(EXCLUDED.direction,recruiting_inbox_messages.direction) ELSE EXCLUDED.direction END,search_text=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.search_text WHEN EXCLUDED.source_kind='observed' AND COALESCE((EXCLUDED.email->>'snippet')::boolean,false) AND NOT COALESCE((recruiting_inbox_messages.email->>'snippet')::boolean,false) THEN recruiting_inbox_messages.search_text ELSE EXCLUDED.search_text END,email=(CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.email WHEN EXCLUDED.source_kind='observed' AND COALESCE((EXCLUDED.email->>'snippet')::boolean,false) AND NOT COALESCE((recruiting_inbox_messages.email->>'snippet')::boolean,false)
       THEN recruiting_inbox_messages.email || EXCLUDED.email || jsonb_build_object('body',recruiting_inbox_messages.email->'body','snippet',false,'date',COALESCE(NULLIF(EXCLUDED.email->'date','null'::jsonb),recruiting_inbox_messages.email->'date'),'direction',COALESCE(NULLIF(EXCLUDED.email->'direction','null'::jsonb),recruiting_inbox_messages.email->'direction')) ELSE EXCLUDED.email END)
-      || CASE WHEN EXCLUDED.source_kind='observed' AND (recruiting_inbox_messages.email ? 'attachments' OR EXCLUDED.email ? 'attachments') THEN jsonb_build_object('attachments', (SELECT COALESCE(jsonb_agg(file),'[]'::jsonb) FROM (SELECT DISTINCT ON (file->>'id') file FROM jsonb_array_elements(COALESCE(recruiting_inbox_messages.email->'attachments','[]'::jsonb)||COALESCE(EXCLUDED.email->'attachments','[]'::jsonb)) file ORDER BY file->>'id') exact_attachments)) ELSE '{}'::jsonb END,
-      person=COALESCE(EXCLUDED.person,recruiting_inbox_messages.person)
-    WHERE recruiting_inbox_messages.observed_at <= EXCLUDED.observed_at`;
+      || CASE WHEN EXCLUDED.source_kind='observed' AND (recruiting_inbox_messages.email ? 'attachments' OR EXCLUDED.email ? 'attachments') THEN jsonb_build_object('attachments', (SELECT COALESCE(jsonb_agg(file),'[]'::jsonb) FROM (SELECT DISTINCT ON (file->>'id') file FROM jsonb_array_elements(CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN COALESCE(EXCLUDED.email->'attachments','[]'::jsonb)||COALESCE(recruiting_inbox_messages.email->'attachments','[]'::jsonb) ELSE COALESCE(recruiting_inbox_messages.email->'attachments','[]'::jsonb)||COALESCE(EXCLUDED.email->'attachments','[]'::jsonb) END) WITH ORDINALITY files(file,ordinal) ORDER BY file->>'id',ordinal DESC) exact_attachments)) ELSE '{}'::jsonb END,
+      person=CASE WHEN recruiting_inbox_messages.observed_at > EXCLUDED.observed_at THEN recruiting_inbox_messages.person ELSE COALESCE(EXCLUDED.person,recruiting_inbox_messages.person) END
+    WHERE recruiting_inbox_messages.observed_at <= EXCLUDED.observed_at OR (EXCLUDED.source_kind='observed' AND EXCLUDED.email ? 'attachments')`;
 }
 
 /** A display projection of an already authorized canonical read, never new provider authority. */
@@ -127,6 +127,8 @@ export async function projectRecruitingInboxMessages(
 
 /** Missing receipt rows, not fabricated progress records, form the bounded backfill cursor. */
 async function backfill(tx: Tx, actor: Actor) {
+  const batchSize = 500;
+  const people = new Map<string, RecruitingRoleCandidate | null>();
   const imports = await tx.$queryRaw<
     {
       roleId: string;
@@ -137,19 +139,22 @@ async function backfill(tx: Tx, actor: Actor) {
       metadata: unknown;
     }[]
   >`
-    SELECT r.id AS "roleId", e.id AS "receiptId", mail.ordinality AS ordinal, e."createdAt", mail.value AS email, jsonb_build_object('version',e.result->'version','roleId',e.result->'roleId','sourceSha256',e.result->'sourceSha256','importedAt',e.result->'importedAt') AS metadata
+    WITH receipts AS MATERIALIZED (
+    SELECT r.id AS "roleId",e.id AS "receiptId",e."createdAt",jsonb_build_object('version',e.result->'version','roleId',e.result->'roleId','sourceSha256',e.result->'sourceSha256','importedAt',e.result->'importedAt') AS metadata,
+      CASE WHEN jsonb_typeof(e.result->'emails')='array' THEN e.result->'emails' ELSE '[]'::jsonb END AS emails
     FROM external_effects e JOIN runs run ON run.id=e."runId" JOIN bots b ON b.id=run."botId"
     JOIN recruiting_role_revisions rev ON rev.id=run."initialRecruitingRoleRevisionId"
     JOIN recruiting_roles r ON r.id=rev."roleId" JOIN threads t ON t.id=run."threadId"
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(e.result->'emails')='array' THEN e.result->'emails' ELSE '[]'::jsonb END) WITH ORDINALITY AS mail
     WHERE e."spaceId"=${actor.spaceId} AND e.kind='recruiting_history_import' AND e.status='completed'
       AND run."userId"=${actor.userId} AND run."spaceId"=${actor.spaceId} AND run.trigger='tool_background' AND run.status='completed'
       AND b."userId"=${actor.userId} AND b."spaceId"=${actor.spaceId} AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId}
       AND r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId} AND r."archivedAt" IS NULL AND t."activeRecruitingRoleId"=r.id
       AND e.request->>'roleId'=r.id AND e.result->>'roleId'=r.id
-      AND NOT EXISTS (SELECT 1 FROM recruiting_inbox_messages seen WHERE seen.user_id=${actor.userId} AND seen.space_id=${actor.spaceId} AND seen.receipt_id=e.id AND seen.receipt_ordinal=mail.ordinality)
-    ORDER BY e."createdAt",e.id,mail.ordinality LIMIT 51`;
-  for (const row of imports.slice(0, 50)) {
+    ) SELECT receipt."roleId",receipt."receiptId",mail.ordinality AS ordinal,receipt."createdAt",mail.value AS email,receipt.metadata
+    FROM receipts receipt CROSS JOIN LATERAL jsonb_array_elements(receipt.emails) WITH ORDINALITY AS mail
+    WHERE NOT EXISTS (SELECT 1 FROM recruiting_inbox_messages seen WHERE seen.user_id=${actor.userId} AND seen.space_id=${actor.spaceId} AND seen.receipt_id=receipt."receiptId" AND seen.receipt_ordinal=mail.ordinality)
+    ORDER BY receipt."createdAt",receipt."receiptId",mail.ordinality LIMIT ${batchSize + 1}`;
+  for (const row of imports.slice(0, batchSize)) {
     RecruitingHistoryImportSchema.pick({
       version: true,
       roleId: true,
@@ -198,19 +203,24 @@ async function backfill(tx: Tx, actor: Actor) {
       AND ((a."roleId" IS NOT NULL AND a."mcpServerId"=m."mcpServerId" AND a."organizationId"=m."organizationId" AND a."crmRoleId"=m."crmRoleId")
         OR (a."roleId" IS NULL AND binding.result->>'roleId'=r.id AND binding.result->'target'->>'mcpServerId'=m."mcpServerId" AND binding.result->'target'->>'organizationId'=m."organizationId" AND binding.result->'target'->>'crmRoleId'=m."crmRoleId"))
       AND NOT EXISTS (SELECT 1 FROM recruiting_inbox_messages seen WHERE seen.user_id=${actor.userId} AND seen.space_id=${actor.spaceId} AND seen.role_id=r.id AND seen.source_kind='crm' AND seen.receipt_id=m.id AND seen.observed_at>=m."syncedAt")
-    ORDER BY m."syncedAt",m.id,r.id LIMIT 51`;
-  for (const row of mirrors.slice(0, 50))
+    ORDER BY m."syncedAt",m.id,r.id LIMIT ${batchSize + 1}`;
+  for (const row of mirrors.slice(0, batchSize)) {
+    const personKey = JSON.stringify([row.sourceId, row.organizationId, row.candidateId]);
+    if (!people.has(personKey))
+      people.set(
+        personKey,
+        await savedPerson(tx, actor, row.roleId, { sourceId: row.sourceId }, null, {
+          organizationId: row.organizationId,
+          candidateId: row.candidateId,
+        }),
+      );
     await put(tx, actor, {
       roleId: row.roleId,
       organizationId: row.organizationId,
       receiptId: row.id,
       observedAt: row.syncedAt,
       kind: "crm",
-      person:
-        (await savedPerson(tx, actor, row.roleId, { sourceId: row.sourceId }, null, {
-          organizationId: row.organizationId,
-          candidateId: row.candidateId,
-        })) ?? undefined,
+      person: people.get(personKey) ?? undefined,
       email: {
         id: JSON.stringify([row.sourceId, row.organizationId, row.candidateId, row.messageId]),
         sourceId: row.sourceId,
@@ -231,8 +241,31 @@ async function backfill(tx: Tx, actor: Actor) {
         url: null,
       },
     });
-  return { importsComplete: imports.length <= 50, crmComplete: mirrors.length <= 50 };
+  }
+  return { importsComplete: imports.length <= batchSize, crmComplete: mirrors.length <= batchSize };
 }
+/** One bounded background chunk; display reads never invoke it. */
+export async function indexRecruitingInboxBatch(
+  prisma: PrismaClient,
+  actor: Actor,
+  authorize?: () => Promise<void>,
+) {
+  return prisma.$transaction(
+    async (tx) => {
+      await authorize?.();
+      const coverage = await backfill(tx, actor);
+      await tx.recruitingInboxIndexProgress.upsert({
+        where: { userId_spaceId: owned(actor) },
+        create: { ...owned(actor), ...coverage },
+        update: { ...coverage, checkedAt: new Date() },
+      });
+      await authorize?.();
+      return coverage;
+    },
+    { timeout: 60_000 },
+  );
+}
+
 function zRecipients(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
@@ -248,8 +281,10 @@ async function savedPerson(
   existing: unknown,
   crmIdentity?: { organizationId: string; candidateId: string },
 ): Promise<RecruitingRoleCandidate | null> {
-  if (existing) return RecruitingRoleCandidateSchema.parse(existing);
-  const identity = crmIdentity ?? email.crm;
+  const supplied = existing ? RecruitingRoleCandidateSchema.parse(existing) : null;
+  // Saved DTOs establish identity, never the current grade or role revision.
+  const identity =
+    crmIdentity ?? email.crm ?? (supplied?.crm?.serverId === email.sourceId ? supplied.crm : null);
   if (identity) {
     const contact = await tx.recruitingCrmContact.findFirst({
       where: {
@@ -289,7 +324,8 @@ async function savedPerson(
       },
     });
   }
-  if (!email.candidateKey) return null;
+  const candidateKey = email.candidateKey ?? supplied?.autumn?.candidateKey;
+  if (!candidateKey) return null;
   const candidates = await tx.$queryRaw<
     {
       candidateKey: string;
@@ -308,7 +344,7 @@ async function savedPerson(
       providerRoleRevisionId: string | null;
     }[]
   >(
-    Prisma.sql`${candidateIndexQuery(roleId, "ranking")} SELECT * FROM base WHERE "candidateKey"=${email.candidateKey} LIMIT 1`,
+    Prisma.sql`${candidateIndexQuery(roleId, "ranking")} SELECT * FROM base WHERE "candidateKey"=${candidateKey} LIMIT 1`,
   );
   const row = candidates[0];
   if (!row) return null;
@@ -358,7 +394,7 @@ async function savedPerson(
 }
 
 /** Canonical corrections first; then the existing complete-body/live-source preference and aliases. */
-function corpus(actor: Actor) {
+function corpus(actor: Actor, includeFiles = true) {
   return Prisma.sql`WITH origins AS (
     SELECT DISTINCT ON (m.role_id,m.origin_key) m.* FROM recruiting_inbox_messages m
     JOIN recruiting_roles r ON r.id=m.role_id JOIN threads t ON t.id=r."sourceThreadId"
@@ -369,17 +405,19 @@ function corpus(actor: Actor) {
   ), preferred AS (
     SELECT DISTINCT ON (role_id,dedupe_key) * FROM origins
     ORDER BY role_id,dedupe_key,COALESCE((email->>'snippet')::boolean,false),COALESCE((email->>'imported')::boolean,false),observed_at DESC,id DESC
-  ), canonical AS (
-    SELECT chosen.id,chosen.user_id,chosen.space_id,chosen.role_id,chosen.origin_key,chosen.dedupe_key,chosen.thread_key,chosen.source_id,chosen.source_kind,chosen.receipt_id,chosen.receipt_ordinal,chosen.observed_at,chosen.message_at,chosen.direction,chosen.search_text,chosen.person,
-      chosen.email || CASE WHEN files.attachments IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('attachments',files.attachments) END AS email
-    FROM preferred chosen LEFT JOIN LATERAL (
-      SELECT jsonb_agg(file) AS attachments FROM (
-        SELECT DISTINCT ON (file->>'id') file
-        FROM origins alias CROSS JOIN LATERAL jsonb_array_elements(COALESCE(alias.email->'attachments','[]'::jsonb)) file
-        WHERE alias.role_id=chosen.role_id AND alias.dedupe_key=chosen.dedupe_key
-        ORDER BY file->>'id',alias.observed_at DESC
-      ) exact_files
-    ) files ON true
+  )${
+    includeFiles
+      ? Prisma.sql`, files AS (
+    SELECT role_id,dedupe_key,jsonb_agg(file) AS attachments FROM (
+      SELECT DISTINCT ON (alias.role_id,alias.dedupe_key,file->>'id') alias.role_id,alias.dedupe_key,file
+      FROM origins alias CROSS JOIN LATERAL jsonb_array_elements(COALESCE(alias.email->'attachments','[]'::jsonb)) file
+      ORDER BY alias.role_id,alias.dedupe_key,file->>'id',alias.observed_at DESC
+    ) exact_files GROUP BY role_id,dedupe_key
+  )`
+      : Prisma.empty
+  }, canonical AS (
+    SELECT chosen.*${includeFiles ? Prisma.sql`, chosen.email || CASE WHEN files.attachments IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('attachments',files.attachments) END AS display_email` : Prisma.empty}
+    FROM preferred chosen ${includeFiles ? Prisma.sql`LEFT JOIN files ON files.role_id=chosen.role_id AND files.dedupe_key=chosen.dedupe_key` : Prisma.empty}
   ), mail AS (SELECT *, COALESCE(thread_key,'message:'||id) AS view_key FROM canonical)`;
 }
 const cursorSchema = {
@@ -415,12 +453,11 @@ export async function readGlobalRecruitingInbox(
   const cursor = input.cursor ? cursorSchema.parse(input.cursor) : null;
   return prisma.$transaction(async (tx) => {
     await authorize?.();
-    const baseline = await tx.recruitingInboxInitialization.upsert({
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    const initialization = await tx.recruitingInboxInitialization.findUnique({
       where: { userId_spaceId: owned(actor) },
-      create: owned(actor),
-      update: { userId: actor.userId },
     });
-    const coverage = await backfill(tx, actor);
+    const baseline = { initializedAt: initialization?.initializedAt ?? new Date() };
     const roles = await tx.recruitingRole.findMany({
       where: {
         ...owned(actor),
@@ -435,7 +472,7 @@ export async function readGlobalRecruitingInbox(
       orderBy: { id: "asc" },
     });
     const base = corpus(actor);
-    const filter = Prisma.sql`${input.roleId ? Prisma.sql`AND role_id=${input.roleId}` : Prisma.empty}${input.sourceId ? Prisma.sql`AND source_id=${input.sourceId}` : Prisma.empty}`;
+    const filter = Prisma.sql`${input.roleId ? Prisma.sql`AND mail.role_id=${input.roleId}` : Prisma.empty}${input.sourceId ? Prisma.sql`AND source_id=${input.sourceId}` : Prisma.empty}`;
     const thread = input.thread;
     const rows = await tx.$queryRaw<
       {
@@ -443,39 +480,40 @@ export async function readGlobalRecruitingInbox(
         role_id: string;
         view_key: string;
         email: unknown;
+        display_email?: unknown;
         person: unknown;
         message_at: Date | null;
         latest_incoming_at: Date | null;
       }[]
-    >(Prisma.sql`${base}, eligible AS (
-      SELECT * FROM mail WHERE true ${filter} ${
-        input.unreadOnly
-          ? Prisma.sql`AND thread_key IS NOT NULL AND EXISTS (
-        SELECT 1 FROM mail received LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=received.thread_key
-        WHERE received.view_key=mail.view_key AND received.direction='received' AND received.message_at<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-          AND (COALESCE(c.unread,false) OR received.message_at>COALESCE(c.last_read_at,${baseline.initializedAt}))) AND NOT EXISTS (SELECT 1 FROM mail uncertain WHERE uncertain.view_key=mail.view_key AND (uncertain.direction IS NULL OR (uncertain.direction='received' AND (uncertain.message_at IS NULL OR uncertain.message_at>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')))))`
-          : Prisma.empty
-      }
-        ${thread ? Prisma.sql`AND role_id=${thread.roleId} AND view_key=${thread.key}` : Prisma.sql`AND EXISTS (SELECT 1 FROM mail incoming WHERE incoming.role_id=mail.role_id AND incoming.view_key=mail.view_key AND (incoming.direction='received' OR incoming.direction IS NULL))`}
-    ), matches AS (SELECT DISTINCT role_id,view_key FROM eligible WHERE true ${input.query ? Prisma.sql`AND search_text ILIKE ${safeLike(input.query)}` : Prisma.empty}), selected AS (
-      ${thread ? Prisma.sql`SELECT * FROM eligible` : Prisma.sql`SELECT DISTINCT ON (e.role_id,e.view_key) e.* FROM eligible e JOIN matches m ON m.role_id=e.role_id AND m.view_key=e.view_key ORDER BY e.role_id,e.view_key,(e.direction='received') DESC NULLS LAST,e.message_at DESC NULLS LAST,e.id DESC`}
-    ) SELECT selected.*, (SELECT CASE WHEN bool_or(incoming.direction='received' AND incoming.message_at IS NULL) THEN NULL ELSE max(incoming.message_at) FILTER (WHERE incoming.direction='received') END FROM mail incoming WHERE incoming.view_key=selected.view_key) AS latest_incoming_at FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
+    >(Prisma.sql`${base}, annotated AS (
+      SELECT mail.*,
+        bool_or(direction='received' OR direction IS NULL) OVER(PARTITION BY role_id,view_key) AS has_incoming,
+        ${input.query ? Prisma.sql`bool_or(search_text ILIKE ${safeLike(input.query)}) OVER(PARTITION BY role_id,view_key)` : Prisma.sql`true`} AS matches,
+        bool_or(direction IS NULL OR (direction='received' AND (message_at IS NULL OR message_at>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')))) OVER(PARTITION BY view_key) AS unknown,
+        CASE WHEN bool_or(direction IS NULL OR (direction='received' AND message_at IS NULL)) OVER(PARTITION BY view_key) THEN NULL
+          ELSE max(message_at) FILTER(WHERE direction='received') OVER(PARTITION BY view_key) END AS latest_incoming_at
+      FROM mail ${thread ? Prisma.sql`WHERE view_key=${thread.key}` : Prisma.empty}
+    ), eligible AS (
+      SELECT mail.* FROM annotated mail ${input.unreadOnly ? Prisma.sql`LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=mail.thread_key` : Prisma.empty}
+      WHERE true ${filter}
+      ${thread ? Prisma.sql`AND role_id=${thread.roleId}` : Prisma.sql`AND has_incoming`}
+      ${input.unreadOnly ? Prisma.sql`AND mail.thread_key IS NOT NULL AND NOT unknown AND latest_incoming_at IS NOT NULL AND (COALESCE(c.unread,false) OR latest_incoming_at>COALESCE(c.last_read_at,${baseline.initializedAt}))` : Prisma.empty}
+    ), selected AS (
+      ${thread ? Prisma.sql`SELECT * FROM eligible` : Prisma.sql`SELECT DISTINCT ON(role_id,view_key) * FROM eligible WHERE matches ORDER BY role_id,view_key,(direction='received') DESC NULLS LAST,message_at DESC NULLS LAST,id DESC`}
+    ) SELECT * FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
       ORDER BY message_at DESC NULLS LAST,id DESC LIMIT ${input.limit + 1}`);
-    const counts = await tx.$queryRaw<
-      { unread: bigint; unknown: bigint }[]
-    >(Prisma.sql`${base}, inbox_threads AS (
-      SELECT COALESCE(thread_key,'message:'||id) AS key,thread_key,max(message_at) FILTER (WHERE direction='received') AS incoming,
-        bool_or(direction='received' AND message_at IS NULL) OR bool_or(direction IS NULL) AS unknown
-      FROM mail GROUP BY COALESCE(thread_key,'message:'||id),thread_key
-      HAVING bool_or(direction='received' OR direction IS NULL)
-    ) SELECT count(*) FILTER (WHERE t.thread_key IS NOT NULL AND NOT t.unknown AND t.incoming IS NOT NULL AND t.incoming<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND (COALESCE(c.unread,false) OR t.incoming>COALESCE(c.last_read_at,${baseline.initializedAt}))) AS unread,
-      count(*) FILTER (WHERE t.thread_key IS NULL OR t.unknown OR t.incoming IS NULL OR t.incoming>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')) AS unknown
-      FROM inbox_threads t LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=t.thread_key`);
+    const summary = await inboxSummary(tx, actor, baseline.initializedAt);
     const page = rows.slice(0, input.limit);
     const last = page.at(-1);
     const people = await Promise.all(
       page.map((row) =>
-        savedPerson(tx, actor, row.role_id, emailSchema.parse(row.email), row.person),
+        savedPerson(
+          tx,
+          actor,
+          row.role_id,
+          emailSchema.parse(row.display_email ?? row.email),
+          row.person,
+        ),
       ),
     );
     await authorize?.();
@@ -488,7 +526,7 @@ export async function readGlobalRecruitingInbox(
         stage: role.playbookStage,
       })),
       items: page.map((row, index) => {
-        const email = emailSchema.parse(row.email);
+        const email = emailSchema.parse(row.display_email ?? row.email);
         return {
           key: row.view_key,
           roleId: row.role_id,
@@ -504,22 +542,68 @@ export async function readGlobalRecruitingInbox(
         };
       }),
       nextCursor:
-        coverage.importsComplete && coverage.crmComplete && rows.length > input.limit && last
+        rows.length > input.limit && last
           ? Buffer.from(
               JSON.stringify({ at: last.message_at?.toISOString() ?? null, id: last.id }),
             ).toString("base64url")
           : null,
-      unread: {
-        count: Number(counts[0]?.unread ?? 0),
-        unknownThreads: Number(counts[0]?.unknown ?? 0),
-        scope: "indexed_stored_mail",
-      },
-      coverage: {
-        ...coverage,
-        native: "observed",
-        providerComplete: false,
-        checkedAt: new Date().toISOString(),
-      },
+      ...summary,
     };
+  });
+}
+
+async function inboxSummary(tx: Tx, actor: Actor, baseline: Date) {
+  const progress = await tx.recruitingInboxIndexProgress.findUnique({
+    where: { userId_spaceId: owned(actor) },
+  });
+  const eligible =
+    !progress?.importsComplete || !progress?.crmComplete
+      ? await tx.$queryRaw<
+          { present: boolean }[]
+        >`SELECT EXISTS(SELECT 1 FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" WHERE r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId} AND r."archivedAt" IS NULL AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id AND NOT EXISTS(SELECT 1 FROM chat_groups g WHERE g.id=t."groupId" AND g."archivedAt" IS NOT NULL)) AS present`
+      : [{ present: true }];
+  const empty = !eligible[0]?.present;
+  const counts = await tx.$queryRaw<
+    { unread: bigint; unknown: bigint }[]
+  >(Prisma.sql`${corpus(actor, false)}, inbox_threads AS (
+      SELECT COALESCE(thread_key,'message:'||id) AS key,thread_key,max(message_at) FILTER (WHERE direction='received') AS incoming,
+        bool_or(direction='received' AND message_at IS NULL) OR bool_or(direction IS NULL) AS unknown
+      FROM mail GROUP BY COALESCE(thread_key,'message:'||id),thread_key
+      HAVING bool_or(direction='received' OR direction IS NULL)
+    ) SELECT count(*) FILTER (WHERE t.thread_key IS NOT NULL AND NOT t.unknown AND t.incoming IS NOT NULL AND t.incoming<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND (COALESCE(c.unread,false) OR t.incoming>COALESCE(c.last_read_at,${baseline}))) AS unread,
+      count(*) FILTER (WHERE t.thread_key IS NULL OR t.unknown OR t.incoming IS NULL OR t.incoming>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')) AS unknown
+      FROM inbox_threads t LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=t.thread_key`);
+
+  return {
+    unread: {
+      count: Number(counts[0]?.unread ?? 0),
+      unknownThreads: Number(counts[0]?.unknown ?? 0),
+      scope: "indexed_stored_mail" as const,
+    },
+    coverage: {
+      importsComplete: empty || (progress?.importsComplete ?? false),
+      crmComplete: empty || (progress?.crmComplete ?? false),
+      native: "observed" as const,
+      providerComplete: false as const,
+      checkedAt: progress?.checkedAt.toISOString() ?? new Date().toISOString(),
+    },
+  };
+}
+
+/** Navigation reads only the canonical counts and concrete last-indexed coverage. */
+export async function readGlobalRecruitingInboxSummary(
+  prisma: PrismaClient,
+  actor: Actor,
+  authorize?: () => Promise<void>,
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    await authorize?.();
+    const baseline = await tx.recruitingInboxInitialization.findUnique({
+      where: { userId_spaceId: owned(actor) },
+    });
+    const summary = await inboxSummary(tx, actor, baseline?.initializedAt ?? new Date());
+    await authorize?.();
+    return summary;
   });
 }

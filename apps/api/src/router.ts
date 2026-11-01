@@ -83,6 +83,7 @@ import {
   fillRecruitingRoleProfiles,
   forgetBotSecret,
   getGlobalRecruitingInbox,
+  getGlobalRecruitingInboxSummary,
   hasActiveComputerControl,
   hasPlatformMcpCredential,
   hostCredentialSource,
@@ -3977,6 +3978,15 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      globalInboxSummary: authed.recruiting.globalInboxSummary.handler(
+        async ({ context, input }) => {
+          if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
+          return getGlobalRecruitingInboxSummary(
+            { prisma: deps.prisma, stillAuthorized: context.stillAuthorized },
+            context.actor,
+          );
+        },
+      ),
       globalInbox: authed.recruiting.globalInbox.handler(async ({ context, input }) => {
         if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
         return getGlobalRecruitingInbox(

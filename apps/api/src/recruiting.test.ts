@@ -241,40 +241,52 @@ describe("saved recruiting correspondence", () => {
     expect(output.contacts).toEqual([contact]);
   });
 
-  it("deduplicates the same provider message while retaining the imported original attachment", async () => {
-    const f = fixture();
-    const attachment = { id: "resume", name: "Resume.pdf", mimeType: "application/pdf", size: 50 };
-    vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce({
-      checkedAt: "2026-10-24T00:00:00.000Z",
-      events: [],
-      history: [],
-      contacts: [],
-      emails: [
-        {
-          id: "imported-copy",
-          sourceName: "Email history",
-          sourceId: "history",
-          providerMessageId: email.id,
-          campaignId: email.campaign_id,
-          eaccount: email.eaccount,
-          savedRead: null,
-          imported: true,
-          sender: "person@example.test",
-          recipients: ["team@example.test"],
-          subject: email.subject,
-          body: email.body.text,
-          date: email.timestamp_email,
-          snippet: false,
-          url: null,
-          attachments: [attachment],
-        },
-      ],
-    });
-    const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
-    expect(output.emails).toHaveLength(1);
-    expect(output.emails[0]?.imported).toBe(true);
-    expect(output.emails[0]?.attachments).toEqual([attachment]);
-  });
+  it.each(["mail", "history"])(
+    "deduplicates only a proven same-source provider message, retaining original attachments (%s)",
+    async (sourceId) => {
+      const f = fixture();
+      const attachment = {
+        id: "resume",
+        name: "Resume.pdf",
+        mimeType: "application/pdf",
+        size: 50,
+      };
+      vi.mocked(db.readRecruitingImportedCorrespondence).mockResolvedValueOnce({
+        checkedAt: "2026-10-24T00:00:00.000Z",
+        events: [],
+        history: [],
+        contacts: [],
+        emails: [
+          {
+            id: "imported-copy",
+            sourceName: "Email history",
+            sourceId,
+            providerMessageId: email.id,
+            campaignId: email.campaign_id,
+            eaccount: email.eaccount,
+            savedRead: null,
+            imported: true,
+            sender: "person@example.test",
+            recipients: ["team@example.test"],
+            subject: email.subject,
+            body: email.body.text,
+            date: email.timestamp_email,
+            snippet: false,
+            url: null,
+            attachments: [attachment],
+          },
+        ],
+      });
+      const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+      expect(output.emails).toHaveLength(sourceId === "mail" ? 1 : 2);
+      const imported = output.emails.find((message) => message.imported);
+      expect(imported?.attachments).toEqual([attachment]);
+      if (sourceId !== "mail") {
+        expect(output.emails.find((message) => !message.imported)?.sourceId).toBe("mail");
+        expect(output.emails.find((message) => !message.imported)?.attachments).toBeUndefined();
+      }
+    },
+  );
 
   it.each([
     [true, true],
@@ -7220,8 +7232,28 @@ describe("role campaign read", () => {
         },
       },
       leads: [
-        { candidateKey: "ada-key", email: "Ada@Example.test", status: -1, interestStatus: 1 },
-        { candidateKey: null, email: "other@example.test", status: 1, interestStatus: null },
+        {
+          candidateKey: "ada-key",
+          email: "Ada@Example.test",
+          status: -1,
+          interestStatus: 1,
+          name: null,
+          company: null,
+          openCount: null,
+          clickCount: null,
+          replyCount: null,
+        },
+        {
+          candidateKey: null,
+          email: "other@example.test",
+          status: 1,
+          interestStatus: null,
+          name: null,
+          company: null,
+          openCount: null,
+          clickCount: null,
+          replyCount: null,
+        },
       ],
     });
   });
