@@ -1,12 +1,14 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { type Bot, GROUP_MEMBER_MAX, GROUP_MEMBER_MIN, type Group } from "@rakazo/contracts";
-import { resolveMentionPickerKey } from "@rakazo/core";
+import { ATTACHMENT_ACCEPT, resolveMentionPickerKey } from "@rakazo/core";
 import { BotAvatar, Button, Input, Textarea } from "@rakazo/ui-web";
 import { ArrowRight, Check, Paperclip, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { isFileDrag, isFilePaste } from "../lib/pending-attachments";
 import { errorText } from "../lib/user-error";
 import { DeleteItemDialog } from "./shell/dialogs";
+import type { SkippedAttachment } from "./shell/skipped-attachments";
+import { SkippedAttachmentChips } from "./shell/skipped-attachments";
 
 function validSelection(name: string, selected: readonly string[]) {
   return (
@@ -74,8 +76,8 @@ export function CreateGroupForm({
   recruiting = false,
   initialDescription = "",
   attachments = [],
-  attachmentNotice,
-  attachmentAccept,
+  attachmentNotice = [],
+  onRemoveSkippedAttachment,
   onAttachmentPick,
   onRemoveAttachment,
   onCancel,
@@ -85,8 +87,8 @@ export function CreateGroupForm({
   recruiting?: boolean;
   initialDescription?: string;
   attachments?: readonly { id: string; file: File; previewUrl?: string }[];
-  attachmentNotice?: string | null;
-  attachmentAccept?: string;
+  attachmentNotice?: readonly SkippedAttachment[];
+  onRemoveSkippedAttachment?: (id: string) => void;
   onAttachmentPick?: (files: FileList | null) => boolean;
   onRemoveAttachment?: (id: string) => void;
   onCancel: () => void;
@@ -189,11 +191,12 @@ export function CreateGroupForm({
               placeholder={t`Start with a role title or paste a job description…`}
               disabled={submitting}
             />
-            {attachmentNotice ? (
-              <p role="status" className="px-5 text-sm">
-                {attachmentNotice}
-              </p>
-            ) : null}
+            <div className="px-5">
+              <SkippedAttachmentChips
+                items={attachmentNotice}
+                onRemove={(id) => onRemoveSkippedAttachment?.(id)}
+              />
+            </div>
             {attachments.length ? (
               <ul className="flex flex-wrap gap-2 px-5 pb-3">
                 {attachments.map((attachment) => (
@@ -233,7 +236,7 @@ export function CreateGroupForm({
                     aria-label={t`Attach role files`}
                     type="file"
                     multiple
-                    accept={attachmentAccept}
+                    accept={ATTACHMENT_ACCEPT}
                     hidden
                     disabled={submitting}
                     onChange={(event) => {

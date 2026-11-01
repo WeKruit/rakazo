@@ -3,6 +3,8 @@ import type { Actor } from "@rakazo/contracts";
 import { BOT_COLORS, GROUP_MEMBER_MAX } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
+  GOOGLE_CALENDAR_ENDPOINT,
+  GOOGLE_CALENDAR_SCHEDULING_TOOLS,
   MEMORY_TIDY_ROUTINE_NAME,
   memoryTidyRoutineCron,
   memoryTidyRoutinePrompt,
@@ -1065,7 +1067,44 @@ export async function ensurePlatformServices(
   for (const slug of ["people-search", "fullenrich"])
     await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
+  await ensureSchedulingCalendar(prisma, actor);
   await retireResearchTools(prisma, actor);
+}
+
+/**
+ * A Google Calendar the recruiter connected reaches Scheduling, which books interviews on it,
+ * even when it was first granted only to the coordinator. Adds only a missing grant.
+ */
+async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
+  if (!role) return;
+  const servers = await prisma.mcpServer.findMany({
+    where: { ...scope, endpoint: GOOGLE_CALENDAR_ENDPOINT, enabled: true, secretId: { not: null } },
+    select: { id: true },
+  });
+  if (!servers.length) return;
+  const bots = await prisma.bot.findMany({
+    where: {
+      ...scope,
+      archivedAt: null,
+      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
+    },
+    select: { id: true },
+  });
+  if (!bots.length) return;
+  await prisma.botMcpServer.createMany({
+    data: servers.flatMap((server) =>
+      bots.map((bot) => ({
+        ...scope,
+        botId: bot.id,
+        serverId: server.id,
+        allowAllTools: false,
+        allowedTools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
+      })),
+    ),
+    skipDuplicates: true,
+  });
 }
 
 /**

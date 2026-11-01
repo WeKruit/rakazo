@@ -2,7 +2,7 @@ import { useLingui } from "@lingui/react/macro";
 import type { Bot, ComputerMode, Group, Me } from "@rakazo/contracts";
 import { attachmentsForThread } from "@rakazo/core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { NavigateFunction } from "react-router-dom";
 import { scheduleFocusPrompt } from "../../lib/focus-prompt";
 import type { Panel } from "../../lib/right-panel-state";
@@ -69,6 +69,8 @@ export function useShellCreation({
   sendingRef: RefObject<boolean>;
 }) {
   const { t } = useLingui();
+  // The sidebar shows the new role from the click, before the server has created it.
+  const [pendingRoleName, setPendingRoleName] = useState<string | null>(null);
   const pendingRoleCreation = useRef<{
     key: string;
     group: Group;
@@ -96,6 +98,7 @@ export function useShellCreation({
       (selectedSpaceId() ?? submittedSpace) === submittedSpace;
 
     setCreatingGroup(true);
+    setPendingRoleName(input.name);
     try {
       const key = JSON.stringify([
         userId,
@@ -127,6 +130,7 @@ export function useShellCreation({
       setGroups((current) =>
         current.some((item) => item.id === group.id) ? current : [group, ...current],
       );
+      setPendingRoleName(null);
       if (input.description && attempt) {
         const currentAttempt = attempt;
         const settled = await Promise.allSettled(
@@ -170,6 +174,7 @@ export function useShellCreation({
       await refreshBots().catch(() => undefined);
     } finally {
       setCreatingGroup(false);
+      setPendingRoleName(null);
     }
   }
 
@@ -241,5 +246,5 @@ export function useShellCreation({
     await refreshBots().catch(() => undefined);
   }
 
-  return { createGroup, startNewRole, restoreGroup, createBot };
+  return { createGroup, startNewRole, restoreGroup, createBot, pendingRoleName };
 }

@@ -1086,6 +1086,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Scheduling only knew Cal.com, so a recruiter with Google Calendar could not book.",
   },
   {
+    rule: "a failed calendar read is reported",
+    in: "Scheduling",
+    phrase:
+      "When a calendar read fails or its connection is unavailable, say so plainly in the reply",
+    why: "Scheduling could not read the calendar three times and never told the recruiter.",
+  },
+  {
     rule: "length only for multi-length events",
     in: "Scheduling",
     phrase:

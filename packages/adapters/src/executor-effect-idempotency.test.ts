@@ -1533,6 +1533,7 @@ describe("tool audit ordering", () => {
               {
                 label: name === "web_search" ? "Web search" : "Message user",
                 count: 1,
+                activity: name === "web_search" ? "search" : "writing",
                 status: "failed",
                 executionId,
                 durationMs: 1,
@@ -5488,6 +5489,42 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
       "Do not create, rename or update a role",
     );
+  });
+
+  it("saves a role team's role from a short first message before the model's first step", async () => {
+    const f = fixture("short-request-role");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: { findUnique: vi.fn(async () => null) },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    const text = "New grads from USC, CS";
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "short-request-role",
+        blocks: [{ kind: "text", text }],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    f.setCalls([]);
+    await f.run();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      operation: "create",
+      title: "New role",
+      brief: null,
+      intent: { basis: "direct", quote: text },
+    });
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
   });
 
   it("posts a progress line while the pasted JD's role is still saving", async () => {

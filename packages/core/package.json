@@ -39,6 +39,11 @@
       "development": "./src/node/desktop-runtime.ts",
       "default": "./src/node/desktop-runtime.ts"
     },
+    "./node/document-text": {
+      "types": "./src/node/document-text.ts",
+      "development": "./src/node/document-text.ts",
+      "default": "./src/node/document-text.ts"
+    },
     "./node/pdf-text": {
       "types": "./src/node/pdf-text.ts",
       "development": "./src/node/pdf-text.ts",

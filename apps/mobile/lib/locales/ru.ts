@@ -702,7 +702,6 @@ export const RU_MESSAGES: Record<string, string> = {
   "Chat Settings": "Настройки чата",
   "Settings: General": "Настройки: Общие",
   "Settings: Usage": "Настройки: Использование",
-  "Skipped {items}": "Пропущен {items}",
   "{name} (max {count} attachments)": "{name} (не более {count} вложений)",
   "{name} (over 10 MiB)": "{name} (более 10 МБ)",
   "{name} (permission denied)": "{name} (в разрешении отказано)",
