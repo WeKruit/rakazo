@@ -21,6 +21,11 @@ import type { useShellController } from "../shell/useShellController";
 const CommandPalette = lazyPanel(() =>
   import("../shell/command-palette").then((module) => module.CommandPalette),
 );
+const RecruitingGlobalSearch = lazyPanel(() =>
+  withFeatureMessages(() => import("../recruiting/RecruitingGlobalSearch")).then(
+    (module) => module.RecruitingGlobalSearch,
+  ),
+);
 const ClearConversationDialog = lazyPanel(() =>
   withFeatureMessages(() => import("../shell/dialogs")).then(
     (module) => module.ClearConversationDialog,
@@ -505,6 +510,18 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
             onSelectBot={(id) => {
               setMobileSidebarOpen(false);
               navigate(`/app/${id}`);
+            }}
+          />
+        )}
+        {!showToolActivity && commandPaletteOpen && (
+          <RecruitingGlobalSearch
+            key={JSON.stringify([userId, bootstrapMe?.spaceId])}
+            open={commandPaletteOpen}
+            onOpenChange={setCommandPaletteOpen}
+            spaceId={bootstrapMe?.spaceId}
+            onNavigate={(href) => {
+              setMobileSidebarOpen(false);
+              navigate(href, { state: { recruitingSearch: true } });
             }}
           />
         )}

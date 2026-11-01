@@ -1978,7 +1978,6 @@ msgstr "Sunucuya ulaşılamadı"
 msgid "Could not read {failedCalendars}."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr ""
@@ -4027,10 +4026,6 @@ msgstr "kimlik doğrulamasız"
 msgid "No authentication"
 msgstr "Kimlik doğrulaması yok"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr ""
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr ""
@@ -4544,7 +4539,6 @@ msgstr "Açık işler"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI uyumlu sunucu URL'si"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr ""
@@ -5198,7 +5192,6 @@ msgstr ""
 msgid "Replaced"
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6042,10 +6035,6 @@ msgstr "Gönderiliyor…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Seniority"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -6995,6 +6984,10 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx

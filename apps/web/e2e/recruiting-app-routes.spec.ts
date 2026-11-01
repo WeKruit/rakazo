@@ -139,9 +139,10 @@ for (const width of [1440, 390]) {
       await expect(person).toBeVisible();
       if (width === 1440) {
         const table = page.getByRole("region", { name: "Candidate table", exact: true });
-        expect(await table.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(
-          0,
-        );
+        await table.evaluate((element) => {
+          element.scrollLeft = element.scrollWidth;
+        });
+        await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
         const action = table
           .locator("tbody tr")
           .first()
@@ -155,7 +156,7 @@ for (const width of [1440, 390]) {
         expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(tableBox!.x + tableBox!.width);
       }
       await expect(page.locator(".hire-contacts-view")).toHaveCSS("scrollbar-width", "none");
-      await expect(page.locator(".candidate-viewport")).toHaveCSS("scrollbar-width", "none");
+      await expect(page.locator(".candidate-viewport")).toHaveCSS("scrollbar-width", "thin");
       await capture(page, testInfo, `app-contacts-${width}`);
       const layout = page.getByRole("group", { name: "Contact layout", exact: true });
       const cards = layout.getByRole("button", { name: "Cards", exact: true });
@@ -175,6 +176,7 @@ for (const width of [1440, 390]) {
         await capture(page, testInfo, `app-profile-navigation-${width}`);
       }
       const assessment = panel.getByRole("region", { name: "Agent assessment", exact: true });
+      await assessment.getByRole("button", { name: "Show all 5 criteria", exact: true }).click();
       await expect(assessment.getByText("C++ production systems", { exact: true })).toBeVisible();
       await expect(assessment.getByText("R4", { exact: true })).toBeVisible();
       await expect(
@@ -216,13 +218,18 @@ for (const width of [1440, 390]) {
       if (width === 1440) {
         await page
           .getByRole("navigation", { name: "Recruiting workspace" })
-          .getByRole("button", { name: "Sequence", exact: true })
+          .getByRole("link", { name: "Sequence", exact: true })
           .click();
         await expect(page).toHaveURL(/view=sequence/);
       } else await openRoute(page, "sequence");
-      const sequence = page.getByTestId("account-recruiting-view");
-      await expect(sequence.getByText("Platform outreach", { exact: true })).toBeVisible();
-      await expect(sequence.getByText("avery@example.test", { exact: true }).first()).toBeVisible();
+      const sequence = page.getByRole("region", { name: "Sequence", exact: true });
+      await sequence.getByRole("button", { name: "Platform outreach", exact: true }).click();
+      await expect(
+        sequence.getByRole("heading", { name: "Platform outreach", exact: true }),
+      ).toBeVisible();
+      await expect(
+        sequence.getByRole("combobox", { name: "Response for avery@example.test", exact: true }),
+      ).toBeVisible();
       await expect(sequence.getByText("No candidate records for this role yet.")).toHaveCount(0);
       await capture(page, testInfo, `app-sequence-${width}`);
       await openRoute(page, "inbox");
@@ -255,14 +262,13 @@ for (const width of [1440, 390]) {
         const before = await parentScrolls();
         await selectedDay.focus();
         await page.keyboard.press("End");
-        await expect(await visibleSelectedDay(page)).toHaveText("Sun, Oct 25");
+        await expect(await visibleSelectedDay(page)).toHaveText("Tue, Oct 27");
         expect(await parentScrolls()).toEqual(before);
-        await page.keyboard.press("ArrowLeft");
-        await page.keyboard.press("ArrowLeft");
+        await page.keyboard.press("Home");
         await expect(await visibleSelectedDay(page)).toHaveText("Fri, Oct 23");
         expect(await parentScrolls()).toEqual(before);
       }
-      const event = calendar.getByRole("button", { name: /Avery platform interview/ }).first();
+      const event = calendar.getByRole("button", { name: /Avery.*Platform interview/ }).first();
       await expect(event).toBeVisible();
       await expect(
         calendar.getByRole("complementary", { name: "Saved calendar events", exact: true }),
@@ -343,8 +349,8 @@ for (const width of [1440, 390]) {
   }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
-    await openRoute(page, "sequence");
-    const sequence = page.getByTestId("account-recruiting-view");
+    await page.goto("/app?view=sequence&role=all");
+    const sequence = page.getByTestId("account-sequences");
     await expect(sequence.getByText("Platform outreach", { exact: true })).toBeVisible();
     await expect(sequence.getByText("Platform follow-up", { exact: true })).toBeVisible();
     await capture(page, testInfo, `app-sequence-campaigns-${width}`);
@@ -397,9 +403,9 @@ for (const width of [1440, 390]) {
       inbox.getByText("Tuesday afternoon works", { exact: false }).first(),
     ).toBeVisible();
     await capture(page, testInfo, `app-inbox-observed-${width}`);
-    await openRoute(page, "sequence");
+    await page.goto("/app?view=sequence&role=all");
     await expect(
-      page.getByTestId("account-recruiting-view").getByText("Platform outreach", { exact: true }),
+      page.getByTestId("account-sequences").getByText("Platform outreach", { exact: true }),
     ).toBeVisible();
     await capture(page, testInfo, `app-sequence-observed-${width}`);
     await openRoute(page, "home");

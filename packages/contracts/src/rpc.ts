@@ -219,7 +219,7 @@ import {
   RunsListOutputSchema,
   RunTraceSchema,
 } from "./runs.js";
-import { SearchQueryOutputSchema } from "./search.js";
+import { RecruitingSearchTargetsOutputSchema, SearchQueryOutputSchema } from "./search.js";
 
 const listPageFields = { offset: z.number().int().min(0).max(1000000).optional() };
 
@@ -1503,6 +1503,9 @@ export const appContract = {
   },
   search: {
     query: oc.input(z.object({ q: z.string().max(200) })).output(SearchQueryOutputSchema),
+    recruitingTargets: oc
+      .input(z.strictObject({ q: z.string().trim().min(1).max(200) }))
+      .output(RecruitingSearchTargetsOutputSchema),
   },
   links: {
     /**

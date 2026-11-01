@@ -222,12 +222,15 @@ ${
       GROUP BY person_key
     ),
     people AS (
-      SELECT f.*, t.email, t.role_ids, t.roles, t.shortlisted, t.added_at, t.last_contacted,
+      SELECT f.*, COALESCE(t.email, NULLIF(btrim(sp.profile->>'email'), '')) AS email,
+        t.role_ids, t.roles, t.shortlisted, t.added_at, t.last_contacted,
         t.last_replied, ${skills ? Prisma.sql`t.skills,` : Prisma.empty}
         COALESCE(t.crm_status,
           CASE t.product_status WHEN 0 THEN 'shortlisted' WHEN 1 THEN 'on_hold' WHEN 2 THEN 'passed' ELSE 'saved' END
         ) AS status
       FROM primary_entry f JOIN totals t USING (person_key)
+      LEFT JOIN recruiting_saved_profiles sp ON sp."personKey" = f.person_key
+        AND sp."ownerUserId" = ${user} AND sp."spaceId" = ${space}
     )`;
 }
 
@@ -409,10 +412,12 @@ export async function listRecruitingContacts(
           fetchedAt: saved.fetched_at?.toISOString(),
         });
       const school = profile?.education[0];
+      const currentJob = profile?.experience.find((job) => job.is_current === true);
+      const company = row.company ?? currentJob?.company_name ?? null;
       const normalize = (name: string | null) => name?.trim().replace(/\s+/g, " ").toLowerCase();
       const employers =
         profile?.experience.filter(
-          (job) => row.company && normalize(job.company_name) === normalize(row.company),
+          (job) => company && normalize(job.company_name) === normalize(company),
         ) ?? [];
       // A logo belongs to the displayed organization; conflicting retained assets stay unknown.
       const unique = (values: (string | null)[]) => {
@@ -422,8 +427,8 @@ export async function listRecruitingContacts(
       return {
         personKey: row.person_key,
         name: row.name,
-        title: row.title,
-        company: row.company,
+        title: row.title ?? currentJob?.title ?? null,
+        company,
         location: row.location,
         school: school?.school_name ?? null,
         savedProfile: parsed?.success ? parsed.data : null,

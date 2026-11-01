@@ -29,6 +29,8 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
     "tasks",
     "routines",
   ]),
+  sequenceSummary: z.boolean().optional(),
+  sequenceContactQuery: z.string().trim().min(1).max(200).optional(),
   campaignId: Id.optional(),
   campaignServerId: Id.optional(),
   campaignLeadCursor: z.string().min(1).max(1600).optional(),
@@ -58,6 +60,7 @@ export const RecruitingAccountViewOutputSchema = z.strictObject({
   items: z.array(
     z.strictObject({
       roleId: Id,
+      sequenceContactPartial: z.boolean().optional(),
       workspace: z
         .strictObject({
           role: RecruitingRoleSchema,

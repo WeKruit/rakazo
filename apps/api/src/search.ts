@@ -1,10 +1,71 @@
-import type { Actor, MessageBlock, SearchHit } from "@rakazo/contracts";
+import type { Actor, MessageBlock, RecruitingSearchTarget, SearchHit } from "@rakazo/contracts";
 import { extractLinksFromText, matchesSearchQuery, snippetAroundMatch } from "@rakazo/core";
 import { Prisma, type PrismaClient } from "@rakazo/db";
 
 const SEARCH_LIMIT = 25;
 /** Cap name matches so content hits (messages/files/links/routines) keep most of the budget. */
 const CONVERSATION_HIT_LIMIT = 5;
+
+/** Bound every result at the database; no all-role scan or live-provider fan-out. */
+export async function queryRecruitingSearchTargets(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  actor: Actor,
+  q: string,
+): Promise<RecruitingSearchTarget[]> {
+  const needle = q.trim();
+  if (!needle) return [];
+  const pattern = `%${needle.replace(/[\\%_]/g, "\\$&")}%`;
+  return prisma.$queryRaw<RecruitingSearchTarget[]>(Prisma.sql`
+    WITH owned_roles AS MATERIALIZED (
+      SELECT r.id, r.title, t."groupId", t."botId"
+      FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId"
+      LEFT JOIN chat_groups g ON g.id=t."groupId"
+      LEFT JOIN bots b ON b.id=t."botId"
+      WHERE r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId}
+        AND r."archivedAt" IS NULL AND t."activeRecruitingRoleId"=r.id
+        AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId}
+        AND ((g.id IS NOT NULL AND g."archivedAt" IS NULL
+              AND g."userId"=${actor.userId} AND g."spaceId"=${actor.spaceId}) OR
+             (b.id IS NOT NULL AND b."archivedAt" IS NULL
+              AND b."userId"=${actor.userId} AND b."spaceId"=${actor.spaceId}))
+    ), role_matches AS (
+      SELECT 'role'::text kind, title, id AS "roleId", title AS "roleTitle",
+        "groupId", "botId", NULL::text AS "campaignId", NULL::text AS "serverId"
+      FROM owned_roles WHERE title ILIKE ${pattern} ORDER BY title,id LIMIT 8
+    ), sequence_observations AS (
+      SELECT DISTINCT ON (r.id, e.request->>'serverId', e.result->>'campaignId')
+        'sequence'::text kind, e.result->>'campaignName' AS title,
+        r.id AS "roleId", r.title AS "roleTitle", r."groupId", r."botId",
+        e.result->>'campaignId' AS "campaignId", e.request->>'serverId' AS "serverId"
+      FROM external_effects e JOIN runs run ON run.id=e."runId"
+      JOIN owned_roles r ON r.id=e.request->>'roleId'
+      JOIN mcp_servers s ON s.id=e.request->>'serverId'
+      WHERE e."spaceId"=${actor.spaceId} AND run."userId"=${actor.userId}
+        AND run."spaceId"=${actor.spaceId} AND e.kind='instantly_role_campaign'
+        AND e.status='completed' AND s."userId"=${actor.userId}
+        AND s."spaceId"=${actor.spaceId} AND s.enabled
+        AND e.result->>'campaignId' IS NOT NULL
+      ORDER BY r.id,e.request->>'serverId',e.result->>'campaignId',e."updatedAt" DESC
+    ), mirror_sequences AS (
+      SELECT 'sequence'::text kind, c.name AS title, r.id AS "roleId", r.title AS "roleTitle",
+        r."groupId", r."botId", c."crmCampaignId" AS "campaignId", NULL::text AS "serverId"
+      FROM owned_roles r JOIN recruiting_crm_workspace_attachments a ON a."roleId"=r.id
+      JOIN mcp_servers s ON s.id=a."mcpServerId" AND s.revision=a."serverRevision" AND s.enabled
+      JOIN recruiting_crm_campaigns c ON c."mcpServerId"=a."mcpServerId"
+        AND c."organizationId"=a."organizationId" AND c."crmRoleId"=a."crmRoleId"
+      WHERE a."userId"=${actor.userId} AND a."spaceId"=${actor.spaceId}
+        AND s."userId"=${actor.userId} AND s."spaceId"=${actor.spaceId}
+        AND c."userId"=${actor.userId} AND c."spaceId"=${actor.spaceId}
+        AND c."archivedAt" IS NULL AND c.name ILIKE ${pattern}
+    ), sequence_matches AS (
+      SELECT * FROM (SELECT * FROM sequence_observations WHERE title ILIKE ${pattern}
+        UNION ALL SELECT * FROM mirror_sequences) sequences
+      ORDER BY title,"roleId","serverId","campaignId" LIMIT 8
+    )
+    SELECT * FROM role_matches UNION ALL SELECT * FROM sequence_matches
+    ORDER BY kind,title,"roleId","campaignId"
+  `);
+}
 
 async function findArtifactMessages(
   prisma: PrismaClient,

@@ -389,7 +389,7 @@ import { listRoutineRuns } from "./routine-runs.js";
 import { readRunTrace } from "./run-trace.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
-import { querySpaceSearch } from "./search.js";
+import { queryRecruitingSearchTargets, querySpaceSearch } from "./search.js";
 import { withSerializableRetry } from "./serializable-retry.js";
 import type { UpdaterProxyConfig } from "./server-update.js";
 import {
@@ -7283,6 +7283,14 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     search: {
+      recruitingTargets: authed.search.recruitingTargets.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const items = await queryRecruitingSearchTargets(deps.prisma, context.actor, input.q);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return { items };
+      }),
       query: authed.search.query.handler(async ({ context, input }) => ({
         hits: await querySpaceSearch(deps.prisma, context.actor, input.q),
       })),

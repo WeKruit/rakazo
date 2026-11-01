@@ -1,13 +1,15 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
-import { Bookmark, Mail, Sparkles } from "lucide-react";
+import { Bookmark, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { isInShortlistWeek } from "./dashboard-drilldown";
 import type { RecruitingDetailTarget } from "./detail";
 import { pendingDetailTarget, useRecruitingDetail } from "./detail";
+import { LinkedInIcon } from "./LinkedInIcon";
+import { ProfileMailIcon } from "./ProfileMailIcon";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
@@ -294,7 +296,7 @@ export function ContactsTab(
                       disabled={!autumn.ready || (!candidate.name && !candidate.linkedinUrl)}
                       onClick={() => autumn.sendEmail!(candidate)}
                     >
-                      <Mail size={14} aria-hidden />
+                      <ProfileMailIcon className="size-3.5" />
                       <Trans>Email draft</Trans>
                     </Button>
                   ) : !candidate && person && detail ? (
@@ -305,7 +307,7 @@ export function ContactsTab(
                         if (next) detail.open({ ...next, view: "thread" });
                       }}
                     >
-                      <Mail size={14} aria-hidden />
+                      <ProfileMailIcon className="size-3.5" />
                       <Trans>Email draft</Trans>
                     </Button>
                   ) : null}
@@ -350,8 +352,9 @@ export function ContactsTab(
                     href={contact.linkedinUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="underline"
+                    className="inline-flex items-center gap-1 underline"
                   >
+                    <LinkedInIcon className="size-4" />
                     <Trans>LinkedIn</Trans>
                   </a>
                 ) : null}

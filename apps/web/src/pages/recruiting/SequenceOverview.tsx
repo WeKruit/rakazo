@@ -50,7 +50,14 @@ export function SequenceOverview({
   period = "all",
   detail = false,
   onMetric,
+  overviewCounts,
+  overviewPartial = false,
 }: {
+  overviewPartial?: boolean;
+  overviewCounts?: Record<
+    "contacted" | "active" | "opened" | "clicked" | "replied" | "interested",
+    number | null
+  >;
   campaign?: RecruitingRoleCampaign;
   replied: number | null;
   sendDates?: readonly string[] | null;
@@ -118,6 +125,13 @@ export function SequenceOverview({
         ]
       : []),
   ];
+  if (overviewCounts)
+    (["contacted", "active", "opened", "clicked", "replied", "interested"] as const).forEach(
+      (key, index) => {
+        metrics[index]!.value = allTime ? overviewCounts[key] : null;
+        metrics[index]!.observed = overviewPartial;
+      },
+    );
   const history = datedSends(sendDates ?? [], now, chartPeriod);
   const max = Math.max(1, ...history.map((day) => day.count));
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -269,7 +283,11 @@ export function SequenceOverview({
                 <div className="absolute inset-0 flex items-center justify-center px-8">
                   <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
                     {sendDates === null ? (
-                      <Trans>Recruiter messages are unavailable for this role.</Trans>
+                      overviewCounts ? (
+                        <Trans>Send timing is not reported in saved sequence records.</Trans>
+                      ) : (
+                        <Trans>Recruiter messages are unavailable for this role.</Trans>
+                      )
                     ) : (
                       <Trans>No dated sends in the available records.</Trans>
                     )}
