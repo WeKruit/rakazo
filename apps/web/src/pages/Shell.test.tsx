@@ -2317,6 +2317,7 @@ it.each(["success", "error"] as const)(
     type(input, fresh.name);
     await view.click("Continue");
     expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+      id: expect.any(String),
       name: "New role",
       botIds: view.members.map((member) => member.botId),
     });
@@ -2582,6 +2583,7 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
   );
   await view.click("Continue");
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    id: expect.any(String),
     name: "New role",
     botIds: view.archivedGroup.members.map((member) => member.botId),
   });
@@ -2686,10 +2688,11 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
       : view.thread,
   );
   await view.click("Continue");
+  // The form closes at once and the role opens while the server creates it.
+  expect(roleName()).toBeNull();
   expect(sourceButton(view.group.name).disabled).toBe(true);
-  await act(async () => sourceButton(view.group.name).click());
-  expect(roleName().value).toBe(fresh.name);
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    id: expect.any(String),
     name: "New role",
     botIds: second.members.map((member) => member.botId),
   });
@@ -3881,6 +3884,7 @@ it("retries an exact natural role request in its confirmed native group with the
   );
   expect(input.value).toBe(description);
   expect(shellApi.createGroup).toHaveBeenCalledExactlyOnceWith({
+    id: expect.any(String),
     name: "New role",
     botIds: view.members.map((member) => member.botId),
   });

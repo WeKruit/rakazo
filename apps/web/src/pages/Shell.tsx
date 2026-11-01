@@ -191,13 +191,19 @@ export function ShellPage() {
     computerScreenError,
     newRoleAttachmentKey,
     newRoleAttachments,
+    roleCreationError,
   } = model;
   const roleCreationForm = (
     <CreateGroupForm
-      key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
+      key={JSON.stringify([
+        showToolActivity ? "group" : roleSourceGroup?.id,
+        showToolActivity ? "" : newRoleDescription,
+        roleCreationError,
+      ])}
       bots={showToolActivity ? bots : roleCrewBots}
       recruiting={!showToolActivity}
       initialDescription={newRoleDescription}
+      initialError={roleCreationError}
       attachments={showToolActivity ? undefined : newRoleAttachments}
       attachmentNotice={attachmentNotice}
       onRemoveSkippedAttachment={removeSkippedAttachment}

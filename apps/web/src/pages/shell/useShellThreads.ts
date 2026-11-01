@@ -100,6 +100,7 @@ export function useShellThreads({
   computerCacheRef,
   setScreenUrl,
   bootstrappedThread,
+  pendingGroupCreations,
   recruitingOutage,
   reconnectNeedsRecruitingRead,
   refreshRecruitingReads,
@@ -175,6 +176,7 @@ export function useShellThreads({
   >;
   setScreenUrl: Dispatch<SetStateAction<string | null>>;
   bootstrappedThread: RefObject<ThreadSnapshot | null>;
+  pendingGroupCreations: RefObject<Map<string, Promise<unknown>>>;
   recruitingOutage: RefObject<boolean>;
   reconnectNeedsRecruitingRead: (
     before: { threadId: string; cursor: number } | null | undefined,
@@ -655,6 +657,8 @@ export function useShellThreads({
     void runThreadSubscription({
       signal: abort.signal,
       loadInitial: async () => {
+        // A role opened from its proxy is read once the server has created it.
+        await pendingGroupCreations.current.get(groupId)?.catch(() => undefined);
         const primed = bootstrappedThread.current;
         bootstrappedThread.current = null;
         if (!pendingJump && primed?.groupId === groupId) {

@@ -957,6 +957,14 @@ msgstr ""
 msgid "Could not continue"
 msgstr "Devam edilemedi"
 
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create group"
+msgstr ""
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create role"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."

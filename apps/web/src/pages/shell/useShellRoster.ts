@@ -94,7 +94,10 @@ export function useShellRoster({
   setMemoryProviderConfig,
   setMobileSidebarOpen,
   onBootstrapThread,
+  pendingGroupCreations,
 }: {
+  /** Roles opened before the server created them; a refresh keeps them listed and open. */
+  pendingGroupCreations: RefObject<Map<string, Promise<unknown>>>;
   userId: string | undefined;
   botId: string | undefined;
   groupId: string | undefined;
@@ -231,7 +234,14 @@ export function useShellRoster({
                 setBots(list);
               }
               setBotSections(sections);
-              setGroups(groupList);
+              setGroups((current) => [
+                ...current.filter(
+                  (group) =>
+                    pendingGroupCreations.current.has(group.id) &&
+                    !groupList.some((listed) => listed.id === group.id),
+                ),
+                ...groupList,
+              ]);
               setSpaces(navigation.spaces);
               setInitialBotsLoaded(true);
               botsRefreshApplied.current = request;
@@ -252,6 +262,7 @@ export function useShellRoster({
               const currentGroupId = routeGroupId.current;
               if (currentGroupId) {
                 if (
+                  !pendingGroupCreations.current.has(currentGroupId) &&
                   !groupList.some((group) => group.id === currentGroupId) &&
                   !(archivedGroupList ?? archivedGroupsRef.current).some(
                     (group) => group.id === currentGroupId,

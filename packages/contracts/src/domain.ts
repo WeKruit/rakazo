@@ -138,6 +138,8 @@ const GroupBotIds = z
   .refine((ids) => new Set(ids).size === ids.length, { error: "botIds must be distinct" });
 
 export const CreateGroupInput = z.object({
+  /** Client-made id, so the role opens before the server answers; a repeat returns the same role. */
+  id: z.uuid().optional(),
   name: z.string().trim().min(1).max(80),
   botIds: GroupBotIds,
   crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
