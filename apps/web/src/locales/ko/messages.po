@@ -4638,10 +4638,6 @@ msgstr ""
 msgid "Reading the hiring playbook"
 msgstr ""
 
-#: src/components/LiveWork.tsx
-msgid "Reading the role"
-msgstr ""
-
 #: src/pages/recruiting/CandidateFeedback.tsx
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Reason"

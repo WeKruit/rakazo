@@ -1,3 +1,4 @@
+import { multiSelectAskAnswer } from "@rakazo/core";
 import { useState } from "react";
 import type { ViewProps } from "react-native";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
@@ -6,6 +7,7 @@ import { useI18n } from "../lib/i18n";
 import { native } from "../lib/native";
 import { errorText } from "../lib/user-error";
 import { NativeActionButton } from "./native-action-button";
+import { NativeSwitch } from "./native-switch";
 
 type AskAction = { id: string; label: string };
 
@@ -20,6 +22,7 @@ export function AskActions({
   actions,
   disabled,
   allowCustomAnswer,
+  multiple,
   onAnswer,
   accessibilityActions,
   onAccessibilityAction,
@@ -27,6 +30,8 @@ export function AskActions({
   actions: AskAction[];
   disabled?: boolean;
   allowCustomAnswer?: boolean;
+  /** Options are switches; the answer is every picked option plus any typed text. */
+  multiple?: boolean;
   onAnswer: (answer: string) => Promise<void>;
   accessibilityActions?: ViewProps["accessibilityActions"];
   onAccessibilityAction?: ViewProps["onAccessibilityAction"];
@@ -35,7 +40,14 @@ export function AskActions({
   const tokens = mobileTokens();
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   const submitting = pendingAction !== null;
+  const typedAnswer = multiple
+    ? multiSelectAskAnswer(
+        actions.filter((action) => picked.includes(action.id)).map((action) => action.label),
+        answer,
+      )
+    : answer;
 
   async function submit(answer: string) {
     if (disabled || submitting || !answer.trim()) return;
@@ -51,7 +63,37 @@ export function AskActions({
 
   return (
     <View style={{ marginTop: 12, gap: 6 }}>
-      {actions.map((action) => {
+      {multiple
+        ? actions.map((action) => (
+            <View
+              key={action.id}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                borderRadius: 12,
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                backgroundColor: native.fill,
+              }}
+            >
+              <Text style={{ color: tokens.foreground, fontSize: 15, flex: 1 }}>
+                {action.label}
+              </Text>
+              <NativeSwitch
+                accessibilityLabel={action.label}
+                disabled={disabled || submitting}
+                value={picked.includes(action.id)}
+                onValueChange={(checked) =>
+                  setPicked((current) =>
+                    checked ? [...current, action.id] : current.filter((id) => id !== action.id),
+                  )
+                }
+              />
+            </View>
+          ))
+        : null}
+      {(multiple ? [] : actions).map((action) => {
         const emphasized = action.id === "allow" || action.id === "always";
         return (
           <Pressable
@@ -85,7 +127,7 @@ export function AskActions({
           </Pressable>
         );
       })}
-      {allowCustomAnswer ? (
+      {allowCustomAnswer || multiple ? (
         <>
           <TextInput
             accessibilityLabel={t("Answer")}
@@ -107,10 +149,10 @@ export function AskActions({
           />
           <NativeActionButton
             label={t("Send answer")}
-            disabled={disabled || !answer.trim()}
+            disabled={disabled || !typedAnswer.trim()}
             busy={submitting}
             fill={false}
-            onPress={() => void submit(answer)}
+            onPress={() => void submit(typedAnswer)}
             style={{ alignSelf: "flex-end" }}
           />
         </>

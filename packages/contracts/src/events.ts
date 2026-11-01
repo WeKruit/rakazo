@@ -270,6 +270,13 @@ export function parseAskFormResponse(
   return { action: "accept", content: AskFormContent.parse(content) };
 }
 
+/** The person may pick several of the options; they can still type their own answer too. */
+export const AskMultiple = z
+  .boolean()
+  .describe(
+    "true when the person may pick more than one option (e.g. several kinds of experience that all count); leave out for a single choice.",
+  );
+
 /** People-search queries planned on the last recruiting question, run the moment it is answered. */
 export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).max(4);
 const askQuestion = {
@@ -292,6 +299,7 @@ export const AskUserInputSchema = z.union([
       .min(2)
       .max(4)
       .refine((values) => new Set(values).size === values.length),
+    multiple: AskMultiple.optional(),
   }),
   z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
 ]);
@@ -425,6 +433,8 @@ export const AskBlockSchema = z
     credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
     /** expired: the wait ended before anyone answered; the card is closed. */
     status: z.enum(["pending", "answered", "expired"]).optional(),
+    /** The options are checkboxes: the answer is every picked label plus any typed text. */
+    multiple: z.boolean().optional(),
     answer: z.string().optional(),
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),
@@ -477,6 +487,12 @@ export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("card"),
     lines: z.array(z.object({ k: z.string(), v: z.string() })),
+  }),
+  z.object({
+    /** Opens a role's conversation from another conversation. */
+    kind: z.literal("role_link"),
+    groupId: z.string(),
+    title: z.string(),
   }),
   AskBlockSchema,
   z.object({
@@ -843,7 +859,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 7;
+export const EVENT_FORMAT_VERSION = 9;
 
 export const ProductEventSchema = z
   .object({

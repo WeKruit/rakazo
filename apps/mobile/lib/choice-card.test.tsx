@@ -94,6 +94,23 @@ vi.mock("../components/native-symbol", () => ({
   NativeSymbol: () => null,
 }));
 
+vi.mock("../components/native-switch", async () => {
+  const { createElement } = await import("react");
+  return {
+    NativeSwitch: (props: {
+      value: boolean;
+      onValueChange: (value: boolean) => void;
+      accessibilityLabel: string;
+    }) =>
+      createElement("input", {
+        type: "checkbox",
+        checked: props.value,
+        "aria-label": props.accessibilityLabel,
+        onChange: () => props.onValueChange(!props.value),
+      }),
+  };
+});
+
 import { AskActions } from "../components/AskActions";
 import { ChoiceCard } from "../components/ChoiceCard";
 
@@ -284,6 +301,37 @@ describe("native question answers", () => {
       act(() => answerInput.change(rawAnswer));
       await act(async () => button(container, "Send answer").click());
       expect(onAnswer).toHaveBeenCalledExactlyOnceWith(rawAnswer);
+    } finally {
+      act(() => root.unmount());
+    }
+  });
+
+  it("submits every picked option and the typed text on a multi-select question", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    const actions = [
+      { id: "choice-1", label: "LLM agent projects" },
+      { id: "choice-2", label: "Production agents" },
+      { id: "choice-3", label: "Coursework" },
+    ];
+    const toggle = (label: string) =>
+      act(() => container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.click());
+    try {
+      act(() =>
+        root.render(
+          <AskActions actions={actions} allowCustomAnswer multiple onAnswer={onAnswer} />,
+        ),
+      );
+      expect(button(container, "Send answer").disabled).toBe(true);
+      toggle("Coursework");
+      toggle("LLM agent projects");
+      act(() => answerInput.change("open source counts too"));
+      await act(async () => button(container, "Send answer").click());
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(
+        "LLM agent projects; Coursework; open source counts too",
+      );
     } finally {
       act(() => root.unmount());
     }

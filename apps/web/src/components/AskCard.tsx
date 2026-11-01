@@ -16,9 +16,10 @@ import {
   askFormOptions,
   isApprovalAskBlock,
   isSecretAskBlock,
+  multiSelectAskAnswer,
   selectedAskActionLabel,
 } from "@rakazo/core";
-import { Button, Input, Textarea } from "@rakazo/ui-web";
+import { Button, Checkbox, Input, Textarea } from "@rakazo/ui-web";
 import { Plug } from "lucide-react";
 import { useId, useState } from "react";
 import { connectMcpOauth } from "../lib/mcp-connect";
@@ -260,6 +261,7 @@ function QuestionAskCard({
 }) {
   const { t } = useLingui();
   const [answer, setAnswer] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   const [username, setUsername] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -271,6 +273,16 @@ function QuestionAskCard({
   const approvalActions = isApprovalAskBlock(block) ? block.actions : undefined;
   const askActions = block.actions;
   const secretInput = isSecretAskBlock(block);
+  const multiple = Boolean(
+    block.multiple && askActions?.length && !approvalActions && !secretInput,
+  );
+  // Picked labels in the card's own option order, then anything typed.
+  const typedAnswer = multiple
+    ? multiSelectAskAnswer(
+        (askActions ?? []).filter((action) => picked.includes(action.id)).map((a) => a.label),
+        answer,
+      )
+    : answer;
   const loginInput = secretInput && block.credential?.auth.type === "login";
   const secretLabel = loginInput ? t`Password` : secretFieldLabel(block.purpose);
 
@@ -522,6 +534,28 @@ function QuestionAskCard({
             </Button>
           </div>
         </form>
+      ) : multiple ? (
+        <div className="mt-3.5 space-y-1.5">
+          {askActions!.map((action) => (
+            // biome-ignore lint/a11y/noLabelWithoutControl: the Checkbox inside is the control.
+            <label
+              key={action.id}
+              className="flex w-full cursor-pointer items-start gap-3 rounded-md border border-border px-3.5 py-3 text-base hover:bg-muted"
+            >
+              <Checkbox
+                className="mt-1"
+                checked={picked.includes(action.id)}
+                disabled={submitting}
+                onCheckedChange={(checked) =>
+                  setPicked((current) =>
+                    checked ? [...current, action.id] : current.filter((id) => id !== action.id),
+                  )
+                }
+              />
+              <span className="min-w-0">{action.label}</span>
+            </label>
+          ))}
+        </div>
       ) : askActions?.length ? (
         <div className="mt-3.5 space-y-1.5">
           {askActions.map((action) => (
@@ -589,7 +623,7 @@ function QuestionAskCard({
           className="mt-3.5 flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            void submitAnswer(answer);
+            void submitAnswer(typedAnswer);
           }}
         >
           <Textarea
@@ -600,7 +634,7 @@ function QuestionAskCard({
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={t`Type your answer`}
           />
-          <Button type="submit" className="self-start" disabled={!answer.trim() || submitting}>
+          <Button type="submit" className="self-start" disabled={!typedAnswer.trim() || submitting}>
             {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
           </Button>
         </form>

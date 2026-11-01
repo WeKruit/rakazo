@@ -2365,6 +2365,10 @@ msgstr "전체 창으로 열기"
 msgid "Open navigation"
 msgstr "메뉴 열기"
 
+#: src/pages/ShellMessage.tsx
+msgid "Open role"
+msgstr ""
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open role chat"
 msgstr ""

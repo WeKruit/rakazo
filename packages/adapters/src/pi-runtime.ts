@@ -1927,6 +1927,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                       id: `choice-${index + 1}`,
                       label,
                     })),
+                    ...("multiple" in parsed.data && parsed.data.multiple
+                      ? { multiple: true }
+                      : {}),
                   }),
             });
             return {
