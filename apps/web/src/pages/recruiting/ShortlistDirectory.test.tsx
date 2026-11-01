@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
+  Plural: ({ value }: { value: number }) => `${value} candidates`,
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),

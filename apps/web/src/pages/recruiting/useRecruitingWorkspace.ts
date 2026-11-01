@@ -23,6 +23,9 @@ import { criteriaDraft, searchFilterDraft } from "../recruiting/criteria-draft";
 import { useArrivals } from "../recruiting/shared";
 import type { CandidateDiscussionContext, Props, Snapshot } from "../recruiting/workspace-types";
 
+/** Candidates per numbered page. */
+const CANDIDATE_PAGE = 30;
+
 export function useRecruitingWorkspace({
   workspaceRead,
   shortlistWeekFilter,
@@ -124,7 +127,7 @@ export function useRecruitingWorkspace({
   ) {
     candidateGeneration.current++;
     setCandidatePage(null);
-    setCandidateList((current) => ({ ...current, filters: update(current.filters), pageCount: 1 }));
+    setCandidateList((current) => ({ ...current, filters: update(current.filters), page: 1 }));
   }
   function setCandidateDetailOpen(detailOpen: boolean) {
     setCandidateList((current) => ({ ...current, detailOpen }));
@@ -449,13 +452,18 @@ export function useRecruitingWorkspace({
   const assessment = selected?.assessment;
   const roleId = workspace?.role.id;
   const roleRevisionId = workspace?.revision.id;
-  const candidateQueryKey = JSON.stringify([
+  // Contacts merges search results with CRM rows and still appends; the other lists are numbered.
+  const candidatePageIndex = contactsView ? 0 : candidateList.page - 1;
+  const candidateOffset = candidatePageIndex * CANDIDATE_PAGE;
+  // The list identity; another page of it keeps the current rows on screen while it loads.
+  const candidateListKey = JSON.stringify([
     userId,
     threadId,
     roleId,
     roleRevisionId,
     candidateRequestFilters,
   ]);
+  const candidateQueryKey = `${candidateListKey}:${candidateOffset}`;
   const candidateFresh =
     !candidateLoading &&
     !candidateFailed &&
@@ -464,7 +472,7 @@ export function useRecruitingWorkspace({
     (!readCache || candidateValidation.current === readCache.epoch);
   const candidatesCacheKey =
     readCacheScope && roleId && roleRevisionId
-      ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters])}`
+      ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters, candidateOffset])}`
       : undefined;
   useEffect(() => {
     const list = tabsList.current;
@@ -512,7 +520,7 @@ export function useRecruitingWorkspace({
         setCandidateList((current) => ({
           ...current,
           filters: { ...current.filters, sort: fallback },
-          pageCount: 1,
+          page: 1,
         }));
         return true;
       }
@@ -533,7 +541,7 @@ export function useRecruitingWorkspace({
     loadingMore.current = false;
     setCandidateLoading(!!roleId && validatedWorkspaceRead === workspaceReadKey);
     setCandidateFailed(false);
-    const retainCandidatePage = displayedCandidateQuery.current === candidateQueryKey;
+    const retainCandidatePage = displayedCandidateQuery.current === candidateListKey;
     setCandidatePage(
       (current) =>
         (candidatesCacheKey
@@ -542,9 +550,8 @@ export function useRecruitingWorkspace({
               | undefined)
           : undefined) ?? (retainCandidatePage ? current : null),
     );
-    displayedCandidateQuery.current = candidateQueryKey;
+    displayedCandidateQuery.current = candidateListKey;
     if (!roleId || summary || validatedWorkspaceRead !== workspaceReadKey) return;
-    const query = candidateQuery.current;
     const abort = new AbortController();
     candidateReadAbort.current = abort;
     const scope = JSON.stringify([userId, threadId, roleId, roleRevisionId]);
@@ -559,7 +566,11 @@ export function useRecruitingWorkspace({
           threadId,
           roleId,
           roleRevisionId: roleRevisionId!,
-          query: { limit: 30, ...candidateRequestFilters },
+          query: {
+            limit: CANDIDATE_PAGE,
+            ...candidateRequestFilters,
+            ...(candidateOffset ? { offset: candidateOffset } : {}),
+          },
         },
         { signal: abort.signal },
       );
@@ -576,8 +587,14 @@ export function useRecruitingWorkspace({
         setRefresh((value) => value + 1);
         return;
       }
-      let page = result.data;
+      const page = result.data;
       if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
+      if (candidateOffset && !page.items.length) {
+        // The list shrank or the filters changed under a saved page: open its last page.
+        const last = Math.max(0, Math.ceil(page.total / CANDIDATE_PAGE) - 1);
+        setCandidateList((current) => ({ ...current, page: last + 1 }));
+        return;
+      }
       candidateValidation.current = cacheEpoch;
       candidateValidatedRead.current = `${workspaceReadKey}:${candidateQueryKey}`;
       setCandidatePage(page);
@@ -587,42 +604,6 @@ export function useRecruitingWorkspace({
         { ...page, crmTarget: null, items: page.items.map((item) => ({ ...item, crm: null })) },
         cacheEpoch,
       );
-      setCandidateList((current) => ({ ...current, pageCount: 1 }));
-      let pageCount = 1;
-      // ponytail: replay saved page depth with fresh cursors; cached rows are display-only until verified.
-      for (let index = 1; index < query.pageCount && page.nextCursor; index++) {
-        if (!isCurrent()) return;
-        const next = await rpc.recruiting.listCandidates(
-          {
-            roleId,
-            limit: 30,
-            ...candidateRequestFilters,
-            cursor: page.nextCursor,
-          },
-          { signal: abort.signal },
-        );
-        if (!isCurrent()) return;
-        if (
-          next.roleId !== roleId ||
-          next.roleRevisionId !== roleRevisionId ||
-          next.crmTarget?.bindingEffectId !== page.crmTarget?.bindingEffectId
-        ) {
-          setCandidatePage(null);
-          setRefresh((value) => value + 1);
-          return;
-        }
-        if (resetUnavailableCandidateSort(next, candidateRequestFilters)) return;
-        page = { ...next, items: page.items.concat(next.items) };
-        pageCount++;
-        setCandidatePage(page);
-        rememberRecruitingRead(
-          readCache,
-          candidatesCacheKey,
-          { ...page, crmTarget: null, items: page.items.map((item) => ({ ...item, crm: null })) },
-          cacheEpoch,
-        );
-        setCandidateList((current) => ({ ...current, pageCount }));
-      }
       const selectedCandidateKey = candidateQuery.current.selectedCandidateKey;
       const { sourceEffectId, actionId } = candidateRequestFilters;
       const explicitSource = sourceEffectId !== undefined || actionId !== undefined;
@@ -637,7 +618,7 @@ export function useRecruitingWorkspace({
           const selectedPage = await rpc.recruiting.listCandidates(
             {
               roleId,
-              limit: 30,
+              limit: CANDIDATE_PAGE,
               query: selectedCandidateKey,
               ...(sourceEffectId !== undefined ? { sourceEffectId } : {}),
               ...(actionId !== undefined ? { actionId } : {}),
@@ -695,6 +676,7 @@ export function useRecruitingWorkspace({
     roleId,
     roleRevisionId,
     candidateRequestFilters,
+    candidateOffset,
     feedbackRefresh,
     workspaceSnapshot,
     threadId,
@@ -775,6 +757,9 @@ export function useRecruitingWorkspace({
         setCandidateDetailOpen(false);
       }
     : undefined;
+  function goToCandidatePage(index: number) {
+    setCandidateList((current) => ({ ...current, page: index + 1 }));
+  }
   async function loadMoreCandidates() {
     if (!candidatePage?.nextCursor || !roleId || loadingMore.current) return;
     const generation = candidateGeneration.current;
@@ -787,7 +772,7 @@ export function useRecruitingWorkspace({
       const page = await rpc.recruiting.listCandidates(
         {
           roleId,
-          limit: 30,
+          limit: CANDIDATE_PAGE,
           ...candidateRequestFilters,
           cursor: candidatePage.nextCursor,
         },
@@ -812,7 +797,6 @@ export function useRecruitingWorkspace({
       setCandidatePage((current) =>
         current ? { ...page, items: current.items.concat(page.items) } : page,
       );
-      setCandidateList((current) => ({ ...current, pageCount: current.pageCount + 1 }));
     } catch (error) {
       if (
         !signal?.aborted &&
@@ -1019,7 +1003,7 @@ export function useRecruitingWorkspace({
     candidateTrigger,
     candidateClose,
     candidateHandoff,
-    candidatePage: displayedCandidateQuery.current === candidateQueryKey ? candidatePage : null,
+    candidatePage: displayedCandidateQuery.current === candidateListKey ? candidatePage : null,
     arrival,
     setCandidateFilters,
     setCandidateDetailOpen,
@@ -1059,6 +1043,8 @@ export function useRecruitingWorkspace({
     discussCandidate,
     revealCandidateMessage,
     loadMoreCandidates,
+    goToCandidatePage,
+    candidatePageIndex,
     setShortlist,
     criteriaChanges,
     searchFiltersChanged,
