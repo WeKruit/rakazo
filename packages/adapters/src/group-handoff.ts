@@ -14,6 +14,7 @@ import {
   IsolationError,
   lockOwnedGroup,
   type PrismaClient,
+  questionClosedByChat,
   touchGroupUpdatedAt,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -311,7 +312,7 @@ export async function reportGroupHandoffOutcome(
       if (!member) return undefined;
       const hop = nextBotMessageHop(asked.hop);
       if (botMessageHopExhausted(hop)) return undefined;
-      const text =
+      const report =
         outcome.status === "completed"
           ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
           : outcome.watch
@@ -319,6 +320,13 @@ export async function reportGroupHandoffOutcome(
             : outcome.status === "progress"
               ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
               : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+      const reask =
+        outcome.status === "progress"
+          ? undefined
+          : await questionClosedByChat(tx, { threadId: run.threadId, botId: asked.fromBotId });
+      const text = reask
+        ? `${report}\n\nYour question "${reask.question}" is still unanswered: the recruiter typed "${reask.reply.slice(0, 300)}" in the chat instead of answering it. Unless that message answered it, do not reply ${NO_RESPONSE} or start other work: ask it again with ask_user now.`
+        : report;
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
         role: "bot",

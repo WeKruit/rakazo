@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   handoffToGroupBot,
@@ -84,6 +85,7 @@ function harness(
     runCreate,
     eventCreate: tx.event.create,
     taskCreate: tx.task.create,
+    tx,
   };
 }
 
@@ -393,6 +395,30 @@ describe("group handoff report back", () => {
       reportGroupHandoffOutcome(again.deps as never, worker, "group-1", { status: "completed" }),
     ).resolves.toBeUndefined();
     expect(again.runCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["typed in the chat", chatReplyToAsk("我们外联用哪些发件邮箱？"), true],
+    ["picked on the card", "Selected choice choice-1: 不要求", false],
+  ])("reminds the sender of a question closed by a message %s", async (_, answer, reminds) => {
+    const question = "语言要求按哪种处理？";
+    const reply = "我们外联用哪些发件邮箱？";
+    const { deps, messageCreate, tx } = harness([asked]);
+    tx.message.findFirst.mockImplementation((async (query?: { where?: { botId?: string } }) =>
+      query?.where?.botId === "bot-a"
+        ? {
+            runId: "run-a",
+            blocks: [{ kind: "ask", text: question, status: "answered", answer: reply }],
+          }
+        : { blocks: [asked] }) as never);
+    tx.run.findFirst.mockImplementation((async () => ({
+      task: { prompt: `新岗位\n\n${question}\nAnswer: ${answer}` },
+    })) as never);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    const text = (
+      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]
+    )[0].data.blocks[0].text;
+    expect(text.includes(`Your question "${question}" is still unanswered`)).toBe(reminds);
   });
 
   it("lets the sender hand a correction back after a report", async () => {
