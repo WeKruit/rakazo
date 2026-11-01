@@ -67,8 +67,13 @@ test("Work and Role details preserve the original actions on a compact screen", 
   await expect(page).toHaveURL(/view=routines/);
   await page.goto(`/app/g/${appGroupId}?view=contacts`);
   const close = page.getByRole("button", { name: "Collapse role chat", exact: true });
-  if (await close.isVisible()) await close.click();
-  await page.getByRole("button", { name: "Role details", exact: true }).click();
+  await expect(close).toBeVisible();
+  await close.click();
+  await expect(close).not.toBeVisible();
+  await page
+    .getByRole("region", { name: "Recruiting", exact: true })
+    .getByRole("button", { name: "Role details", exact: true })
+    .click();
   await expect(page.getByRole("link", { name: "Job brief", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Client feedback", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Job brief", exact: true }).click();
