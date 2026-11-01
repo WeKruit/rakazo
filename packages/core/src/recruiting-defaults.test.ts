@@ -88,6 +88,7 @@ describe("isChineseText", () => {
   it("reads mostly-Han text as Chinese", () => {
     expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
     expect(isChineseText("以后都用中文回复我")).toBe(true);
+    expect(isChineseText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(true);
   });
 
   it("reads English that quotes a Chinese phrase as English", () => {
