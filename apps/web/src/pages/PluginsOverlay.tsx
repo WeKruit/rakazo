@@ -14,6 +14,9 @@ import {
   buildFeaturedConnectorTiles,
   CONNECTION_CATALOG_PAGE_SIZE,
   filterConnectionCatalogItems,
+  GOOGLE_CALENDAR_ENDPOINT,
+  GOOGLE_CALENDAR_READ_TOOLS,
+  GOOGLE_CALENDAR_SCHEDULING_TOOLS,
   humanizeToolName,
   isVendorService,
 } from "@rakazo/core";
@@ -109,7 +112,7 @@ function serviceEndpoint(server: McpServer) {
 /** Services that act on the recruiter's own account, so each specialist gets only what it needs. */
 const PERSONAL_ENDPOINTS = [
   "https://gmailmcp.googleapis.com/mcp/v1",
-  "https://calendarmcp.googleapis.com/mcp/v1",
+  GOOGLE_CALENDAR_ENDPOINT,
   "https://mcp.cal.com/mcp",
 ];
 
@@ -409,17 +412,10 @@ export function PluginsOverlay({
       recipients.set(coordinatorBotId, mailReads);
       for (const id of [recruitingBotIds?.outreach, recruitingBotIds?.scheduling])
         if (id) recipients.set(id, [...mailReads, "list_drafts", "get_draft", "create_draft"]);
-    } else if (endpoint === "https://calendarmcp.googleapis.com/mcp/v1") {
-      const reads = ["list_calendars", "list_events", "get_event", "search_events", "suggest_time"];
-      recipients.set(coordinatorBotId, reads);
+    } else if (endpoint === GOOGLE_CALENDAR_ENDPOINT) {
+      recipients.set(coordinatorBotId, GOOGLE_CALENDAR_READ_TOOLS);
       if (recruitingBotIds?.scheduling)
-        recipients.set(recruitingBotIds.scheduling, [
-          ...reads,
-          "create_event",
-          "update_event",
-          "delete_event",
-          "respond_to_event",
-        ]);
+        recipients.set(recruitingBotIds.scheduling, GOOGLE_CALENDAR_SCHEDULING_TOOLS);
     } else if (endpoint === "https://mcp.cal.com/mcp") {
       const reads = [
         "get_bookings",
