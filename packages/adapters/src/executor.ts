@@ -189,6 +189,7 @@ import {
   waitingApprovalNote,
   withoutHiddenTools,
   workActivityForTool,
+  workStepDetail,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -1008,6 +1009,12 @@ export async function unsavedRoundFeedback(
   });
   if (saved) return undefined;
   return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they turned down or praised, and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
+}
+
+/** The topic a step may show beside its label, as a payload field. */
+function stepDetail(name: string, args: unknown): { detail?: string } {
+  const detail = workStepDetail(name, args);
+  return detail ? { detail } : {};
 }
 
 /** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
@@ -5599,6 +5606,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           name: string;
           executionId: string;
           startedAt: string;
+          activity?: string;
+          detail?: string;
           completion?: Record<string, unknown>;
         }[] = [];
         const flushPendingTools = () => {
@@ -12511,7 +12520,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   name,
                   executionId,
                   startedAt: new Date(startedAt).toISOString(),
-                  category: workActivityForTool(name),
+                  category: workActivityForTool(name, args),
+                  ...stepDetail(name, args),
                   argsSummary: toolArgsSummary(args, runSecrets),
                 },
               })
@@ -13930,6 +13940,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await publishMidTurnNarration();
               }
               const toolStartedAt = new Date().toISOString();
+              const toolActivity = workActivityForTool(event.name, event.args);
+              const toolDetail = stepDetail(event.name, event.args);
               try {
                 await deps.events.append({
                   spaceId: run.spaceId,
@@ -13941,7 +13953,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     name: event.name,
                     executionId: event.executionId,
                     startedAt: toolStartedAt,
-                    category: workActivityForTool(event.name),
+                    category: toolActivity,
+                    ...toolDetail,
                     argsSummary: toolArgsSummary(event.args, runSecrets),
                   },
                 });
@@ -13952,6 +13965,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 name: event.name,
                 executionId: event.executionId,
                 startedAt: toolStartedAt,
+                activity: toolActivity,
+                ...toolDetail,
               });
               if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();

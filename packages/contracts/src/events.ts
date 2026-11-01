@@ -532,6 +532,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
           name: z.string(),
           executionId: z.string().optional(),
           startedAt: IsoDate.optional(),
+          /** Work category of the call, from its tool name and closed operation. */
+          activity: z.string().max(40).optional(),
+          /** Recruiter-facing topic of the call, e.g. a history query; never ids or JSON. */
+          detail: z.string().max(80).optional(),
         }),
       )
       .optional(),
@@ -555,6 +559,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
         executionId: z.string().optional(),
         startedAt: IsoDate.optional(),
         durationMs: z.number().int().nonnegative().optional(),
+        /** Work category of the call, from its tool name and closed operation. */
+        activity: z.string().max(40).optional(),
+        /** Recruiter-facing topic of the call, e.g. a history query; never ids or JSON. */
+        detail: z.string().max(80).optional(),
       }),
     ),
     durationMs: z.number().int().nonnegative().optional(),
@@ -830,7 +838,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 5;
+export const EVENT_FORMAT_VERSION = 6;
 
 export const ProductEventSchema = z
   .object({

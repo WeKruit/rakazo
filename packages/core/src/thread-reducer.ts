@@ -8,6 +8,7 @@ import {
   reduceLiveMessageBlocks,
   runFailureError,
   subagentBlockFromPayload,
+  toolCallStepFields,
 } from "./events.js";
 import { upsertMessageById } from "./message-pages.js";
 import { replyMetadata } from "./message-replies.js";
@@ -520,6 +521,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
             name,
             startedAt: typeof payload.startedAt === "string" ? payload.startedAt : event.createdAt,
             executionId: toolExecutionId(payload),
+            ...toolCallStepFields(payload),
           },
     );
     // The hidden marker keeps a current call distinct from historical developer steps.

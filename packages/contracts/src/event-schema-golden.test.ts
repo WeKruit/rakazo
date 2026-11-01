@@ -21,6 +21,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
   // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
   5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
+  // 6: optional activity and detail on steps and pending tool calls (specific step labels).
+  6: "6c64d3dfecab7fe62c660bd765189b4a93ac37544dd57823fca5179027a7e3c9",
 };
 
 const OLD_ROWS: unknown[] = [

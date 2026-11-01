@@ -30,7 +30,9 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     files: t`Reading files`,
     search: t`Searching the web`,
     page: t`Reading a page`,
-    context: t`Checking saved context`,
+    playbook: t`Reading the hiring playbook`,
+    recall: t`Recalling your preferences`,
+    history: t`Looking back at earlier conversations`,
     memory: t`Saving notes`,
     connections: t`Checking connections`,
     connected_action: t`Using a connected app`,
@@ -38,15 +40,55 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     availability: t`Checking availability`,
     drafting: t`Drafting email`,
     role: t`Reviewing the role`,
+    role_save: t`Saving the role`,
+    roles: t`Looking up your roles`,
     candidates: t`Reviewing candidates`,
+    candidate_lookup: t`Finding the candidate`,
+    replies: t`Checking candidate replies`,
+    assess: t`Assessing candidates`,
+    profiles_save: t`Saving candidates`,
+    notes: t`Checking candidate notes`,
+    reminders: t`Checking reminders`,
+    interview: t`Planning the interview`,
     research: t`Searching candidates`,
     feedback: t`Recording feedback`,
     crm: t`Checking candidate records`,
     question: t`Preparing a question`,
     specialist: t`Asking a specialist`,
+    delegating: t`Handing this to the role team`,
+    routine: t`Setting up a routine`,
     waiting: t`Waiting for background work`,
-    working: t`Working on it`,
+    writing: t`Writing to you`,
+    thinking: t`Deciding the next step`,
+    working: t`Running a step`,
   };
+}
+
+/** What the model is doing with what a step just returned, for the gap before its next call. */
+function useWorkThinkingLabels(): Partial<Record<WorkActivity, string>> {
+  const { t } = useLingui();
+  return {
+    playbook: t`Applying the hiring playbook`,
+    recall: t`Applying your preferences`,
+    history: t`Going over earlier conversations`,
+    search: t`Reviewing search results`,
+    page: t`Reviewing the page`,
+    role: t`Reviewing the role`,
+    role_save: t`Reviewing the role`,
+    roles: t`Picking the right role`,
+    candidates: t`Going over the candidates`,
+    candidate_lookup: t`Going over the candidate`,
+    replies: t`Going over candidate replies`,
+    research: t`Going over search results`,
+    crm: t`Going over candidate records`,
+    emails: t`Going over emails`,
+    availability: t`Finding a time that works`,
+  };
+}
+
+/** A step's label with its topics, e.g. "Looking back at earlier conversations · SWE hires". */
+function stepLabel(label: string, detail: string | undefined): string {
+  return detail ? `${label} · ${detail}` : label;
 }
 
 function useWorkStageLabels(): Record<WorkStageKind, string> {
@@ -317,9 +359,10 @@ export function LiveWork({
   onCancelStage?: (botId: string) => Promise<void>;
 }) {
   const labels = useWorkActivityLabels();
+  const thinkingLabels = useWorkThinkingLabels();
   const stageLabels = useWorkStageLabels();
   const labelSteps = (list: readonly WorkStep[]) =>
-    list.map((step) => ({ ...step, label: labels[step.activity] }));
+    list.map((step) => ({ ...step, label: stepLabel(labels[step.activity], step.detail) }));
   const split = showSteps ? workSessionStages(session) : { own: [], stages: [] as WorkStage[] };
   const steps = labelSteps(split.own);
   const stages = split.stages.length ? (
@@ -340,10 +383,17 @@ export function LiveWork({
     </div>
   ) : null;
   if (live) {
+    const lastStep = (split.stages.findLast((stage) => stage.running)?.steps ?? split.own).at(-1);
+    const current =
+      session?.current === "thinking"
+        ? ((lastStep && thinkingLabels[lastStep.activity]) ?? labels.thinking)
+        : session?.current
+          ? stepLabel(labels[session.current], session.currentDetail)
+          : null;
     const headline = session?.progress
       ? workProgressLabel(session.progress)
-      : session?.current
-        ? `${labels[session.current]}…`
+      : current
+        ? `${current}…`
         : label;
     return (
       <div data-testid="live-work" className="space-y-1">

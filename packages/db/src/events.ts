@@ -24,6 +24,7 @@ import {
   isApprovalAskBlock,
   isConversationalRun,
   isSecretAskBlock,
+  isWorkActivity,
   messagingChannelId,
   resolveAskChoice,
   runsBesidePerson,
@@ -1842,7 +1843,9 @@ export function completedRunSummary(
   for (const block of blocks)
     if (block.kind === "steps")
       for (const step of block.steps) {
-        const category = workActivityForTool(step.label);
+        const category = isWorkActivity(step.activity)
+          ? step.activity
+          : workActivityForTool(step.label);
         counts.set(category, (counts.get(category) ?? 0) + step.count);
       }
   const steps = [...counts].map(([category, count]) => ({ category, count }));
@@ -2152,22 +2155,26 @@ async function appendEventStatement(prisma: PrismaClient, input: AppendEventInpu
   const runId = row.runId ?? null;
   const cancelledOnly = input.type === "run.cancelled";
   if (cancelledOnly && !runId) throw new RunHistoryWriteError();
-  const rows = await alarmOnSeqConflict(input.threadId, -1, 1, () =>
-    prisma.$queryRaw<
-      {
-        id: string | null;
-        spaceId: string | null;
-        threadId: string | null;
-        botId: string | null;
-        seq: number | null;
-        type: string | null;
-        payload: unknown;
-        runId: string | null;
-        createdAt: Date | null;
-        userId: string | null;
-        runOk: boolean;
-      }[]
-    >`
+  const rows = await alarmOnSeqConflict(
+    input.threadId,
+    -1,
+    1,
+    () =>
+      prisma.$queryRaw<
+        {
+          id: string | null;
+          spaceId: string | null;
+          threadId: string | null;
+          botId: string | null;
+          seq: number | null;
+          type: string | null;
+          payload: unknown;
+          runId: string | null;
+          createdAt: Date | null;
+          userId: string | null;
+          runOk: boolean;
+        }[]
+      >`
       WITH run_ok AS (
         SELECT CASE
           WHEN ${runId}::text IS NULL THEN true

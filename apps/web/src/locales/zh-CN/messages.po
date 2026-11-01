@@ -505,6 +505,14 @@ msgstr "API 密钥请求头"
 msgid "Appearance"
 msgstr "外观"
 
+#: src/components/LiveWork.tsx
+msgid "Applying the hiring playbook"
+msgstr "按招聘手册梳理"
+
+#: src/components/LiveWork.tsx
+msgid "Applying your preferences"
+msgstr "结合你的偏好"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
@@ -584,6 +592,10 @@ msgstr "先询问"
 #: src/components/LiveWork.tsx
 msgid "Asking a specialist"
 msgstr "正在请专员协助"
+
+#: src/components/LiveWork.tsx
+msgid "Assessing candidates"
+msgstr "评估候选人"
 
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Assessment"
@@ -1012,8 +1024,16 @@ msgid "Checking availability"
 msgstr "正在查看空闲时间"
 
 #: src/components/LiveWork.tsx
+msgid "Checking candidate notes"
+msgstr "查看候选人备注"
+
+#: src/components/LiveWork.tsx
 msgid "Checking candidate records"
 msgstr "正在查看候选人记录"
+
+#: src/components/LiveWork.tsx
+msgid "Checking candidate replies"
+msgstr "查看候选人回复"
 
 #: src/components/LiveWork.tsx
 msgid "Checking candidates"
@@ -1028,8 +1048,8 @@ msgid "Checking email"
 msgstr "正在查看邮件"
 
 #: src/components/LiveWork.tsx
-msgid "Checking saved context"
-msgstr "正在查看已保存的上下文"
+msgid "Checking reminders"
+msgstr "查看提醒"
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "Checking…"
@@ -2156,6 +2176,10 @@ msgstr "日常工作"
 msgid "days"
 msgstr "天"
 
+#: src/components/LiveWork.tsx
+msgid "Deciding the next step"
+msgstr "想下一步怎么做"
+
 #: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
@@ -2668,6 +2692,10 @@ msgstr "查找模型"
 msgid "Find work history"
 msgstr "查找工作经历"
 
+#: src/components/LiveWork.tsx
+msgid "Finding a time that works"
+msgstr "找合适的时间"
+
 #. placeholder {0}: estimate.people
 #: src/components/LiveWork.tsx
 msgid "Finding about {0} people"
@@ -2680,6 +2708,10 @@ msgstr "寻找候选人"
 #: src/components/LiveWork.tsx
 msgid "Finding people"
 msgstr "正在找人"
+
+#: src/components/LiveWork.tsx
+msgid "Finding the candidate"
+msgstr "查找这位候选人"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2755,6 +2787,34 @@ msgstr "Git 事件"
 msgid "Give feedback"
 msgstr "提供反馈"
 
+#: src/components/LiveWork.tsx
+msgid "Going over candidate records"
+msgstr "整理候选人记录"
+
+#: src/components/LiveWork.tsx
+msgid "Going over candidate replies"
+msgstr "整理候选人回复"
+
+#: src/components/LiveWork.tsx
+msgid "Going over earlier conversations"
+msgstr "整理之前的对话"
+
+#: src/components/LiveWork.tsx
+msgid "Going over emails"
+msgstr "整理邮件"
+
+#: src/components/LiveWork.tsx
+msgid "Going over search results"
+msgstr "整理搜索结果"
+
+#: src/components/LiveWork.tsx
+msgid "Going over the candidate"
+msgstr "整理这位候选人的信息"
+
+#: src/components/LiveWork.tsx
+msgid "Going over the candidates"
+msgstr "整理候选人"
+
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Good example"
 msgstr "好的例子"
@@ -2790,6 +2850,10 @@ msgstr "群组"
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Guide retrieval; qualification criteria stay unchanged."
 msgstr "仅用于引导搜索，资格标准保持不变。"
+
+#: src/components/LiveWork.tsx
+msgid "Handing this to the role team"
+msgstr "交给岗位团队"
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Hard"
@@ -3271,8 +3335,16 @@ msgid "Log out"
 msgstr "退出登录"
 
 #: src/components/LiveWork.tsx
+msgid "Looking back at earlier conversations"
+msgstr "翻看之前的对话"
+
+#: src/components/LiveWork.tsx
 msgid "Looking up emails"
 msgstr "正在查找邮箱"
+
+#: src/components/LiveWork.tsx
+msgid "Looking up your roles"
+msgstr "查找你的岗位"
 
 #: src/components/AskCard.tsx
 msgid "Looks good, start searching"
@@ -4328,6 +4400,10 @@ msgstr ""
 msgid "Phone"
 msgstr "电话"
 
+#: src/components/LiveWork.tsx
+msgid "Picking the right role"
+msgstr "确定是哪个岗位"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Pin"
 msgstr "置顶"
@@ -4344,6 +4420,10 @@ msgstr "安排面试"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Plan saved. Booking and sending still require approval."
 msgstr "安排已保存。预约和发送仍需批准。"
+
+#: src/components/LiveWork.tsx
+msgid "Planning the interview"
+msgstr "安排面试"
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Playing…"
@@ -4548,6 +4628,14 @@ msgstr "正在阅读网页"
 msgid "Reading files"
 msgstr "正在读取文件"
 
+#: src/components/LiveWork.tsx
+msgid "Reading the hiring playbook"
+msgstr "阅读招聘手册"
+
+#: src/components/LiveWork.tsx
+msgid "Reading the role"
+msgstr "阅读岗位要求"
+
 #: src/pages/recruiting/CandidateFeedback.tsx
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Reason"
@@ -4557,6 +4645,10 @@ msgstr "原因"
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
 msgstr "推理强度"
+
+#: src/components/LiveWork.tsx
+msgid "Recalling your preferences"
+msgstr "回顾你的偏好"
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Receipt"
@@ -4931,6 +5023,14 @@ msgid "Reviewing candidates"
 msgstr "正在查看候选人"
 
 #: src/components/LiveWork.tsx
+msgid "Reviewing search results"
+msgstr "查看搜索结果"
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the page"
+msgstr "查看页面"
+
+#: src/components/LiveWork.tsx
 msgid "Reviewing the role"
 msgstr "正在查看职位"
 
@@ -5070,6 +5170,10 @@ msgstr "运行中"
 #: src/pages/RoutineList.tsx
 msgid "Running · Stop"
 msgstr "运行中 · 停止"
+
+#: src/components/LiveWork.tsx
+msgid "Running a step"
+msgstr "执行一步操作"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
@@ -5233,8 +5337,16 @@ msgid "Saved. Rotate to reveal."
 msgstr "已保存。轮换后可查看。"
 
 #: src/components/LiveWork.tsx
+msgid "Saving candidates"
+msgstr "保存候选人"
+
+#: src/components/LiveWork.tsx
 msgid "Saving notes"
 msgstr "正在保存笔记"
+
+#: src/components/LiveWork.tsx
+msgid "Saving the role"
+msgstr "保存岗位"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saving this plan does not approve a booking or message."
@@ -5526,6 +5638,10 @@ msgstr "服务器 URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "服务连接"
+
+#: src/components/LiveWork.tsx
+msgid "Setting up a routine"
+msgstr "设置定时任务"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -6421,12 +6537,12 @@ msgid "Workflow status"
 msgstr "流程状态"
 
 #: src/components/LiveWork.tsx
-msgid "Working on it"
-msgstr "正在处理"
-
-#: src/components/LiveWork.tsx
 msgid "Working…"
 msgstr "处理中…"
+
+#: src/components/LiveWork.tsx
+msgid "Writing to you"
+msgstr "给你回复"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"

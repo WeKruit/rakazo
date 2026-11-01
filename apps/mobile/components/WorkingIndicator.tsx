@@ -91,6 +91,7 @@ function StepRows({ steps }: { steps: readonly WorkStep[] }) {
         {step.status ? "! " : "✓ "}
       </Text>
       {t(workActivityLabel(step.activity))}
+      {step.detail ? ` · ${step.detail}` : ""}
       {step.count > 1 ? ` ×${step.count}` : ""}
       {step.peopleWithEmail !== undefined
         ? ` · ${t(step.peopleWithEmail === 1 ? "{count} person with email" : "{count} people with email", { count: step.peopleWithEmail })}`
@@ -285,7 +286,7 @@ export function WorkingIndicator({
     (workProgress
       ? t(workProgressLabel(workProgress))
       : session?.current
-        ? `${t(workActivityLabel(session.current))}…`
+        ? `${t(workActivityLabel(session.current))}${session.currentDetail ? ` · ${session.currentDetail}` : ""}…`
         : t("Working…"));
 
   useEffect(() => {
