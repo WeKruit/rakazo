@@ -2595,6 +2595,33 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
   expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
 });
 
+it("shows a new role in the sidebar the moment it is submitted", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    allGroupsArchived: true,
+  });
+  await view.click("New Role");
+  const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
+  const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "New role",
+  )!;
+  await act(async () => useCrew.click());
+  type(
+    container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Job description"]')!,
+    "Fresh systems role",
+  );
+  let create!: (group: unknown) => void;
+  shellApi.createGroup.mockImplementation(() => new Promise((resolve) => (create = resolve)));
+  await view.click("Continue");
+  const pending = () =>
+    container!.querySelector('nav[aria-label="Role conversations"] [aria-busy="true"]');
+  expect(pending()?.textContent).toBe("New role");
+  await act(async () => create({ ...view.group, id: "group-new", name: "New role" }));
+  expect(pending()).toBeNull();
+});
+
 it("resets an archived source's draft and error, then keeps its team fixed during creation", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("bot", undefined, {
