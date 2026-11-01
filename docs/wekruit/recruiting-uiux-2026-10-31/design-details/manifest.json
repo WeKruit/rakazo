@@ -1,0 +1,2972 @@
+[
+  {
+    "id": "juicebox-analytics-metric-menu-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-analytics-metric-menu-1440.json",
+    "ax": "states/juicebox-analytics-metric-menu-1440.txt",
+    "screenshot": "diagrams/juicebox-analytics-metric-menu-1440.svg",
+    "displayName": "juicebox-analytics-metric-menu-1440",
+    "privateCaptureSha256": "8a7f9e44ca3c934a7dc0ffe3489677ea64abb75041e8939bdd28225e287dba24",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-columns-menu-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-columns-menu-1440.json",
+    "ax": "states/juicebox-columns-menu-1440.txt",
+    "screenshot": "diagrams/juicebox-columns-menu-1440.svg",
+    "displayName": "juicebox-columns-menu-1440",
+    "privateCaptureSha256": "df5d89a58d6ef115b942307f246961e78caa76425e6900e33cb1a0100b0d3e93",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-contact-actions-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-contact-actions-1440.json",
+    "ax": "states/juicebox-contact-actions-1440.txt",
+    "screenshot": "diagrams/juicebox-contact-actions-1440.svg",
+    "displayName": "juicebox-contact-actions-1440",
+    "privateCaptureSha256": "29488b06dc9a2fbb97fbe3f3d0b1e8b5f28a6bdf0187708bc2f93e7da35817e1",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-contact-filter-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-contact-filter-1440.json",
+    "ax": "states/juicebox-contact-filter-1440.txt",
+    "screenshot": "diagrams/juicebox-contact-filter-1440.svg",
+    "displayName": "juicebox-contact-filter-1440",
+    "privateCaptureSha256": "65a9571f6a8de0ec373a1774d4397e787aaaa6090800a5bef2487e01c5d2a0a0",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-contacts-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-contacts-1024.json",
+    "ax": "states/juicebox-contacts-1024.txt",
+    "screenshot": "diagrams/juicebox-contacts-1024.svg",
+    "displayName": "juicebox-contacts-1024",
+    "privateCaptureSha256": "81beabbe4e81f065d600171e94ca8b2873e78db37bae55fb297fb42fda98d9d8",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-contacts-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-contacts-1440.json",
+    "ax": "states/juicebox-contacts-1440.txt",
+    "screenshot": "diagrams/juicebox-contacts-1440.svg",
+    "displayName": "juicebox-contacts-1440",
+    "privateCaptureSha256": "26ea7367e6b9ecdd77ed0b66009b7a18983f595e3ec007f8c047afdd6b046d64",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-contacts-scrolled-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-contacts-scrolled-1440.json",
+    "ax": "states/juicebox-contacts-scrolled-1440.txt",
+    "screenshot": "diagrams/juicebox-contacts-scrolled-1440.svg",
+    "displayName": "juicebox-contacts-scrolled-1440",
+    "privateCaptureSha256": "b78ec47112ccc2c9b83f96cb4324f1d9f1779481ad02f7598b2d6d5da5d45312",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-editor-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-editor-1024.json",
+    "ax": "states/juicebox-editor-1024.txt",
+    "screenshot": "diagrams/juicebox-editor-1024.svg",
+    "displayName": "juicebox-editor-1024",
+    "privateCaptureSha256": "3e313c77c6918b870e35901624e5e583dbcff05fc244fb1edd8c0d7c102cba7a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-editor-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-editor-1440.json",
+    "ax": "states/juicebox-editor-1440.txt",
+    "screenshot": "diagrams/juicebox-editor-1440.svg",
+    "displayName": "juicebox-editor-1440",
+    "privateCaptureSha256": "aa03a2529f2f006701087bbbf4ab7695c6bb7cf4bd26584ec6effd11260b82d2",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-editor-preview-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-editor-preview-1440.json",
+    "ax": "states/juicebox-editor-preview-1440.txt",
+    "screenshot": "diagrams/juicebox-editor-preview-1440.svg",
+    "displayName": "juicebox-editor-preview-1440",
+    "privateCaptureSha256": "e3d6e7b527ee0f47c51918f6c7d7e089fcfa12959e84dc582f8144df26e1f335",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-editor-short-height",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 600,
+      "innerWidth": 1440,
+      "outerHeight": 600,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 600,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 600,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 600,
+      "clientWidth": 1440,
+      "scrollHeight": 600,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-editor-short-height.json",
+    "ax": "states/juicebox-editor-short-height.txt",
+    "screenshot": "diagrams/juicebox-editor-short-height.svg",
+    "displayName": "juicebox-editor-short-height",
+    "privateCaptureSha256": "2d3d9c0a24d738885fcfa1a8873f4eaa87a7d3ff66dc9c55dae4145d95a9339a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-editor-timing-popover-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-editor-timing-popover-1440.json",
+    "ax": "states/juicebox-editor-timing-popover-1440.txt",
+    "screenshot": "diagrams/juicebox-editor-timing-popover-1440.svg",
+    "displayName": "juicebox-editor-timing-popover-1440",
+    "privateCaptureSha256": "6c67a3a91835018c21ed7e5697be328a91ad9958eeec966bf0f9694646739c71",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-enrollment-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-enrollment-1024.json",
+    "ax": "states/juicebox-enrollment-1024.txt",
+    "screenshot": "diagrams/juicebox-enrollment-1024.svg",
+    "displayName": "juicebox-enrollment-1024",
+    "privateCaptureSha256": "07593fe695d1079323f563f14e3342c962a80461dfd8d6f4232fcca258acc5bb",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-enrollment-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-enrollment-1440.json",
+    "ax": "states/juicebox-enrollment-1440.txt",
+    "screenshot": "diagrams/juicebox-enrollment-1440.svg",
+    "displayName": "juicebox-enrollment-1440",
+    "privateCaptureSha256": "e11da6be639b2a174b185bfcbc7bce1e20cb1fa3c68b00fd8d3a04b05dfc8d13",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-enrollment-short-height",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 600,
+      "innerWidth": 1440,
+      "outerHeight": 600,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 600,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 600,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 600,
+      "clientWidth": 1440,
+      "scrollHeight": 600,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-enrollment-short-height.json",
+    "ax": "states/juicebox-enrollment-short-height.txt",
+    "screenshot": "diagrams/juicebox-enrollment-short-height.svg",
+    "displayName": "juicebox-enrollment-short-height",
+    "privateCaptureSha256": "d3cb0ec9ddf675029eb3b9d07b5fc46e696f2801fe1e2b913f8aab084cae21a7",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-guard-1023",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1023,
+      "outerHeight": 768,
+      "outerWidth": 1023,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1023,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1023,
+      "clientHeight": 768,
+      "clientWidth": 1023,
+      "scrollHeight": 768,
+      "scrollWidth": 1023,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-guard-1023.json",
+    "ax": "states/juicebox-guard-1023.txt",
+    "screenshot": "diagrams/juicebox-guard-1023.svg",
+    "displayName": "1023px Insights 正常页面；文件名含 guard 但没有窄屏阻挡",
+    "privateCaptureSha256": "cab63a1ded569cc34c8d0f997beefc0de82c6be79a9c269ad9fca69174faf3ed",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-insights-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-insights-1024.json",
+    "ax": "states/juicebox-insights-1024.txt",
+    "screenshot": "diagrams/juicebox-insights-1024.svg",
+    "displayName": "juicebox-insights-1024",
+    "privateCaptureSha256": "7e1044dccb39a53420c81dd1cce8df33343197dd175bc2eb5b96a89c80c7f569",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-insights-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-insights-1440.json",
+    "ax": "states/juicebox-insights-1440.txt",
+    "screenshot": "diagrams/juicebox-insights-1440.svg",
+    "displayName": "juicebox-insights-1440",
+    "privateCaptureSha256": "f48e43958dc73a06f1423aab0003fb644a3987b6953c82576d660a073f1ae918",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-insights-scrolled-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-insights-scrolled-1440.json",
+    "ax": "states/juicebox-insights-scrolled-1440.txt",
+    "screenshot": "diagrams/juicebox-insights-scrolled-1440.svg",
+    "displayName": "juicebox-insights-scrolled-1440",
+    "privateCaptureSha256": "c50282ad8b6b73922d30ffa9840cea97dddbff868bebb7f5dbd18d3a1308ccef",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-analytics-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-analytics-1024.json",
+    "ax": "states/juicebox-outreach-analytics-1024.txt",
+    "screenshot": "diagrams/juicebox-outreach-analytics-1024.svg",
+    "displayName": "juicebox-outreach-analytics-1024",
+    "privateCaptureSha256": "a0003b5f7fcdab923d574caf99501ac1120243ae9e17b3cfeaf94dcf440f5340",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-analytics-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-analytics-1440.json",
+    "ax": "states/juicebox-outreach-analytics-1440.txt",
+    "screenshot": "diagrams/juicebox-outreach-analytics-1440.svg",
+    "displayName": "juicebox-outreach-analytics-1440",
+    "privateCaptureSha256": "149ea039e523a8d510d605ee65ff17f713d4f007a0028d6615696b4d181d1083",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-analytics-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-analytics-390.json",
+    "ax": "states/juicebox-outreach-analytics-390.txt",
+    "screenshot": "diagrams/juicebox-outreach-analytics-390.svg",
+    "displayName": "juicebox-outreach-analytics-390",
+    "privateCaptureSha256": "4a1f4017510c42e57d886a1d07cad9ed450d58e6be33fd65ab5dd294c216c997",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-analytics-768",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 1024,
+      "innerWidth": 768,
+      "outerHeight": 1024,
+      "outerWidth": 768,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 1024,
+      "bodyClientWidth": 768,
+      "bodyScrollHeight": 1024,
+      "bodyScrollWidth": 768,
+      "clientHeight": 1024,
+      "clientWidth": 768,
+      "scrollHeight": 1024,
+      "scrollWidth": 768,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-analytics-768.json",
+    "ax": "states/juicebox-outreach-analytics-768.txt",
+    "screenshot": "diagrams/juicebox-outreach-analytics-768.svg",
+    "displayName": "juicebox-outreach-analytics-768",
+    "privateCaptureSha256": "ba3b910fc1fa13c8f68259c88fc5d93953fe36675ab919008c6bd7381d0d389e",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-scrolled-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-scrolled-1440.json",
+    "ax": "states/juicebox-outreach-scrolled-1440.txt",
+    "screenshot": "diagrams/juicebox-outreach-scrolled-1440.svg",
+    "displayName": "juicebox-outreach-scrolled-1440",
+    "privateCaptureSha256": "8fb09402ffb201409f9471f24f1fba026b23e1e92d7295d0203f2d571b9862bf",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-width-1000",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1000,
+      "outerHeight": 768,
+      "outerWidth": 1000,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1000,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1000,
+      "clientHeight": 768,
+      "clientWidth": 1000,
+      "scrollHeight": 768,
+      "scrollWidth": 1000,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-width-1000.json",
+    "ax": "states/juicebox-outreach-width-1000.txt",
+    "screenshot": "diagrams/juicebox-outreach-width-1000.svg",
+    "displayName": "juicebox-outreach-width-1000",
+    "privateCaptureSha256": "dc3b7fa2c2b53ca4398f3552379cbd9d603c9c2d305a5d0b9114991e3e5459cb",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-width-1023-stable",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1023,
+      "outerHeight": 768,
+      "outerWidth": 1023,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1023,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1023,
+      "clientHeight": 768,
+      "clientWidth": 1023,
+      "scrollHeight": 768,
+      "scrollWidth": 1023,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-width-1023-stable.json",
+    "ax": "states/juicebox-outreach-width-1023-stable.txt",
+    "screenshot": "diagrams/juicebox-outreach-width-1023-stable.svg",
+    "displayName": "juicebox-outreach-width-1023-stable",
+    "privateCaptureSha256": "939102fa5844578572f0bf3ae5bf1028a002a173ed72f86eaaa9a27da9ec76ad",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-width-899",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 899,
+      "outerHeight": 900,
+      "outerWidth": 899,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 899,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 899,
+      "clientHeight": 900,
+      "clientWidth": 899,
+      "scrollHeight": 900,
+      "scrollWidth": 899,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-width-899.json",
+    "ax": "states/juicebox-outreach-width-899.txt",
+    "screenshot": "diagrams/juicebox-outreach-width-899.svg",
+    "displayName": "juicebox-outreach-width-899",
+    "privateCaptureSha256": "41332f40b592c62b4bf1f515b95a618a720d152ce6f1ab811b2b9e67a03e294a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-width-900",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 900,
+      "outerHeight": 900,
+      "outerWidth": 900,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 900,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 900,
+      "clientHeight": 900,
+      "clientWidth": 900,
+      "scrollHeight": 900,
+      "scrollWidth": 900,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-width-900.json",
+    "ax": "states/juicebox-outreach-width-900.txt",
+    "screenshot": "diagrams/juicebox-outreach-width-900.svg",
+    "displayName": "juicebox-outreach-width-900",
+    "privateCaptureSha256": "f959bea05e6f09d1275283a98a0f581f3f88f16384474d5dfac0842d2421347c",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-outreach-width-999",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 999,
+      "outerHeight": 768,
+      "outerWidth": 999,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 999,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 999,
+      "clientHeight": 768,
+      "clientWidth": 999,
+      "scrollHeight": 768,
+      "scrollWidth": 999,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-outreach-width-999.json",
+    "ax": "states/juicebox-outreach-width-999.txt",
+    "screenshot": "diagrams/juicebox-outreach-width-999.svg",
+    "displayName": "juicebox-outreach-width-999",
+    "privateCaptureSha256": "75fe774981f101741d81f8e128d20c047dbb57720c4a0e0417fb259bf986ab48",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-profile-collapsed-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-profile-collapsed-1024.json",
+    "ax": "states/juicebox-profile-collapsed-1024.txt",
+    "screenshot": "diagrams/juicebox-profile-collapsed-1024.svg",
+    "displayName": "juicebox-profile-collapsed-1024",
+    "privateCaptureSha256": "6c23affcdb507262e552301fd6a00d41d2a5584234ff65d33c55ee3eecacec9b",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-profile-collapsed-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-profile-collapsed-1440.json",
+    "ax": "states/juicebox-profile-collapsed-1440.txt",
+    "screenshot": "diagrams/juicebox-profile-collapsed-1440.svg",
+    "displayName": "juicebox-profile-collapsed-1440",
+    "privateCaptureSha256": "5667cfb00c0a13d2ac7bcb3eca4c15f851f5735a38aedebd714eab1263e6d8d6",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-profile-drawer-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-profile-drawer-1440.json",
+    "ax": "states/juicebox-profile-drawer-1440.txt",
+    "screenshot": "diagrams/juicebox-profile-drawer-1440.svg",
+    "displayName": "juicebox-profile-drawer-1440",
+    "privateCaptureSha256": "d6cc72882dce6671885fbdb773808737972e80cb3f093ace4022edac623c251f",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-profile-sequences-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-profile-sequences-1440.json",
+    "ax": "states/juicebox-profile-sequences-1440.txt",
+    "screenshot": "diagrams/juicebox-profile-sequences-1440.svg",
+    "displayName": "juicebox-profile-sequences-1440",
+    "privateCaptureSha256": "f8eb04b2cbf7190fff32c98a81d555100ad0f5a100a4473f123937c29ee8a378",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-review-modal-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-review-modal-1440.json",
+    "ax": "states/juicebox-review-modal-1440.txt",
+    "screenshot": "diagrams/juicebox-review-modal-1440.svg",
+    "displayName": "juicebox-review-modal-1440",
+    "privateCaptureSha256": "9387f2cf5ae77c20f431b7584e13af7b03e0cf63bc659730bb63f5d864b2eeda",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-run-filter-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-run-filter-1440.json",
+    "ax": "states/juicebox-run-filter-1440.txt",
+    "screenshot": "diagrams/juicebox-run-filter-1440.svg",
+    "displayName": "juicebox-run-filter-1440",
+    "privateCaptureSha256": "d83e2faf005abb44c532e7119d1090df572aebcf0c96ef2ada803f9ed3d64565",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-1024.json",
+    "ax": "states/juicebox-sequence-1024.txt",
+    "screenshot": "diagrams/juicebox-sequence-1024.svg",
+    "displayName": "juicebox-sequence-1024",
+    "privateCaptureSha256": "cf84acaf72a29834d6dab901820ead0544c06e9f1b9720ac2db68c90e30f7456",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-1440.json",
+    "ax": "states/juicebox-sequence-1440.txt",
+    "screenshot": "diagrams/juicebox-sequence-1440.svg",
+    "displayName": "juicebox-sequence-1440",
+    "privateCaptureSha256": "5330bde7d71dbdcbb31ba9699ad378021403ef7268c0e865601fd901941f5d48",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-1806",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 1067,
+      "innerWidth": 1806,
+      "outerHeight": 1154,
+      "outerWidth": 1806,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 1067,
+      "bodyClientWidth": 1806,
+      "bodyScrollHeight": 1067,
+      "bodyScrollWidth": 1806,
+      "clientHeight": 1067,
+      "clientWidth": 1806,
+      "scrollHeight": 1067,
+      "scrollWidth": 1806,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-1806.json",
+    "ax": "states/juicebox-sequence-1806.txt",
+    "screenshot": "diagrams/juicebox-sequence-1806.svg",
+    "displayName": "juicebox-sequence-1806",
+    "privateCaptureSha256": "a9607c13b064570ee11e5b2e81b7a2f2d81cd91f8558a873f4df70c806026216",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-390.json",
+    "ax": "states/juicebox-sequence-390.txt",
+    "screenshot": "diagrams/juicebox-sequence-390.svg",
+    "displayName": "juicebox-sequence-390",
+    "privateCaptureSha256": "4a1f4017510c42e57d886a1d07cad9ed450d58e6be33fd65ab5dd294c216c997",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-768",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 1024,
+      "innerWidth": 768,
+      "outerHeight": 1024,
+      "outerWidth": 768,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 1024,
+      "bodyClientWidth": 768,
+      "bodyScrollHeight": 1024,
+      "bodyScrollWidth": 768,
+      "clientHeight": 1024,
+      "clientWidth": 768,
+      "scrollHeight": 1024,
+      "scrollWidth": 768,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-768.json",
+    "ax": "states/juicebox-sequence-768.txt",
+    "screenshot": "diagrams/juicebox-sequence-768.svg",
+    "displayName": "juicebox-sequence-768",
+    "privateCaptureSha256": "ba3b910fc1fa13c8f68259c88fc5d93953fe36675ab919008c6bd7381d0d389e",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-contact-drawer-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-contact-drawer-1440.json",
+    "ax": "states/juicebox-sequence-contact-drawer-1440.txt",
+    "screenshot": "diagrams/juicebox-sequence-contact-drawer-1440.svg",
+    "displayName": "juicebox-sequence-contact-drawer-1440",
+    "privateCaptureSha256": "3e064f1a25be580062c22a6699e02d6a00b28808f7ddf448d43aac39b0b4c9aa",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-sequence-detail-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-sequence-detail-1440.json",
+    "ax": "states/juicebox-sequence-detail-1440.txt",
+    "screenshot": "diagrams/juicebox-sequence-detail-1440.svg",
+    "displayName": "juicebox-sequence-detail-1440",
+    "privateCaptureSha256": "4fc0dc70221ed71e08d6e2473b2bd60097c1b582ec444fce5b7cc5b12e068486",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-shortlist-board-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-shortlist-board-1440.json",
+    "ax": "states/juicebox-shortlist-board-1440.txt",
+    "screenshot": "diagrams/juicebox-shortlist-board-1440.svg",
+    "displayName": "juicebox-shortlist-board-1440",
+    "privateCaptureSha256": "4200bc3e6cd4b9935c459c78c5fc8c148679a2db4577ec8ccb682981a46fab83",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "juicebox-shortlist-table-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/juicebox-shortlist-table-1440.json",
+    "ax": "states/juicebox-shortlist-table-1440.txt",
+    "screenshot": "diagrams/juicebox-shortlist-table-1440.svg",
+    "displayName": "juicebox-shortlist-table-1440",
+    "privateCaptureSha256": "2ce8526cb26e4a9f3b4b5877f9f52d2651f876281c7a723edcd329f54df940fd",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-availability-thread-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-availability-thread-1440.json",
+    "ax": "states/metix-availability-thread-1440.txt",
+    "screenshot": "diagrams/metix-availability-thread-1440.svg",
+    "displayName": "metix-availability-thread-1440",
+    "privateCaptureSha256": "adda53f3335a815042d07f3c055b642919c418f487f437b7c6c19c6eddb567f6",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-candidates-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-candidates-1024.json",
+    "ax": "states/metix-candidates-1024.txt",
+    "screenshot": "diagrams/metix-candidates-1024.svg",
+    "displayName": "metix-candidates-1024",
+    "privateCaptureSha256": "b06917091d1a5e96b9f425fe8dd3ab3f1ee44aa208b5c258ff84fb4f00a16efa",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-candidates-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-candidates-1440.json",
+    "ax": "states/metix-candidates-1440.txt",
+    "screenshot": "diagrams/metix-candidates-1440.svg",
+    "displayName": "metix-candidates-1440",
+    "privateCaptureSha256": "66ac6616a3095723202a9010d80d7a566e4ebb59f0ae229bab26827adf40a9aa",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-candidates-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-candidates-390.json",
+    "ax": "states/metix-candidates-390.txt",
+    "screenshot": "diagrams/metix-candidates-390.svg",
+    "displayName": "metix-candidates-390",
+    "privateCaptureSha256": "4d83a2bffb6d753bab39d34433168998097e6f7552cb69a971300a26ddd5324e",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-1024.json",
+    "ax": "states/metix-inbox-1024.txt",
+    "screenshot": "diagrams/metix-inbox-1024.svg",
+    "displayName": "metix-inbox-1024",
+    "privateCaptureSha256": "3ff0115a5a01cd5b78b8b39038143f593be57182ebcd4d875bf20168e2e73165",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-1440.json",
+    "ax": "states/metix-inbox-1440.txt",
+    "screenshot": "diagrams/metix-inbox-1440.svg",
+    "displayName": "metix-inbox-1440",
+    "privateCaptureSha256": "56ab751fd52590605b31c841eba7d1b1fa194b2475829649a5c3f0b3b8216a81",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-1806",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 1011,
+      "innerWidth": 1806,
+      "outerHeight": 1011,
+      "outerWidth": 1806,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 1011,
+      "bodyClientWidth": 1806,
+      "bodyScrollHeight": 1011,
+      "bodyScrollWidth": 1806,
+      "clientHeight": 1011,
+      "clientWidth": 1806,
+      "scrollHeight": 1011,
+      "scrollWidth": 1806,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-1806.json",
+    "ax": "states/metix-inbox-1806.txt",
+    "screenshot": "diagrams/metix-inbox-1806.svg",
+    "displayName": "metix-inbox-1806",
+    "privateCaptureSha256": "5d811e86b6ebb40b279422cd542c8f12ec7b69b906c39d4ee9433d2153fd6be5",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-390.json",
+    "ax": "states/metix-inbox-390.txt",
+    "screenshot": "diagrams/metix-inbox-390.svg",
+    "displayName": "metix-inbox-390",
+    "privateCaptureSha256": "bc0d7b97700f75147cf3c2eb5a2b1fa3460c2ba9370b2e541e5d2526e163e9ab",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-768",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 1024,
+      "innerWidth": 768,
+      "outerHeight": 1024,
+      "outerWidth": 768,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 1024,
+      "bodyClientWidth": 768,
+      "bodyScrollHeight": 1024,
+      "bodyScrollWidth": 768,
+      "clientHeight": 1024,
+      "clientWidth": 768,
+      "scrollHeight": 1024,
+      "scrollWidth": 768,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-768.json",
+    "ax": "states/metix-inbox-768.txt",
+    "screenshot": "diagrams/metix-inbox-768.svg",
+    "displayName": "metix-inbox-768",
+    "privateCaptureSha256": "a97e71ec341368a605a77f2394896800a12cd73f6bef6af6a4a4d2d82560b2dc",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-list-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-list-390.json",
+    "ax": "states/metix-inbox-list-390.txt",
+    "screenshot": "diagrams/metix-inbox-list-390.svg",
+    "displayName": "metix-inbox-list-390",
+    "privateCaptureSha256": "ed88dc0add770a43875871cb1c512057167c2eedc87849af7456c2141bc37cb4",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-inbox-selected-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-inbox-selected-1440.json",
+    "ax": "states/metix-inbox-selected-1440.txt",
+    "screenshot": "diagrams/metix-inbox-selected-1440.svg",
+    "displayName": "metix-inbox-selected-1440",
+    "privateCaptureSha256": "e4fb736d0d7703caa9c1c0a90d1f2e27fbe333bf8d882508fa2a162ebb96eb98",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-1024.json",
+    "ax": "states/metix-interview-1024.txt",
+    "screenshot": "diagrams/metix-interview-1024.svg",
+    "displayName": "metix-interview-1024",
+    "privateCaptureSha256": "b258a7b6a7a3e0125f8232b62df9b527488181d2f875bf9923f3f74770a34869",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-1440.json",
+    "ax": "states/metix-interview-1440.txt",
+    "screenshot": "diagrams/metix-interview-1440.svg",
+    "displayName": "metix-interview-1440",
+    "privateCaptureSha256": "f9c94f3735aca69a629957ab86d1cfd133e2a634fa26519d814317d62d352a15",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-390.json",
+    "ax": "states/metix-interview-390.txt",
+    "screenshot": "diagrams/metix-interview-390.svg",
+    "displayName": "metix-interview-390",
+    "privateCaptureSha256": "b53a0af3825721e194956f301ccd6611787aa400a797335912ca4ac8803da20e",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-datepicker-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-datepicker-1440.json",
+    "ax": "states/metix-interview-datepicker-1440.txt",
+    "screenshot": "diagrams/metix-interview-datepicker-1440.svg",
+    "displayName": "metix-interview-datepicker-1440",
+    "privateCaptureSha256": "675f6dcf94de7c2628962aac8ede17d9482de1e12637f51baff80f4a322c390b",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-short-height",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 600,
+      "innerWidth": 1440,
+      "outerHeight": 600,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 600,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 600,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 600,
+      "clientWidth": 1440,
+      "scrollHeight": 600,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-short-height.json",
+    "ax": "states/metix-interview-short-height.txt",
+    "screenshot": "diagrams/metix-interview-short-height.svg",
+    "displayName": "metix-interview-short-height",
+    "privateCaptureSha256": "a7bdbaf04158b245cc7e07e926c45915d9c9a0057081c11d1be3782a8808d60d",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-interview-status-menu-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-interview-status-menu-1440.json",
+    "ax": "states/metix-interview-status-menu-1440.txt",
+    "screenshot": "diagrams/metix-interview-status-menu-1440.svg",
+    "displayName": "metix-interview-status-menu-1440",
+    "privateCaptureSha256": "332caeef6b6be6d9e2bd694cb0951da4dcd27cad8d87086ca10419344be36ea1",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-mailbox-modal-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-mailbox-modal-1440.json",
+    "ax": "states/metix-mailbox-modal-1440.txt",
+    "screenshot": "diagrams/metix-mailbox-modal-1440.svg",
+    "displayName": "metix-mailbox-modal-1440",
+    "privateCaptureSha256": "350ae16d488a407ba74533d88c327a289f1188aeeefeae15a6112b1cd1e74893",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-mailbox-modal-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-mailbox-modal-390.json",
+    "ax": "states/metix-mailbox-modal-390.txt",
+    "screenshot": "diagrams/metix-mailbox-modal-390.svg",
+    "displayName": "metix-mailbox-modal-390",
+    "privateCaptureSha256": "ae927a9211282d4e786ae2b063111ac5e005ec0177ae5589aed74c6a70a644fb",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-outreach-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-outreach-1440.json",
+    "ax": "states/metix-outreach-1440.txt",
+    "screenshot": "diagrams/metix-outreach-1440.svg",
+    "displayName": "metix-outreach-1440",
+    "privateCaptureSha256": "f95d8220661ce08d2210ee31c0ae30c3f68224899de18151fa90589686a8510d",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-outreach-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-outreach-390.json",
+    "ax": "states/metix-outreach-390.txt",
+    "screenshot": "diagrams/metix-outreach-390.svg",
+    "displayName": "metix-outreach-390",
+    "privateCaptureSha256": "1c81131273473c20ea6f0d3ca41eb0d0398ddb4ba3c5666291393e7d12bce97a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-profile-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-profile-1440.json",
+    "ax": "states/metix-profile-1440.txt",
+    "screenshot": "diagrams/metix-profile-1440.svg",
+    "displayName": "Profile 进入动画帧；稳定位置以 profile-stable-1440 为准",
+    "privateCaptureSha256": "754e01626109ec3f0a8ab9f54fdc321f1e94988b4c2ae5c31e79d3f7ea38ba63",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-profile-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-profile-390.json",
+    "ax": "states/metix-profile-390.txt",
+    "screenshot": "diagrams/metix-profile-390.svg",
+    "displayName": "metix-profile-390",
+    "privateCaptureSha256": "5511f71dc829d3cdc2a8c70f3f1500cb33417fd276bbb5e789b7546625a248f2",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-profile-criteria-expanded-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-profile-criteria-expanded-1440.json",
+    "ax": "states/metix-profile-criteria-expanded-1440.txt",
+    "screenshot": "diagrams/metix-profile-criteria-expanded-1440.svg",
+    "displayName": "metix-profile-criteria-expanded-1440",
+    "privateCaptureSha256": "cf2a19789668a07b1fabeeb3f6ccc0ba693a35a277b4aff706c4a8f740f77061",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-profile-stable-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-profile-stable-1440.json",
+    "ax": "states/metix-profile-stable-1440.txt",
+    "screenshot": "diagrams/metix-profile-stable-1440.svg",
+    "displayName": "metix-profile-stable-1440",
+    "privateCaptureSha256": "cd901d4c7dbc0e178a6d933842bfd95742e69847de6a1e17d0cb2e39e461f864",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-reply-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-reply-1440.json",
+    "ax": "states/metix-reply-1440.txt",
+    "screenshot": "diagrams/metix-reply-1440.svg",
+    "displayName": "metix-reply-1440",
+    "privateCaptureSha256": "778c74dde2c2b5daff649775af332f1edd6077f792102d6d35e9069f4a48cb4e",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-reply-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-reply-390.json",
+    "ax": "states/metix-reply-390.txt",
+    "screenshot": "diagrams/metix-reply-390.svg",
+    "displayName": "metix-reply-390",
+    "privateCaptureSha256": "d555d930dac23a185ab7abef182175a217f4e4dc12b257404d87d7c1a5585fb0",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-exit-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-exit-390.json",
+    "ax": "states/metix-schedule-exit-390.txt",
+    "screenshot": "diagrams/metix-schedule-exit-390.svg",
+    "displayName": "metix-schedule-exit-390",
+    "privateCaptureSha256": "0422b4734389dea2a3e0053ece4c40478213c615cbf1739fff23e666c5e0ff7a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-mobile-calendar-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-mobile-calendar-390.json",
+    "ax": "states/metix-schedule-mobile-calendar-390.txt",
+    "screenshot": "diagrams/metix-schedule-mobile-calendar-390.svg",
+    "displayName": "metix-schedule-mobile-calendar-390",
+    "privateCaptureSha256": "41e2b90f771ea32188663c310d4d56b0893ea7449470fbb0bf374636649d32b9",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-mobile-customize-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-mobile-customize-390.json",
+    "ax": "states/metix-schedule-mobile-customize-390.txt",
+    "screenshot": "diagrams/metix-schedule-mobile-customize-390.svg",
+    "displayName": "metix-schedule-mobile-customize-390",
+    "privateCaptureSha256": "3885c4b57aca55b472e6318bc5f97e7f83c367542cfd8370dcd1b4a520601310",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-mobile-pick-times-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-mobile-pick-times-390.json",
+    "ax": "states/metix-schedule-mobile-pick-times-390.txt",
+    "screenshot": "diagrams/metix-schedule-mobile-pick-times-390.svg",
+    "displayName": "metix-schedule-mobile-pick-times-390",
+    "privateCaptureSha256": "ee5c6c237c1c1ec55b49473d3bd74f566b41e882beff25a7bb12fc539c7842d3",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-mobile-selected-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-mobile-selected-390.json",
+    "ax": "states/metix-schedule-mobile-selected-390.txt",
+    "screenshot": "diagrams/metix-schedule-mobile-selected-390.svg",
+    "displayName": "metix-schedule-mobile-selected-390",
+    "privateCaptureSha256": "7bfb97de7e2e8c6c2cac8fdcd175d993befe1abe6190fa822ab319cc78f68635",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-multiple-advanced-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-multiple-advanced-1440.json",
+    "ax": "states/metix-schedule-multiple-advanced-1440.txt",
+    "screenshot": "diagrams/metix-schedule-multiple-advanced-1440.svg",
+    "displayName": "metix-schedule-multiple-advanced-1440",
+    "privateCaptureSha256": "392ff7da3ea62adbf1400429e3b651eb4bf87158e82f50096b262569e77fad7a",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-selected-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-selected-1440.json",
+    "ax": "states/metix-schedule-selected-1440.txt",
+    "screenshot": "diagrams/metix-schedule-selected-1440.svg",
+    "displayName": "metix-schedule-selected-1440",
+    "privateCaptureSha256": "5d9dc824a735814650306f8a50eec6b2ebe7e2703caba6998a7ebc4048033892",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-short-height",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 600,
+      "innerWidth": 1440,
+      "outerHeight": 600,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 600,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 600,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 600,
+      "clientWidth": 1440,
+      "scrollHeight": 600,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-short-height.json",
+    "ax": "states/metix-schedule-short-height.txt",
+    "screenshot": "diagrams/metix-schedule-short-height.svg",
+    "displayName": "metix-schedule-short-height",
+    "privateCaptureSha256": "5341abf172a9bbfddf2e6896db537712348177c398c015208f7c26bf8fe880a3",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-step1-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-step1-1440.json",
+    "ax": "states/metix-schedule-step1-1440.txt",
+    "screenshot": "diagrams/metix-schedule-step1-1440.svg",
+    "displayName": "metix-schedule-step1-1440",
+    "privateCaptureSha256": "b3ca72f19874f50346db5e2aa1c81792e220325aa5cab902a40e354d256280b7",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-step2-1024",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 768,
+      "innerWidth": 1024,
+      "outerHeight": 768,
+      "outerWidth": 1024,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 768,
+      "bodyClientWidth": 1024,
+      "bodyScrollHeight": 768,
+      "bodyScrollWidth": 1024,
+      "clientHeight": 768,
+      "clientWidth": 1024,
+      "scrollHeight": 768,
+      "scrollWidth": 1024,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-step2-1024.json",
+    "ax": "states/metix-schedule-step2-1024.txt",
+    "screenshot": "diagrams/metix-schedule-step2-1024.svg",
+    "displayName": "metix-schedule-step2-1024",
+    "privateCaptureSha256": "d5c537da2b7b47e88261d629f6060618dcad323c596b358a4e05fbc451ad3037",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-step2-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-step2-1440.json",
+    "ax": "states/metix-schedule-step2-1440.txt",
+    "screenshot": "diagrams/metix-schedule-step2-1440.svg",
+    "displayName": "metix-schedule-step2-1440",
+    "privateCaptureSha256": "cdbf5a555185197978ba4702279f05e7db856a379eae5489f79683574853e7f5",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-schedule-step2-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-schedule-step2-390.json",
+    "ax": "states/metix-schedule-step2-390.txt",
+    "screenshot": "diagrams/metix-schedule-step2-390.svg",
+    "displayName": "桌面 Step 2 切换至手机后的日历（不是手机 Step 2）",
+    "privateCaptureSha256": "e7feb2c0bdf1bf20802b820f5965137134fa744ff35153eec23e6134537fc955",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-score-menu-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-score-menu-1440.json",
+    "ax": "states/metix-score-menu-1440.txt",
+    "screenshot": "diagrams/metix-score-menu-1440.svg",
+    "displayName": "metix-score-menu-1440",
+    "privateCaptureSha256": "06367a9c8b3658c1b2fea5e3046689a4d086f872bffd6c9d9adae5a602c99f90",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-context-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-context-1440.json",
+    "ax": "states/metix-sequence-context-1440.txt",
+    "screenshot": "diagrams/metix-sequence-context-1440.svg",
+    "displayName": "metix-sequence-context-1440",
+    "privateCaptureSha256": "7d7ff0c59e8b5ea6ebf7d2854d29a491cf39b37cdc90f1bb54dfdb9ed318ec61",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-context-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-context-390.json",
+    "ax": "states/metix-sequence-context-390.txt",
+    "screenshot": "diagrams/metix-sequence-context-390.svg",
+    "displayName": "metix-sequence-context-390",
+    "privateCaptureSha256": "53c08d3cfeff2317686f1a8b5988dbdd28000399b26e93eeac3122821b32e0c3",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-context-expanded-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-context-expanded-1440.json",
+    "ax": "states/metix-sequence-context-expanded-1440.txt",
+    "screenshot": "diagrams/metix-sequence-context-expanded-1440.svg",
+    "displayName": "metix-sequence-context-expanded-1440",
+    "privateCaptureSha256": "b0f55aad3573630b2468020fd86f7bc6f1abd5ef5b1d93d55edacb25af22e3c2",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-editor-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-editor-1440.json",
+    "ax": "states/metix-sequence-editor-1440.txt",
+    "screenshot": "diagrams/metix-sequence-editor-1440.svg",
+    "displayName": "metix-sequence-editor-1440",
+    "privateCaptureSha256": "eded28426c5b2ef7c77218c3459d46c3e521ed6f75fe07de123b5d3636cfb025",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-editor-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-editor-390.json",
+    "ax": "states/metix-sequence-editor-390.txt",
+    "screenshot": "diagrams/metix-sequence-editor-390.svg",
+    "displayName": "metix-sequence-editor-390",
+    "privateCaptureSha256": "0a2a97d6e61063e5540a777c57236f6626639ae2d46f5f59ebed5cb141c2e972",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-editor-scrolled-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-editor-scrolled-390.json",
+    "ax": "states/metix-sequence-editor-scrolled-390.txt",
+    "screenshot": "diagrams/metix-sequence-editor-scrolled-390.svg",
+    "displayName": "metix-sequence-editor-scrolled-390",
+    "privateCaptureSha256": "aa61156402e32776cbb1f5f912a152cecfc73ba33e4a1db48f9b28629cd535f5",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-editor-settings-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-editor-settings-1440.json",
+    "ax": "states/metix-sequence-editor-settings-1440.txt",
+    "screenshot": "diagrams/metix-sequence-editor-settings-1440.svg",
+    "displayName": "metix-sequence-editor-settings-1440",
+    "privateCaptureSha256": "7a870b06929f999fb98de140431e8f8a20db3cf3c020925ad475dd550b3b3fcf",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-empty-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-empty-1440.json",
+    "ax": "states/metix-sequence-empty-1440.txt",
+    "screenshot": "diagrams/metix-sequence-empty-1440.svg",
+    "displayName": "metix-sequence-empty-1440",
+    "privateCaptureSha256": "cd94ad95158339be06b7e9889ae9b9d768c5d91ae9823a8da3d25730f60f7e06",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-empty-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-empty-390.json",
+    "ax": "states/metix-sequence-empty-390.txt",
+    "screenshot": "diagrams/metix-sequence-empty-390.svg",
+    "displayName": "Sequence 新建上下文表单（不是空列表）",
+    "privateCaptureSha256": "fa2c62bb1c525f2aad95bb859f2e3dd25ae32c658df1a4cc68b86607a9cb5dfd",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-recipients-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-recipients-1440.json",
+    "ax": "states/metix-sequence-recipients-1440.txt",
+    "screenshot": "diagrams/metix-sequence-recipients-1440.svg",
+    "displayName": "metix-sequence-recipients-1440",
+    "privateCaptureSha256": "ef28dd217dd0eb7941338bd2c12184a753b0877e570ee4bd181b5ab88fc56d7c",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-sender-menu-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-sender-menu-1440.json",
+    "ax": "states/metix-sequence-sender-menu-1440.txt",
+    "screenshot": "diagrams/metix-sequence-sender-menu-1440.svg",
+    "displayName": "metix-sequence-sender-menu-1440",
+    "privateCaptureSha256": "a46983824681702af21684e459ef37e43b3ed78ad1e95a3a2855c83835708eec",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-timezone-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-timezone-1440.json",
+    "ax": "states/metix-sequence-timezone-1440.txt",
+    "screenshot": "diagrams/metix-sequence-timezone-1440.svg",
+    "displayName": "metix-sequence-timezone-1440",
+    "privateCaptureSha256": "b0a1fe82a63000934031604fe534ec6b0d8fcff634e1fff0067d70360441d962",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-sequence-variables-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-sequence-variables-1440.json",
+    "ax": "states/metix-sequence-variables-1440.txt",
+    "screenshot": "diagrams/metix-sequence-variables-1440.svg",
+    "displayName": "metix-sequence-variables-1440",
+    "privateCaptureSha256": "aa06dba6ccffc23ec5670b9901b2fb44d25c21f1e652c21e9224039b7eeb2ab0",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-shortlist-empty-1440",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 900,
+      "innerWidth": 1440,
+      "outerHeight": 900,
+      "outerWidth": 1440,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 900,
+      "bodyClientWidth": 1440,
+      "bodyScrollHeight": 900,
+      "bodyScrollWidth": 1440,
+      "clientHeight": 900,
+      "clientWidth": 1440,
+      "scrollHeight": 900,
+      "scrollWidth": 1440,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-shortlist-empty-1440.json",
+    "ax": "states/metix-shortlist-empty-1440.txt",
+    "screenshot": "diagrams/metix-shortlist-empty-1440.svg",
+    "displayName": "metix-shortlist-empty-1440",
+    "privateCaptureSha256": "632aa637ed57737b0cbc731e28145c04b847aa89d69e75e4d384356f4b218ed3",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  },
+  {
+    "id": "metix-shortlist-empty-390",
+    "window": {
+      "devicePixelRatio": 1,
+      "innerHeight": 844,
+      "innerWidth": 390,
+      "outerHeight": 844,
+      "outerWidth": 390,
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "document": {
+      "bodyClientHeight": 844,
+      "bodyClientWidth": 390,
+      "bodyScrollHeight": 844,
+      "bodyScrollWidth": 390,
+      "clientHeight": 844,
+      "clientWidth": 390,
+      "scrollHeight": 844,
+      "scrollWidth": 390,
+      "scrollingElement": "HTML"
+    },
+    "url": "https://example.invalid/reference",
+    "json": "states/metix-shortlist-empty-390.json",
+    "ax": "states/metix-shortlist-empty-390.txt",
+    "screenshot": "diagrams/metix-shortlist-empty-390.svg",
+    "displayName": "metix-shortlist-empty-390",
+    "privateCaptureSha256": "8e149f6b2c991b8a9c6015759829320e202f9297c50ef2e8664c61405ccc5fa0",
+    "evidenceKind": "anonymized DOM geometry diagram; not original screenshot"
+  }
+]
