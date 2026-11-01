@@ -65,6 +65,7 @@ import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingReadCacheContext } from "./recruiting/shared";
+import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 
 const CreateGroupForm = lazyPanel(() =>
@@ -346,6 +347,18 @@ export function ShellPage() {
         />
       ) : null}
       <ShellSidebar model={model} />
+      {/* In a conversation the dock would cover the composer, and the role list still flags waits. */}
+      {showToolActivity || model.recruitingWorkspaceView === "conversation" ? null : (
+        <KruitDock
+          groups={groups}
+          groupId={model.groupId}
+          onOpen={(id) => {
+            setPanel(null);
+            setMobileSidebarOpen(false);
+            navigate(`/app/g/${encodeURIComponent(id)}?view=conversation`);
+          }}
+        />
+      )}
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
       {computerOpen || booting || !botsSidebarCollapsed ? null : (

@@ -1329,6 +1329,7 @@ msgid "Direct MCP"
 msgstr "Direct MCP"
 
 #: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/shell/KruitDock.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
 
@@ -2128,10 +2129,12 @@ msgstr "Name: {0}"
 msgid "Needs an answer"
 msgstr "Needs an answer"
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
 msgstr "Needs confirmation"
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs input"
 msgstr "Needs input"
