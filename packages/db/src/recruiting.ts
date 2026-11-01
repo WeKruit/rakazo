@@ -309,22 +309,64 @@ export class RecruitingSourceValidationError extends Error {
   }
 }
 
+const TRANSACTION_SCOPE = Symbol.for("prisma.client.transaction.scope_context");
+const transactionReads = new WeakMap<object, Map<string, Promise<unknown>>>();
+
+/**
+ * A read that cannot change inside one transaction (ownership, immutable rows), loaded once per
+ * interactive transaction instead of once per helper. Outside a transaction it always loads, so
+ * nothing is remembered across requests.
+ */
+function onceInTransaction<T>(tx: Tx, key: string, load: () => Promise<T>): Promise<T> {
+  if (typeof (tx as unknown as Record<symbol, unknown>)[TRANSACTION_SCOPE] !== "object")
+    return load();
+  let reads = transactionReads.get(tx);
+  if (!reads) {
+    reads = new Map();
+    transactionReads.set(tx, reads);
+  }
+  const known = reads.get(key);
+  if (known) return known as Promise<T>;
+  const loading = load();
+  reads.set(key, loading);
+  loading.catch(() => reads.delete(key));
+  return loading;
+}
+
+/** Drop a remembered row after this transaction writes it. */
+function forgetInTransaction(tx: Tx, key: string) {
+  transactionReads.get(tx)?.delete(key);
+}
+
 async function requireThread(tx: Tx, actor: Actor, threadId: string) {
   const thread = scoped(
     actor,
-    await tx.thread.findFirst({
-      where: { id: threadId, spaceId: actor.spaceId, userId: actor.userId },
-      select: {
-        id: true,
-        spaceId: true,
-        userId: true,
-        botId: true,
-        groupId: true,
-        externalConversationId: true,
-        activeRecruitingRoleId: true,
-      },
-    }),
+    await onceInTransaction(tx, `thread:${actor.spaceId}:${actor.userId}:${threadId}`, () =>
+      tx.thread.findFirst({
+        where: { id: threadId, spaceId: actor.spaceId, userId: actor.userId },
+        select: {
+          id: true,
+          spaceId: true,
+          userId: true,
+          botId: true,
+          groupId: true,
+          externalConversationId: true,
+          activeRecruitingRoleId: true,
+        },
+      }),
+    ),
   );
+  await onceInTransaction(tx, `thread-owner:${actor.spaceId}:${actor.userId}:${threadId}`, () =>
+    requireThreadOwner(tx, actor, thread),
+  );
+  return { ...thread };
+}
+
+async function requireThreadOwner(
+  tx: Tx,
+  actor: Actor,
+  thread: { botId: string | null; groupId: string | null; externalConversationId: string | null },
+) {
   if (thread.botId)
     scoped(
       actor,
@@ -351,7 +393,19 @@ async function requireThread(tx: Tx, actor: Actor, threadId: string) {
     );
     scoped(actor, conversation.bot);
   } else throw new IsolationError();
-  return thread;
+}
+
+/** The role pointer changed on this thread: later reads in the transaction see the new value. */
+function forgetThread(tx: Tx, actor: Actor, threadId: string, roleId?: string | null) {
+  const key = `thread:${actor.spaceId}:${actor.userId}:${threadId}`;
+  const known = transactionReads.get(tx)?.get(key) as
+    | Promise<{ activeRecruitingRoleId: string | null } | null>
+    | undefined;
+  if (!known || roleId === undefined) return forgetInTransaction(tx, key);
+  transactionReads.get(tx)?.set(
+    key,
+    known.then((thread) => (thread ? { ...thread, activeRecruitingRoleId: roleId } : thread)),
+  );
 }
 
 async function recordRecruitingChange(
@@ -399,19 +453,22 @@ async function requireRun(
   runId: string,
   authorizedThread?: Awaited<ReturnType<typeof requireThread>>,
 ) {
+  // A run's owner, thread and bot never change.
   const run = scoped(
     actor,
-    await tx.run.findFirst({
-      where: { id: runId, spaceId: actor.spaceId, userId: actor.userId },
-      select: {
-        id: true,
-        spaceId: true,
-        userId: true,
-        threadId: true,
-        botId: true,
-        bot: { select: { spaceId: true, userId: true } },
-      },
-    }),
+    await onceInTransaction(tx, `run:${actor.spaceId}:${actor.userId}:${runId}`, () =>
+      tx.run.findFirst({
+        where: { id: runId, spaceId: actor.spaceId, userId: actor.userId },
+        select: {
+          id: true,
+          spaceId: true,
+          userId: true,
+          threadId: true,
+          botId: true,
+          bot: { select: { spaceId: true, userId: true } },
+        },
+      }),
+    ),
   );
   scoped(actor, run.bot);
   if (run.threadId === authorizedThread?.id) scoped(actor, authorizedThread);
@@ -428,11 +485,14 @@ async function validateArtifact(
     thread: Awaited<ReturnType<typeof requireThread>>;
   },
 ) {
+  // A saved file's owner, chat and hash never change.
   const artifact = scoped(
     actor,
-    await tx.artifact.findFirst({
-      where: { id: ref.artifactId, spaceId: actor.spaceId, userId: actor.userId },
-    }),
+    await onceInTransaction(tx, `artifact:${actor.spaceId}:${actor.userId}:${ref.artifactId}`, () =>
+      tx.artifact.findFirst({
+        where: { id: ref.artifactId, spaceId: actor.spaceId, userId: actor.userId },
+      }),
+    ),
   );
   if (!artifact.groupId && !artifact.botId) throw new IsolationError();
   if (artifact.hash !== ref.sha256)
@@ -445,19 +505,28 @@ async function validateArtifact(
       ? scoped(actor, context.run)
       : await requireRun(tx, actor, artifact.runId, context?.thread)
     : null;
-  const thread = await tx.thread.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      ...(run ? { id: run.threadId } : {}),
-      ...(artifact.groupId
-        ? { groupId: artifact.groupId }
-        : {
-            groupId: null,
-            OR: [{ botId: artifact.botId }, { externalConversation: { botId: artifact.botId! } }],
-          }),
-    },
-  });
+  const thread = await onceInTransaction(
+    tx,
+    `artifact-thread:${actor.spaceId}:${actor.userId}:${ref.artifactId}:${run?.threadId ?? ""}`,
+    () =>
+      tx.thread.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          ...(run ? { id: run.threadId } : {}),
+          ...(artifact.groupId
+            ? { groupId: artifact.groupId }
+            : {
+                groupId: null,
+                OR: [
+                  { botId: artifact.botId },
+                  { externalConversation: { botId: artifact.botId! } },
+                ],
+              }),
+        },
+        select: { id: true },
+      }),
+  );
   if (!thread) throw new IsolationError();
   if (context && thread.id === context.thread.id) scoped(actor, context.thread);
   else await requireThread(tx, actor, thread.id);
@@ -490,10 +559,11 @@ async function validateSources(
   }
   const sourceMessageTargets: RecruitingAssessmentSnapshot["sourceMessageTargets"] = [];
   if (!messageIds.size) return sourceMessageTargets;
-  const messages = await tx.message.findMany({
-    where: { id: { in: [...messageIds] } },
-    select: { id: true, threadId: true },
-  });
+  const ids = [...messageIds].sort();
+  // A message's thread never changes.
+  const messages = await onceInTransaction(tx, `message-threads:${ids.join(",")}`, () =>
+    tx.message.findMany({ where: { id: { in: ids } }, select: { id: true, threadId: true } }),
+  );
   if (messages.length !== messageIds.size) throw new IsolationError();
   const threads = new Map<string, Awaited<ReturnType<typeof requireThread>>>();
   for (const threadId of new Set(messages.map((message) => message.threadId)))
@@ -771,6 +841,7 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
+  forgetThread(tx, actor, input.sourceThreadId, role.id);
   await syncRoleGroupName(tx, actor, thread, input.title);
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
@@ -799,6 +870,7 @@ async function bindRoleInTransaction(
     where: { id: input.threadId },
     data: { activeRecruitingRoleId: role?.id ?? null },
   });
+  forgetThread(tx, actor, input.threadId, role?.id ?? null);
   await recordRecruitingChange(tx, actor, thread, role?.id ?? null);
   return role ? roleSnapshot(tx, actor, role) : null;
 }
@@ -1248,6 +1320,7 @@ export async function openVerifiedRecruitingCrmWorkspace(
         },
       });
       await tx.thread.update({ where: { id: threadId }, data: { activeRecruitingRoleId: roleId } });
+      forgetThread(tx, actor, threadId, roleId);
       return { groupId, threadId, roleId };
     },
     { timeout: 30_000 },
@@ -1878,6 +1951,13 @@ async function runTargetsRecruitingThread(
   return true;
 }
 
+/** A message in a thread with its human-author fields; messages are not edited in these transactions. */
+function threadMessage(tx: Tx, id: string, threadId: string) {
+  return onceInTransaction(tx, `message:${threadId}:${id}`, () =>
+    tx.message.findFirst({ where: { id, threadId }, include: humanMessageInclude }),
+  );
+}
+
 async function requireRunSource(
   tx: Tx,
   actor: Actor,
@@ -1886,12 +1966,7 @@ async function requireRunSource(
 ) {
   if (sourceMessageId === null && run.sourceMessageId !== null) throw new IsolationError();
   const source =
-    sourceMessageId === null
-      ? null
-      : await tx.message.findFirst({
-          where: { id: sourceMessageId, threadId: run.threadId },
-          include: humanMessageInclude,
-        });
+    sourceMessageId === null ? null : await threadMessage(tx, sourceMessageId, run.threadId);
   if (sourceMessageId !== null && !source) throw new IsolationError();
   const { steering, answers } = await loadRunHumanSources(tx, actor, run);
   const hint =
@@ -2989,10 +3064,7 @@ export async function executeRecruitingRoleMutation(
       const source = RecruitingSourceRefSchema.parse(saved.source);
       if (source.anchor.kind !== "message" || source.quote !== input.intent.quote)
         throw new IsolationError();
-      const human = await tx.message.findFirst({
-        where: { id: source.anchor.messageId, threadId: run.threadId },
-        include: humanMessageInclude,
-      });
+      const human = await threadMessage(tx, source.anchor.messageId, run.threadId);
       if (!human || !isNativeHumanMessage(human)) throw new IsolationError();
       await validateReadSources(tx, actor, [source], artifacts);
       const workspace = saved.workspace
