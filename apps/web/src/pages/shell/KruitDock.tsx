@@ -3,30 +3,37 @@ import type { Group } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
 import { Minus } from "lucide-react";
-import { useState } from "react";
+import type { MouseEvent, PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  clampOffset,
+  controlAt,
+  DOCK_MARGIN,
+  type DockOffset,
+  findFreeOffset,
+  readDockOffset,
+  saveDockOffset,
+} from "./kruit-dock-position";
 
 const SURFACE =
   "border border-border/60 bg-card/80 text-card-foreground ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150";
 
 /**
- * Kruit's corner entry at the bottom of the page, beside the sidebar. While something waits it
- * shows a small reminder that minimizes to the Kruit button with a count; the list of waits
- * opens only when asked for.
+ * Kruit's corner entry, floating at the bottom right. While something waits it shows a small
+ * reminder that minimizes to the Kruit button with a count; one click opens what waits. It
+ * steps clear of buttons on the page and can be dragged anywhere; a dragged spot is remembered.
  */
 export function KruitDock({
   groups,
   groupId,
   chatting = false,
-  start = 0,
   onOpen,
 }: {
   groups: Group[];
   /** The open conversation: its own card is already in view. */
   groupId?: string;
-  /** A chat is on screen: start minimized and sit above its composer. */
+  /** A chat is on screen: start minimized. */
   chatting?: boolean;
-  /** Width of the sidebar the entry sits beside. */
-  start?: number;
   onOpen: (groupId: string) => void;
 }) {
   const { t } = useLingui();
@@ -39,10 +46,13 @@ export function KruitDock({
   const minimized = minimizedPref ?? chatting;
   const showList = expanded && waiting.length > 0;
   const showReminder = !showList && !minimized && waiting.length > 0;
-  if (chatting ? !waiting.length : !kruit && !waiting.length) return null;
+  const hidden = chatting ? !waiting.length : !kruit && !waiting.length;
+  const dock = useFloatingDock(hidden, `${minimized}:${showList}:${waiting.length}`);
+  if (hidden) return null;
   // One click reaches the content: a single wait opens straight away, several show the list.
   const reveal = () => {
-    if (waiting.length === 1) onOpen(waiting[0].id);
+    const only = waiting.length === 1 ? waiting[0] : undefined;
+    if (only) onOpen(only.id);
     else setExpanded(true);
   };
   const minimize = () => {
@@ -56,8 +66,9 @@ export function KruitDock({
   );
   return (
     <div
-      className={`fixed z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2 ${chatting ? "bottom-24" : "bottom-4"}`}
-      style={{ insetInlineStart: `calc(${start}px + 1rem)` }}
+      ref={dock.ref}
+      className="fixed z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2"
+      style={{ right: dock.offset.right, bottom: dock.offset.bottom }}
     >
       {showList ? (
         <div className={`w-80 max-w-full rounded-xl p-2 shadow-2xl ${SURFACE}`}>
@@ -97,7 +108,8 @@ export function KruitDock({
       {showReminder ? (
         <div
           role="status"
-          className={`flex items-center gap-1 rounded-full py-1 ps-3 pe-1 shadow-xl ${SURFACE}`}
+          className={`flex touch-none items-center gap-1 rounded-full py-1 ps-3 pe-1 shadow-xl ${SURFACE}`}
+          {...dock.drag}
         >
           <button type="button" className="text-sm font-medium" onClick={reveal}>
             <Plural
@@ -116,7 +128,8 @@ export function KruitDock({
               ? t`${RECRUITING_GLOBAL_AGENT_NAME}, ${waiting.length} waiting`
               : RECRUITING_GLOBAL_AGENT_NAME
           }
-          className={`relative grid size-12 place-items-center rounded-full shadow-xl hover:bg-accent ${SURFACE}`}
+          className={`relative grid size-12 touch-none place-items-center rounded-full shadow-xl hover:bg-accent ${SURFACE}`}
+          {...dock.drag}
           onClick={() => {
             // With something waiting the button opens it; otherwise it opens Kruit.
             if (showList) setExpanded(false);
@@ -134,4 +147,92 @@ export function KruitDock({
       )}
     </div>
   );
+}
+
+/** Where the dock sits, how to drag it, and the clearing of controls it would otherwise cover. */
+function useFloatingDock(hidden: boolean, layout: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [stored, setStored] = useState(readDockOffset);
+  const [auto, setAuto] = useState<DockOffset>({ right: DOCK_MARGIN, bottom: DOCK_MARGIN });
+  const moved = useRef(false);
+  const latest = useRef<DockOffset | undefined>(undefined);
+  const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
+
+  const settle = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const box = { width: el.offsetWidth, height: el.offsetHeight };
+    if (readDockOffset()) {
+      setStored((was) => was && clampOffset(was, box, viewport()));
+      return;
+    }
+    const next = findFreeOffset(box, viewport(), (x, y) => controlAt(x, y, el));
+    setAuto((was) => (was.right === next.right && was.bottom === next.bottom ? was : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!hidden) settle();
+  }, [hidden, layout, settle]);
+
+  useEffect(() => {
+    if (hidden) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const later = () => {
+      clearTimeout(timer);
+      timer = setTimeout(settle, 400);
+    };
+    const observer = new MutationObserver((records) => {
+      if (records.some((record) => !ref.current?.contains(record.target))) later();
+    });
+    observer.observe(document.body, { subtree: true, childList: true });
+    window.addEventListener("resize", later);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      window.removeEventListener("resize", later);
+    };
+  }, [hidden, settle]);
+
+  const drag = {
+    onPointerDown: (event: PointerEvent<HTMLElement>) => {
+      const el = ref.current;
+      if (!el || (event.target as Element).closest('button[aria-label="Minimize"]')) return;
+      const rect = el.getBoundingClientRect();
+      const start = {
+        x: event.clientX,
+        y: event.clientY,
+        right: window.innerWidth - rect.right,
+        bottom: window.innerHeight - rect.bottom,
+      };
+      moved.current = false;
+      const move = (e: globalThis.PointerEvent) => {
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        if (!moved.current && Math.hypot(dx, dy) < 5) return;
+        moved.current = true;
+        latest.current = clampOffset(
+          { right: start.right - dx, bottom: start.bottom - dy },
+          { width: rect.width, height: rect.height },
+          viewport(),
+        );
+        setStored(latest.current);
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        if (moved.current && latest.current) saveDockOffset(latest.current);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    },
+    onClickCapture: (event: MouseEvent) => {
+      if (!moved.current) return;
+      moved.current = false;
+      event.stopPropagation();
+    },
+  };
+
+  return { ref, offset: stored ?? auto, drag };
 }

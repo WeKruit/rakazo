@@ -22,10 +22,7 @@ const KRUIT = "recruiting-global-a";
 let host: HTMLDivElement | undefined;
 afterEach(() => host?.remove());
 
-async function render(
-  groups: Group[],
-  props: { groupId?: string; chatting?: boolean; start?: number } = {},
-) {
+async function render(groups: Group[], props: { groupId?: string; chatting?: boolean } = {}) {
   host = document.createElement("div");
   document.body.append(host);
   const onOpen = vi.fn();
@@ -95,9 +92,28 @@ it("opens the list in one click from the Kruit button when several wait", async 
   expect(host.textContent).toContain("Open role");
 });
 
-it("sits beside the sidebar", async () => {
-  const { host } = await render([group(KRUIT)], { start: 260 });
-  expect((host.firstElementChild as HTMLElement).style.insetInlineStart).toBe("calc(260px + 1rem)");
+it("floats bottom right and remembers where it was dragged", async () => {
+  localStorage.clear();
+  const { host } = await render([group(KRUIT)]);
+  const dock = host.firstElementChild as HTMLElement;
+  expect(dock.style.right).toBe("16px");
+  expect(dock.style.bottom).toBe("16px");
+  const logo = find(host, "Kruit");
+  const fire = (type: string, x: number, y: number, target: EventTarget = window) =>
+    act(async () => {
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+    });
+  Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  await fire("pointerdown", 900, 700, logo);
+  await fire("pointermove", 700, 500);
+  await fire("pointerup", 700, 500);
+  expect(JSON.parse(localStorage.getItem("kruit-dock-position")!)).toMatchObject({
+    right: expect.any(Number),
+    bottom: expect.any(Number),
+  });
+  expect(dock.style.right).not.toBe("16px");
+  localStorage.clear();
 });
 
 it("in a conversation starts minimized and shows only waits from other conversations", async () => {
@@ -112,7 +128,6 @@ it("in a conversation starts minimized and shows only waits from other conversat
     { groupId: "Designer", chatting: true },
   );
   expect(other.host.querySelector('[role="status"]')).toBeNull();
-  expect(other.host.firstElementChild?.className).toContain("bottom-24");
   expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(other.host, "Kruit").click());
   expect(other.onOpen).toHaveBeenCalledWith("Open role");
