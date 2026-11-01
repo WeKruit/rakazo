@@ -453,7 +453,7 @@ msgid "Awaiting feedback"
 msgstr "Awaiting feedback"
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr "Back"
 
@@ -1050,6 +1050,10 @@ msgstr "Could not load search results"
 msgid "Could not load sign-in options"
 msgstr "Could not load sign-in options"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "Could not load this conversation"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "Could not load this file."
@@ -1123,6 +1127,10 @@ msgstr "Could not save the note."
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr "Could not save the reminder."
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "Could not send"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1910,6 +1918,7 @@ msgstr "Loading trace…"
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "Loading…"
@@ -2003,6 +2012,7 @@ msgstr "Mentions"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "Message"
 
@@ -2023,6 +2033,7 @@ msgid "Message from {peer}"
 msgstr "Message from {peer}"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "Message…"
 
@@ -2365,6 +2376,10 @@ msgstr "Open computer settings"
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "Open external link?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "Open full conversation"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3131,6 +3146,7 @@ msgid "Select all on this page"
 msgstr "Select all on this page"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "Send"
 

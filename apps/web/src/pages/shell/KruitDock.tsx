@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
-import { ArrowLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -14,7 +14,6 @@ export function KruitDock({
   groupId,
   chatting = false,
   onOpen,
-  onBack,
 }: {
   groups: Group[];
   /** The open conversation: its own card is already in view. */
@@ -22,8 +21,6 @@ export function KruitDock({
   /** A chat is on screen: no button over its composer, and cards sit at the top instead. */
   chatting?: boolean;
   onOpen: (groupId: string) => void;
-  /** Return to where the recruiter was before opening a card from here. */
-  onBack?: () => void;
 }) {
   const { t } = useLingui();
   const kruit = groups.find((group) => group.id.startsWith("recruiting-global-"));
@@ -35,17 +32,11 @@ export function KruitDock({
   const [closedFor, setClosedFor] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
   const showCard = waiting.length > 0 && (opened || closedFor !== key);
-  if (!onBack && (chatting ? !showCard : !kruit && !waiting.length)) return null;
+  if (chatting ? !showCard : !kruit && !waiting.length) return null;
   return (
     <div
       className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "top-20" : "bottom-4"}`}
     >
-      {onBack ? (
-        <Button variant="outline" size="sm" className="shadow-lg" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />
-          <Trans>Back</Trans>
-        </Button>
-      ) : null}
       {showCard ? (
         <div
           role="status"

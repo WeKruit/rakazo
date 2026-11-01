@@ -21,10 +21,7 @@ const KRUIT = "recruiting-global-a";
 let host: HTMLDivElement | undefined;
 afterEach(() => host?.remove());
 
-async function render(
-  groups: Group[],
-  props: { groupId?: string; chatting?: boolean; onBack?: () => void } = {},
-) {
+async function render(groups: Group[], props: { groupId?: string; chatting?: boolean } = {}) {
   host = document.createElement("div");
   document.body.append(host);
   const onOpen = vi.fn();
@@ -78,15 +75,4 @@ it("in a conversation shows no button, only cards from other conversations", asy
   );
   expect(other.host.querySelector('[role="status"]')?.textContent).toContain("Open role");
   expect(find(other.host, "Kruit")).toBeUndefined();
-});
-
-it("offers a way back to where the recruiter was after opening a card", async () => {
-  const onBack = vi.fn();
-  const { host } = await render([group(KRUIT), group("Designer")], {
-    groupId: "Designer",
-    chatting: true,
-    onBack,
-  });
-  await act(async () => find(host, "Back").click());
-  expect(onBack).toHaveBeenCalled();
 });

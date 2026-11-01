@@ -453,7 +453,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr "뒤로"
 
@@ -1050,6 +1050,10 @@ msgstr "검색 결과를 불러올 수 없습니다"
 msgid "Could not load sign-in options"
 msgstr "로그인 옵션을 불러올 수 없습니다"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "이 대화를 불러올 수 없습니다"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "파일을 불러오지 못했습니다."
@@ -1123,6 +1127,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr ""
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "보낼 수 없습니다"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1910,6 +1918,7 @@ msgstr ""
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "불러오는 중…"
@@ -2003,6 +2012,7 @@ msgstr "멘션"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "메시지"
 
@@ -2023,6 +2033,7 @@ msgid "Message from {peer}"
 msgstr "{peer}의 메시지"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "메시지를 입력하세요"
 
@@ -2365,6 +2376,10 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "외부 링크를 열까요?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "전체 대화 열기"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3131,6 +3146,7 @@ msgid "Select all on this page"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "보내기"
 

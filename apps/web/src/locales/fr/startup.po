@@ -453,7 +453,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr "Retour"
 
@@ -1050,6 +1050,10 @@ msgstr "Impossible de charger les résultats de recherche"
 msgid "Could not load sign-in options"
 msgstr "Impossible de charger les options de connexion"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "Impossible de charger cette conversation"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "Impossible de charger ce fichier."
@@ -1123,6 +1127,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr ""
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "Échec de l’envoi"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1910,6 +1918,7 @@ msgstr ""
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "Chargement…"
@@ -2003,6 +2012,7 @@ msgstr "Mentions"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "Message"
 
@@ -2023,6 +2033,7 @@ msgid "Message from {peer}"
 msgstr "Message de {peer}"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "Message…"
 
@@ -2365,6 +2376,10 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "Ouvrir le lien externe ?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "Ouvrir la conversation complète"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3131,6 +3146,7 @@ msgid "Select all on this page"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "Envoyer"
 
