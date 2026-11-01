@@ -22,7 +22,6 @@ import {
   createCompanySiteResolver,
   createConnectorStack,
   createDeploymentEmbedder,
-  createExaOrganizationSearch,
   createJobReconciler,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
@@ -404,7 +403,6 @@ async function main() {
     void fillOrganizationLogos(
       prisma,
       createCompanySiteResolver({
-        searchOrganizations: createExaOrganizationSearch(),
         store: createPrismaOrganizationLogoStore(prisma),
       }),
       { signal: shutdown.signal, maxLookups: LOGO_FILL_MAX_LOOKUPS },
