@@ -5932,6 +5932,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
+        // Kruit lists a role's people with the same lines a role team's round uses.
+        const showGlobalRolePeople = async (
+          args: Record<string, unknown>,
+          result: unknown,
+        ): Promise<object | undefined> => {
+          const items = (result as { items?: Array<{ candidateKey?: unknown }> } | null)?.items;
+          if (
+            !thread.groupId?.startsWith("recruiting-global-") ||
+            args.operation !== "list" ||
+            typeof args.roleId !== "string" ||
+            !items?.length
+          )
+            return undefined;
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: args.roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { title: true, sourceThreadId: true },
+          });
+          if (!role) return undefined;
+          const text = await recruitingRoundListText(deps.prisma, {
+            threadId: role.sourceThreadId,
+            spaceId: run.spaceId,
+            roleId: args.roleId,
+            candidateKeys: items.flatMap((item) =>
+              typeof item.candidateKey === "string" ? [item.candidateKey] : [],
+            ),
+            knownOnly: true,
+            heading: `${role.title}:`,
+          });
+          if (!text) return undefined;
+          await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+          return {
+            ...(result as object),
+            shownInChat:
+              "These people are already listed in chat as the role team lists them. Do not list them again; add at most one line, such as that nobody is graded yet.",
+          };
+        };
         const showRoundList = async (text: string) => {
           const messageId = roundStream?.messageId;
           if (!messageId) {
@@ -10688,17 +10724,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "recruiting_candidates") {
             try {
               if (!deps.artifacts) throw new IsolationError();
-              return finish(
-                redactConnectorPayload(
-                  await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
-                    { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
-                    args,
-                    context,
-                  ),
-                  runSecrets,
-                ),
+              const result = await executeRecruitingCandidatesTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
+                { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
+                args,
+                context,
               );
+              const shown = await showGlobalRolePeople(args, result);
+              return finish(redactConnectorPayload(shown ?? result, runSecrets));
             } catch (error) {
               return finish(roleError(error));
             }
