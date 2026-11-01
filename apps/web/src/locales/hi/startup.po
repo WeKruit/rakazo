@@ -56,6 +56,11 @@ msgstr "{0} MB"
 msgid "{0} selected"
 msgstr ""
 
+#. placeholder {0}: data.shortlistDateUnknownPeople
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "{0} shortlisted people have no recorded shortlist date."
+msgstr ""
+
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
 #. placeholder {2}: data.total
@@ -250,6 +255,10 @@ msgstr ""
 msgid "Add a schedule, webhook, GitHub, or message trigger"
 msgstr ""
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Add email"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Add MCP server"
 msgstr "MCP सर्वर जोड़ें"
@@ -325,8 +334,16 @@ msgstr ""
 msgid "All internal verdicts"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All matches"
+msgstr ""
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "All of"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "All roles"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -353,6 +370,14 @@ msgstr "पहले से खाता है?"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "इस प्रोवाइडर के लिए API कुंजी संग्रहीत है, सब्सक्रिप्शन साइन-इन नहीं।"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Analytics"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Analytics could not be read."
+msgstr ""
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "AND"
 msgstr ""
@@ -366,6 +391,7 @@ msgid "Any of"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Any time"
 msgstr ""
 
@@ -494,6 +520,10 @@ msgstr ""
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "बियरर टोकन"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Best match"
+msgstr ""
 
 #: src/lib/ticket-status.ts
 msgid "Blocked"
@@ -694,6 +724,10 @@ msgstr "बॉट का आकार और रंग चुनें, या �
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "नया पासवर्ड चुनें"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Choose a valid date range."
+msgstr ""
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
@@ -1037,6 +1071,10 @@ msgstr ""
 msgid "Could not load notes."
 msgstr ""
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Could not load or save this sequence. Reopen it to try again."
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr ""
@@ -1116,6 +1154,10 @@ msgstr ""
 msgid "Could not run routine"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Could not save read status."
+msgstr ""
+
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not save routine"
 msgstr "रूटीन सहेजा नहीं जा सका"
@@ -1184,6 +1226,10 @@ msgstr "बनाएं"
 #: src/pages/Auth.tsx
 msgid "Create account"
 msgstr "खाता बनाएं"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Create draft"
+msgstr ""
 
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1315,6 +1361,10 @@ msgstr "डिलीट किया गया"
 msgid "Deletion code"
 msgstr "हटाने का कोड"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Delivery"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "विवरण"
@@ -1400,6 +1450,10 @@ msgstr ""
 msgid "Duration not recorded"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Earliest observed contact in period"
+msgstr ""
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1414,6 +1468,11 @@ msgstr ""
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
 msgstr "ईमेल"
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Email {0}"
+msgstr ""
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Email content unavailable."
@@ -1609,6 +1668,10 @@ msgstr "पासवर्ड भूल गए?"
 msgid "From"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "From (UTC)"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Full assessment"
 msgstr ""
@@ -1738,6 +1801,10 @@ msgstr ""
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "इनपुट"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Insert variable"
+msgstr ""
 
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Instance API key"
@@ -1895,6 +1962,10 @@ msgstr "पुराने संदेश लोड करें"
 msgid "Load more"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Loading analytics…"
+msgstr ""
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Loading costs…"
 msgstr ""
@@ -1920,6 +1991,7 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 #: src/pages/shell/StackedConversation.tsx
@@ -1972,6 +2044,14 @@ msgstr "निम्न"
 msgid "Low"
 msgstr "निम्न"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Mark read"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Mark unread"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -1979,11 +2059,7 @@ msgid "Match"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Match score"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Match tier"
+msgid "Match group"
 msgstr ""
 
 #. js-lingui-explicit-id
@@ -2015,6 +2091,7 @@ msgstr ""
 
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Message"
@@ -2113,6 +2190,7 @@ msgstr "म्यूट करें"
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Name"
 msgstr "नाम"
 
@@ -2217,6 +2295,10 @@ msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No contacts match."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "No dated CRM messages are available for this scope."
 msgstr ""
 
 #: src/pages/recruiting/SequenceOverview.tsx
@@ -2370,6 +2452,10 @@ msgstr "खोलें"
 msgid "Open {0}"
 msgstr ""
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Open {name} on LinkedIn"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Open {name}'s source profile"
 msgstr ""
@@ -2394,6 +2480,7 @@ msgstr "पूरी विंडो में खोलें"
 msgid "Open navigation"
 msgstr "नेविगेशन खोलें"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open role"
 msgstr ""
@@ -2461,6 +2548,11 @@ msgstr ""
 msgid "Original sender: {0}"
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Outdated review"
+msgstr ""
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Output"
 msgstr ""
@@ -2489,6 +2581,15 @@ msgstr ""
 #. placeholder {0}: overdue.length
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Overdue ({0})"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Partial"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Partial coverage · Stored CRM messages only. Native and imported correspondence are not included. Complete first-contact and shortlist history, automated-reply classification, and unmatched identities are unknown."
 msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
@@ -2521,6 +2622,10 @@ msgstr "पासवर्ड मेल नहीं खाते"
 msgid "Paste your API key, then test again."
 msgstr "अपनी API कुंजी पेस्ट करें, फिर फिर से परीक्षण करें।"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Pause"
+msgstr ""
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Pause consideration"
 msgstr ""
@@ -2528,6 +2633,10 @@ msgstr ""
 #: src/components/ToolActivityDisclosure.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "People, deduplicated by saved identity."
 msgstr ""
 
 #: src/lib/message-text.ts
@@ -2595,10 +2704,6 @@ msgstr "कतार में"
 
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
-msgstr ""
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Rank"
 msgstr ""
 
 #: src/pages/ShellMessage.tsx
@@ -2712,6 +2817,10 @@ msgstr ""
 msgid "Recruiting"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Recruiting analytics"
+msgstr ""
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Recruiting assistant"
 msgstr ""
@@ -2758,6 +2867,10 @@ msgstr "नियंत्रण छोड़ें"
 
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Reminder"
+msgstr ""
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Remove"
 msgstr ""
 
 #. placeholder {0}: attachment.file.name
@@ -2809,12 +2922,20 @@ msgstr ""
 msgid "Replied {replied}"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Replies follow the original observed contact cohort, including replies after this period. Automated replies may be included. Rates require complete history."
+msgstr ""
+
 #: src/pages/ShellMessage.tsx
 msgid "Reply"
 msgstr "उत्तर दें"
 
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Reply rate"
 msgstr ""
 
 #: src/pages/shell/useShellRecruiting.ts
@@ -2916,6 +3037,7 @@ msgstr ""
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
@@ -2933,11 +3055,20 @@ msgstr ""
 msgid "Return to the original role before saving this draft."
 msgstr ""
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Review and send"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "प्रोवाइडर सेटिंग्स की समीक्षा करें और फिर से परीक्षण करें।"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Review the saved sequence and prepare the send confirmation for this role."
+msgstr ""
+
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Role"
 msgstr ""
@@ -3033,12 +3164,17 @@ msgstr "सहेजें"
 msgid "Save as CSV"
 msgstr "CSV के रूप में सहेजें"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Save draft"
+msgstr ""
+
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
 msgstr "कार्यक्षेत्र सहेजें और नवीनतम सॉफ़्टवेयर इंस्टॉल करें।"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Saved"
 msgstr "सहेजा गया"
 
@@ -3056,6 +3192,10 @@ msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Saved emails"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Saved match score"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -3146,6 +3286,10 @@ msgstr ""
 msgid "Select a bot"
 msgstr "एक बॉट चुनें"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Select a mailbox"
+msgstr ""
+
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Select all on this page"
 msgstr ""
@@ -3179,6 +3323,10 @@ msgstr "रीसेट लिंक भेजें"
 msgid "Sender unavailable"
 msgstr ""
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Sending mailbox"
+msgstr ""
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Sending schedule"
 msgstr ""
@@ -3193,6 +3341,10 @@ msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Sequence draft"
 msgstr ""
 
 #: src/pages/recruiting/SequenceStats.tsx
@@ -3261,6 +3413,10 @@ msgstr ""
 #. placeholder {1}: roleTitle(roleId)
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Shortlisted {0} in {1}."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Shortlisted in period"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -3488,6 +3644,15 @@ msgstr ""
 msgid "Stopped."
 msgstr "रोक दिया गया।"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Strong Match"
+msgstr ""
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Subject"
+msgstr ""
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Subject unavailable."
 msgstr ""
@@ -3495,6 +3660,10 @@ msgstr ""
 #. placeholder {0}: draft.email.subject
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Subject: {0}"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Subsequently replied"
 msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
@@ -3661,6 +3830,10 @@ msgstr "यह रीसेट लिंक अमान्य है या इ
 msgid "This role changed. Select the candidate again."
 msgstr ""
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "This sequence is available to review in the conversation."
+msgstr ""
+
 #. placeholder {0}: formatToolActivityDuration(row.thinkingMs)
 #: src/components/RunTrace.tsx
 msgid "Thought for {0}"
@@ -3670,8 +3843,16 @@ msgstr ""
 msgid "Thread"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Through (UTC)"
+msgstr ""
+
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Time not recorded"
+msgstr ""
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Timezone"
 msgstr ""
 
 #. placeholder {0}: candidate.title
@@ -3741,8 +3922,14 @@ msgstr ""
 msgid "Unavailable"
 msgstr ""
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Uncertain"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 #: src/pages/recruiting/VerdictLabel.tsx
 msgid "Unknown"
@@ -3770,8 +3957,20 @@ msgstr ""
 msgid "Unpriced usage"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Unreviewed"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Unscored"
 msgstr ""
 
 #: src/pages/recruiting/SequenceStats.tsx
@@ -3866,6 +4065,10 @@ msgstr "वॉइस चैट"
 msgid "Wait a moment and test again."
 msgstr "थोड़ी देर रुकें और फिर से परीक्षण करें।"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Wait days"
+msgstr ""
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Wait for this role to finish loading before saving."
 msgstr ""
@@ -3888,6 +4091,10 @@ msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Week"
+msgstr ""
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Weekdays, 9–5"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -3934,6 +4141,11 @@ msgstr "काम चल रहा है…"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Worth checking"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Worth Talking"
 msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
