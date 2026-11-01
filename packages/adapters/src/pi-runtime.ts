@@ -1685,6 +1685,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           content: raw.content,
           path: String(raw.path ?? "MEMORY.md"),
           expectedRevision: raw.expectedRevision,
+          // The schema offers a partial edit; dropping it here failed every edit-mode save.
+          ...(raw.edit === undefined ? {} : { edit: raw.edit }),
           ...(raw.recruitingFeedback === undefined
             ? {}
             : { recruitingFeedback: raw.recruitingFeedback }),

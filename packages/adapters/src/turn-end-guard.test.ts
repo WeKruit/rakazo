@@ -1105,6 +1105,19 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("retries once when every memory save failed, so a failed save is not told as saved", async () => {
+    const saved = { ...input, reply: "Got it, I'll reply in Chinese.", memorySaveFailed: true };
+    expect(
+      (await planDeclineRetry({ prisma: prisma([{ clientNonce: "send:human" }]) }, saved))?.note,
+    ).toContain("nothing was saved");
+    expect(
+      await planDeclineRetry(
+        { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
+        saved,
+      ),
+    ).toBeUndefined();
+  });
+
   it("keeps a reply the judge is sure is not a refusal, and retries when it is unsure or absent", async () => {
     const judged = (p: number | undefined) => ({
       ...input,

@@ -14145,6 +14145,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   worked: turnReport.worked(),
                   read: turnReport.read(),
+                  memorySaveFailed: turnReport.memorySaveFailed(),
                   judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),

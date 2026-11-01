@@ -507,3 +507,18 @@ describe("restatesUpdate", () => {
     expect(restatesUpdate("Found 122 people.", undefined)).toBe(false);
   });
 });
+
+describe("TurnReportLedger.memorySaveFailed", () => {
+  it("is true only when every memory save in the attempt failed", () => {
+    const ledger = new TurnReportLedger(true);
+    expect(ledger.memorySaveFailed()).toBe(false);
+    ledger.tool("a", "remember", {});
+    ledger.settle("a", { ok: false });
+    ledger.tool("b", "save_shared_memory", {});
+    ledger.settle("b", { ok: false });
+    expect(ledger.memorySaveFailed()).toBe(true);
+    ledger.tool("c", "remember", {});
+    ledger.settle("c", { ok: true });
+    expect(ledger.memorySaveFailed()).toBe(false);
+  });
+});
