@@ -1690,6 +1690,10 @@ msgstr ""
 msgid "Get credentials"
 msgstr ""
 
+#: src/components/ListPager.tsx
+msgid "Go to page"
+msgstr ""
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Good example"
 msgstr ""
@@ -2251,8 +2255,8 @@ msgstr ""
 msgid "New Role"
 msgstr ""
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Next"
+#: src/components/ListPager.tsx
+msgid "Next page"
 msgstr ""
 
 #. placeholder {0}: stage.nextStep
@@ -2583,6 +2587,15 @@ msgstr ""
 msgid "Overdue ({0})"
 msgstr ""
 
+#. placeholder {0}: item + 1
+#: src/components/ListPager.tsx
+msgid "Page {0}"
+msgstr ""
+
+#: src/components/ListPager.tsx
+msgid "Pages"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Partial"
@@ -2673,8 +2686,8 @@ msgstr ""
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr ""
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Previous"
+#: src/components/ListPager.tsx
+msgid "Previous page"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx

@@ -30,6 +30,7 @@ import {
 import { ChevronDown, ListFilter, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ListPager } from "../../components/ListPager";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
 import { CompanyLogo } from "./CompanyLogo";
@@ -824,26 +825,12 @@ export function AllContacts({
               </table>
             </div>
           ) : null}
-          {data.total > PAGE_SIZE ? (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!offset || loading}
-                onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
-              >
-                <Trans>Previous</Trans>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!data.nextCursor || loading}
-                onClick={() => setOffset(Number(data.nextCursor))}
-              >
-                <Trans>Next</Trans>
-              </Button>
-            </div>
-          ) : null}
+          <ListPager
+            page={Math.floor(offset / PAGE_SIZE)}
+            pageCount={Math.ceil(data.total / PAGE_SIZE)}
+            onPage={(next) => setOffset(next * PAGE_SIZE)}
+            disabled={loading}
+          />
         </>
       ) : null}
 

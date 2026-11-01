@@ -25,6 +25,7 @@ export * from "./components/ui/input-group.js";
 export * from "./components/ui/kbd.js";
 export * from "./components/ui/label.js";
 export * from "./components/ui/native-select.js";
+export * from "./components/ui/pagination.js";
 export * from "./components/ui/popover.js";
 export * from "./components/ui/scroll-area.js";
 export * from "./components/ui/select.js";

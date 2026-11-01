@@ -1690,6 +1690,10 @@ msgstr "有缺口"
 msgid "Get credentials"
 msgstr "获取凭据"
 
+#: src/components/ListPager.tsx
+msgid "Go to page"
+msgstr "跳到第几页"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Good example"
 msgstr "好的例子"
@@ -2251,9 +2255,9 @@ msgstr "新岗位"
 msgid "New Role"
 msgstr "新岗位"
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Next"
-msgstr "下一步"
+#: src/components/ListPager.tsx
+msgid "Next page"
+msgstr "下一页"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2583,6 +2587,15 @@ msgstr "整体方向：{direction}"
 msgid "Overdue ({0})"
 msgstr "已逾期（{0}）"
 
+#. placeholder {0}: item + 1
+#: src/components/ListPager.tsx
+msgid "Page {0}"
+msgstr "第 {0} 页"
+
+#: src/components/ListPager.tsx
+msgid "Pages"
+msgstr "分页"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Partial"
@@ -2673,9 +2686,9 @@ msgstr "仅预览"
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Previous"
-msgstr "上一步"
+#: src/components/ListPager.tsx
+msgid "Previous page"
+msgstr "上一页"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
