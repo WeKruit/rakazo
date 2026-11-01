@@ -5,6 +5,7 @@ import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import {
   currentWorkEstimate,
   startWorkEstimate,
+  waitWithCountdown,
   wakeForResearchCountdown,
 } from "./work-estimate.js";
 
@@ -210,5 +211,58 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     await tick(t0 + 20.5 * MINUTE);
     woken = await wakes(thread.id);
     expect(woken).toHaveLength(2);
+  });
+
+  it("ends an agent's wait on background work when the countdown runs out", async () => {
+    const { bot, thread, turn } = await conversation();
+    const agentRunId = `agent_run_wait_${suffix}`;
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+    await answer(turn.id, agentRunId, "running");
+    const started = await startWorkEstimate(prisma, turn, {
+      ref: agentRunId,
+      kind: "search",
+      people: 100,
+    });
+    const scope = { spaceId, threadId: thread.id };
+    const asked: Array<number | undefined> = [];
+    // The agent asks for the tool's default 10 minutes; the wait ends with the 2-minute countdown.
+    let now = Date.parse(started!.startedAt) + 1_000;
+    const result = await waitWithCountdown(
+      prisma,
+      scope,
+      600,
+      async (timeoutSeconds) => {
+        asked.push(timeoutSeconds);
+        now += (timeoutSeconds ?? 0) * 1_000;
+        return { timedOut: true };
+      },
+      () => now,
+    );
+    expect(asked[0]).toBeGreaterThan(100);
+    expect(asked[0]).toBeLessThanOrEqual(122);
+    expect(result).toMatchObject({ countdown: expect.stringContaining("about 2 minutes ran out") });
+
+    // The agent reported in its own turn, so the follow-up job adds no second line for it.
+    await waitForRecruitingAgentRun(
+      { prisma, jobs },
+      { threadId: thread.id, botId: bot.id, agentRunId },
+      now + 10_000,
+    );
+    const woken = await wakes(thread.id);
+    expect(woken.every((wake) => !wake.task?.prompt.includes("minutes are up"))).toBe(true);
+
+    // A shorter wait than the countdown is left as asked, with no report.
+    const short = await waitWithCountdown(
+      prisma,
+      scope,
+      30,
+      async (timeoutSeconds) => {
+        asked.push(timeoutSeconds);
+        return { timedOut: true };
+      },
+      () => now + 20_000,
+    );
+    expect(asked[1]).toBe(30);
+    expect(short).not.toHaveProperty("countdown");
   });
 });
