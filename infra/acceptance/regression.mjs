@@ -24,7 +24,7 @@
 //                  (--t5-group <id> --t5-say <text>), and answering a question card whose wait
 //                  expired (--expired-group <id>, a test chat with a question left unanswered for a day)
 //   --suite staging  the test environment's release gate (with --paid --staging): smoke, pages
-//                  (Home and Contacts in a browser, no supplier names), memory (a preference told
+//                  (Home and the left-nav pages in a browser, no supplier names), memory (a preference told
 //                  to Kruit is saved and recalled in the <cases>/t5.json chat), progress, midwork,
 //                  and resume (a find-100 whose server is restarted mid-search reaches its target,
 //                  reports when its countdown runs out and answers a bare "再来点"). Cases in a
@@ -1416,13 +1416,7 @@ try {
   define("pages", async (failures) => {
     // Home and the left-nav pages open in a real browser within budget, with no load error and
     // no supplier name on screen.
-    // The test environment cannot open production's CRM and calendar connections, so there it
-    // checks Home and Contacts; production's post-deploy check covers all four pages.
-    const code = await run(
-      "pages",
-      "home-load.mjs",
-      args.includes("--staging") ? ["--views", "contacts"] : [],
-    );
+    const code = await run("pages", "home-load.mjs", []);
     if (code !== 0) failures.push(`pages did not pass (exit ${code}); see pages.log`);
   });
 
