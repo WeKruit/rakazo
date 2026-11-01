@@ -3,6 +3,7 @@ import { useShellRecruitingRefresh } from "./useShellRecruitingRefresh";
 
 export { eventChangesRecruitingPanel } from "./useShellRecruitingRefresh";
 
+import type { SkippedAttachment } from "./skipped-attachments";
 import { useShellCreation } from "./useShellCreation";
 import { useShellMessages } from "./useShellMessages";
 import { useShellNotifications } from "./useShellNotifications";
@@ -156,7 +157,11 @@ export function useShellController() {
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [exportingConversation, setExportingConversation] = useState(false);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState<SkippedAttachment[]>([]);
+  const removeSkippedAttachment = useCallback(
+    (id: string) => setAttachmentNotice((current) => current.filter((item) => item.id !== id)),
+    [],
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
@@ -1220,7 +1225,7 @@ export function useShellController() {
       return attachmentsForThread(current, threadKey);
     });
     clearReply();
-    setAttachmentNotice(null);
+    setAttachmentNotice([]);
     setSendError(null);
   }, [active?.id, clearReply, groupId, inGroup]);
 
@@ -1325,6 +1330,7 @@ export function useShellController() {
     setExportingConversation,
     attachmentNotice,
     setAttachmentNotice,
+    removeSkippedAttachment,
     fileInputRef,
     panel,
     setPanelState,

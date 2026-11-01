@@ -31,21 +31,6 @@ msgstr ""
 msgid "{0, plural, one {# person with email} other {# people with email}}"
 msgstr ""
 
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
-msgstr "{0} (maximal {ATTACHMENT_MAX_COUNT} Anhänge)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (over 10 MiB)"
-msgstr "{0} (über 10 MiB)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
-msgstr ""
-
 #. placeholder {0}: archivedRouteGroup.name
 #: src/pages/shell/ShellConversation.tsx
 msgid "{0} is archived."
@@ -1320,6 +1305,7 @@ msgid "Direct MCP"
 msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/shell/KruitDock.tsx
 msgid "Dismiss"
 msgstr ""
 
@@ -1978,6 +1964,10 @@ msgstr ""
 msgid "Max"
 msgstr "Max."
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Max {ATTACHMENT_MAX_COUNT} files"
+msgstr "Max. {ATTACHMENT_MAX_COUNT} Dateien"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "MCP endpoint"
 msgstr ""
@@ -2111,10 +2101,12 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
 msgstr ""
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs input"
 msgstr "Eingabe erforderlich"
@@ -2434,6 +2426,10 @@ msgstr "Outreach drafts"
 msgid "Outreach status"
 msgstr ""
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Over {maxMegabytes} MB"
+msgstr "Über {maxMegabytes} MB"
+
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Overall direction"
 msgstr ""
@@ -2717,7 +2713,9 @@ msgid "Reminder"
 msgstr ""
 
 #. placeholder {0}: attachment.file.name
+#. placeholder {0}: item.name
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/skipped-attachments.tsx
 msgid "Remove {0}"
 msgstr "{0} entfernen"
 
@@ -2982,6 +2980,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Save"
 msgstr "Speichern"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Save as CSV"
+msgstr "Als CSV speichern"
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
@@ -3312,11 +3314,6 @@ msgstr "Überspringen oder Deploy-Key"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Skipped"
 msgstr ""
-
-#. placeholder {0}: skipped.join(", ")
-#: src/pages/shell/useShellMessages.ts
-msgid "Skipped {0}"
-msgstr "{0} übersprungen"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
@@ -3738,6 +3735,10 @@ msgstr ""
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Unsupported file type: {0}"
 msgstr "Nicht unterstützter Dateityp: {0}"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Unsupported format"
+msgstr "Format nicht unterstützt"
 
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx

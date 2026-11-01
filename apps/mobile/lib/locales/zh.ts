@@ -676,7 +676,6 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Chat Settings": "聊天设置",
   "Settings: General": "设置：常规",
   "Settings: Usage": "设置：用量",
-  "Skipped {items}": "已跳过 {items}",
   "{name} (max {count} attachments)": "{name}（最多 {count} 个附件）",
   "{name} (over 10 MiB)": "{name}（超过 10 MiB）",
   "{name} (permission denied)": "{name}（未授予权限）",

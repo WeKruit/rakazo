@@ -268,7 +268,8 @@ function renderComposer(
     activeName: "Ada",
     running: false,
     pendingAttachments: [],
-    attachmentNotice: null,
+    attachmentNotice: [],
+    onRemoveSkippedAttachment: vi.fn(),
     sendError: null,
     runError: null,
     runErrorId: null,
@@ -3769,6 +3770,31 @@ it.each(["user", "thread", "view"] as const)(
   },
 );
 
+it("shows each skipped attachment with its reason and lets it be removed", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const input = container!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  expect(input.accept).toContain(".md");
+  const big = new File(["x"], "huge.pdf", { type: "application/pdf" });
+  Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 });
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File(["x"], "Untitled.blend"), big],
+  });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  const skipped = container!.querySelector('[data-testid="skipped-attachments"]');
+  expect(skipped?.textContent).toContain("Untitled.blendUnsupported format");
+  expect(skipped?.textContent).toContain("huge.pdfOver 10 MB");
+  await act(async () =>
+    container!
+      .querySelector<HTMLButtonElement>('button[aria-label="Remove Untitled.blend"]')!
+      .click(),
+  );
+  expect(container?.textContent).not.toContain("Untitled.blend");
+  expect(container?.textContent).toContain("huge.pdf");
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+});
+
 it("keeps the original chat attachment when the same file is removed with a cancelled new role", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
@@ -4906,6 +4932,33 @@ describe("Composer", () => {
     );
     expect(container?.querySelector("[data-testid='mention-chip']")?.textContent).toContain("Bob");
     expect(container?.textContent).not.toContain("Follow up");
+  });
+  it("shows the suggested next message as gray text and Tab fills it in", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more" });
+    expect(textarea.placeholder).toBe("Find 20 more");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(textarea.value).toBe("Find 20 more");
+  });
+
+  it("styles a pasted link in the draft and still sends it with Enter", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const textarea = renderComposer(onSend);
+    expect(container?.querySelector("[data-testid='composer-highlight']")).toBeNull();
+    type(textarea, "see https://example.com/jobs/1 please");
+    const link = container?.querySelector("[data-testid='composer-highlight'] .composer-link");
+    expect(link?.textContent).toBe("https://example.com/jobs/1");
+    pressEnter(textarea);
+    await act(async () => {});
+    expect(onSend.mock.calls[0]?.[0]).toBe("see https://example.com/jobs/1 please");
+  });
+
+  it("hides the suggestion while a reply is running", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
+    expect(textarea.placeholder).not.toBe("Find 20 more");
   });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);

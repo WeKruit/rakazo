@@ -1,9 +1,9 @@
 import { t } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { AgentSkillCatalogEntry, ThreadMessage } from "@rakazo/contracts";
-import { ATTACHMENT_ALLOWED_MIME_TYPES } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
+  ATTACHMENT_ACCEPT,
   clampMentionHighlightIndex,
   mentionChipKey,
   replyAttachment,
@@ -59,6 +59,8 @@ import { isFileDrag, isFilePaste } from "../../lib/pending-attachments";
 import type { CandidateDiscussionContext } from "../RecruitingPanel";
 import { ComposerReplyPreview } from "../shell/chat-context";
 import { FALLBACK_BOT_COLOR } from "./constants";
+import type { SkippedAttachment } from "./skipped-attachments";
+import { SkippedAttachmentChips } from "./skipped-attachments";
 
 export type PendingAttachment = {
   id: string;
@@ -67,7 +69,6 @@ export type PendingAttachment = {
   previewUrl?: string;
 };
 
-export const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 export function candidateReferenceText(candidate: CandidateDiscussionContext): string {
   const reference = [
     t`Name: ${candidate.name ?? t`Name missing`}`,
@@ -94,6 +95,7 @@ export const Composer = memo(function Composer({
   disabled,
   pendingAttachments,
   attachmentNotice,
+  onRemoveSkippedAttachment,
   sendError,
   runError,
   runErrorId,
@@ -121,6 +123,7 @@ export const Composer = memo(function Composer({
   draftKey,
   contextKey,
   enterToSend,
+  suggestion,
 }: {
   ref?: Ref<ComposerHandle>;
   activeName?: string;
@@ -128,7 +131,8 @@ export const Composer = memo(function Composer({
   running: boolean;
   disabled?: boolean;
   pendingAttachments: PendingAttachment[];
-  attachmentNotice: string | null;
+  attachmentNotice: readonly SkippedAttachment[];
+  onRemoveSkippedAttachment: (id: string) => void;
   sendError: string | null;
   runError: string | null;
   runErrorId: string | null;
@@ -158,6 +162,8 @@ export const Composer = memo(function Composer({
   draftKey: string;
   contextKey?: string;
   enterToSend: boolean;
+  /** Likely next message, shown as gray text in an empty composer; Tab accepts it. */
+  suggestion?: string | null;
 }) {
   const { t } = useLingui();
   const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
@@ -521,6 +527,11 @@ export const Composer = memo(function Composer({
 
   const showComposerPlaceholder =
     draft.length === 0 && selectedSkill === null && selectedMentions.length === 0;
+  const draftHasUrl = URL_IN_TEXT.test(draft);
+  const highlightRef = useRef<HTMLDivElement>(null);
+  const showSuggestion = Boolean(
+    suggestion && !running && !disabled && showComposerPlaceholder && !replyTarget,
+  );
   const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
   const replyNameRef = useRef(replyName);
   replyNameRef.current = replyName;
@@ -624,11 +635,7 @@ export const Composer = memo(function Composer({
           }}
         />
       ) : null}
-      {attachmentNotice ? (
-        <div className="mb-3 rounded-[14px] border border-warning/40 bg-warning/10 px-4 py-2 text-[13px] text-warning">
-          {attachmentNotice}
-        </div>
-      ) : null}
+      <SkippedAttachmentChips items={attachmentNotice} onRemove={onRemoveSkippedAttachment} />
       {pendingAttachments.length ? (
         <div className="mb-3 flex flex-wrap gap-2">
           {pendingAttachments.map((attachment) => (
@@ -820,75 +827,107 @@ export const Composer = memo(function Composer({
               </button>
             </span>
           ))}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(event) => updateDraft(event.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Backspace" &&
-                draft.length === 0 &&
-                (selectedSkill !== null || selectedMentions.length > 0)
-              ) {
-                event.preventDefault();
-                removeLastChip();
-                return;
+          <div className="relative flex min-w-[8rem] flex-1">
+            {draftHasUrl ? (
+              <div
+                ref={highlightRef}
+                aria-hidden="true"
+                dir="auto"
+                data-testid="composer-highlight"
+                className="rk-scroll pointer-events-none absolute inset-0 overflow-y-auto whitespace-pre-wrap break-words py-0.5 text-base leading-6 text-foreground"
+              >
+                {highlightUrls(draft)}
+              </div>
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onScroll={(event) => {
+                if (highlightRef.current)
+                  highlightRef.current.scrollTop = event.currentTarget.scrollTop;
+              }}
+              onChange={(event) => updateDraft(event.target.value)}
+              onPaste={handlePaste}
+              onKeyDown={(event) => {
+                if (
+                  showSuggestion &&
+                  event.key === "Tab" &&
+                  !event.shiftKey &&
+                  !event.ctrlKey &&
+                  !event.metaKey &&
+                  !event.altKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  updateDraft(suggestion ?? "");
+                  return;
+                }
+                if (
+                  event.key === "Backspace" &&
+                  draft.length === 0 &&
+                  (selectedSkill !== null || selectedMentions.length > 0)
+                ) {
+                  event.preventDefault();
+                  removeLastChip();
+                  return;
+                }
+                const action = resolveMentionPickerKey({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  ctrlKey: event.ctrlKey,
+                  metaKey: event.metaKey,
+                  enterToSend,
+                  isComposing: event.nativeEvent.isComposing || event.keyCode === 229,
+                  optionCount: mentionOptions.length,
+                  highlightedIndex: activeMentionIndex,
+                });
+                if (action.type === "complete") {
+                  const mention = mentionOptions[action.index];
+                  if (!mention) return;
+                  event.preventDefault();
+                  insertMention(mention);
+                  return;
+                }
+                if (action.type === "move") {
+                  event.preventDefault();
+                  setMentionHighlightIndex(action.index);
+                  return;
+                }
+                if (action.type === "dismiss") {
+                  event.preventDefault();
+                  setMentionQuery(null);
+                  setMentionHighlightIndex(0);
+                  return;
+                }
+                if (action.type === "send") {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
+              disabled={disabled}
+              placeholder={
+                showSuggestion
+                  ? (suggestion ?? undefined)
+                  : showComposerPlaceholder
+                    ? activeName && !compact
+                      ? t`Message ${activeName}`
+                      : t`Message…`
+                    : undefined
               }
-              const action = resolveMentionPickerKey({
-                key: event.key,
-                shiftKey: event.shiftKey,
-                ctrlKey: event.ctrlKey,
-                metaKey: event.metaKey,
-                enterToSend,
-                isComposing: event.nativeEvent.isComposing || event.keyCode === 229,
-                optionCount: mentionOptions.length,
-                highlightedIndex: activeMentionIndex,
-              });
-              if (action.type === "complete") {
-                const mention = mentionOptions[action.index];
-                if (!mention) return;
-                event.preventDefault();
-                insertMention(mention);
-                return;
-              }
-              if (action.type === "move") {
-                event.preventDefault();
-                setMentionHighlightIndex(action.index);
-                return;
-              }
-              if (action.type === "dismiss") {
-                event.preventDefault();
-                setMentionQuery(null);
-                setMentionHighlightIndex(0);
-                return;
-              }
-              if (action.type === "send") {
-                event.preventDefault();
-                void send();
-              }
-            }}
-            disabled={disabled}
-            placeholder={
-              showComposerPlaceholder
-                ? activeName && !compact
-                  ? t`Message ${activeName}`
-                  : t`Message…`
-                : undefined
-            }
-            aria-label={activeName ? t`Message ${activeName}` : t`Message`}
-            role="combobox"
-            aria-autocomplete="list"
-            aria-haspopup="listbox"
-            aria-expanded={mentionPickerOpen}
-            aria-controls={mentionPickerOpen ? mentionListboxId : undefined}
-            aria-activedescendant={activeMentionOptionId}
-            name="chat-message"
-            autoComplete="off"
-            dir="auto"
-            rows={compact ? 1 : 2}
-            className={`rk-scroll max-h-60 ${compact ? "min-h-7" : "min-h-12"} min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40`}
-          />
+              aria-label={activeName ? t`Message ${activeName}` : t`Message`}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-haspopup="listbox"
+              aria-expanded={mentionPickerOpen}
+              aria-controls={mentionPickerOpen ? mentionListboxId : undefined}
+              aria-activedescendant={activeMentionOptionId}
+              name="chat-message"
+              autoComplete="off"
+              dir="auto"
+              rows={compact ? 1 : 2}
+              className={`rk-scroll relative max-h-60 ${compact ? "min-h-7" : "min-h-12"} min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 ${draftHasUrl ? "text-transparent caret-foreground" : "text-foreground"} outline-none placeholder:text-muted-foreground disabled:opacity-40`}
+            />
+          </div>
         </div>
         <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
           {onVoice && draft.trim().length === 0 ? (
@@ -972,6 +1011,24 @@ export const Composer = memo(function Composer({
 });
 
 /** Hides the scrollbar while measuring and leaves the height at 0. */
+const URL_IN_TEXT = /https?:\/\/\S/i;
+const URL_SPLIT = /(https?:\/\/[^\s<>"'`]+)/gi;
+
+/** Draft text with pasted links styled; drawn behind the transparent textarea text. */
+function highlightUrls(text: string) {
+  // A trailing newline needs a character after it to keep the same height as the textarea.
+  const parts = `${text}\u200b`.split(URL_SPLIT);
+  return parts.map((part, index) =>
+    index % 2 === 1 ? (
+      <span key={index} className="composer-link">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
 function measureTextareaHeight(textarea: HTMLTextAreaElement) {
   const { style } = textarea;
   style.overflowY = "hidden";

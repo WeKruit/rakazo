@@ -1,4 +1,4 @@
-import { ATTACHMENT_MAX_BYTES } from "@rakazo/contracts";
+import { ATTACHMENT_ALLOWED_MIME_TYPES, ATTACHMENT_MAX_BYTES } from "@rakazo/contracts";
 import { inferAttachmentMimeType } from "@rakazo/core";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
@@ -70,6 +70,7 @@ export async function pickDocuments(existingCount = 0): Promise<{
   const result = await DocumentPicker.getDocumentAsync({
     multiple: true,
     copyToCacheDirectory: true,
+    type: [...ATTACHMENT_ALLOWED_MIME_TYPES],
   });
   if (result.canceled) return { attachments: [], skipped: [] };
   const assets = result.assets ?? [];
