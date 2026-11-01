@@ -1,5 +1,7 @@
 > **公开评审版本**：保留需求、交互、实测几何与样式；内容槽已匿名化。所有公开布局图均由 DOM 测量生成，**不是原始截图**。原始登录态截图、AX、媒体及完整历史静态证据单独保留，未公开。
 
+> 实施口径更新（2026-11-01）：下文保留原始基线盘点，后续评审以 [实施合同](IMPLEMENTATION-CONTRACTS.md) 为准。Sequence 复用已有原生零收件人 draft campaign，不新增 Sequence 表；Worth Talking 复用当前职位版本 Reviewer 分组，不引入本地评分器。完整页面、接口、存储和验收映射见 [实施验收清单](../../REA-IMPLEMENTATION-ACCEPTANCE.md)。本批新增持久结构为 Notes 附件引用和可检索的已保存邮件投影，个人阅读游标继续复用上一批实现。
+
 # 字段、内容与关联补齐清单
 
 本清单配合 [后端变更方案](BACKEND-CHANGE-PROPOSAL.md)，依据同一 [主线快照](baseline.json)。不是生产数据库已完成迁移的报告。
@@ -44,3 +46,17 @@
 5. 核对原有记录数、身份关联、附件与职位关系，再按同一候选人列表→详情→Shortlist→Sequence→Inbox→Interview走完整链。
 
 本轮只完成代码与当前页面的证据核对和方案，未执行客户数据回填、迁移或新付费查询。
+
+## 2026-11-01 实施核对：Candidates / Profile 媒体
+
+本节更新代码状态，不改变上文原始基线证据；没有执行在线数据库盘点、客户数据回填或付费查询。可公开的逐项覆盖及查询合同见产品仓库 `docs/wekruit/REA-CANDIDATES-UI-COVERAGE.md` 的 “Saved-media inventory and historical repair”。
+
+- 全局 Contacts 已接同页真实候选人的 PersonAvatar / CompanyLogo / LinkedIn 静态图标。查询为 `recruiting_saved_profiles WHERE ownerUserId=actor.userId AND spaceId=actor.spaceId AND personKey IN (当前页精确键)`，页面最大100人；不逐行补查。完整校验后的 `savedProfile` 与显式头像、公司/学校媒体位于共享 DTO。公司媒体只对应当前显示雇主；冲突值为空。Detached CRM 联系人可打开实际只读职业资料，不捏造职位权限。
+- Profile/Shortlist 的工作、教育、逐段组织媒体沿用现有结构化 profile / report / timeline 解析；既有完整履历不被摘要、后续评分或补图替换。公司网站/logo仍复用既有组织服务与缓存，不引入候选人主表或第二套媒体框架。
+- 历史补齐复用已有 `recruiting.fillRoleProfiles`，新增可选 `dryRun:true`。正常登录客户端调用 `rpc.recruiting.fillRoleProfiles({roleId: selectedOwnedRole.id, dryRun:true})` 即可得到只读盘点；actor/space来自会话，不能通过参数指定他人身份。dryRun不抓图、不调connector、不写profile。
+- 身份与查询链：`listRecruitingRolePoolRuns` 校验owned role，读取精确LinkedIn pool keys与属于owner/space的candidate-page runs；`listRecruitingSavedProfiles`读取同owner/space/key；完成的catalog-tool effect按run/user/space统计并分页，每次最多400条，**不再把400当作整个run上限**，从旧到新扫描。当前source connection也必须属于actor/space；现有parser逐人核对LinkedIn key。补写时 `saveRecruitingSavedProfile` 再核对来源effect/run。
+- `inventory.missingBefore` 与 `recoverable` 是photo/work/education/employerLogo/schoolLogo的**人数**。work/education表示非空历史；logo表示该人的对应历史至少有一张图，不表示每段经历全部有图。recoverable表示原投影缺失、已保留且可解析的原始来源中有实际值。dryRun下filled/photos/missing是模拟补齐结果，不是写入回执。`sourceCalls`、`sourcePageSize:400`、`sourceCoverage:owned_saved_results`标明读取范围，不代表供应商覆盖率或图片下载已成功。
+- `dryRun:false` 使用同一已有服务补齐选定owned role。保留所有完整历史与非空媒体，仅补缺失历史/头像，以及组织名称匹配、已知网站无冲突且来源URL唯一的缺失组织媒体。普通keepSearchHistory也已修复“已有工作+教育导致缺头像永远被跳过”的问题。真正图片复制仍走原有URL/image guards；不补造图片。
+- 真正缺失与未知必须区分：纯文本履历本身没有logo URL；受支持结构化Profile记录可保留真实公司/学校logo。断开/删除的source、未知来源形状和parser限制（结构化provider最多80段工作/40段教育，search history最多30段）不能证明其他原始记录中绝无值。原始effect/artifact不修改；不能据此推断头像、组织、邮箱/电话、联系方式验证状态。
+
+验收分开记录：本地合成测试已覆盖同人媒体、完整履历保留、dryRun零fetch/零write、401条来源跨页，以及CRM-only/native单一Candidates标题、角色label与Role details。部署后由实际授权用户先对选定role运行dryRun，记录真实counts，再决定是否执行同范围历史补齐，并检查同人列表→详情→Shortlist图像；当前没有线上counts或上线验收结论。媒体接线和历史修复不需要新增表/迁移；Notes附件的artifact-ID数组属于单独业务状态迁移。

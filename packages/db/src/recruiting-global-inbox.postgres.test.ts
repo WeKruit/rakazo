@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
-import { inboxThreadKey } from "@rakazo/contracts";
+import { GlobalRecruitingInboxOutputSchema, inboxThreadKey } from "@rakazo/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client.js";
 import {
@@ -149,6 +149,27 @@ suite("stored global Inbox projection", () => {
     await projectRecruitingInboxMessages(prisma, actor, {
       roleId,
       emails: [
+        ...["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"].map(
+          (organizationId, index) => ({
+            ...base,
+            crm: {
+              organizationId,
+              serverRevision: 1,
+              crmRoleId: "00000000-0000-4000-8000-000000000003",
+              candidateId: "00000000-0000-4000-8000-000000000004",
+              threadId: "collision",
+              direction: "received" as const,
+            },
+            attachments: [
+              {
+                id: `org-file-${index}`,
+                name: `organization-${index}.pdf`,
+                mimeType: "application/pdf",
+                size: 10,
+              },
+            ],
+          }),
+        ),
         base,
         {
           ...base,
@@ -161,9 +182,20 @@ suite("stored global Inbox projection", () => {
       observedAt: new Date("2026-10-04T00:00:00Z"),
     });
     const page = await read({ query: "collision" });
-    expect(page.items).toHaveLength(2);
+    expect(page.items).toHaveLength(4);
+    for (const [index, org] of [
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+    ].entries()) {
+      expect(
+        page.items
+          .find((row) => row.email.crm?.organizationId === org)
+          ?.email.attachments?.map((file) => file.id),
+      ).toEqual([`org-file-${index}`]);
+    }
     expect(
-      page.items.find((row) => row.email.sourceId === "source")?.email.attachments,
+      page.items.find((row) => row.email.sourceId === "source" && !row.email.crm)?.email
+        .attachments,
     ).toBeUndefined();
   });
   it("never returns another owner or space, and rolls back a projection whose authorization was revoked", async () => {
@@ -249,6 +281,137 @@ suite("stored global Inbox projection", () => {
     const second = await read({ limit: 10, cursor: first.nextCursor! });
     expect(new Set([...first.items, ...second.items].map((row) => row.key)).size).toBe(20);
   });
+  it("maps an exact native saved candidate and current Reviewer grade without reading another owner's profile", async () => {
+    const candidateKey = "linkedin:/in/synthetic-inbox-profile";
+    const effectId = `candidate-page-${suffix}`;
+    const artifactId = `candidate-artifact-${suffix}`;
+    await prisma.artifact.create({
+      data: {
+        id: artifactId,
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        name: "Synthetic Reviewer rows",
+        mimeType: "application/json",
+        size: 1,
+        hash: "b".repeat(64),
+        storageKey: artifactId,
+      },
+    });
+    await prisma.externalEffect.create({
+      data: {
+        id: effectId,
+        spaceId: actor.spaceId,
+        runId: roleId,
+        kind: "recruiting_research",
+        status: "completed",
+        idempotencyKey: effectId,
+        request: { operation: "save_grades" },
+      },
+    });
+    await prisma.recruitingCandidatePage.create({
+      data: {
+        effectId,
+        roleId,
+        roleRevisionId: roleId,
+        artifactId,
+        artifactHash: "b".repeat(64),
+        observedAt: new Date("2026-10-07T00:00:00Z"),
+        rowCount: 1,
+      },
+    });
+    await prisma.recruitingCandidate.create({
+      data: {
+        roleId,
+        candidateKey,
+        shortlisted: true,
+        shortlistedAt: new Date("2026-10-07T00:00:00Z"),
+      },
+    });
+    await prisma.recruitingCandidateOccurrence.create({
+      data: {
+        pageId: effectId,
+        rowIndex: 0,
+        roleId,
+        candidateKey,
+        name: "Exact Saved Person",
+        title: "Platform Engineer",
+        location: "Remote",
+        linkedinUrl: "https://www.linkedin.com/in/synthetic-inbox-profile",
+        issues: [],
+        matchFields: { match_tier: "Strong", match_score: 92 },
+      },
+    });
+    for (const owner of actors)
+      await prisma.recruitingSavedProfile.create({
+        data: {
+          spaceId: owner.spaceId,
+          ownerUserId: owner.userId,
+          personKey: candidateKey,
+          provider: "Synthetic saved profile",
+          sourceEffectId: effectId,
+          fetchedAt: new Date("2026-10-07T00:00:00Z"),
+          profile: {
+            headline: owner === actor ? "Saved headline" : "PRIVATE FOREIGN PROFILE",
+            profileImageUrl:
+              owner === actor
+                ? "https://assets.example.test/owned-avatar.png"
+                : "https://assets.example.test/foreign-avatar.png",
+            experience: [
+              {
+                company_name: owner === actor ? "Owned Company" : "Foreign Company",
+                company_url: null,
+                company_linkedin_url: null,
+                company_industry: null,
+                company_size: null,
+                is_current: null,
+                company_logo_url: null,
+                title: "Platform Engineer",
+                location: null,
+                start_date: null,
+                end_date: null,
+                description: null,
+              },
+            ],
+            education: [],
+          },
+        },
+      });
+    await projectRecruitingInboxMessages(prisma, actor, {
+      roleId,
+      emails: [message("exact-profile", { candidateKey })],
+      observedAt: new Date("2026-10-08T00:00:00Z"),
+    });
+    const page = GlobalRecruitingInboxOutputSchema.parse(
+      await read({ query: "Subject exact-profile" }),
+    );
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.person).toMatchObject({
+      key: `autumn:${candidateKey}`,
+      name: "Exact Saved Person",
+      title: "Platform Engineer",
+      location: "Remote",
+      shortlisted: true,
+      autumn: {
+        candidateKey,
+        savedProfile: {
+          personKey: candidateKey,
+          headline: "Saved headline",
+          profileImageUrl: "https://assets.example.test/owned-avatar.png",
+          experience: [{ company_name: "Owned Company" }],
+        },
+        ranking: {
+          source: "reviewer",
+          state: "current",
+          grade: "Strong",
+          score: 92,
+          roleRevisionId: roleId,
+          sourceEffectId: effectId,
+        },
+      },
+    });
+    expect(JSON.stringify(page)).not.toContain("PRIVATE FOREIGN PROFILE");
+    expect((await read({ query: "Subject exact-profile" }, actors[1]!)).items).toEqual([]);
+  });
   it("counts only stored incoming after the fixed baseline and shares read cursors across role aliases", async () => {
     const now = new Date();
     await prisma.recruitingInboxInitialization.update({
@@ -261,7 +424,56 @@ suite("stored global Inbox projection", () => {
       emails: [incoming, message("sent", { direction: "sent", date: now.toISOString() })],
       observedAt: now,
     });
-    expect((await read()).unread.count).toBe(1);
+    const aliasRole = `${roleId}-alias`;
+    await prisma.bot.create({
+      data: {
+        id: aliasRole,
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        name: "Synthetic alias role",
+        color: "blue",
+      },
+    });
+    await prisma.thread.create({
+      data: { id: aliasRole, userId: actor.userId, spaceId: actor.spaceId, botId: aliasRole },
+    });
+    await prisma.$transaction(async (tx) => {
+      await tx.recruitingRole.create({
+        data: {
+          id: aliasRole,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          sourceThreadId: aliasRole,
+          title: "Same mail, second owned role",
+          revision: 1,
+          currentRevisionId: aliasRole,
+        },
+      });
+      await tx.recruitingRoleRevision.create({
+        data: {
+          id: aliasRole,
+          roleId: aliasRole,
+          revision: 1,
+          sourceRefs: [],
+          criteria: [],
+          preferences: [],
+          definitionQuestions: [],
+        },
+      });
+      await tx.thread.update({
+        where: { id: aliasRole },
+        data: { activeRecruitingRoleId: aliasRole },
+      });
+    });
+    await projectRecruitingInboxMessages(prisma, actor, {
+      roleId: aliasRole,
+      emails: [incoming],
+      observedAt: now,
+    });
+    const aliases = await read({ query: "Subject fresh", unreadOnly: true });
+    expect(aliases.items.map((row) => row.roleId).sort()).toEqual([roleId, aliasRole].sort());
+    expect(new Set(aliases.items.map((row) => row.key)).size).toBe(1);
+    expect(aliases.unread.count).toBe(1);
     await markRecruitingInbox(prisma, actor, {
       thread: {
         sourceId: "source",
@@ -273,6 +485,9 @@ suite("stored global Inbox projection", () => {
       unread: false,
     });
     expect((await read()).unread.count).toBe(0);
+    expect((await read({ query: "Subject fresh", unreadOnly: true })).items).toEqual([]);
+    expect((await read({ query: "Subject fresh", roleId: aliasRole })).items).toHaveLength(1);
+    expect((await read({ query: "Subject fresh" }, actors[1]!)).items).toEqual([]);
     expect((await read()).coverage.providerComplete).toBe(false);
     expect(
       inboxThreadKey({
