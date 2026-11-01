@@ -534,6 +534,7 @@ export async function createApp(
     prisma,
     runtime,
     codexCatalog,
+    replySuggestions: true,
     sandbox,
     memory,
     memoryProviders,

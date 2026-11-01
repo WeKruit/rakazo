@@ -75,14 +75,12 @@ export function ThreadComposer({
   const colorScheme = useResolvedAppearance();
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
-  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<AgentSkillCatalogEntry | null>(null);
   useImperativeHandle(ref, () => ({
     snapshot: () => ({
-      queueMode,
       promptText: serializeComposerPrompt(draft, selectedSkill, selectedMentions),
       mentions: selectedMentions,
       skill: selectedSkill,
@@ -299,14 +297,6 @@ export function ThreadComposer({
             </Pressable>
           ))}
         </ScrollView>
-      ) : null}
-      {working || queueMode === "follow_up" ? (
-        <NativeActionButton
-          label={queueMode === "follow_up" ? t("Follow up") : t("Steer")}
-          prominence="plain"
-          size="compact"
-          onPress={() => setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"))}
-        />
       ) : null}
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 8 }}>
         <MenuView
