@@ -1,0 +1,18 @@
+匿名化布局节点清单（由测量派生，不是原始 AX 树）
+E0 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E1 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E2 MAIN None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E3 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E4 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E5 SECTION None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E6 DIV None Shortlist {'height': 44, 'width': 390, 'x': 0, 'y': 0}
+E7 DIV None Shortlist {'height': 44, 'width': 390, 'x': 0, 'y': 0}
+E8 DIV None  {'height': 26, 'width': 32, 'x': 20, 'y': 9}
+E9 svg None  {'height': 24, 'width': 24, 'x': 20, 'y': 11}
+E10 DIV None [匿名内容槽] {'height': 800, 'width': 390, 'x': 0, 'y': 44}
+E11 DIV None [匿名内容槽] {'height': 800, 'width': 390, 'x': 0, 'y': 44}
+E12 DIV None [匿名内容槽] {'height': 279.92, 'width': 342, 'x': 24, 'y': 284.03}
+E13 DIV None  {'height': 121.59, 'width': 192, 'x': 99, 'y': 284.03}
+E14 svg None  {'height': 121.59, 'width': 153.59, 'x': 118.2, 'y': 284.03}
+E15 H3 None [匿名内容槽] {'height': 27.55, 'width': 320, 'x': 35, 'y': 417.63}
+E16 A None [匿名内容槽] {'height': 44, 'width': 220, 'x': 85, 'y': 519.95}

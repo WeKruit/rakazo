@@ -309,22 +309,26 @@ fi
 # answered, so nothing is sent). Needs the private JD fixtures in RELEASE_CASES and the test account
 # in RAKAZO_EMAIL/RAKAZO_PASSWORD; a red result rolls the release back. Skipped on a rollback.
 # It pays for a search, grading and contact lookups, so it runs only when this release changes
-# search, grading or contact code (or RELEASE_PAID_CHECKS=1); every other release stays free.
+# search, grading or contact code (or RELEASE_PAID_CHECKS=1), and at most once a day: a pass in
+# the last 24 hours covers later releases. Every other release stays free.
 PAID_PATHS='^packages/(adapters/src/(recruiting-|mcp-connector|contact-)|core/src/recruiting-)|^infra/acceptance/regression\.mjs$'
+PAID_STAMP="$WORK/paid-check-passed"
 paid_change() {
   [ "${RELEASE_PAID_CHECKS:-}" = 1 ] && return 0
   [ "$TARGET" = test ] && return 1
   [ "$LIVE" != unknown ] || return 0
+  [ -z "$(find "$PAID_STAMP" -mmin -1440 2>/dev/null)" ] || return 1
   git -C "$REPO" diff --name-only "$LIVE" "$SHA" -- . 2>/dev/null | grep -v '\.test\.' | grep -qE "$PAID_PATHS"
 }
 if [ "${RELEASE_ROLLBACK:-}" != 1 ] && ! paid_change; then
-  log "contacts check skipped: no search, grading or contact code changed (RELEASE_PAID_CHECKS=1 to run it)"
+  log "contacts check skipped: no search, grading or contact change since the last daily pass (RELEASE_PAID_CHECKS=1 to run it)"
 elif [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
   && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
   RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" \
     node "$DIR/infra/acceptance/regression.mjs" --only contacts --paid --cases "$RELEASE_CASES" \
       --out "$WORK/contacts-$SHORT" > "$WORK/contacts-$SHORT.log" 2>&1 \
     || { tail -8 "$WORK/contacts-$SHORT.log"; rollback "contacts check failed (log: $WORK/contacts-$SHORT.log)"; }
+  touch "$PAID_STAMP"
   log "contacts ok"
 else
   log "contacts check skipped (set RELEASE_CASES and the test account to run it)"

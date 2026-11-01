@@ -22,6 +22,7 @@
 //            --area <regex>                   locations the role accepts; others are flagged
 //            --hiring-company <name>          flag people who work there now
 //            --keep                           keep the test copy in the sidebar (it is archived by default)
+//            --question-only                  time the first question, leave it unanswered (no paid search)
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
@@ -152,7 +153,19 @@ async function auth(path, body) {
   remember(response);
   return { status: response.status, body: await response.json().catch(() => null) };
 }
+// Sign-in is rate limited, so repeated checks can reuse one saved session.
+const sessionFile = process.env.RAKAZO_SESSION_FILE;
 async function signIn() {
+  if (sessionFile && fs.existsSync(sessionFile)) {
+    cookie = fs.readFileSync(sessionFile, "utf8").trim();
+    const me = await fetch(`${BASE}/api/auth/get-session`, { headers: headers() });
+    if (me.ok && (await me.json().catch(() => null))?.user) return;
+    cookie = "";
+  }
+  await signInWithPassword();
+  if (sessionFile && cookie) fs.writeFileSync(sessionFile, cookie, { mode: 0o600 });
+}
+async function signInWithPassword() {
   if (bearer && !process.env.RAKAZO_EMAIL) return;
   const email = process.env.RAKAZO_EMAIL;
   const password = process.env.RAKAZO_PASSWORD;
@@ -517,6 +530,56 @@ function namesListedInChat(round) {
 // recover from with a later successful call of the same tool, and on any error that reads
 // as an outage. Counts every error class either way, so recovered retries still show up.
 const CHECKED_TOOLS = /^(recruiting_|artifact_read$)/;
+function watchLive(groupId) {
+  const controller = new AbortController();
+  const stop = setTimeout(() => controller.abort(), 120_000);
+  stop.unref?.();
+  (async () => {
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: { ...headers(), accept: "text/event-stream" },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        let event;
+        try {
+          const data = JSON.parse(line.slice(5));
+          event = data.json ?? data;
+        } catch {
+          continue;
+        }
+        const payload = event?.payload ?? {};
+        if (event?.type === "run.started") mark("live_run_started");
+        if (
+          event?.type === "thread.progress" &&
+          typeof payload.text === "string" &&
+          payload.text.trim()
+        )
+          mark("live_first_text", { text: payload.text.slice(0, 40) });
+        if (
+          event?.type === "thread.message.created" &&
+          (payload.blocks ?? []).some((block) => block.kind === "ask")
+        ) {
+          mark("live_first_card");
+          controller.abort();
+        }
+      }
+    }
+  })().catch((error) => {
+    if (error.name !== "AbortError") log(`live watch stopped: ${error.message}`);
+  });
+}
 async function readEvents(groupId) {
   const controller = new AbortController();
   let idle = setTimeout(() => controller.abort(), 15_000);
@@ -868,6 +931,10 @@ async function main() {
           ).id,
         ]
       : undefined;
+    // Watches the live stream from the send, so the first words and the card are timed exactly,
+    // not on the next poll.
+    watchLive(groupId);
+    mark("send_called");
     await rpc("threads/followUp", {
       groupId,
       text: file ? "使用附件来定义这个岗位并开始搜索。" : JD,
@@ -883,6 +950,17 @@ async function main() {
     mark("attached");
   }
 
+  // Times only the first question and leaves it unanswered, so no paid search runs.
+  if (flag("--question-only")) {
+    const until = Date.now() + 90_000;
+    while (!report.milestones.live_first_card && Date.now() < until) await sleep(250);
+    await sleep(2_000);
+    report.result = report.milestones.live_first_card ? "question_shown" : "no_question";
+    save();
+    await archiveCopy();
+    log(`result ${report.result}`);
+    process.exit(0);
+  }
   let phase = "intake";
   if (option("--group") && flag("--scale-now")) {
     await readMessages(groupId);

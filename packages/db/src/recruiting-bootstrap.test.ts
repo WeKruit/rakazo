@@ -410,7 +410,7 @@ describe("ensureRecruitingWorkspace", () => {
         secretId: undefined,
       }),
     });
-    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(3);
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledTimes(4);
     f.tx.botMcpServer.createMany.mockClear();
     f.tx.mcpServer.create.mockClear();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
@@ -1083,7 +1083,7 @@ describe("managed first-party recruiting CRM installation", () => {
     const before = structuredClone(f.presets[0]);
     f.busy();
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.servers).toHaveLength(3);
+    expect(f.servers).toHaveLength(4);
     expect(f.presets[0]).toEqual(before);
   });
 });

@@ -61,6 +61,7 @@ import {
   pastedJobTitle,
   REPORT_IN_FINAL_REPLY,
   REVISIONED_RESEARCH_OPERATIONS,
+  requestTitle,
   resumeBriefForRun,
   STEERING_ACK,
   savedCandidateKeyForm,
@@ -5536,6 +5537,51 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
   });
 
+  async function firstMessageRole(groupId: string, groupName: string | null) {
+    const f = fixture(`first-message-${groupId}`);
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () =>
+          groupName === null ? null : { id: groupId, name: groupName, members: [] },
+        ),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: `first-message-${groupId}`,
+        blocks: [{ kind: "text", text: "Open an agent engineer role, new grads welcome" }],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    await f.run();
+    return { f, saved: vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2] };
+  }
+
+  it("never saves a role in Kruit's account-wide conversation", async () => {
+    const { f, saved } = await firstMessageRole("recruiting-global-abc", "Kruit");
+    expect(saved).toBeUndefined();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).not.toContain(
+      "Do not create a role in this turn",
+    );
+  });
+
+  it("keeps the title of a role Kruit opened when its team saves the role", async () => {
+    const { saved } = await firstMessageRole("role-abc", "Agent Engineer");
+    expect(saved).toMatchObject({ operation: "create", title: "Agent Engineer" });
+  });
+
   it("streams a question and its choices while the card is still being written", async () => {
     const f = fixture("streamed-question");
     f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
@@ -5748,6 +5794,16 @@ describe("native recruiting assessment effect delivery", () => {
     expect(short.endsWith("候选人需要三项都具备吗？")).toBe(true);
     expect(shortQuestion("short?")).toBe("short?");
     expect(shortQuestion("x".repeat(300))).toHaveLength(240);
+  });
+
+  it("titles a short role request from its first line only when it reads as a name", () => {
+    expect(requestTitle("测试固定 · 验证岗位 8\n职位：前端工程师（React），北京")).toBe(
+      "测试固定 · 验证岗位 8",
+    );
+    expect(requestTitle("**Founding Engineer**\nSF, 5+ years")).toBe("Founding Engineer");
+    expect(requestTitle("new grads from USC, CS")).toBeNull();
+    expect(requestTitle("Hi there.\nI need a designer")).toBeNull();
+    expect(requestTitle("帮我找人：\n前端")).toBeNull();
   });
 
   it("titles a pasted JD from its first line and ignores short messages", () => {

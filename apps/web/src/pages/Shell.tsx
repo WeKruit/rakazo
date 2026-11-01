@@ -399,6 +399,7 @@ export function ShellPage() {
           groupId={model.groupId}
           chatting={
             model.recruitingWorkspaceView === "conversation" ||
+            model.workspaceBrief ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
           start={visibleSidebarWidth}

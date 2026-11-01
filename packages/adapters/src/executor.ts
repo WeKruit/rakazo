@@ -124,6 +124,7 @@ import {
   isBackgroundRunTrigger,
   isCallClientNonce,
   isChineseText,
+  isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -155,6 +156,7 @@ import {
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   REPLY_IN_CHINESE_NOTE,
+  REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -1315,6 +1317,21 @@ export function pastedJobTitle(text: string): string | null {
   if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
   if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
+}
+
+/**
+ * A working title for a short role request that is not a full JD: its first line, when the
+ * message has more lines after it and that line reads as a name, not a sentence.
+ */
+export function requestTitle(text: string): string | null {
+  const lines = text
+    .split("\n")
+    .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(first))
+    return null;
+  return first;
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
@@ -12681,6 +12698,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         async function startRoleFromJob() {
           if (
             thread.activeRecruitingRoleId ||
+            // Kruit's account-wide conversation never holds a role; it opens one with start_role.
+            thread.groupId?.startsWith("recruiting-global-") ||
             nativeSources?.currentAnswer ||
             currentTurnMessage?.role !== "user" ||
             !deps.artifacts ||
@@ -12778,7 +12797,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   })
                 )?.name.trim()
               : undefined;
-            const title = named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : NEW_ROLE_TITLE;
+            const title =
+              named && named !== NEW_ROLE_TITLE
+                ? named.slice(0, 120)
+                : (requestTitle(request) ?? NEW_ROLE_TITLE);
             return {
               saving: create(title, [], request),
               note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
@@ -13112,7 +13134,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
-        const lastRecruiterBlocks = messages.findLast((message) => message.role === "user")?.blocks;
+        // History is newest first, so the first user row is the recruiter's latest message.
+        const lastRecruiterBlocks = messages.find((message) => message.role === "user")?.blocks;
         const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
           ? lastRecruiterBlocks
               .map((block) =>
@@ -13125,8 +13148,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
               .join(" ")
           : "";
-        const languageNote =
-          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
+        const languageNote = !hideVendors
+          ? undefined
+          : isChineseText(lastRecruiterText)
+            ? REPLY_IN_CHINESE_NOTE
+            : isEnglishText(lastRecruiterText)
+              ? REPLY_IN_ENGLISH_NOTE
+              : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -14585,6 +14613,58 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // Gray next-message text in the composer. It starts as soon as the reply text is final,
+          // beside the checkpoint and finalize below, so it is ready about when the reply lands.
+          const suggestionPending =
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            text.trim() &&
+            !blocks.some((block) => block.kind === "ask")
+              ? suggestNextMessage({
+                  runtime: deps.runtime,
+                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+                  earlier: historyMessages
+                    .filter(
+                      (message) =>
+                        message.id !== currentTurnMessage?.id &&
+                        (message.role === "user" || message.role === "bot"),
+                    )
+                    .map((message) => ({
+                      role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                      text: message.blocks
+                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                        .join("\n"),
+                    })),
+                  userText: turnUserText,
+                  replyText: text,
+                  runId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  threadId: thread.id,
+                  onUsage: (event) =>
+                    recordUsage(
+                      deps.prisma,
+                      event,
+                      {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                        parentRunId: runId,
+                        runId,
+                        operationId: `suggestion:${runId}`,
+                        operationKind: "setup",
+                      },
+                      estimateCatalogTokenCostUsd,
+                    ),
+                }).catch((error) => {
+                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+                  return null;
+                })
+              : null;
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -14630,6 +14710,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
+          // only while this reply is the newest message and nothing is running.
+          if (suggestionPending && !completed.continuationRunId) {
+            void suggestionPending
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+              );
+          }
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
@@ -14732,71 +14832,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
-          }
-          // Gray next-message text in the composer, sent after the reply so it never delays it.
-          if (
-            deps.replySuggestions &&
-            !scripted &&
-            run.trigger === "user" &&
-            !messagingChannelRun &&
-            !handedOff &&
-            !completed.continuationRunId &&
-            !recruitingContinued &&
-            text.trim()
-          ) {
-            void suggestNextMessage({
-              runtime: deps.runtime,
-              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-              earlier: historyMessages
-                .filter(
-                  (message) =>
-                    message.id !== currentTurnMessage?.id &&
-                    (message.role === "user" || message.role === "bot"),
-                )
-                .map((message) => ({
-                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                  text: message.blocks
-                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                    .join("\n"),
-                })),
-              userText: turnUserText,
-              replyText: text,
-              runId,
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `suggestion:${runId}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
-                ),
-            })
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.publishTransient({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
-              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (

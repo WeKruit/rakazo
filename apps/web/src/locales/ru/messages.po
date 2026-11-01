@@ -701,6 +701,10 @@ msgstr "Назад"
 msgid "Back to inbox"
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Back to overview"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models"
 msgstr "Резервные модели"
@@ -933,6 +937,12 @@ msgstr "Candidate status"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Candidate time zone"
+msgstr ""
+
+#. placeholder {0}: candidate.name
+#. placeholder {1}: candidate.email
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate: {0} · {1} · {candidateZone}"
 msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
@@ -2394,8 +2404,16 @@ msgstr "Скачать как Markdown"
 msgid "Draft"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Draft in role chat"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -2464,6 +2482,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email draft editor"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Email draft only. No time is booked."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -2853,6 +2875,10 @@ msgstr "Обновления группы"
 msgid "Groups"
 msgstr "Группы"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Guests and location are requests in the draft. Email recipients stay unchanged. No time is booked."
+msgstr ""
+
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Guide retrieval; qualification criteria stay unchanged."
 msgstr ""
@@ -3008,6 +3034,11 @@ msgstr ""
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Include"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Include these notes verbatim in the draft and any later confirmation:\n"
+"{notes}"
 msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
@@ -4078,6 +4109,10 @@ msgstr ""
 msgid "Notes"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Notes for the email"
+msgstr ""
+
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
 msgstr ""
@@ -4424,6 +4459,10 @@ msgid "Plan interview"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Plan one booking"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Plan saved. Booking and sending still require approval."
 msgstr ""
 
@@ -4567,6 +4606,10 @@ msgstr ""
 msgid "Projects"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Propose times by email"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Provider"
@@ -4662,6 +4705,10 @@ msgstr "Недавние"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Recents"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Recheck availability before booking. Any later booking, guest addition or sending requires review of the exact participants, selected time, location and message."
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
@@ -4876,11 +4923,33 @@ msgid "Request"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested guests"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested guests (do not add to email recipients):\n"
+"{guests}"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Requested interviewer email"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Requested interviewer name"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested interviewer: {interviewerName} · {interviewerEmail} · {interviewerZone}"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested location"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested location:\n"
+"{location}"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSummary.tsx
@@ -4977,6 +5046,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Review plan"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review proposed times"
 msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
@@ -5394,6 +5467,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Scheduling action"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -6210,6 +6287,10 @@ msgstr "Инструменты"
 msgid "Treat like a person"
 msgstr "Считать человеком"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Treat this as a location request in the draft. Verify the selected event type supports it before proposing a booking; do not override its configured location."
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Treg token"
 msgstr "Токен Treg"
@@ -6417,6 +6498,10 @@ msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "View {name}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "View analytics"
 msgstr ""
 
 #: src/pages/RoutineRunHistory.tsx

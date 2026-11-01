@@ -38,8 +38,12 @@ export async function startRoleFromRecruiterMessage(
   role: { threadId: string; botId: string; deliveryKey: string },
 ): Promise<boolean> {
   if (!run.sourceMessageId) return false;
-  const source = await deps.prisma.message.findFirst({
-    where: { id: run.sourceMessageId, threadId: run.threadId },
+  // The recruiter's latest message here: a turn resumed by answering a card keeps the
+  // card's original message as its source, but the role was asked for in the answer.
+  const recent = await deps.prisma.message.findMany({
+    where: { threadId: run.threadId, role: "user", botId: null },
+    orderBy: { seq: "desc" },
+    take: 10,
     select: {
       role: true,
       botId: true,
@@ -48,7 +52,9 @@ export async function startRoleFromRecruiterMessage(
       externalTranscriptFor: { select: { id: true } },
     },
   });
-  const blocks = source && !source.externalTranscriptFor ? recruiterBlocks(source) : undefined;
+  const blocks = recent
+    .map((message) => (message.externalTranscriptFor ? undefined : recruiterBlocks(message)))
+    .find(Boolean);
   if (!blocks) return false;
   const text = blocks
     .flatMap((block) => (block.kind === "text" ? [block.text] : []))

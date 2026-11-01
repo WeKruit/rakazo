@@ -13,6 +13,7 @@ import {
   DISCOVERY_FAILURE_TTL_MS,
   DISCOVERY_REFRESH_OPERATION,
   firstPartyMcpUrl,
+  hasPlatformMcpCredential,
   loadMcpCredentialRecord,
   McpConnector,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
@@ -3448,6 +3449,51 @@ describe("allowlistDrift", () => {
       offered: 2,
       stringAllowedCount: 1,
     });
+  });
+});
+
+describe("deployment Instantly credentials", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const context = {
+    userId: "new-user",
+    spaceId: "private-space",
+    signal: new AbortController().signal,
+  };
+  const server = {
+    secretId: "saved-secret",
+    transport: "streamable_http",
+    endpoint: "https://mcp.instantly.ai/mcp",
+  };
+
+  it("uses the product's account for every user, even one holding an old saved key", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
+    const findFirst = vi.fn();
+    const load = vi.fn();
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst } } as never,
+      { load } as never,
+      server,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-mail-key" });
+    expect(result.secret).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+    expect(hasPlatformMcpCredential(server)).toBe(true);
+  });
+
+  it("keeps the user's own key when the deployment has no account", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", " ");
+    const row = { id: "saved-secret", ciphertext: "encrypted-reference" };
+    const load = vi.fn().mockResolvedValue('{"secret":"own-key"}');
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst: vi.fn().mockResolvedValue(row) } } as never,
+      { load } as never,
+      server,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "own-key" });
+    expect(hasPlatformMcpCredential({ ...server, secretId: null })).toBe(false);
   });
 });
 
