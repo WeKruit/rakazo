@@ -17,6 +17,7 @@ export { Composer, candidateReferenceText } from "./shell/Composer";
 
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ComputerReleaseReason, RecruitingAccountViewOutput } from "@rakazo/contracts";
+import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
@@ -67,6 +68,7 @@ import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingReadCacheContext } from "./recruiting/shared";
 import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
+import { StackedConversation } from "./shell/StackedConversation";
 
 const CreateGroupForm = lazyPanel(() =>
   withFeatureMessages(() => import("./GroupPanel")).then((module) => module.CreateGroupForm),
@@ -116,8 +118,8 @@ export function ShellPage() {
     !accountParams.has("role") &&
     ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
   const { t } = useLingui();
-  // Where the recruiter was before opening a waiting card from the corner.
-  const [dockReturn, setDockReturn] = useState<string | null>(null);
+  // A waiting conversation opened from the corner, stacked over the current page.
+  const [stacked, setStacked] = useState<string | null>(null);
   const {
     navigate,
     session,
@@ -194,13 +196,20 @@ export function ShellPage() {
     computerScreenError,
     newRoleAttachmentKey,
     newRoleAttachments,
+    roleCreationError,
   } = model;
+  const stackedGroup = stacked ? groups.find((group) => group.id === stacked) : undefined;
   const roleCreationForm = (
     <CreateGroupForm
-      key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
+      key={JSON.stringify([
+        showToolActivity ? "group" : roleSourceGroup?.id,
+        showToolActivity ? "" : newRoleDescription,
+        roleCreationError,
+      ])}
       bots={showToolActivity ? bots : roleCrewBots}
       recruiting={!showToolActivity}
       initialDescription={newRoleDescription}
+      initialError={roleCreationError}
       attachments={showToolActivity ? undefined : newRoleAttachments}
       attachmentNotice={attachmentNotice}
       onRemoveSkippedAttachment={removeSkippedAttachment}
@@ -358,26 +367,27 @@ export function ShellPage() {
             model.recruitingWorkspaceView === "conversation" ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
-          onOpen={(id) => {
-            const view = model.recruitingWorkspaceView;
-            setDockReturn(`${window.location.pathname}${window.location.search}`);
-            setPanel(null);
-            setMobileSidebarOpen(false);
-            // From a role workspace the other role opens in the same workspace, its card in the chat beside it.
-            navigate(
-              `/app/g/${encodeURIComponent(id)}?view=${model.roleChatWorkspace ? view : "conversation"}`,
-            );
-          }}
-          onBack={
-            dockReturn
-              ? () => {
-                  setDockReturn(null);
-                  navigate(dockReturn);
-                }
-              : undefined
-          }
+          onOpen={(id) => setStacked(id)}
         />
       )}
+      {stackedGroup ? (
+        <StackedConversation
+          groupId={stackedGroup.id}
+          title={
+            stackedGroup.id.startsWith("recruiting-global-")
+              ? RECRUITING_GLOBAL_AGENT_NAME
+              : stackedGroup.name
+          }
+          bots={bots}
+          onBack={() => setStacked(null)}
+          onOpenFull={() => {
+            setStacked(null);
+            setPanel(null);
+            setMobileSidebarOpen(false);
+            navigate(`/app/g/${encodeURIComponent(stackedGroup.id)}?view=conversation`);
+          }}
+        />
+      ) : null}
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
       {computerOpen || booting || !botsSidebarCollapsed ? null : (

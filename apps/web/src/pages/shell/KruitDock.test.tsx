@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children?: ReactNode }) => children,
+  Plural: ({ value, other }: { value: number; other: string }) => other.replace("#", String(value)),
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
@@ -21,10 +22,7 @@ const KRUIT = "recruiting-global-a";
 let host: HTMLDivElement | undefined;
 afterEach(() => host?.remove());
 
-async function render(
-  groups: Group[],
-  props: { groupId?: string; chatting?: boolean; onBack?: () => void } = {},
-) {
+async function render(groups: Group[], props: { groupId?: string; chatting?: boolean } = {}) {
   host = document.createElement("div");
   document.body.append(host);
   const onOpen = vi.fn();
@@ -46,7 +44,7 @@ it("opens Kruit from the button when nothing waits", async () => {
   expect(onOpen).toHaveBeenCalledWith(KRUIT);
 });
 
-it("pops a card for what waits, with a count on the button, and opens its conversation", async () => {
+it("shows a small closable reminder and lists what waits only when asked", async () => {
   const { host, onOpen } = await render([
     group(KRUIT),
     group("Designer", { attention: "approval" }),
@@ -54,15 +52,25 @@ it("pops a card for what waits, with a count on the button, and opens its conver
     group("Quiet"),
   ]);
   expect(find(host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 2 waiting");
-  const card = host.querySelector('[role="status"]')!;
-  expect(card.textContent).toContain("Needs approval");
-  expect(card.textContent).toContain("Needs your response");
-  expect(card.textContent).not.toContain("Quiet");
+  const reminder = host.querySelector('[role="status"]')!;
+  expect(reminder.textContent).toContain("2 items need your attention");
+  expect(host.textContent).not.toContain("Designer");
+  await act(async () => find(host, "2 items").click());
+  expect(host.textContent).toContain("Needs approval");
+  expect(host.textContent).toContain("Needs your response");
+  expect(host.textContent).not.toContain("Quiet");
   await act(async () => find(host, "Designer").click());
   expect(onOpen).toHaveBeenCalledWith("Designer");
+  expect(host.textContent).not.toContain("Open role");
   expect(host.querySelector('[role="status"]')).toBeNull();
   await act(async () => find(host, "Kruit").click());
-  expect(host.querySelector('[role="status"]')).not.toBeNull();
+  expect(host.textContent).toContain("Open role");
+});
+
+it("closes the reminder until something new waits", async () => {
+  const { host } = await render([group(KRUIT), group("Designer", { attention: "approval" })]);
+  await act(async () => find(host, "Close").click());
+  expect(host.querySelector('[role="status"]')).toBeNull();
 });
 
 it("in a conversation shows no button, only cards from other conversations", async () => {
@@ -76,17 +84,8 @@ it("in a conversation shows no button, only cards from other conversations", asy
     [group(KRUIT), group("Designer"), group("Open role", { attention: "question" })],
     { groupId: "Designer", chatting: true },
   );
-  expect(other.host.querySelector('[role="status"]')?.textContent).toContain("Open role");
+  expect(other.host.querySelector('[role="status"]')?.textContent).toContain(
+    "1 items need your attention",
+  );
   expect(find(other.host, "Kruit")).toBeUndefined();
-});
-
-it("offers a way back to where the recruiter was after opening a card", async () => {
-  const onBack = vi.fn();
-  const { host } = await render([group(KRUIT), group("Designer")], {
-    groupId: "Designer",
-    chatting: true,
-    onBack,
-  });
-  await act(async () => find(host, "Back").click());
-  expect(onBack).toHaveBeenCalled();
 });

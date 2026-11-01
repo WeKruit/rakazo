@@ -263,7 +263,9 @@ export function useShellController() {
     SpaceMemoryConfig | null | undefined
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
+  const pendingGroupCreations = useRef(new Map<string, Promise<Group>>());
   const shellRoster = useShellRoster({
+    pendingGroupCreations,
     userId,
     botId,
     groupId,
@@ -642,6 +644,7 @@ export function useShellController() {
     computerCacheRef,
     setScreenUrl,
     bootstrappedThread,
+    pendingGroupCreations,
     recruitingOutage,
     reconnectNeedsRecruitingRead,
     refreshRecruitingReads,
@@ -1029,6 +1032,7 @@ export function useShellController() {
     jumpGeneration,
     setScrollRequest,
     activeGroupId,
+    pendingGroupCreations,
     jumpToMessageRef,
     activeBotId,
     snapshotRef,
@@ -1129,6 +1133,14 @@ export function useShellController() {
     focusPromptAbortRef,
     focusPromptBotIdRef,
     sendingRef,
+    newRoleSourceId,
+    pendingGroupCreations,
+    reopenRoleCreation: () => {
+      setPanel("create-group");
+      // The route may still be moving to the role; keep the form open through that change.
+      pendingExplicitPanel.current = true;
+    },
+    setPendingAttachments,
   });
   function cancelFocusPrompt() {
     focusPromptAbortRef.current?.abort();
@@ -1219,10 +1231,12 @@ export function useShellController() {
 
   useEffect(() => {
     const threadKey = inGroup ? groupId : active?.id;
+    // A new role's files stay with its form: a role that fails to start reopens with them.
+    const keep = (attachment: PendingAttachment) =>
+      attachment.threadKey === threadKey || attachment.threadKey.startsWith('["new-role",');
     setPendingAttachments((current) => {
-      const stale = current.filter((attachment) => attachment.threadKey !== threadKey);
-      revokePendingAttachmentPreviews(stale);
-      return attachmentsForThread(current, threadKey);
+      revokePendingAttachmentPreviews(current.filter((attachment) => !keep(attachment)));
+      return current.filter(keep);
     });
     clearReply();
     setAttachmentNotice([]);

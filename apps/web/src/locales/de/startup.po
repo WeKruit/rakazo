@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{0, plural, one {# item needs your attention} other {# items need your attention}}"
+msgstr "{0, plural, one {# Eintrag braucht deine Aufmerksamkeit} other {# Einträge brauchen deine Aufmerksamkeit}}"
+
 #. placeholder {0}: step.peopleWithEmail
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{0, plural, one {# person with email} other {# people with email}}"
@@ -453,7 +458,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr ""
 
@@ -958,6 +963,14 @@ msgstr ""
 msgid "Could not continue"
 msgstr "Fortfahren fehlgeschlagen"
 
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create group"
+msgstr "Gruppe konnte nicht erstellt werden"
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create role"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1042,6 +1055,10 @@ msgstr "Suchergebnisse konnten nicht geladen werden"
 msgid "Could not load sign-in options"
 msgstr "Anmeldeoptionen konnten nicht geladen werden"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "Diese Unterhaltung konnte nicht geladen werden"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "Datei konnte nicht geladen werden."
@@ -1115,6 +1132,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr ""
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "Senden fehlgeschlagen"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1902,6 +1923,7 @@ msgstr ""
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "Wird geladen…"
@@ -1995,6 +2017,7 @@ msgstr ""
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "Nachricht"
 
@@ -2015,6 +2038,7 @@ msgid "Message from {peer}"
 msgstr "Nachricht von {peer}"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "Nachricht…"
 
@@ -2357,6 +2381,10 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "Externen Link öffnen?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "Ganze Unterhaltung öffnen"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3123,6 +3151,7 @@ msgid "Select all on this page"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "Senden"
 

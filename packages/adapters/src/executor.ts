@@ -13363,6 +13363,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 Boolean(linkRole) ||
                 firstRoundPending ||
                 (Boolean(thread.groupId) &&
+                  // Kruit's account-wide conversation is never a role's intake.
+                  !thread.groupId?.startsWith("recruiting-global-") &&
                   !thread.activeRecruitingRoleId &&
                   recruitingSearch &&
                   Boolean(recruitingBotKey(bot))),

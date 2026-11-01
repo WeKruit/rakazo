@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{0, plural, one {# item needs your attention} other {# items need your attention}}"
+msgstr "{0, plural, one {# пункт требует внимания} few {# пункта требуют внимания} many {# пунктов требуют внимания} other {# пункта требуют внимания}}"
+
 #. placeholder {0}: step.peopleWithEmail
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{0, plural, one {# person with email} other {# people with email}}"
@@ -453,7 +458,7 @@ msgid "Awaiting feedback"
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
-#: src/pages/shell/KruitDock.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Back"
 msgstr "Назад"
 
@@ -958,6 +963,14 @@ msgstr "Не удалось подключиться к экрану компь�
 msgid "Could not continue"
 msgstr "Не удалось продолжить"
 
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create group"
+msgstr "Не удалось создать группу"
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not create role"
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1042,6 +1055,10 @@ msgstr "Не удалось загрузить результаты поиска
 msgid "Could not load sign-in options"
 msgstr "Не удалось загрузить способы входа"
 
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not load this conversation"
+msgstr "Не удалось загрузить разговор"
+
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not load this file."
 msgstr "Не удалось загрузить этот файл."
@@ -1115,6 +1132,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr ""
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Could not send"
+msgstr "Не удалось отправить"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1902,6 +1923,7 @@ msgstr ""
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Loading…"
 msgstr "Загрузка…"
@@ -1995,6 +2017,7 @@ msgstr "Упоминания"
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message"
 msgstr "Сообщение"
 
@@ -2015,6 +2038,7 @@ msgid "Message from {peer}"
 msgstr "Сообщение от {peer}"
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Message…"
 msgstr "Сообщение…"
 
@@ -2357,6 +2381,10 @@ msgstr ""
 #: src/components/markdown-link-prompt.tsx
 msgid "Open external link?"
 msgstr "Открыть внешнюю ссылку?"
+
+#: src/pages/shell/StackedConversation.tsx
+msgid "Open full conversation"
+msgstr "Открыть весь разговор"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Open in full window"
@@ -3123,6 +3151,7 @@ msgid "Select all on this page"
 msgstr ""
 
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/StackedConversation.tsx
 msgid "Send"
 msgstr "Отправить"
 
