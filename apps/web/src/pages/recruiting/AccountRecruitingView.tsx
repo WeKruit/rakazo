@@ -163,7 +163,12 @@ export function AccountRecruitingView({
       const abort = new AbortController();
       void (async () => {
         const list = await rpc.recruiting.accountView(
-          { view: "roles", cursor, limit: ROLES_PER_PAGE },
+          {
+            view: "roles",
+            cursor,
+            limit: ROLES_PER_PAGE,
+            ...(view === "sequence" ? { briefedOnly: true } : {}),
+          },
           { signal: abort.signal },
         );
         if (cancelled) return;
@@ -891,11 +896,13 @@ export function AccountRecruitingView({
                         .length ? (
                         (item.campaigns ?? [item.campaign!]).map((campaign) => (
                           <div key={campaign.campaign?.id} className="space-y-2">
-                            <h3 className="text-sm font-medium">
-                              {campaign.campaign?.name
-                                ? hideVendorNames(campaign.campaign.name)
-                                : null}
-                            </h3>
+                            {campaign.campaign?.name &&
+                            hideVendorNames(campaign.campaign.name).trim() !==
+                              info?.title.trim() ? (
+                              <h3 className="text-sm font-medium">
+                                {hideVendorNames(campaign.campaign.name)}
+                              </h3>
+                            ) : null}
                             {campaign.status === "unavailable" ? (
                               <RetryNotice onRetry={() => setReload((value) => value + 1)}>
                                 <Trans>Could not read this campaign.</Trans>

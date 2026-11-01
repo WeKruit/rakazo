@@ -38,6 +38,8 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
   cursor: Id.optional(),
   limit: z.number().int().min(1).max(50).default(20),
   since: IsoDate.optional(),
+  /** Leave out roles whose brief has not been written yet (placeholder "New role"). */
+  briefedOnly: z.boolean().optional(),
 });
 export const RecruitingAccountRoleSchema = z.strictObject({
   id: Id,
