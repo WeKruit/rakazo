@@ -5801,6 +5801,9 @@ describe("native recruiting assessment effect delivery", () => {
       "测试固定 · 验证岗位 8",
     );
     expect(requestTitle("**Founding Engineer**\nSF, 5+ years")).toBe("Founding Engineer");
+    expect(requestTitle("测试固定 · 仓库主管 11-01T17:20\n地点：Dallas，现场办公。")).toBe(
+      "测试固定 · 仓库主管 11-01T17:20",
+    );
     expect(requestTitle("new grads from USC, CS")).toBeNull();
     expect(requestTitle("Hi there.\nI need a designer")).toBeNull();
     expect(requestTitle("帮我找人：\n前端")).toBeNull();
