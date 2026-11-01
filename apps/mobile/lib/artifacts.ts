@@ -1,4 +1,5 @@
 import type { Artifact, ArtifactVersion } from "@rakazo/contracts";
+import { DOCX_MIME_TYPE } from "@rakazo/contracts";
 import { rpc } from "./api";
 import type { MobileArtifactTarget } from "./artifact-open";
 
@@ -41,6 +42,7 @@ export function mimeBadgeLabel(mimeType: string): string {
   if (mimeType === "text/html") return "HTML";
   if (mimeType === "text/markdown") return "MD";
   if (mimeType === "application/pdf") return "PDF";
+  if (mimeType === DOCX_MIME_TYPE) return "DOCX";
   const slash = mimeType.indexOf("/");
   return (slash === -1 ? mimeType : mimeType.slice(slash + 1)).toUpperCase().slice(0, 6);
 }

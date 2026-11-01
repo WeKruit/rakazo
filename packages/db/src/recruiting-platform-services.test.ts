@@ -24,6 +24,9 @@ function fixture(
     reviewerGrants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
     /** Recruiting conversations of this crew that lack its Reviewer. */
     withoutReviewer?: { id: string; members: number }[];
+    /** Connected Google Calendars and the Scheduling bots of the crew. */
+    calendars?: { id: string }[];
+    scheduling?: { id: string }[];
   } = {},
 ) {
   const servers = { ...options.servers };
@@ -39,6 +42,7 @@ function fixture(
         current = where.slug;
         return servers[current] ?? null;
       }),
+      findMany: vi.fn(async () => options.calendars ?? []),
       create: vi.fn(async ({ data }: { data: { slug: string; endpoint: string } }) => {
         servers[data.slug] = {
           id: data.slug,
@@ -52,12 +56,14 @@ function fixture(
     bot: {
       count: vi.fn(async () => (options.withoutReviewer ? 1 : 0)),
       findFirst: vi.fn(async () => (options.lead === false ? null : { id: "main-bot" })),
-      findMany: vi.fn(async () =>
-        (missing[current] ?? []).map((id) => ({
-          id,
-          name: id.startsWith("outreach") ? "Outreach" : id,
-          spawnKey: null,
-        })),
+      findMany: vi.fn(async ({ where }: { where: unknown }) =>
+        JSON.stringify(where).includes(":scheduling")
+          ? (options.scheduling ?? [])
+          : (missing[current] ?? []).map((id) => ({
+              id,
+              name: id.startsWith("outreach") ? "Outreach" : id,
+              spawnKey: null,
+            })),
       ),
     },
     chatGroup: {
@@ -265,5 +271,39 @@ describe("ensurePlatformServices", () => {
         allowedTools: [...reads, "create_booking", "reschedule_booking", "cancel_booking"],
       },
     });
+  });
+
+  it("gives Scheduling a connected Google Calendar it was never granted", async () => {
+    const f = fixture({ calendars: [{ id: "calendar" }], scheduling: [{ id: "scheduling-bot" }] });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.mcpServer.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+        enabled: true,
+        secretId: { not: null },
+      }),
+      select: { id: true },
+    });
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          botId: "scheduling-bot",
+          serverId: "calendar",
+          allowAllTools: false,
+          allowedTools: expect.arrayContaining(["suggest_time", "create_event"]),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it("adds no calendar grant when no Google Calendar is connected", async () => {
+    const f = fixture({ scheduling: [{ id: "scheduling-bot" }] });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ botId: "scheduling-bot" })],
+      }),
+    );
   });
 });

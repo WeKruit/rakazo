@@ -74,6 +74,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   archivedGroups,
   archivedOpen,
   groupId,
+  pendingRoleName,
   query,
   canCreateRole,
   onQueryChange,
@@ -111,6 +112,8 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   archivedGroups: Group[];
   archivedOpen: boolean;
   groupId?: string;
+  /** A role being created: shown at once, before the server returns it. */
+  pendingRoleName?: string | null;
   query: string;
   canOpenDashboard: boolean;
   canCreateRole: boolean;
@@ -380,6 +383,25 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           </p>
         ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
+          {pendingRoleName ? (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                aria-current="page"
+                aria-busy="true"
+                disabled
+                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal disabled:opacity-100"
+              >
+                <span
+                  className="size-2 shrink-0 animate-pulse rounded-full bg-link"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 truncate" dir="auto">
+                  {pendingRoleName}
+                </span>
+              </Button>
+            </div>
+          ) : null}
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
               <Button

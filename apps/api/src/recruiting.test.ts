@@ -5874,6 +5874,54 @@ describe("live CRM browser reads", () => {
       ).rejects.toMatchObject({ code: "NOT_FOUND" });
     },
   );
+  it("drops a workspace id saved as a company and uses the person's next real company", async () => {
+    const f = browserFixture();
+    const workspaceId = "70000000-0000-4000-8000-000000000007";
+    const source = (id: string, company: string | null) => ({
+      id,
+      company,
+      title: null,
+      location: null,
+      syncedAt: timestamp,
+    });
+    const listed = f.results.list_crm_candidates as { rows: Record<string, unknown>[] };
+    listed.rows = [
+      {
+        ...listed.rows[0],
+        company: workspaceId,
+        profile: {
+          history: [],
+          summary: "",
+          skills: [],
+          sources: [
+            source("50000000-0000-4000-8000-000000000001", workspaceId),
+            source("50000000-0000-4000-8000-000000000002", " "),
+            source("50000000-0000-4000-8000-000000000003", "Tesla"),
+          ],
+        },
+      },
+      {
+        ...listed.rows[0],
+        candidate_id: "40000000-0000-4000-8000-000000000005",
+        company: workspaceId,
+      },
+    ];
+    const response = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "candidates",
+      serverId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      limit: 2,
+    });
+    if (response.operation !== "candidates") throw new Error("Expected candidates");
+    expect(response.items.map((item) => item.company)).toEqual(["Tesla", null]);
+    expect(response.items[0]!.profile!.sources.map((item) => item.company)).toEqual([
+      null,
+      null,
+      "Tesla",
+    ]);
+    expect(JSON.stringify(response)).not.toContain(workspaceId);
+  });
   it("reads canonical role metadata and the unchanged legacy candidate filter without a run or copied records", async () => {
     const f = browserFixture();
     const response = await api.getRecruitingCrmData(f.deps, actor, target, {

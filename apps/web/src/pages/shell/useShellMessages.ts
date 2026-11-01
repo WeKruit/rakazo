@@ -38,6 +38,7 @@ import { errorText } from "../../lib/user-error";
 import type { ComposerHandle, PendingAttachment } from "../shell/Composer";
 import type { RecruitingChatContact } from "../shell/recruiting-chat-context";
 import { recruitingChatContext } from "../shell/recruiting-chat-context";
+import type { SkippedAttachment } from "./skipped-attachments";
 
 /** How long a sent message may wait for its durable event before the thread is re-read. */
 const SEND_ECHO_GRACE_MS = 3_000;
@@ -111,7 +112,7 @@ export function useShellMessages({
   setSendError: Dispatch<SetStateAction<string | null>>;
   pendingAttachments: PendingAttachment[];
   setPendingAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
-  setAttachmentNotice: Dispatch<SetStateAction<string | null>>;
+  setAttachmentNotice: Dispatch<SetStateAction<SkippedAttachment[]>>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   sending: boolean;
   composerRef: RefObject<ComposerHandle | null>;
@@ -255,23 +256,22 @@ export function useShellMessages({
       if (!threadKey || !files?.length) return false;
       const existing = attachmentsForThread(pendingAttachments, threadKey);
       const next: PendingAttachment[] = [];
-      const skipped: string[] = [];
+      const skipped: SkippedAttachment[] = [];
+      const skip = (file: File, reason: string) =>
+        skipped.push({ id: crypto.randomUUID(), name: file.name, reason });
+      const maxMegabytes = ATTACHMENT_MAX_BYTES / 1024 / 1024;
       for (const file of Array.from(files)) {
-        if (existing.length + next.length >= ATTACHMENT_MAX_COUNT) {
-          skipped.push(t`${file.name} (max ${ATTACHMENT_MAX_COUNT} attachments)`);
+        const mimeType = inferAttachmentMimeType(file.name, file.type);
+        if (!mimeType) {
+          skip(file, isXlsxFileName(file.name) ? t`Save as CSV` : t`Unsupported format`);
           continue;
         }
         if (file.size > ATTACHMENT_MAX_BYTES) {
-          skipped.push(t`${file.name} (over 10 MiB)`);
+          skip(file, t`Over ${maxMegabytes} MB`);
           continue;
         }
-        const mimeType = inferAttachmentMimeType(file.name, file.type);
-        if (!mimeType) {
-          skipped.push(
-            isXlsxFileName(file.name)
-              ? t`${file.name} (XLSX is not supported yet. Save as CSV and upload again.)`
-              : file.name,
-          );
+        if (existing.length + next.length >= ATTACHMENT_MAX_COUNT) {
+          skip(file, t`Max ${ATTACHMENT_MAX_COUNT} files`);
           continue;
         }
         next.push({
@@ -284,7 +284,7 @@ export function useShellMessages({
       if (next.length) setPendingAttachments((current) => [...current, ...next]);
       for (const item of next)
         attachmentUploads.current.start(attachmentUploadKey(item), item.file);
-      setAttachmentNotice(skipped.length ? t`Skipped ${skipped.join(", ")}` : null);
+      setAttachmentNotice(skipped);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return next.length > 0;
     },
@@ -403,7 +403,7 @@ export function useShellMessages({
           setPendingAttachments((current) =>
             current.filter((attachment) => attachment.threadKey !== originThreadKey),
           );
-          setAttachmentNotice(null);
+          setAttachmentNotice([]);
           if (reroutedToGroup && groupTarget) {
             navigate(`/app/g/${groupTarget}`);
             return true;
@@ -498,8 +498,8 @@ export function useShellMessages({
           navigate(`/app/g/${groupTarget}`);
           return true;
         }
-        if (groupTarget && activeGroupId.current === groupTarget) setAttachmentNotice(null);
-        if (botTarget && activeBotId.current === botTarget) setAttachmentNotice(null);
+        if (groupTarget && activeGroupId.current === groupTarget) setAttachmentNotice([]);
+        if (botTarget && activeBotId.current === botTarget) setAttachmentNotice([]);
         // The receipt and the event stream carry the rest. Read only if no event or echo
         // arrived in time (stream down), or the message carried no text to echo.
         if (!mounted.current) return true;

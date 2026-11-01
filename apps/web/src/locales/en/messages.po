@@ -1638,6 +1638,10 @@ msgstr "Could not delete space"
 msgid "Could not delete this artifact."
 msgstr "Could not delete this artifact."
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not disconnect"
+msgstr "Could not disconnect"
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not disconnect memory provider"
 msgstr "Could not disconnect memory provider"
@@ -2308,6 +2312,7 @@ msgstr "Disabled tools"
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsControls.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnect"
 msgstr "Disconnect"
@@ -2323,6 +2328,7 @@ msgstr "Disconnected {0}."
 
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnecting…"
 msgstr "Disconnecting…"
