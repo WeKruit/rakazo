@@ -1214,6 +1214,8 @@ export const REPORT_IN_FINAL_REPLY =
 export const STEERING_ACK =
   "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it.";
 
+export const INTAKE_ASK_FIRST =
+  "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_RECRUITER_LANGUAGE =
@@ -5632,6 +5634,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -12083,6 +12086,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            // A new role's first question is the coordinator's own: a handoff first costs the
+            // recruiter a second agent's start-up before anything appears.
+            if (linkRole && !intakeHandoffRefused && recruitingBotKey(bot) === "main") {
+              intakeHandoffRefused = true;
+              return finish({ error: INTAKE_ASK_FIRST });
+            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,

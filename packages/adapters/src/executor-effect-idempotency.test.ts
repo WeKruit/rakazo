@@ -53,6 +53,7 @@ import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   continuedCandidateKey,
   createRunExecutor,
+  INTAKE_ASK_FIRST,
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
@@ -5515,8 +5516,16 @@ describe("native recruiting assessment effect delivery", () => {
         createdAt: new Date(),
       },
     ]) as never);
-    f.setCalls([]);
+    f.setCalls([
+      {
+        name: "handoff_to_bot",
+        args: { confirm_name: "Sourcer", message: text },
+        executionId: "handoff-1",
+      },
+    ]);
     await f.run();
+    // The first question comes from the coordinator itself, not after a teammate starts up.
+    expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "New role",
