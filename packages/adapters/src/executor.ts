@@ -12746,6 +12746,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const outside = outsideOf(onTime);
           addFresh(inArea(onTime, outside));
+          // The people are already in Results; chat says so at once instead of staying on the
+          // last activity until the model's picks.
+          if (plannedNewPeople > 0 && !isBackgroundRunTrigger(run.trigger))
+            void deps.events
+              .publishTransient({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: { text: `Found ${plannedNewPeople} people`, activity: true },
+              })
+              .catch(() => undefined);
           // A search still running at the pick adds its people when it returns; a refused extra
           // search hands them to the model instead of searching again.
           results.forEach((result, index) => {
