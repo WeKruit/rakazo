@@ -250,12 +250,10 @@ async function searchMine(
       : before
         ? Prisma.sql`AND m."createdAt" < ${before}`
         : Prisma.empty;
-  const rows = await prisma.$queryRaw<
-    Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
-  >(Prisma.sql`
+  const rows = await prisma.$queryRaw<Array<MineRow>>(Prisma.sql`
     SELECT ${columns}, m."threadId" AS "threadId",
       (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
-      (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName"
+      (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName", t."groupId" AS "groupId", t."botId" AS "ownerBotId"
     FROM messages m JOIN threads t ON t.id = m."threadId"
     WHERE ${visible(scope, { mine: null })}
       ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
@@ -269,13 +267,11 @@ async function searchMine(
   const fullMiss = !rows.length && !before;
   const vector = fullMiss ? await queryVector(embed, query) : null;
   const meaningRows = vector
-    ? await prisma.$queryRaw<
-        Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
-      >(Prisma.sql`
+    ? await prisma.$queryRaw<Array<MineRow>>(Prisma.sql`
         SELECT * FROM (
           SELECT ${columns}, m."threadId" AS "threadId",
             (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
-            (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName",
+            (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName", t."groupId" AS "groupId", t."botId" AS "ownerBotId",
             ${similarity(vector.vector)} AS "similarity"
           FROM message_embeddings e JOIN messages m ON m.id = e."messageId"
           JOIN threads t ON t.id = m."threadId"
@@ -292,12 +288,10 @@ async function searchMine(
     const seen = new Set(rows.map((row) => row.id));
     rows.push(
       ...(
-        await prisma.$queryRaw<
-          Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
-        >(Prisma.sql`
+        await prisma.$queryRaw<Array<MineRow>>(Prisma.sql`
         SELECT ${columns}, m."threadId" AS "threadId",
           (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
-          (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName"
+          (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName", t."groupId" AS "groupId", t."botId" AS "ownerBotId"
         FROM messages m JOIN threads t ON t.id = m."threadId"
         WHERE ${visible(scope, { mine: null })}
           ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
@@ -333,6 +327,7 @@ async function searchMine(
       role: row.role,
       createdAt: row.createdAt.toISOString(),
       snippet: reference(row, query, MINE_SNIPPET_LENGTH).text,
+      link: messageLink(row, row.id),
     })),
     nextSearch: last
       ? {
@@ -345,6 +340,27 @@ async function searchMine(
         }
       : null,
   };
+}
+
+type MineRow = HistoryRow & {
+  threadId: string;
+  botName: string | null;
+  groupName: string | null;
+  groupId: string | null;
+  ownerBotId: string | null;
+};
+
+/** The app path that opens a conversation at one message. */
+export function messageLink(
+  thread: { groupId: string | null; ownerBotId: string | null },
+  messageId: string,
+): string | undefined {
+  const base = thread.groupId
+    ? `/app/g/${encodeURIComponent(thread.groupId)}`
+    : thread.ownerBotId
+      ? `/app/${encodeURIComponent(thread.ownerBotId)}`
+      : undefined;
+  return base ? `${base}?m=${encodeURIComponent(messageId)}` : undefined;
 }
 
 type MineSearchResult = Awaited<ReturnType<typeof searchMine>>;

@@ -20,12 +20,15 @@ const asyncNoop = async () => undefined;
  */
 export function StackedConversation({
   groupId,
+  messageId,
   title,
   bots,
   onBack,
   onOpenFull,
 }: {
   groupId: string;
+  /** Opens at this message instead of the latest ones, until the recruiter sends. */
+  messageId?: string;
   title: string;
   bots: Bot[];
   onBack: () => void;
@@ -33,6 +36,8 @@ export function StackedConversation({
 }) {
   const { t } = useLingui();
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
+  const [focused, setFocused] = useState(messageId);
+  const [around, setAround] = useState<ThreadSnapshot["messages"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -44,6 +49,29 @@ export function StackedConversation({
     const next = await rpc.threads.get({ groupId });
     if (current.current === groupId) setSnapshot(next);
   }, [groupId]);
+
+  useEffect(() => {
+    if (!focused) return;
+    let alive = true;
+    rpc.threads
+      .messages({ groupId, around: { messageId: focused } })
+      .then((page) => {
+        if (alive) setAround(page.messages);
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(errorText(err, t`Could not load this conversation`));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [groupId, focused]);
+
+  useEffect(() => {
+    if (!around || !focused) return;
+    scroller.current
+      ?.querySelector(`[data-message-id="${CSS.escape(focused)}"]`)
+      ?.scrollIntoView({ block: "center" });
+  }, [around, focused]);
 
   useEffect(() => {
     setSnapshot(null);
@@ -64,8 +92,9 @@ export function StackedConversation({
   const lastId = snapshot?.messages.at(-1)?.id;
   useEffect(() => {
     const box = scroller.current;
-    if (box) box.scrollTop = box.scrollHeight;
-  }, [lastId]);
+    if (box && !focused) box.scrollTop = box.scrollHeight;
+  }, [lastId, focused]);
+  const shown = focused ? around : (snapshot?.messages ?? null);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -86,6 +115,7 @@ export function StackedConversation({
     try {
       await rpc.threads.send({ groupId, text });
       setDraft("");
+      setFocused(undefined);
       await load();
     } catch (err) {
       setError(errorText(err, t`Could not send`));
@@ -117,43 +147,48 @@ export function StackedConversation({
         </Button>
       </header>
       <div ref={scroller} className="rk-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {snapshot === null && !error ? (
+        {shown === null && !error ? (
           <p className="text-sm text-muted-foreground">
             <Trans>Loading…</Trans>
           </p>
         ) : null}
-        {snapshot?.messages.map((message) => (
-          <MessageView
+        {shown?.map((message) => (
+          <div
             key={message.id}
-            artifactTarget={{ groupId }}
-            message={message}
-            canAnswer={answerable.includes(message.id)}
-            onAnswer={async (target, answer: AskAnswer, username?: string) => {
-              await rpc.threads.answer({
-                groupId,
-                runId: target.runId ?? "",
-                messageId: target.id,
-                answer,
-                ...(username ? { username } : {}),
-              });
-              await load();
-            }}
-            onOpenBot={noop}
-            onOpenPeerMessages={noop}
-            memberName={botName}
-            peerBot={(botId) => {
-              const bot = bots.find((item) => item.id === botId);
-              return bot ? { name: bot.name, color: bot.color } : undefined;
-            }}
-            onRefresh={load}
-            onBotChanged={asyncNoop}
-            onAddRoutine={noop}
-            voiceReady={false}
-            speaking={false}
-            onSpeak={noop}
-            onOpenComputer={noop}
-            showToolActivity={false}
-          />
+            data-message-id={message.id}
+            className={message.id === focused ? "rounded-xl ring-2 ring-ring" : undefined}
+          >
+            <MessageView
+              artifactTarget={{ groupId }}
+              message={message}
+              canAnswer={answerable.includes(message.id)}
+              onAnswer={async (target, answer: AskAnswer, username?: string) => {
+                await rpc.threads.answer({
+                  groupId,
+                  runId: target.runId ?? "",
+                  messageId: target.id,
+                  answer,
+                  ...(username ? { username } : {}),
+                });
+                await load();
+              }}
+              onOpenBot={noop}
+              onOpenPeerMessages={noop}
+              memberName={botName}
+              peerBot={(botId) => {
+                const bot = bots.find((item) => item.id === botId);
+                return bot ? { name: bot.name, color: bot.color } : undefined;
+              }}
+              onRefresh={load}
+              onBotChanged={asyncNoop}
+              onAddRoutine={noop}
+              voiceReady={false}
+              speaking={false}
+              onSpeak={noop}
+              onOpenComputer={noop}
+              showToolActivity={false}
+            />
+          </div>
         ))}
       </div>
       {error ? (
