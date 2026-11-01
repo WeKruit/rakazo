@@ -62,7 +62,6 @@ import {
   computerUpdateIsCurrent,
   computerUpdateView,
   createCompanySiteResolver,
-  createExaOrganizationSearch,
   createFaviconResolver,
   createPrismaOrganizationLogoStore,
   createTicket,
@@ -954,7 +953,6 @@ export function createRouter(deps: RouterDeps) {
   const companySites =
     deps.companySites ??
     createCompanySiteResolver({
-      searchOrganizations: createExaOrganizationSearch(),
       store: createPrismaOrganizationLogoStore(deps.prisma),
     });
   const refreshExpiredCredential =
