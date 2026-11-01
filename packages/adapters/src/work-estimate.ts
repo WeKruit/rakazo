@@ -88,8 +88,8 @@ export async function startWorkEstimate(
 
 /**
  * The countdown of an earlier search for the same ask in this conversation: a new wave toward
- * the same Results target continues it instead of starting over, and the earlier one stops
- * counting so the recruiter hears one report per run-out countdown.
+ * the same Results target, with no new message from the recruiter since, continues it instead
+ * of starting over; the earlier one stops counting so each run-out countdown is reported once.
  */
 async function sameAsk(
   prisma: PrismaClient,
@@ -98,12 +98,19 @@ async function sameAsk(
   people: number,
 ): Promise<{ request: Request; reported: number } | null> {
   if (!saved.roleId || saved.saved === undefined) return null;
+  // A new message from the recruiter is a new ask with its own countdown.
+  const asked = await prisma.message.findFirst({
+    where: { threadId: run.threadId, role: "user" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  const since = Math.max(Date.now() - SAME_ASK_MS, asked?.createdAt.getTime() ?? 0);
   const rows = await prisma.externalEffect.findMany({
     where: {
       kind: WORK_ESTIMATE_KIND,
       spaceId: run.spaceId,
       status: { in: ["running", "done"] },
-      createdAt: { gte: new Date(Date.now() - SAME_ASK_MS) },
+      createdAt: { gte: new Date(since) },
       run: { threadId: run.threadId },
     },
     orderBy: { createdAt: "desc" },

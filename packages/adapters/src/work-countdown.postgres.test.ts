@@ -342,10 +342,26 @@ describePostgres("big-work countdown follow-up (PostgreSQL)", () => {
     expect(woken).toHaveLength(1);
     expect(woken[0]?.task?.prompt).toContain("estimated 5 minutes are up");
 
-    // A new ask after the target is met starts its own countdown.
+    // The recruiter asks again before that target is met: a new ask with its own countdown.
+    await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 1,
+        role: "user",
+        blocks: [{ kind: "text", text: "再找 100 个人" }],
+      },
+    });
+    const again = await startWorkEstimate(prisma, turn, {
+      ref: `agent_run_wave3_${suffix}`,
+      kind: "search",
+      people: 100,
+    });
+    expect(again?.estimateMs).toBe(2 * MINUTE);
+
+    // A new ask after the target is met starts its own countdown too.
     await save(191, 19);
     const next = await startWorkEstimate(prisma, turn, {
-      ref: `agent_run_wave3_${suffix}`,
+      ref: `agent_run_wave4_${suffix}`,
       kind: "search",
       people: 100,
     });
