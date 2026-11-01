@@ -294,6 +294,7 @@ async function main() {
     runtime,
     // Live per-account Codex catalog; never refreshes or writes credentials.
     codexCatalog: new CodexCatalogCache(),
+    replySuggestions: true,
     sandbox,
     memory: new MarkdownMemoryStore(prisma),
     memoryProviders,

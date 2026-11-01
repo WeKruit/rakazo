@@ -592,6 +592,7 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
+import { suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import { lazyRunComputer } from "./run-computer.js";
@@ -3574,6 +3575,8 @@ export interface ExecutorDeps {
   cloudAgent?: CloudAgentConnection | null;
   /** Optional Auto Review verifier. When omitted, the factory selects from env (llm | jev | scripted). */
   autoReview?: AutoReviewProvider;
+  /** Suggest the user's next message after each reply (one extra small model call). */
+  replySuggestions?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -13059,6 +13062,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             : undefined,
         };
+        const turnUserText = turnBlocks
+          ? turnBlocks
+              .filter((block) => block.kind === "text")
+              .map((block) => block.text)
+              .join("\n")
+          : taskPrompt;
         // Light turns run on the fast model; the configured model becomes the first backup.
         let turnModel = scripted
           ? {
@@ -13071,12 +13080,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               trigger: run.trigger,
               answersQuestion: Boolean(nativeSources?.currentAnswer),
               peerIntent: peerMessage?.intent,
-              userText: turnBlocks
-                ? turnBlocks
-                    .filter((block) => block.kind === "text")
-                    .map((block) => block.text)
-                    .join("\n")
-                : taskPrompt,
+              userText: turnUserText,
               hasAttachments:
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
@@ -14399,6 +14403,59 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
+          }
+          // Gray next-message text in the composer, sent after the reply so it never delays it.
+          if (
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            !completed.continuationRunId &&
+            !recruitingContinued &&
+            text.trim()
+          ) {
+            void suggestNextMessage({
+              runtime: deps.runtime,
+              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+              userText: turnUserText,
+              replyText: text,
+              runId,
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `suggestion:${runId}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            })
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.publishTransient({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
+              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (

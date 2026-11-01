@@ -35,6 +35,8 @@ export const ProductEventType = z.enum([
   "thread.message.deleted",
   "thread.message.reaction",
   "thread.progress",
+  /** Live-only guess at the user's next message after a finished reply. */
+  "thread.suggestion",
   "thread.artifact",
   "thread.ask",
   "thread.choice",
@@ -110,6 +112,8 @@ export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
   thinkingSince: IsoDate.optional(),
 });
 export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
+
+export const ThreadSuggestionPayloadSchema = z.object({ text: z.string().min(1).max(200) });
 
 export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
@@ -827,10 +831,11 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
   "run.requeued": RunRequeuedPayloadSchema,
   "run.completed": RunCompletedPayloadSchema,
   "thread.progress": ThreadProgressPayloadSchema,
+  "thread.suggestion": ThreadSuggestionPayloadSchema,
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 5;
+export const EVENT_FORMAT_VERSION = 6;
 
 export const ProductEventSchema = z
   .object({
