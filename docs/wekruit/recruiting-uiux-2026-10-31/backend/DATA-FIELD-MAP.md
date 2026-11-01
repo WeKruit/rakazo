@@ -23,9 +23,9 @@
 | 工作/教育详细内容 | SavedProfile JSON、保留的source report、结构化timeline | 摘要headline不是完整履历；当前字符串可能只是抓取片段 | 复用已有结构化投影；已保存原始内容优先复用，缺什么补什么，不清空已有完整资料 | 职位/公司/起止日期/学位/学校逐项保留；不把整段抓取文案塞Current role |
 | Worth Talking | match.score/rank/tier；source/result identity | 已有数字不证明跨结果可比；现有跨源行只带分数可能不足以判断口径 | 展示排序复用原分；接口保留明确result/source关联；标签阈值待确定，不新增评估器 | 排名稳定、缺分独立、计数与查询同口径 |
 | 人工Shortlist | RecruitingCandidate roleId+candidateKey，shortlisted/At/revision | 全局联系人不能只有一个覆盖所有职位的收藏位 | 每次写入明确目标role，复用现有操作并返回新revision | 同一人A职位入选不改B职位 |
-| 独立Sequence草稿 | 目前内容Artifact格式与provider campaign观察 | 当前OutreachSequence要求至少1收件人，不直接满足竞品0收件人草稿 | 新建原生可编辑Sequence实体，参考主方案字段；复用发布执行器 | 保存/重开/修改/发布与回读完整 |
-| Inbox阅读状态 | provider unread只是观测 | 缺应用用户自己的已读持久状态 | 最小owner/space/source/mail identity阅读记录 | 跨刷新一致、不串账户、不改历史正文 |
-| 面试表单内容 | 原生plan已有candidate/interviewer/单calendar slot；回执已有booking与confirmation | 多候选时段、额外guests、地点与notes超出当前plan contract | 扩现有plan的实际业务字段，与底部表单一致 | 来宾/时间/时区/地点/notes与实际邀请内容一致 |
+| 独立Sequence草稿 | 目前内容Artifact格式与provider campaign观察 | OutreachSequence只是内容Artifact；现有原生draft campaign已支持0收件人 | 直接编辑现有原生draft campaign；不建Sequence表、不复制步骤/发送窗口状态 | 保存/重开/修改/发布与回读完整 |
+| Inbox阅读状态 | provider unread只是观测 | 缺应用用户自己的已读持久状态 | 用户×space×来源邮件线程lastReadAt游标 | 跨刷新一致、不串账户、不改历史正文 |
+| 面试表单内容 | 原生plan已有candidate/interviewer/单calendar slot；回执已有booking与confirmation | 多时段属于提议邮件；Cal.com地点由event type决定，Google支持location | 保持单时段booking；复用已有来宾、Google description/location与Cal.com预约类型能力 | 来宾/时间/时区/地点/notes与实际邀请内容一致 |
 | Analytics | campaign.stats(sent/opened/replied)、lead观察、Shortlist时间 | clicked/bounced、时间桶、去重分母和完整覆盖不足以从3个总数推出来 | 接真实来源字段/事件，授权范围内按时间与职位聚合 | 每个数字能下钻，unknown不填0 |
 
 ## 既有媒体实现的实际约束
