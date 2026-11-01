@@ -242,6 +242,7 @@ import {
   listBoards,
   listRecruitingContacts,
   listRecruitingInbox,
+  listRecruitingShortlistDates,
   listRoutinesDto,
   listSpaceBackupModels,
   listTicketComments,
@@ -4188,20 +4189,16 @@ export function createRouter(deps: RouterDeps) {
               (await targetOf(group)).threadId === group.threadId
                 ? getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: group.threadId })
                 : null,
-            shortlistPage: (roleId, cursor) =>
-              listRecruitingCandidates(deps, actor, {
-                roleId,
-                shortlisted: true,
-                sort: "recent",
-                limit: 200,
-                ...(cursor ? { cursor } : {}),
-              }),
+            shortlist: (roleId) => listRecruitingShortlistDates(deps.prisma, actor, roleId),
             candidates: async (group, signal) => {
               const { target, ...read } = await readDeps(group, signal);
-              return getRecruitingRoleCandidates(read, actor, target, {
-                threadId: group.threadId,
-                limit: 1,
-              });
+              return getRecruitingRoleCandidates(
+                read,
+                actor,
+                target,
+                { threadId: group.threadId, limit: 1 },
+                { summary: true },
+              );
             },
             campaign: async (group, signal) => {
               const { target, artifacts: _, ...read } = await readDeps(group, signal);

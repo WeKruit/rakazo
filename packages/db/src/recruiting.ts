@@ -11358,6 +11358,25 @@ export async function listRecruitingCandidateLinkedinUrls(
   });
 }
 
+/** Shortlisted people's shortlist dates for one role; one narrow indexed read, no reports. */
+export async function listRecruitingShortlistDates(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<{ total: number; dates: (string | null)[] }> {
+  return prisma.$transaction(async (tx) => {
+    const role = await requireRole(tx, actor, roleId);
+    const rows = await tx.recruitingCandidate.findMany({
+      where: { roleId: role.id, shortlisted: true },
+      select: { shortlistedAt: true },
+    });
+    return {
+      total: rows.length,
+      dates: rows.map((row) => row.shortlistedAt?.toISOString() ?? null),
+    };
+  });
+}
+
 export async function setRecruitingCandidateShortlist(
   prisma: PrismaClient,
   actor: Actor,

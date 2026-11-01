@@ -4140,11 +4140,18 @@ type RoleCandidatesCrmRow = Extract<
 export type RoleCandidatesSources = {
   autumn(cursor: string | undefined, limit: number): Promise<RoleCandidatesAutumnPage>;
   autumnLinkedinUrls(): Promise<string[]>;
-  crm(target: RecruitingCrmTarget): Promise<
+  /**
+   * One CRM page from `offset`. `total` is the CRM's own count; a read without it returned every
+   * remaining row.
+   */
+  crm(
+    target: RecruitingCrmTarget,
+    offset: number,
+    query: string | undefined,
+  ): Promise<
     | {
         status: "ok";
         rows: RoleCandidatesCrmRow[];
-        /** The CRM's own count when only its first page was read. */
         total?: number;
       }
     | { status: "unavailable" }
@@ -4160,27 +4167,33 @@ export function linkedinIdentity(url: string | null | undefined): string | null 
 }
 
 const roleCandidatesCursor = {
-  read(raw: string | undefined, scope: string): { a?: string; o?: number } {
+  /** `a`: Autumn cursor. `o`: CRM offset of the page being shown, `k`: its CRM-only rows shown. */
+  read(raw: string | undefined, scope: string): { a?: string; o?: number; k?: number } {
     if (raw === undefined) return {};
     try {
       const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+      const count = (field: unknown) =>
+        field === undefined || (Number.isSafeInteger(field) && (field as number) >= 0);
       if (
         value?.s === scope &&
         (value.a === undefined || (typeof value.a === "string" && value.a)) &&
-        (value.o === undefined || (Number.isSafeInteger(value.o) && value.o >= 0)) &&
-        (value.a === undefined) !== (value.o === undefined)
+        count(value.o) &&
+        count(value.k) &&
+        (value.a === undefined) !== (value.o === undefined) &&
+        (value.k === undefined || value.o !== undefined)
       )
-        return value.a === undefined ? { o: value.o } : { a: value.a };
+        return value.a === undefined ? { o: value.o, k: value.k ?? 0 } : { a: value.a };
     } catch {}
     throw new RecruitingConflictError();
   },
-  write: (scope: string, position: { a: string } | { o: number }) =>
+  write: (scope: string, position: { a: string } | { o: number; k: number }) =>
     Buffer.from(JSON.stringify({ s: scope, ...position })).toString("base64url"),
 };
 
 /**
  * Merges one page of Autumn results with the role's CRM contacts. Pages Autumn first (its own
- * cursor/sort), then the CRM-only contacts by offset; the cursor carries whichever position is live.
+ * cursor/sort), then the CRM-only contacts one CRM page at a time; the cursor carries whichever
+ * position is live. A request never reads more than one CRM page.
  */
 export async function mergeRoleCandidates(
   input: RoleCandidatesInput,
@@ -4197,10 +4210,12 @@ export async function mergeRoleCandidates(
   ]);
   const position = roleCandidatesCursor.read(input.cursor, scope);
   const autumnPhase = position.o === undefined;
+  const crmOffset = position.o ?? 0;
+  const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
   // ponytail: the CRM phase still reads one Autumn row for totals, counts and the CRM binding.
   const autumn = await sources.autumn(position.a, autumnPhase ? limit : 1);
   const crm = autumn.crmTarget
-    ? await sources.crm(autumn.crmTarget.target)
+    ? await sources.crm(autumn.crmTarget.target, crmOffset, needle || undefined)
     : ({ status: "not_bound" } as const);
   // One slot per person: LinkedIn identity first, then lowercased email. Autumn rows have no email.
   type Slot = { autumn: boolean; crm: RoleCandidatesCrmRow | null };
@@ -4226,7 +4241,6 @@ export async function mergeRoleCandidates(
       for (const key of keys) if (!owners.has(key)) owners.set(key, slot);
     }
   }
-  const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
   const visibleCrmOnly =
     input.shortlistedOnly || (input.rankingGroup !== undefined && input.rankingGroup !== "unscored")
       ? []
@@ -4303,8 +4317,8 @@ export async function mergeRoleCandidates(
   if (autumnPhase && autumn.nextCursor)
     nextCursor = roleCandidatesCursor.write(scope, { a: autumn.nextCursor });
   else {
-    const offset = position.o ?? 0;
-    const page = visibleCrmOnly.slice(offset, offset + limit - items.length);
+    const shown = position.k ?? 0;
+    const page = visibleCrmOnly.slice(shown, shown + limit - items.length);
     for (const row of page)
       items.push({
         key: `crm:${row.candidateId}`,
@@ -4318,23 +4332,28 @@ export async function mergeRoleCandidates(
         shortlisted: false,
         shortlistedAt: null,
       });
-    if (
-      offset + page.length < visibleCrmOnly.length ||
-      (crm.status === "ok" && crm.total !== undefined && crm.rows.length < crm.total)
+    if (shown + page.length < visibleCrmOnly.length)
+      nextCursor = roleCandidatesCursor.write(scope, { o: crmOffset, k: shown + page.length });
+    else if (
+      crm.status === "ok" &&
+      crm.total !== undefined &&
+      crm.rows.length &&
+      crmOffset + crm.rows.length < crm.total
     )
-      nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
+      nextCursor = roleCandidatesCursor.write(scope, { o: crmOffset + crm.rows.length, k: 0 });
   }
   return {
     items,
     nextCursor,
-    // A first-page CRM read counts its unread people as CRM-only, so the total can include a few
-    // people also listed by Autumn.
+    // A CRM with more than one page is counted by its own total, the same on every page, so it can
+    // include a few people also listed by Autumn. A CRM read in one page is deduped exactly.
     total:
       autumn.total +
-      visibleCrmOnly.length +
-      (crm.status === "ok" && crm.total !== undefined && !needle
-        ? Math.max(0, crm.total - crm.rows.length)
-        : 0),
+      (crm.status === "ok" &&
+      crm.total !== undefined &&
+      (crmOffset > 0 || crm.rows.length < crm.total)
+        ? crm.total
+        : visibleCrmOnly.length),
     counts: {
       ...outreach,
       shortlisted: input.shortlistedSince ? autumn.total : autumn.counts.shortlisted,
@@ -4391,8 +4410,7 @@ export async function getRecruitingRoleCandidates(
   target: ThreadTarget,
   input: RoleCandidatesInput,
   /**
-   * `summary` is for lists that show names only: it reads the CRM's first page (the total is the
-   * CRM's own count) and skips match reports. Later pages use the full read.
+   * `summary` is for lists that show names only: it skips match reports.
    */
   options: { summary?: boolean; timer?: PhaseTimer } = {},
 ): Promise<RecruitingRoleCandidatesOutput> {
@@ -4444,32 +4462,30 @@ export async function getRecruitingRoleCandidates(
           recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
         ),
       ),
-    crm: (binding) => timed("candidatesCrmMs", readCrm(binding)),
+    crm: (binding, offset, query) => timed("candidatesCrmMs", readCrm(binding, offset, query)),
   });
   async function readCrm(
     binding: RecruitingCrmTarget,
+    offset: number,
+    query: string | undefined,
   ): Promise<Awaited<ReturnType<RoleCandidatesSources["crm"]>>> {
     const rows: RoleCandidatesCrmRow[] = [];
     let total: number | undefined;
     try {
-      // Read the role's people live from the CRM, so replies and status are current. Each page
-      // is a fully authorized read; pages after the first load a few at a time.
-      const page = await getRecruitingCrmData(
-        deps,
-        actor,
-        target,
-        {
-          operation: "candidates",
-          serverId: binding.mcpServerId,
-          serverRevision: binding.serverRevision,
-          organizationId: binding.organizationId,
-          crmRoleId: binding.crmRoleId,
-          limit: CRM_PAGE,
-        },
-        options.summary ? {} : { allPages: true },
-      );
+      // Read the role's people live from the CRM, so replies and status are current. One fully
+      // authorized page per request; the CRM's own count stands in for the rest.
+      const page = await getRecruitingCrmData(deps, actor, target, {
+        operation: "candidates",
+        serverId: binding.mcpServerId,
+        serverRevision: binding.serverRevision,
+        organizationId: binding.organizationId,
+        crmRoleId: binding.crmRoleId,
+        limit: CRM_PAGE,
+        ...(offset ? { offset } : {}),
+        ...(query ? { query } : {}),
+      });
       if (page.operation !== "candidates") throw new IsolationError();
-      if (options.summary && page.nextOffset !== null) total = page.total;
+      total = page.total;
       const seen = new Set<string>();
       for (const item of page.items) {
         if (seen.has(item.candidateId)) continue;
