@@ -59,6 +59,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     transcriptArtifactTarget,
     openCrmRole,
     startNewRole,
+    pendingRoleName,
     restoreGroup,
     setBotsSidebarCollapsedPref,
     openSettings,
@@ -114,6 +115,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             archivedGroups={archivedGroups}
             archivedOpen={archivedOpen}
             groupId={groupId}
+            pendingRoleName={pendingRoleName}
             query={query}
             view={recruitingWorkspaceView}
             onView={openRecruitingView}
