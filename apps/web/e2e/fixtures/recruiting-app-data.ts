@@ -668,11 +668,41 @@ export async function mockRecruitingApp(
     } else if (method === "recruiting/accountView") {
       const roles = accountRolesData().slice(0, 1);
       const selected = roles.filter((role) => !input.roleId || input.roleId === role.id);
-      value = {
-        roles,
-        items: selected.map(fixtureAccountItem),
-        nextCursor: null,
-      };
+      const items = selected.map(fixtureAccountItem);
+      if (input.view === "sequence" && input.sequenceSummary) {
+        const rows = items.flatMap((item) =>
+          (item.campaigns ?? (item.campaign ? [item.campaign] : []))
+            .filter(
+              (campaign) =>
+                campaign.campaign &&
+                (!input.sequenceQuery ||
+                  campaign.campaign.name
+                    .toLowerCase()
+                    .includes(String(input.sequenceQuery).toLowerCase())) &&
+                (input.sequenceStatus === undefined ||
+                  campaign.campaign.status === input.sequenceStatus),
+            )
+            .map((campaign) => ({ roleId: item.roleId, campaigns: [campaign] })),
+        );
+        const offset = Number(input.offset ?? input.cursor ?? 0);
+        const limit = Number(input.limit ?? 25);
+        value = {
+          roles,
+          items: rows.slice(offset, offset + limit),
+          total: rows.length,
+          nextCursor: offset + limit < rows.length ? String(offset + limit) : null,
+          sequenceSummary: {
+            contacted: null,
+            active: null,
+            opened: 4,
+            clicked: null,
+            replied: 2,
+            interested: null,
+            sent: 6,
+            partial: true,
+          },
+        };
+      } else value = { roles, items, nextCursor: null };
     } else if (method === "bootstrap") value = bootstrap;
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };

@@ -114,15 +114,10 @@ msgstr "{0} selected people"
 msgid "{0} sequence contacts"
 msgstr "{0} sequence contacts"
 
-#. placeholder {0}: filtered.length
+#. placeholder {0}: current.total
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "{0} sequences"
 msgstr "{0} sequences"
-
-#. placeholder {0}: filtered.length
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "{0} sequences loaded"
-msgstr "{0} sequences loaded"
 
 #. placeholder {0}: people.length
 #: src/pages/recruiting/TalentInsights.tsx
@@ -1474,10 +1469,6 @@ msgstr "Could not reach the server"
 msgid "Could not read candidate records."
 msgstr "Could not read candidate records."
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Could not read this campaign. Results are incomplete."
-msgstr "Could not read this campaign. Results are incomplete."
-
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 msgid "Could not read this cohort."
 msgstr "Could not read this cohort."
@@ -2476,14 +2467,6 @@ msgstr "last {0} days"
 msgid "Last {count} days"
 msgstr "Last {count} days"
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 30 days"
-msgstr "Last 30 days"
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 90 days"
-msgstr "Last 90 days"
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
@@ -2910,6 +2893,7 @@ msgstr "New role"
 msgid "New sequence"
 msgstr "New sequence"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Next"
 msgstr "Next"
@@ -3079,6 +3063,10 @@ msgstr "No roles match your search."
 msgid "No roles yet."
 msgstr "No roles yet."
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No saved activity metrics are available for these sequences."
+msgstr "No saved activity metrics are available for these sequences."
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No saved candidates"
@@ -3236,6 +3224,7 @@ msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
 
 #: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open"
@@ -3562,6 +3551,7 @@ msgstr "Preview only. Ask for the complete message to read the full body."
 msgid "Preview steps"
 msgstr "Preview steps"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Previous"
 msgstr "Previous"
@@ -4253,6 +4243,10 @@ msgstr "Saved results"
 msgid "Saved role summary"
 msgstr "Saved role summary"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Saved sequence updates are still pending. Retry."
+msgstr "Saved sequence updates are still pending. Retry."
+
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Saved sequences"
 msgstr "Saved sequences"
@@ -4529,10 +4523,6 @@ msgstr "Sequence"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence contacts"
 msgstr "Sequence contacts"
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Sequence date range"
-msgstr "Sequence date range"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Sequence draft"
@@ -5384,6 +5374,10 @@ msgstr "Update pending. Refresh to check."
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Updated"
 msgstr "Updated"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Updating saved sequence records…"
+msgstr "Updating saved sequence records…"
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/SoftwareUpdateSection.tsx

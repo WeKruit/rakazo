@@ -4294,6 +4294,12 @@ describe("local native Instantly campaign and lead tools", () => {
       body: { name: "Founding Engineer", stop_on_reply: true, email_list: ["team@example.test"] },
     });
     expect(JSON.stringify(create.body)).not.toContain("[role");
+    const binding = [...f.state.effects.values()].find(
+      (effect) => effect.kind === "instantly_role_campaign",
+    )!;
+    Object.assign(binding.result as object, {
+      __rakazoSequenceObservation: { internal: "derived-cache-only" },
+    });
     f.state.requests.length = 0;
     const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(second).toMatchObject({
@@ -4301,6 +4307,7 @@ describe("local native Instantly campaign and lead tools", () => {
       campaignId: CAMPAIGN,
       stopOnReplyPatched: false,
     });
+    expect(second).not.toHaveProperty("__rakazoSequenceObservation");
     // An empty mapped campaign with no same-title alternative stays mapped; nothing is created.
     expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([
       { method: "POST", path: "/api/v2/leads/list", body: { campaign: CAMPAIGN, limit: 1 } },

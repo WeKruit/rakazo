@@ -44,6 +44,8 @@ export const RecruitingSequenceInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingSequenceInput = z.infer<typeof RecruitingSequenceInputSchema>;
 export type RecruitingSequenceDraft = z.infer<typeof RecruitingSequenceDraftSchema>;
 export const RecruitingSequenceOutputSchema = z.strictObject({
+  sourceRevision: z.number().int().nonnegative().optional(),
+  observedAt: z.iso.datetime().optional(),
   roleId: z.string(),
   response: z
     .strictObject({

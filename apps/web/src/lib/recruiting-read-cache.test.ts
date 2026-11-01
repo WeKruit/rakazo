@@ -132,3 +132,61 @@ it("garbage collects inactive display data after five minutes", async () => {
     vi.useRealTimers();
   }
 });
+
+it("does not let a slow earlier provider response overwrite a verified pause in the same epoch", async () => {
+  const { rememberRecruitingSequenceRead } = await import("./recruiting-read-cache");
+  const cache = createRecruitingReadCache();
+  const key = '["owner","space","thread"]:sequence-observation:["role","server","campaign"]';
+  const earlier = {
+    roleId: "role",
+    roleTitle: "Engineer",
+    mailboxes: [],
+    sourceRevision: 1,
+    observedAt: "2030-01-01T00:00:00.000Z",
+    campaign: {
+      id: "campaign",
+      name: "Original",
+      status: 1,
+      editable: false,
+      eaccount: null,
+      steps: [],
+      timezone: null,
+      send_hours: null,
+    },
+  } as const;
+  let release!: (value: typeof earlier) => void;
+  const pending = new Promise<typeof earlier>((resolve) => {
+    release = resolve;
+  });
+  const write = pending.then((value) =>
+    rememberRecruitingSequenceRead(cache, key, {
+      ...value,
+      mailboxes: [],
+      campaign: { ...value.campaign, steps: [] },
+    }),
+  );
+  rememberRecruitingSequenceRead(cache, key, {
+    ...earlier,
+    mailboxes: [],
+    observedAt: "2031-01-01T00:00:00.000Z",
+    campaign: { ...earlier.campaign, name: "Verified pause", status: 2, steps: [] },
+  });
+  release(earlier);
+  await write;
+  expect(savedRecruitingRead(cache, key)).toMatchObject({
+    observedAt: "2031-01-01T00:00:00.000Z",
+    campaign: { name: "Verified pause", status: 2 },
+  });
+  rememberRecruitingSequenceRead(cache, key, {
+    ...earlier,
+    mailboxes: [],
+    sourceRevision: 0,
+    observedAt: "2032-01-01T00:00:00.000Z",
+    campaign: { ...earlier.campaign, steps: [] },
+  });
+  expect(savedRecruitingRead(cache, key)).toMatchObject({
+    sourceRevision: 1,
+    campaign: { status: 2 },
+  });
+  cache.client.clear();
+});

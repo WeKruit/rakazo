@@ -634,7 +634,20 @@ export async function createApp(
         runSecretWriter: createRunSecretWriter(secrets),
       })
     : events;
+  const sequenceObservationWrites = new Set<Promise<void>>();
+  const deferSequenceObservation = (work: () => Promise<void>) => {
+    const pending = Promise.resolve()
+      .then(work)
+      .catch((error) => {
+        getLogger().warn("recruiting.sequence_observation_failed", {
+          error: error instanceof Error ? error.name : "Unknown error",
+        });
+      })
+      .finally(() => sequenceObservationWrites.delete(pending));
+    sequenceObservationWrites.add(pending);
+  };
   const router = createRouter({
+    deferSequenceObservation,
     cloudAgent,
     codexCatalog,
     prisma: actorPrisma,
@@ -1170,6 +1183,7 @@ export async function createApp(
       await teamChatBridge?.stop();
       await email?.drain?.();
       await reconciler?.stop();
+      await Promise.all([...sequenceObservationWrites]);
       await jobs.close();
       await secrets.close();
       await realtime.close();

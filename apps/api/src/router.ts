@@ -691,6 +691,8 @@ export interface RouterDeps {
   ticketChanges: TicketChangeNotifier;
   auth: Auth;
   jobs: JobPublisher;
+  /** Tracked derived-cache writes; never delay a verified provider response. */
+  deferSequenceObservation?: (work: () => Promise<void>) => void;
   sandbox: SandboxProvider;
   memory: MemoryStore;
   memoryProviders: MemoryProviderResolver;
@@ -4043,6 +4045,7 @@ export function createRouter(deps: RouterDeps) {
             connectors: deps.connectors,
             signal: context.signal,
             stillAuthorized: async () => !context.stillAuthorized || context.stillAuthorized(),
+            deferSequenceObservation: deps.deferSequenceObservation,
             reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
           },
           context.actor,
@@ -4142,6 +4145,7 @@ export function createRouter(deps: RouterDeps) {
         getRecruitingRoleCampaign(
           {
             prisma: deps.prisma,
+            deferSequenceObservation: deps.deferSequenceObservation,
             connectors: deps.connectors,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,

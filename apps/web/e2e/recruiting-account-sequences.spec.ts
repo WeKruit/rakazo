@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { appGroupId, mockRecruitingApp } from "./fixtures/recruiting-app-data";
 
-for (const width of [1440, 320])
+for (const width of [1440, 390, 320])
   test(`actual global Sequence overview and native drilldown at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
@@ -18,7 +18,7 @@ for (const width of [1440, 320])
       "Interested",
     ]);
     await expect(main.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
-    await expect(main.getByRole("combobox", { name: "Sequence date range" })).toBeVisible();
+    await expect(main.getByRole("combobox", { name: "Sequence date range" })).toHaveCount(0);
     await expect(main.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
     await expect(main.getByRole("columnheader")).toHaveText([
       "Name",
@@ -82,5 +82,95 @@ for (const width of [1440, 320])
     await dialog.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page).toHaveURL(/compose=new/);
     await expect(page.getByRole("dialog", { name: "New sequence", exact: true })).toBeVisible();
+    expect(fixture.unknown).toEqual([]);
+  });
+
+for (const width of [1440, 390])
+  test(`saved campaigns render the first bounded page without waiting for later pages at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const fixture = await mockRecruitingApp(page);
+    const reads: Record<string, unknown>[] = [];
+    let release!: () => void;
+    const later = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/rpc/recruiting/accountView", async (route) => {
+      const input = route.request().postDataJSON().json as Record<string, unknown>;
+      if (!input.sequenceSummary) return route.fallback();
+      reads.push(input);
+      const offset = Number(input.cursor ?? 0);
+      if (offset) await later;
+      const count = Math.min(25, 61 - offset);
+      return route.fulfill({
+        json: {
+          json: {
+            roles: [
+              {
+                id: "fixture-recruiting-role",
+                title: "Platform Engineer",
+                threadId: "fixture-thread",
+                groupId: appGroupId,
+                stage: "outreach",
+              },
+            ],
+            items: Array.from({ length: count }, (_, index) => ({
+              roleId: "fixture-recruiting-role",
+              campaigns: [
+                {
+                  status: "ready",
+                  sourceKind: "native",
+                  serverId: "fixture-source",
+                  leads: [],
+                  leadsComplete: false,
+                  stats: { sent: 4, opened: 3, replied: 1 },
+                  campaign: {
+                    id: `saved-${offset + index}`,
+                    name: `Saved campaign ${offset + index + 1}`,
+                    eaccount: null,
+                    status: 1,
+                    stopOnReply: null,
+                  },
+                },
+              ],
+            })),
+            total: 61,
+            nextCursor: offset + count < 61 ? String(offset + count) : null,
+            sequenceSummary: {
+              contacted: null,
+              active: null,
+              opened: 3,
+              clicked: null,
+              replied: 1,
+              interested: null,
+              sent: 4,
+              partial: true,
+            },
+          },
+        },
+      });
+    });
+    await page.goto("/app?view=sequence&role=all");
+    const main = page.getByTestId("account-sequences");
+    await expect(main.getByRole("link", { name: "Saved campaign 1", exact: true })).toBeVisible();
+    await expect(main.locator("tbody tr")).toHaveCount(25);
+    await expect(main).toContainText("61 sequences");
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ sequenceSummary: true, limit: 25 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: test.info().outputPath(`saved-sequences-page-${width}.png`),
+      fullPage: true,
+    });
+    await main.getByRole("button", { name: "Next", exact: true }).click();
+    await expect.poll(() => reads.length).toBe(2);
+    expect(reads[1]).toMatchObject({ cursor: "25", limit: 25 });
+    await expect(main).toContainText("Loading sequences…");
+    release();
+    await expect(main.getByRole("link", { name: "Saved campaign 26", exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "Saved campaign 1", exact: true })).toHaveCount(0);
     expect(fixture.unknown).toEqual([]);
   });

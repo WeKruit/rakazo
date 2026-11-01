@@ -31,7 +31,8 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { rememberRecruitingSequenceRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
@@ -45,6 +46,7 @@ import {
   CrmGate,
   formatDate,
   LoadMore,
+  RecruitingReadCacheContext,
   statusText,
   TabLoading,
   TabNotice,
@@ -169,15 +171,26 @@ export function SequenceTab(
     props.conversation && "groupId" in props.conversation ? props.conversation.groupId : undefined;
   const botId =
     props.conversation && "botId" in props.conversation ? props.conversation.botId : undefined;
+  const sharedCache = useContext(RecruitingReadCacheContext);
+  const readCache = props.readCache ?? sharedCache;
   const executeDraft = useCallback(
-    (command: RecruitingSequenceInput) => {
+    async (command: RecruitingSequenceInput) => {
       if (!groupId && !botId) return Promise.reject(new Error("No role conversation"));
-      return rpc.recruiting.sequenceDraft({
+      const epoch = readCache?.epoch;
+      const result = await rpc.recruiting.sequenceDraft({
         ...(groupId ? { groupId } : { botId: botId! }),
         command,
       });
+      if (props.readCacheScope && result.campaign)
+        rememberRecruitingSequenceRead(
+          readCache,
+          `${props.readCacheScope}:sequence-observation:${JSON.stringify([command.roleId, command.serverId, result.campaign.id])}`,
+          result,
+          epoch,
+        );
+      return result;
     },
-    [groupId, botId],
+    [groupId, botId, readCache, props.readCacheScope],
   );
 
   const instantly = useInstantlyStatus();

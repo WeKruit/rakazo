@@ -1771,16 +1771,18 @@ export const RecruitingCampaignDetailsSchema = z.strictObject({
 export type RecruitingCampaignDetails = z.infer<typeof RecruitingCampaignDetailsSchema>;
 
 export const RecruitingRoleCampaignSchema = z.strictObject({
+  sourceRevision: z.number().int().nonnegative().optional(),
+  campaignObservedAt: IsoDate.optional(),
   sourceKind: z.enum(["crm", "native"]).optional(),
   observations: z
     .strictObject({
       total: z.number().int().nonnegative(),
-      contacted: z.number().int().nonnegative(),
-      active: z.number().int().nonnegative(),
+      contacted: z.number().int().nonnegative().nullable(),
+      active: z.number().int().nonnegative().nullable(),
       opened: z.number().int().nonnegative().nullable(),
       replied: z.number().int().nonnegative().nullable(),
-      interested: z.number().int().nonnegative(),
-      bounced: z.number().int().nonnegative(),
+      interested: z.number().int().nonnegative().nullable(),
+      bounced: z.number().int().nonnegative().nullable(),
     })
     .optional(),
   nextLeadCursor: z.string().nullable().optional(),

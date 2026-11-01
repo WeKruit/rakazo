@@ -68,6 +68,7 @@ import {
   projectRecruitingInboxMessages,
   RecruitingConflictError,
   RecruitingSourceValidationError,
+  rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
@@ -532,6 +533,7 @@ export async function getRecruitingRoleCampaign(
     prisma: PrismaClient;
     connectors: Pick<ConnectorProvider, "execute">;
     signal?: AbortSignal;
+    deferSequenceObservation?: (work: () => Promise<void>) => void;
     firstPartyMcpUrl?: string;
     reauthorize?: () => Promise<ThreadTarget>;
     stillAuthorized?: () => Promise<boolean>;
@@ -771,6 +773,7 @@ export async function getRecruitingRoleCampaign(
       }
       return undefined;
     };
+    const observedAt = new Date().toISOString();
     const [campaign, leads, analytics] = await Promise.all([
       read("get_campaign", { campaign_id: campaignId }).catch(() => undefined),
       read("list_leads", {
@@ -849,7 +852,9 @@ export async function getRecruitingRoleCampaign(
       rawLeads.length < 100 &&
       (leads?.next_starting_after === undefined || leads.next_starting_after === null) &&
       rawLeads.every((value) => typeof correspondenceRecord(value)?.email === "string");
-    return {
+    const result: RecruitingRoleCampaign = {
+      sourceRevision: assignment.server.revision,
+      campaignObservedAt: observedAt,
       status: "ready",
       leadsComplete: leadsComplete && !selection.leadCursor,
       ...(typeof leads?.next_starting_after === "string"
@@ -897,6 +902,23 @@ export async function getRecruitingRoleCampaign(
         ];
       }),
     };
+    if (result.campaign) {
+      const snapshot = {
+        botId: assignment.botId,
+        roleId: workspace.role.id,
+        threadId: target.threadId,
+        serverId: assignment.server.id,
+        sourceRevision: assignment.server.revision,
+        observedAt,
+        campaign: result.campaign,
+        stats: result.stats,
+      };
+      deps.deferSequenceObservation?.(async () => {
+        if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
+        await rememberRecruitingSequenceObservation(deps.prisma, actor, snapshot);
+      });
+    }
+    return result;
   });
 }
 

@@ -141,6 +141,20 @@ export function SequenceOverview({
   );
   const hasDatedSends = history.some((day) => day.count > 0);
   const unknown = t`Not reported`;
+  if (
+    overviewCounts &&
+    !detail &&
+    allTime &&
+    metrics.every((metric) => metric.value === null) &&
+    !sendContext &&
+    !hasDatedSends
+  )
+    return (
+      <p role="status" className="rounded-xl border bg-card p-5 text-sm text-muted-foreground">
+        {t`No saved activity metrics are available for these sequences.`}
+      </p>
+    );
+
   return (
     <div className="mb-6 space-y-4">
       <dl
@@ -206,116 +220,140 @@ export function SequenceOverview({
         aria-label={t`Recorded send activity`}
         className="min-w-0 rounded-xl border bg-card p-4 sm:p-5"
       >
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h3 className="text-sm font-semibold">
+        {overviewCounts && sendDates === null ? (
+          <>
+            <h3 className="mb-3 text-sm font-semibold">
               <Trans>Schedule</Trans>
             </h3>
-            <label className="text-xs">
-              <span className="sr-only">
-                <Trans>Schedule period</Trans>
-              </span>
-              <select
-                className="rounded-md border bg-background p-1.5 text-foreground"
-                aria-label={t`Schedule period`}
-                value={chartPeriod}
-                onChange={(event) => setChartPeriod(Number(event.target.value))}
-              >
-                <option value={7}>{t`7 day period`}</option>
-                <option value={14}>{t`14 day period`}</option>
-              </select>
-            </label>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <span aria-hidden className="size-2 rounded-full bg-primary" />
-              <Trans>Sent</Trans>
-            </span>
-            <span className="flex items-center gap-1.5" title={t`Scheduled sends are not reported`}>
-              <span aria-hidden className="size-2 rounded-full border border-muted-foreground" />
-              <Trans>Scheduled · not reported</Trans>
-            </span>
-          </div>
-        </div>
-        {sendContext ? (
-          <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
-        ) : null}
-        <div className="overflow-x-auto">
-          <div className="min-w-[580px]">
-            <div className="relative ms-7 h-40 border-b border-border">
-              {[0, 1, 2, 3].map((line) => (
-                <div
-                  key={line}
-                  className="absolute inset-x-0 border-t border-border/50"
-                  style={{ bottom: `${line * 33}%` }}
-                >
-                  <span className="absolute -start-7 -top-2 w-5 text-right text-[10px] text-muted-foreground">
-                    {sendDates === null ? "—" : Math.round((max * line) / 3).toLocaleString(locale)}
+            {sendContext ? (
+              <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
+            ) : null}
+            <p className="text-sm text-muted-foreground">
+              <Trans>Send timing is not reported in saved sequence records.</Trans>
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <h3 className="text-sm font-semibold">
+                  <Trans>Schedule</Trans>
+                </h3>
+                <label className="text-xs">
+                  <span className="sr-only">
+                    <Trans>Schedule period</Trans>
                   </span>
-                </div>
-              ))}
-              <div className="relative flex h-full items-end">
-                {ticks.map((date) => {
-                  const day = history.find((item) => item.start === date);
-                  return (
-                    <div
-                      key={date}
-                      className={`relative flex h-full min-w-0 flex-1 items-end justify-center ${date === today ? "border-s border-dashed border-foreground/60" : ""}`}
-                    >
-                      {date === today ? (
-                        <span className="absolute -top-4 start-1 text-[10px] font-medium">
-                          <Trans>Today</Trans>
-                        </span>
-                      ) : null}
-                      {day?.count ? (
-                        <div
-                          className="z-10 w-3/5 max-w-8 rounded-t bg-primary"
-                          role="img"
-                          aria-label={t`${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date)}: ${day.count} recorded sends`}
-                          style={{ height: `${(day.count / max) * 82}%` }}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
+                  <select
+                    className="rounded-md border bg-background p-1.5 text-foreground"
+                    aria-label={t`Schedule period`}
+                    value={chartPeriod}
+                    onChange={(event) => setChartPeriod(Number(event.target.value))}
+                  >
+                    <option value={7}>{t`7 day period`}</option>
+                    <option value={14}>{t`14 day period`}</option>
+                  </select>
+                </label>
               </div>
-              {!hasDatedSends ? (
-                <div className="absolute inset-0 flex items-center justify-center px-8">
-                  <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
-                    {sendDates === null ? (
-                      overviewCounts ? (
-                        <Trans>Send timing is not reported in saved sequence records.</Trans>
-                      ) : (
-                        <Trans>Recruiter messages are unavailable for this role.</Trans>
-                      )
-                    ) : (
-                      <Trans>No dated sends in the available records.</Trans>
-                    )}
-                  </p>
-                </div>
-              ) : null}
-            </div>
-            <div className="ms-7 flex pt-2">
-              {ticks.map((date, index) => (
-                <span
-                  key={date}
-                  className="min-w-0 flex-1 text-center text-[10px] text-muted-foreground"
-                >
-                  {chartPeriod === 7 || index % 2 === 0
-                    ? new Intl.DateTimeFormat(locale, {
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "UTC",
-                      }).format(date)
-                    : ""}
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden className="size-2 rounded-full bg-primary" />
+                  <Trans>Sent</Trans>
                 </span>
-              ))}
+                <span
+                  className="flex items-center gap-1.5"
+                  title={t`Scheduled sends are not reported`}
+                >
+                  <span
+                    aria-hidden
+                    className="size-2 rounded-full border border-muted-foreground"
+                  />
+                  <Trans>Scheduled · not reported</Trans>
+                </span>
+              </div>
             </div>
-          </div>
-        </div>
-        <p className="mt-3 text-right text-[10px] text-muted-foreground">
-          <Trans>UTC · only recorded send timestamps are plotted</Trans>
-        </p>
+            {sendContext ? (
+              <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
+            ) : null}
+            <div className="overflow-x-auto">
+              <div className="min-w-[580px]">
+                <div className="relative ms-7 h-40 border-b border-border">
+                  {[0, 1, 2, 3].map((line) => (
+                    <div
+                      key={line}
+                      className="absolute inset-x-0 border-t border-border/50"
+                      style={{ bottom: `${line * 33}%` }}
+                    >
+                      <span className="absolute -start-7 -top-2 w-5 text-right text-[10px] text-muted-foreground">
+                        {sendDates === null
+                          ? "—"
+                          : Math.round((max * line) / 3).toLocaleString(locale)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="relative flex h-full items-end">
+                    {ticks.map((date) => {
+                      const day = history.find((item) => item.start === date);
+                      return (
+                        <div
+                          key={date}
+                          className={`relative flex h-full min-w-0 flex-1 items-end justify-center ${date === today ? "border-s border-dashed border-foreground/60" : ""}`}
+                        >
+                          {date === today ? (
+                            <span className="absolute -top-4 start-1 text-[10px] font-medium">
+                              <Trans>Today</Trans>
+                            </span>
+                          ) : null}
+                          {day?.count ? (
+                            <div
+                              className="z-10 w-3/5 max-w-8 rounded-t bg-primary"
+                              role="img"
+                              aria-label={t`${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date)}: ${day.count} recorded sends`}
+                              style={{ height: `${(day.count / max) * 82}%` }}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!hasDatedSends ? (
+                    <div className="absolute inset-0 flex items-center justify-center px-8">
+                      <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
+                        {sendDates === null ? (
+                          overviewCounts ? (
+                            <Trans>Send timing is not reported in saved sequence records.</Trans>
+                          ) : (
+                            <Trans>Recruiter messages are unavailable for this role.</Trans>
+                          )
+                        ) : (
+                          <Trans>No dated sends in the available records.</Trans>
+                        )}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="ms-7 flex pt-2">
+                  {ticks.map((date, index) => (
+                    <span
+                      key={date}
+                      className="min-w-0 flex-1 text-center text-[10px] text-muted-foreground"
+                    >
+                      {chartPeriod === 7 || index % 2 === 0
+                        ? new Intl.DateTimeFormat(locale, {
+                            month: "short",
+                            day: "numeric",
+                            timeZone: "UTC",
+                          }).format(date)
+                        : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 text-right text-[10px] text-muted-foreground">
+              <Trans>UTC · only recorded send timestamps are plotted</Trans>
+            </p>
+          </>
+        )}
       </section>
     </div>
   );

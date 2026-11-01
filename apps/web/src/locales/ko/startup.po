@@ -114,14 +114,9 @@ msgstr ""
 msgid "{0} sequence contacts"
 msgstr ""
 
-#. placeholder {0}: filtered.length
+#. placeholder {0}: current.total
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "{0} sequences"
-msgstr ""
-
-#. placeholder {0}: filtered.length
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "{0} sequences loaded"
 msgstr ""
 
 #. placeholder {0}: people.length
@@ -1474,10 +1469,6 @@ msgstr "서버에 연결할 수 없습니다"
 msgid "Could not read candidate records."
 msgstr ""
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Could not read this campaign. Results are incomplete."
-msgstr ""
-
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 msgid "Could not read this cohort."
 msgstr ""
@@ -2476,14 +2467,6 @@ msgstr ""
 msgid "Last {count} days"
 msgstr ""
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 30 days"
-msgstr ""
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 90 days"
-msgstr ""
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
@@ -2910,6 +2893,7 @@ msgstr ""
 msgid "New sequence"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Next"
 msgstr ""
@@ -3079,6 +3063,10 @@ msgstr ""
 msgid "No roles yet."
 msgstr ""
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No saved activity metrics are available for these sequences."
+msgstr "이 시퀀스에 저장된 활동 지표가 없습니다."
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No saved candidates"
@@ -3236,6 +3224,7 @@ msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
 
 #: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open"
@@ -3562,6 +3551,7 @@ msgstr ""
 msgid "Preview steps"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Previous"
 msgstr ""
@@ -4253,6 +4243,10 @@ msgstr ""
 msgid "Saved role summary"
 msgstr ""
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Saved sequence updates are still pending. Retry."
+msgstr "저장된 시퀀스 업데이트가 아직 처리 중입니다. 다시 시도하세요."
+
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Saved sequences"
 msgstr ""
@@ -4528,10 +4522,6 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence contacts"
-msgstr ""
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Sequence date range"
 msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -5384,6 +5374,10 @@ msgstr ""
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Updated"
 msgstr "업데이트됨"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Updating saved sequence records…"
+msgstr "저장된 시퀀스 기록을 업데이트하는 중…"
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/SoftwareUpdateSection.tsx

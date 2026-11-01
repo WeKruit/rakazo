@@ -1543,7 +1543,7 @@ export class McpConnector implements ConnectorProvider {
           }
           return rest(method, path, body);
         },
-        context,
+        { ...context, recruitingCampaignSourceRevision: credential.server.revision },
         credential.server.id,
         call.route!.toolName,
         call.args,
@@ -1566,10 +1566,16 @@ export class McpConnector implements ConnectorProvider {
         )
           throw new IsolationError("Email does not belong to the current role campaign");
       }
+      const publicResult =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? Object.fromEntries(
+              Object.entries(result).filter(([key]) => key !== "__rakazoSequenceObservation"),
+            )
+          : result;
       yield {
         type: "result",
         data: redactConnectorPayload(
-          { structuredContent: { source: "local_native_instantly_rest", result } },
+          { structuredContent: { source: "local_native_instantly_rest", result: publicResult } },
           redactions,
         ),
       };
