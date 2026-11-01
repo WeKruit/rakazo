@@ -256,6 +256,11 @@ function resumeChoiceLabel(
  * Keep authoritative task state, including resolved private choice labels. The
  * executor separately projects native goals/questions/answers into conversation turns.
  */
+/** A message typed in the chat box while a card was open: the agent decides whether it answers. */
+export function chatReplyToAsk(text: string): string {
+  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, then ask the question again if you still need the answer.)`;
+}
+
 function resumePrompt(
   run: { trigger: string; task?: { prompt: string } | null },
   question: string,
@@ -1181,7 +1186,9 @@ async function commitAnswerRunInput(
                 : `${connection.name} is still not connected. Continue without it or tell the user what it blocks; do not request it again unless the user asks.`
               : selectedChoice
                 ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
-                : answerText,
+                : input.answerMessageId
+                  ? chatReplyToAsk(answerText)
+                  : answerText,
         ),
       },
     });

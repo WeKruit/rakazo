@@ -3,6 +3,7 @@ import type { Actor, MessageBlock } from "@rakazo/contracts";
 import { callClientNonce } from "@rakazo/core";
 import type * as MessageQuoteModule from "@rakazo/core/message-quote";
 import type { PrismaClient } from "@rakazo/db";
+import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ThreadTarget } from "./thread-target.js";
 import {
@@ -1836,7 +1837,7 @@ describe("sendThreadMessage", () => {
       expect(tx.task.updateMany).toHaveBeenCalledWith({
         where: { runs: { some: { id: "run-waiting" } } },
         data: {
-          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
         },
       });
       expect(tx.message.create).toHaveBeenCalledWith({
@@ -1845,7 +1846,7 @@ describe("sendThreadMessage", () => {
       expect(tx.task.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {
-            prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+            prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
           },
         }),
       );
@@ -2143,7 +2144,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
         },
       }),
     );
@@ -3094,7 +3095,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-routine" } } },
       data: {
-        prompt: "Which city should I use?\nAnswer: Paris",
+        prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk("Paris")}`,
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
@@ -3216,7 +3217,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-webhook" } } },
       data: {
-        prompt: "Which city should I use?\nAnswer: Paris",
+        prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk("Paris")}`,
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
