@@ -4,6 +4,8 @@ import {
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
+  ownedInstantlyCampaigns,
+  ownedInstantlyRest,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 
@@ -207,5 +209,97 @@ describe("native campaign analytics", () => {
     );
     expect(rest).toHaveBeenCalledWith("GET", `/campaigns/analytics/overview?id=${id}`);
     expect(result).toEqual({ emails_sent_count: 3, open_count_unique: 2, reply_count_unique: 1 });
+  });
+});
+
+describe("shared mail account isolation", () => {
+  const MINE = "11111111-1111-4111-8111-111111111111";
+  const THEIRS = "22222222-2222-4222-8222-222222222222";
+  const NEW = "33333333-3333-4333-8333-333333333333";
+  const account = () =>
+    vi.fn(async (method: string, path: string) =>
+      method === "POST" && path === "/campaigns" ? { id: NEW } : { ok: true, path },
+    );
+
+  it("reads and changes only this account's own campaigns", async () => {
+    const rest = account();
+    const own = ownedInstantlyRest(rest as never, new Set([MINE]));
+    await expect(own("GET", `/campaigns/${MINE}`)).resolves.toMatchObject({ ok: true });
+    await expect(own("POST", `/campaigns/${MINE}/activate`)).resolves.toMatchObject({ ok: true });
+    await expect(own("POST", "/leads/list", { campaign: MINE })).resolves.toMatchObject({
+      ok: true,
+    });
+    for (const [method, path, body] of [
+      ["GET", `/campaigns/${THEIRS}`],
+      ["POST", `/campaigns/${THEIRS}/pause`],
+      ["PATCH", `/campaigns/${THEIRS}`, {}],
+      ["GET", `/campaigns/analytics/overview?id=${THEIRS}`],
+      ["POST", "/leads/list", { contacts: ["ada@example.test"] }],
+      ["POST", "/leads/list", { campaign: THEIRS }],
+      ["POST", "/leads/add", { campaign_id: THEIRS, leads: [] }],
+      ["POST", "/leads/add", { campaign_id: MINE, leads: [], skip_if_in_workspace: true }],
+      ["POST", "/leads/update-interest-status", { lead_email: "ada@example.test" }],
+      ["GET", "/workspaces/current"],
+    ] as const)
+      await expect(own(method, path, body)).rejects.toThrow("does not belong to this account");
+    expect(rest).toHaveBeenCalledTimes(3);
+  });
+
+  it("never finds another account's campaign by name and owns the one it creates", async () => {
+    const rest = account();
+    const own = ownedInstantlyRest(rest as never, new Set());
+    await expect(own("GET", "/campaigns?search=Founding%20Engineer&limit=100")).resolves.toEqual({
+      items: [],
+    });
+    await own("POST", "/campaigns", { name: "Founding Engineer" });
+    await expect(own("GET", `/campaigns/${NEW}`)).resolves.toMatchObject({ ok: true });
+    expect(rest).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a raw campaign create and other accounts' campaigns through the tools", async () => {
+    const rest = account();
+    await expect(
+      runInstantlyWrite(
+        {} as never,
+        rest as never,
+        context,
+        "server",
+        "native_instantly_create_campaign",
+        {},
+        new Set(),
+      ),
+    ).rejects.toThrow("ensure_role_campaign");
+    await expect(
+      runInstantlyWrite(
+        {} as never,
+        rest as never,
+        context,
+        "server",
+        "native_instantly_get_campaign",
+        { campaign_id: THEIRS },
+        new Set([MINE]),
+      ),
+    ).rejects.toThrow("does not belong to this account");
+    expect(rest).not.toHaveBeenCalled();
+  });
+
+  it("lists the campaigns bound to this connection's roles", async () => {
+    const findMany = vi.fn(async () => [
+      { result: { campaignId: MINE } },
+      { result: { campaignId: MINE } },
+      { result: null },
+    ]);
+    await expect(
+      ownedInstantlyCampaigns({ externalEffect: { findMany } } as never, "s", "server"),
+    ).resolves.toEqual([MINE]);
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: "s",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        request: { path: ["serverId"], equals: "server" },
+      },
+      select: { result: true },
+    });
   });
 });
