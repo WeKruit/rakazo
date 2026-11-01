@@ -1238,6 +1238,12 @@ export const RecruitingAssessmentAskInputSchema = z.strictObject({
       message: "Ask options must be unique",
     })
     .readonly(),
+  multiple: z
+    .boolean()
+    .optional()
+    .describe(
+      "true when the recruiter may pick more than one option; leave out for a single choice.",
+    ),
 });
 export type RecruitingAssessmentAskInput = z.infer<typeof RecruitingAssessmentAskInputSchema>;
 

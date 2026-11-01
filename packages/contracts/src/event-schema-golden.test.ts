@@ -21,6 +21,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
   // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
   5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
+  // 6: optional multiple flag on ask blocks (multi-select options).
+  6: "7e6ae24434eac7bf4f6888348234ec077dddf94d47f561c86872c0bdd5d85cf3",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -49,6 +51,15 @@ const OLD_ROWS: unknown[] = [
   },
   { kind: "meta", text: "Dana stopped the assistant" },
   { kind: "progress", text: "Thinking", phase: "thinking", summary: "Reading the role" },
+  {
+    kind: "ask",
+    text: "Which experience counts?",
+    status: "pending",
+    actions: [
+      { id: "choice-1", label: "Agent projects" },
+      { id: "choice-2", label: "Coursework" },
+    ],
+  },
 ];
 
 describe("stored event shapes", () => {

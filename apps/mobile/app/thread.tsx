@@ -3809,6 +3809,7 @@ const MessageBubble = memo(function MessageBubble({
             <AskActions
               actions={askBlock.actions}
               allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
+              multiple={Boolean(askBlock.multiple) && !isApprovalAskBlock(askBlock)}
               accessibilityActions={actionProps.accessibilityActions}
               onAccessibilityAction={actionProps.onAccessibilityAction}
               onAnswer={(answer) => onAnswer(message, answer)}

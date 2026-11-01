@@ -13731,6 +13731,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   turnReport.report();
                   event.text = card.text;
                   event.detail = undefined;
+                  event.multiple = undefined;
                   event.actions = card.options.map((label, index) => ({
                     id: `choice-${index + 1}`,
                     label,
@@ -13803,6 +13804,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     detail: safeDetail,
                     status: "pending",
                     actions: safeActions,
+                    ...(event.multiple && safeActions?.length ? { multiple: true } : {}),
                     requestedSchema: event.requestedSchema,
                   },
                 ],
