@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import { GlobalRecruitingInboxOutputSchema, inboxThreadKey } from "@rakazo/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -681,7 +682,10 @@ suite("stored global Inbox projection", () => {
         where: { userId: actor.userId, spaceId: actor.spaceId, receiptId },
       }),
     ).toBe(24_000);
+    const firstPageStarted = performance.now();
     const first = await read({ query: "Subject volume", limit: 50 });
+    const firstPageMs = performance.now() - firstPageStarted;
+    expect(firstPageMs).toBeLessThan(5_000);
     const second = await read({ query: "Subject volume", limit: 50, cursor: first.nextCursor! });
     expect(new Set([...first.items, ...second.items].map((row) => row.key)).size).toBe(100);
     // A numbered page reads only its rows and carries the full count of matching threads.
@@ -797,4 +801,43 @@ suite("stored global Inbox projection", () => {
       )?.threadKey,
     );
   });
+  it("searches 30000 saved messages without provider reads", async () => {
+    const scaleActor = actors[1]!;
+    const scaleRoleId = scaleActor.userId;
+    const prefix = `search-scale-${suffix}-`;
+    const email = JSON.stringify(message("scale", { body: "Synthetic saved body. ".repeat(30) }));
+    try {
+      await prisma.$executeRaw`INSERT INTO recruiting_inbox_messages
+        (id,user_id,space_id,role_id,origin_key,dedupe_key,thread_key,source_id,source_kind,observed_at,message_at,direction,search_text,email)
+        SELECT ${prefix}||n,${scaleActor.userId},${scaleActor.spaceId},${scaleRoleId},${prefix}||n,${prefix}||n,
+          ${prefix}||n,'source','observed',now(),'2026-10-01'::timestamp,'received',
+          CASE WHEN n=29999 THEN 'Synthetic-Person saved reply' ELSE 'Synthetic saved reply '||n END,
+          ${email}::jsonb || jsonb_build_object('id',${prefix}||n,'providerMessageId',${prefix}||n,'providerThreadId',${prefix}||n)
+        FROM generate_series(1,30000) n`;
+      const samples: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const start = performance.now();
+        const found = await readGlobalRecruitingInbox(prisma, scaleActor, {
+          query: "Synthetic-Person",
+          limit: 8,
+        });
+        samples.push(performance.now() - start);
+        expect(found.items).toHaveLength(1);
+        expect(found.items[0]?.email.id).toBe(`${prefix}29999`);
+      }
+      process.stdout.write(
+        `Synthetic saved mail search milliseconds: ${samples.map((value) => Math.round(value)).join(", ")}\n`,
+      );
+      expect([...samples].sort((a, b) => a - b)[1]).toBeLessThan(1000);
+      expect(Math.max(...samples)).toBeLessThan(1500);
+    } finally {
+      await prisma.recruitingInboxMessage.deleteMany({
+        where: {
+          userId: scaleActor.userId,
+          spaceId: scaleActor.spaceId,
+          id: { startsWith: prefix },
+        },
+      });
+    }
+  }, 30000);
 });
