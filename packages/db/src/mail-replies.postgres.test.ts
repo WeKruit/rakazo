@@ -1,7 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Actor, MailReply } from "@rakazo/contracts";
 import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import { boundDirectApprovalRequest } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
@@ -190,6 +191,139 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     });
     expect(await prisma.message.count({ where: { runId: f.run.id } })).toBe(1);
   });
+  it.each(["valid", "stale-hash", "foreign-owner"])(
+    "atomically rebinds only the owned unchanged scheduling plan: %s",
+    async (mode) => {
+      const f = await fixture();
+      const hash = (value: unknown) =>
+        createHash("sha256").update(stableJsonValue(value)).digest("hex");
+      const previousHash = hash(f.effect.request);
+      const foreignAddress = `+1555${Math.floor(Math.random() * 9000000 + 1000000)}`;
+      const foreign =
+        mode === "foreign-owner"
+          ? await provisionMessagingIdentity(
+              prisma,
+              { provider: "sendblue", address: foreignAddress },
+              { signupsEnabled: undefined, signupAllowlist: undefined },
+            )
+          : undefined;
+      try {
+        const foreignTask = foreign
+          ? await prisma.task.create({
+              data: {
+                userId: foreign.userId,
+                spaceId: foreign.spaceId,
+                threadId: foreign.threadId,
+                botId: foreign.botId,
+                prompt: "Foreign scheduling plan",
+                status: "completed",
+              },
+            })
+          : undefined;
+        const foreignRun = foreign
+          ? await prisma.run.create({
+              data: {
+                userId: foreign.userId,
+                spaceId: foreign.spaceId,
+                threadId: foreign.threadId,
+                botId: foreign.botId,
+                taskId: foreignTask!.id,
+                trigger: "user",
+                status: "completed",
+              },
+            })
+          : undefined;
+        const plan = await prisma.externalEffect.create({
+          data: {
+            spaceId: foreign?.spaceId ?? identity.spaceId,
+            runId: foreignRun?.id ?? f.run.id,
+            kind: "recruiting_scheduling_plan",
+            idempotencyKey: randomUUID(),
+            status: "draft",
+            request: {
+              mailSourceId: "mail",
+              mailSourceRevision: 1,
+              input: { originalEmail: { providerMessageId: "anchor" } },
+            },
+            result: {
+              confirmationEffectId: f.effect.id,
+              bookingEffectId: "booking-proof",
+              confirmationRequestHash: mode === "stale-hash" ? "0".repeat(64) : previousHash,
+              untouched: "preserve",
+            },
+          },
+        });
+        const evidence = {
+          kind: "recruiting_scheduling",
+          version: 1,
+          planId: plan.id,
+          operation: "confirm",
+          requestHash: previousHash,
+          planHash: "a".repeat(64),
+          bookingEffectId: "booking-proof",
+        };
+        await prisma.externalEffect.update({
+          where: { id: f.effect.id },
+          data: {
+            result: {
+              mailReplyApproval: (f.effect.result as Prisma.JsonObject).mailReplyApproval!,
+              schedulingApprovalEvidence: evidence,
+            },
+          },
+        });
+        const blocks = MessageBlockSchema.array().parse(f.message.blocks);
+        if (blocks[0]?.kind !== "ask") throw new Error("Missing ask");
+        blocks[0].approvalEvidenceHash = hash(evidence);
+        await prisma.message.update({ where: { id: f.message.id }, data: { blocks } });
+        const answer = {
+          action: "send" as const,
+          body: "Edited scheduling confirmation",
+          cc: ["copy@example.test"],
+        };
+        if (mode === "valid") {
+          expect(await answerRunInput(prisma, { ...f.input, answer })).toBe(true);
+          const approved = await prisma.externalEffect.findUniqueOrThrow({
+            where: { id: f.effect.id },
+          });
+          expect(
+            (await prisma.externalEffect.findUniqueOrThrow({ where: { id: plan.id } })).result,
+          ).toMatchObject({
+            confirmationEffectId: f.effect.id,
+            bookingEffectId: "booking-proof",
+            confirmationRequestHash: hash(approved.request),
+            untouched: "preserve",
+          });
+          expect(hash(approved.request)).not.toBe(previousHash);
+        } else {
+          await expect(answerRunInput(prisma, { ...f.input, answer })).rejects.toThrow(
+            "The bound scheduling confirmation changed",
+          );
+          const unchanged = await prisma.externalEffect.findUniqueOrThrow({
+            where: { id: f.effect.id },
+          });
+          expect(unchanged.status).toBe("intended");
+          expect(hash(unchanged.request)).toBe(previousHash);
+          expect((await prisma.run.findUniqueOrThrow({ where: { id: f.run.id } })).status).toBe(
+            "waiting_input",
+          );
+          expect(
+            (await prisma.message.findUniqueOrThrow({ where: { id: f.message.id } })).blocks,
+          ).toMatchObject([{ status: "pending", mailReply: { body: "Original draft" } }]);
+          expect(
+            (await prisma.externalEffect.findUniqueOrThrow({ where: { id: plan.id } })).result,
+          ).toEqual(plan.result);
+        }
+      } finally {
+        if (foreign) {
+          await prisma.messagingIdentity.deleteMany({
+            where: { provider: "sendblue", address: foreignAddress },
+          });
+          await prisma.organization.deleteMany({ where: { id: foreign.spaceId } });
+          await prisma.user.deleteMany({ where: { id: foreign.userId } });
+        }
+      }
+    },
+  );
   it("Discard persists on the same message without an approved effect or a send job", async () => {
     const f = await fixture();
     expect(await answerRunInput(prisma, { ...f.input, answer: "deny" })).toBe(true);

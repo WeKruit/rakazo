@@ -11,8 +11,8 @@ import type {
 } from "@rakazo/adapter-kit";
 import type { MemoryProviderResolver } from "@rakazo/adapters";
 import { createRunExecutor } from "@rakazo/adapters";
-import type { MessageBlock } from "@rakazo/contracts";
-import type { ActionApprovalRule } from "@rakazo/core";
+import type { AskAnswer, MessageBlock } from "@rakazo/contracts";
+import { type ActionApprovalRule, boundDirectApprovalDetails } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { answerRunInput, getRecruitingWorkspace } from "@rakazo/db";
@@ -603,7 +603,12 @@ describe("linked offline scheduling receipts", () => {
       description: "Reply to the original email",
       readOnly: false,
       inputSchema: { type: "object" },
-      route: { connectorId: "mcp", toolName: "native_instantly_reply_to_email" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "mail-source",
+        resourceRevision: 2,
+        toolName: "native_instantly_reply_to_email",
+      },
     };
     const cal = (toolName: string) => ({
       name: `mcp__cal__${toolName}`,
@@ -702,7 +707,51 @@ describe("linked offline scheduling receipts", () => {
         const chosen = where.serverId === mailSource.id ? mailSource : server;
         return { ...chosen.assignments[0]!, server: chosen };
       });
-      f.prisma.$queryRaw.mockResolvedValue([planActor]);
+      f.prisma.$queryRaw.mockImplementation(async (...query: unknown[]) => {
+        const [strings, ...values] = query;
+        if (!Array.isArray(strings) || !strings.join("").includes("UPDATE external_effects plan"))
+          return [planActor];
+        const [
+          hash,
+          id,
+          spaceId,
+          ownerSpaceId,
+          userId,
+          threadId,
+          confirmationId,
+          bookingId,
+          previousHash,
+          sourceId,
+          sourceRevision,
+          emailId,
+        ] = values;
+        const plan = f.effects.find((row) => row.id === id);
+        const result = plan?.result as Record<string, unknown> | undefined;
+        const request = plan?.request as
+          | {
+              mailSourceId: string;
+              mailSourceRevision: number;
+              input: { originalEmail: { providerMessageId: string } };
+            }
+          | undefined;
+        if (
+          plan?.kind !== "recruiting_scheduling_plan" ||
+          plan.spaceId !== spaceId ||
+          plan.runId !== f.runData.id ||
+          ownerSpaceId !== f.runData.spaceId ||
+          userId !== f.runData.userId ||
+          threadId !== f.runData.threadId ||
+          result?.confirmationEffectId !== confirmationId ||
+          result?.bookingEffectId !== bookingId ||
+          result?.confirmationRequestHash !== previousHash ||
+          request?.mailSourceId !== sourceId ||
+          String(request?.mailSourceRevision) !== sourceRevision ||
+          request?.input.originalEmail.providerMessageId !== emailId
+        )
+          return [];
+        plan.result = { ...result, confirmationRequestHash: hash };
+        return [{ id: plan.id }];
+      });
       Object.assign(f.prisma, {
         recruitingRole: { findFirst: vi.fn(async () => ({ id: "role-1", revision: 1 })) },
         recruitingCandidate: { findUnique: vi.fn(async () => ({ candidateKey: recipient })) },
@@ -928,7 +977,15 @@ describe("linked offline scheduling receipts", () => {
           "native_instantly_reply_to_email",
           call.args,
         );
-      yield { type: "result", data: { content: [{ type: "text", text: JSON.stringify(data) }] } };
+      yield {
+        type: "result",
+        data: {
+          content: [{ type: "text", text: JSON.stringify(data) }],
+          ...(call.route?.toolName === "native_instantly_get_email"
+            ? { structuredContent: { result: data } }
+            : {}),
+        },
+      };
     });
     async function approveAndExecute(
       name: string,
@@ -949,17 +1006,17 @@ describe("linked offline scheduling receipts", () => {
       f.setCalls([{ ...wrapper, executionId: `request-${index}` }]);
       let count = f.connector.execute.mock.calls.length;
       await f.run();
-      if (planId && name === mail.name && index === 3) {
-        expect(
-          f.connector.execute.mock.calls
-            .slice(count)
-            .every(([call]) =>
-              ["get_email", "native_instantly_get_email"].includes(call.route?.toolName ?? ""),
-            ),
-        ).toBe(true);
-        count = f.connector.execute.mock.calls.length;
-      } else expect(f.connector.execute).toHaveBeenCalledTimes(count);
+      // Rendering the reply card may read its exact original; no mutation precedes consent.
+      expect(
+        f.connector.execute.mock.calls
+          .slice(count)
+          .every(([call]) =>
+            ["get_email", "native_instantly_get_email"].includes(call.route?.toolName ?? ""),
+          ),
+      ).toBe(true);
+      count = f.connector.execute.mock.calls.length;
       const card = messages.at(-1)!;
+      expect(card, JSON.stringify(f.results.at(-1))).toBeDefined();
       expect(
         card.blocks.some((block) => block.kind === "ask" && block.status !== "answered"),
         JSON.stringify(f.results.at(-1)),
@@ -979,16 +1036,46 @@ describe("linked offline scheduling receipts", () => {
           expect.stringContaining(originalEmail.eaccount),
         );
       }
-      const request = structuredClone(effect.request);
+      const mailCard = card.blocks.find((block) => block.kind === "ask" && block.mailReply);
+      const answer: AskAnswer =
+        mailCard?.kind === "ask" && mailCard.mailReply
+          ? {
+              action: "send",
+              body: `${mailCard.mailReply.body}${planId && index === 3 ? "\nSee you then." : ""}`,
+              cc: mailCard.mailReply.cc,
+            }
+          : "allow";
       const input = {
         spaceId: f.runData.spaceId,
         threadId: f.runData.threadId,
         runId: f.runData.id,
         messageId: card.id,
         answeredByUserId: f.runData.userId,
-        answer: "allow",
+        answer,
       };
       expect(await answerRunInput(db, input)).toBe(true);
+      const request = structuredClone(effect.request);
+      if (planId && index === 3 && mailCard) {
+        expect(f.effects.find((row) => row.id === planId)?.result).toMatchObject({
+          confirmationEffectId: effect.id,
+          confirmationRequestHash: createHash("sha256")
+            .update(stableJsonValue(request))
+            .digest("hex"),
+        });
+        expect(boundDirectApprovalDetails(request, "__rakazoCatalogTool")).toMatchObject({
+          route: {
+            connectorId: "mcp",
+            resourceId: "mail-source",
+            resourceRevision: 2,
+            toolName: "native_instantly_reply_to_email",
+          },
+          args: {
+            reply_to_uuid: originalEmail.id,
+            eaccount: originalEmail.eaccount,
+            subject: args.subject,
+          },
+        });
+      }
       expect(await answerRunInput(db, input)).toBe(false);
       expect(effect.status).toBe("approved");
       expect(events).toContainEqual(
@@ -1022,7 +1109,12 @@ describe("linked offline scheduling receipts", () => {
         const changeCard = messages.at(-1)!;
         expect(changeCard.id).not.toBe(card.id);
         expect(
-          await answerRunInput(db, { ...input, runId: f.runData.id, messageId: changeCard.id }),
+          await answerRunInput(db, {
+            ...input,
+            runId: f.runData.id,
+            messageId: changeCard.id,
+            answer: "allow",
+          }),
         ).toBe(true);
         f.setCalls([{ name: mutation.name, args: changeArgs, executionId: "pause-change-resume" }]);
         await f.run();
@@ -1061,13 +1153,13 @@ describe("linked offline scheduling receipts", () => {
       await f.run();
       if (staleConfirmation) {
         expect(f.connector.execute).toHaveBeenCalledTimes(count);
-        expect(f.results.at(-1)).toMatchObject({ dispatched: false });
+        expect(effect.result).toMatchObject({ dispatched: false });
         expect(
           f.connector.execute.mock.calls.filter(
             ([call]) => call.args.subject === "Interview confirmed",
           ),
         ).toHaveLength(0);
-        expect(effect.status).toBe("approved");
+        expect(effect.status).toBe("failed");
         return effect;
       }
       const isBooking = name === createBooking.name;
@@ -1075,10 +1167,17 @@ describe("linked offline scheduling receipts", () => {
       // A blocked booking with a length reads availability twice: with the length, then without
       // it to tell a taken time from a fixed-length event type.
       const dispatchCount = isBooking ? 2 : 1;
-      expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
+      expect(f.connector.execute, JSON.stringify(f.results.at(-1))).toHaveBeenCalledTimes(
+        count + dispatchCount,
+      );
       if (!blockedBooking)
         expect(f.connector.execute).toHaveBeenLastCalledWith(
-          expect.objectContaining({ args }),
+          expect.objectContaining({
+            args:
+              typeof answer === "object" && "action" in answer
+                ? { ...args, body: { text: answer.body } }
+                : args,
+          }),
           expect.anything(),
         );
       if (isBooking) {
@@ -1099,7 +1198,9 @@ describe("linked offline scheduling receipts", () => {
       expect(effect).toMatchObject({ status: outcome, request });
       f.setCalls([{ ...wrapper, executionId: `retry-${index}` }]);
       await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
+      expect(f.connector.execute, JSON.stringify(f.results.at(-1))).toHaveBeenCalledTimes(
+        count + dispatchCount,
+      );
       return effect;
     }
     const listArgs = {};

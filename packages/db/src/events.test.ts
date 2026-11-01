@@ -413,6 +413,72 @@ describe("native approval answer provenance", () => {
       expect(f.effect.status).toBe("intended");
     },
   );
+  it.each([true, false])(
+    "rebinds only the exact unchanged scheduling confirmation on edited Send: %s",
+    async (matches) => {
+      const f = replyAnswerFixture();
+      const hash = (value: unknown) =>
+        createHash("sha256").update(stableJsonValue(value)).digest("hex");
+      const previousHash = hash(f.effect.request);
+      const evidence = {
+        kind: "recruiting_scheduling",
+        version: 1,
+        planId: "plan-1",
+        operation: "confirm",
+        requestHash: previousHash,
+        planHash: "a".repeat(64),
+        bookingEffectId: "booking-1",
+      };
+      Object.assign(f.effect, { result: { schedulingApprovalEvidence: evidence } });
+      const ask = f.rows[0]!.blocks[1]!;
+      if (ask.kind !== "ask") throw new Error("Missing approval");
+      ask.approvalEvidenceHash = hash(evidence);
+      f.tx.$queryRaw.mockImplementation(async (sql: TemplateStringsArray) =>
+        sql.join("").includes("UPDATE external_effects plan")
+          ? matches
+            ? [{ id: "plan-1" }]
+            : []
+          : [{ id: "thread-1" }],
+      );
+      const answered = answerRunInput(f.prisma, {
+        ...f.input,
+        answer: { action: "send", body: "Edited confirmation", cc: ["copy@example.test"] },
+      });
+      if (matches) {
+        expect(await answered).toBe(true);
+        expect(f.effect.status).toBe("approved");
+      } else {
+        await expect(answered).rejects.toThrow("The bound scheduling confirmation changed");
+        expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+      }
+      const update = f.tx.$queryRaw.mock.calls.find(([sql]) =>
+        sql.join("").includes("UPDATE external_effects plan"),
+      )!;
+      expect(update[0].join("")).toContain('owner."threadId"=');
+      expect(update[0].join("")).toContain('owner."userId"=');
+      expect(update[0].join("")).toContain("plan.result->>'confirmationEffectId'=");
+      expect(update[0].join("")).toContain("plan.result->>'bookingEffectId'=");
+      expect(update[0].join("")).toContain("plan.request->>'mailSourceRevision'=");
+      expect(update[0].join("")).toContain(
+        "plan.request->'input'->'originalEmail'->>'providerMessageId'=",
+      );
+      expect(update.slice(1)).toEqual([
+        expect.any(String),
+        "plan-1",
+        "workspace-1",
+        "workspace-1",
+        "user-1",
+        "thread-1",
+        "effect-1",
+        "booking-1",
+        previousHash,
+        "mail",
+        "1",
+        "original-email",
+      ]);
+      if (matches) expect(update[1]).toBe(hash(f.effect.request));
+    },
+  );
   it("discard keeps the original message and marks the same effect denied", async () => {
     const f = replyAnswerFixture();
     expect(await answerRunInput(f.prisma, { ...f.input, answer: "deny" })).toBe(true);

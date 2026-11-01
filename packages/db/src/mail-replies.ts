@@ -40,7 +40,8 @@ export function editMailReplyRequest(
       throw new IsolationError();
     args.body_text = answer.body;
     delete args.body_html;
-    args.cc_address_email_list = answer.cc.join(", ");
+    if (answer.cc.length) args.cc_address_email_list = answer.cc.join(", ");
+    else delete args.cc_address_email_list;
   } else if (route.connectorId === "mcp" && route.toolName === "native_instantly_reply_to_email") {
     if (
       args.reply_to_uuid !== draft.inReplyTo.emailId ||
@@ -52,7 +53,8 @@ export function editMailReplyRequest(
     args.eaccount = draft.from;
     args.subject = draft.subject;
     args.body = { text: answer.body };
-    args.cc_address_email_list = answer.cc.join(", ");
+    if (answer.cc.length) args.cc_address_email_list = answer.cc.join(", ");
+    else delete args.cc_address_email_list;
   } else if (
     route.connectorId === "composio" &&
     route.toolName.toUpperCase() === "GMAIL_REPLY_TO_THREAD"

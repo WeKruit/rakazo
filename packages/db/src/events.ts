@@ -1001,6 +1001,17 @@ async function commitAnswerRunInput(
   let approvalUserId: string | null = null;
   let editedApprovalRequest: Prisma.InputJsonValue | undefined;
   let editedApprovalResult: Prisma.InputJsonValue | undefined;
+  let editedSchedulingEvidence:
+    | {
+        planId: string;
+        bookingEffectId: string;
+        previousHash: string;
+        requestHash: string;
+        sourceId: string;
+        sourceRevision: string | number;
+        emailId: string;
+      }
+    | undefined;
 
   if (approvalAsk) {
     if (!pendingAsk.actions?.some((action) => action.id === answerText)) return null;
@@ -1091,6 +1102,25 @@ async function commitAnswerRunInput(
             .update(stableJsonValue(editedApprovalRequest))
             .digest("hex"),
         };
+        if (evidence.kind === "recruiting_scheduling") {
+          const scheduling = RecruitingSchedulingApprovalEvidenceSchema.parse(evidence);
+          if (
+            scheduling.operation !== "confirm" ||
+            !scheduling.bookingEffectId ||
+            !approvedRoute ||
+            approvedRoute.resourceRevision === undefined
+          )
+            return null;
+          editedSchedulingEvidence = {
+            planId: scheduling.planId,
+            bookingEffectId: scheduling.bookingEffectId,
+            previousHash: scheduling.requestHash,
+            requestHash: changed.requestHash,
+            sourceId: approvedRoute.resourceId,
+            sourceRevision: approvedRoute.resourceRevision,
+            emailId: pendingAsk.mailReply.inReplyTo.emailId,
+          };
+        }
         const previous = editedApprovalResult as Prisma.InputJsonObject;
         editedApprovalResult = {
           ...previous,
@@ -1204,6 +1234,26 @@ async function commitAnswerRunInput(
   }
 
   if (approvalAsk) {
+    if (editedSchedulingEvidence) {
+      const proof = editedSchedulingEvidence;
+      const rebound = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE external_effects plan
+        SET result=jsonb_set(plan.result,'{confirmationRequestHash}',to_jsonb(${proof.requestHash}::text))
+        FROM runs owner
+        WHERE plan.id=${proof.planId} AND plan.kind='recruiting_scheduling_plan'
+          AND plan."spaceId"=${input.spaceId} AND owner.id=plan."runId"
+          AND owner."spaceId"=${input.spaceId} AND owner."userId"=${run.userId}
+          AND owner."threadId"=${input.threadId}
+          AND plan.result->>'confirmationEffectId'=${approvalEffect!.id}
+          AND plan.result->>'bookingEffectId'=${proof.bookingEffectId}
+          AND plan.result->>'confirmationRequestHash'=${proof.previousHash}
+          AND plan.request->>'mailSourceId'=${proof.sourceId}
+          AND plan.request->>'mailSourceRevision'=${String(proof.sourceRevision)}
+          AND plan.request->'input'->'originalEmail'->>'providerMessageId'=${proof.emailId}
+        RETURNING plan.id`;
+      if (rebound.length !== 1)
+        throw new IsolationError("The bound scheduling confirmation changed");
+    }
     const allowed = answerText === "allow" || answerText === "always";
     await tx.externalEffect.update({
       where: { id: approvalEffect!.id },

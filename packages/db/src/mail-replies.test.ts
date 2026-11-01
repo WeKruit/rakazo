@@ -123,6 +123,30 @@ describe("the existing reply approval", () => {
       expect(args.body_text).toBe("Draft");
     },
   );
+  it.each(["reply_to_email", "native_instantly_reply_to_email"])(
+    "omits an empty Cc field from the canonical %s request",
+    (toolName) => {
+      const route = { connectorId: "mcp", resourceId: "source", resourceRevision: 1, toolName };
+      const request = boundDirectApprovalRequest(
+        route,
+        { ...args, body: { text: "Draft" }, cc_address_email_list: "old-copy@example.test" },
+        "__rakazoCatalogTool",
+      );
+      const edited = editMailReplyRequest(request, draft, {
+        action: "send",
+        body: "Edited",
+        cc: [],
+      });
+      const details = boundDirectApprovalDetails(edited, "__rakazoCatalogTool");
+      expect(details?.route).toEqual(route);
+      expect(details?.args).not.toHaveProperty("cc_address_email_list");
+      expect(details?.args).toMatchObject({
+        reply_to_uuid: "anchor",
+        eaccount: draft.from,
+        subject: draft.subject,
+      });
+    },
+  );
   it("rejects mutable mailbox/To fields and poisoned Cc", () => {
     expect(
       MailReplySendAnswerSchema.safeParse({
