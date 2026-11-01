@@ -130,6 +130,11 @@ msgstr ""
 msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
 msgstr "{peopleAdded, plural, one {# persona añadida} other {# personas añadidas}}"
 
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{RECRUITING_GLOBAL_AGENT_NAME}, {0} waiting"
+msgstr "{RECRUITING_GLOBAL_AGENT_NAME}, {0} pendientes"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "Quedan {remaining} · el bot observa, no actúa"
@@ -717,6 +722,7 @@ msgstr ""
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "Cerrar"
@@ -1305,7 +1311,6 @@ msgid "Direct MCP"
 msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
-#: src/pages/shell/KruitDock.tsx
 msgid "Dismiss"
 msgstr "Descartar"
 
@@ -2102,11 +2107,13 @@ msgid "Needs an answer"
 msgstr ""
 
 #: src/pages/shell/KruitDock.tsx
+msgid "Needs approval"
+msgstr "Necesita aprobación"
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
 msgstr ""
 
-#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs input"
 msgstr "Necesita entrada"
@@ -2119,6 +2126,14 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Needs you"
 msgstr ""
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your attention"
+msgstr "Necesita tu atención"
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your response"
+msgstr "Necesita tu respuesta"
 
 #: src/pages/Auth.tsx
 msgid "New password"

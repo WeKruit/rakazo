@@ -347,11 +347,11 @@ export function ShellPage() {
         />
       ) : null}
       <ShellSidebar model={model} />
-      {/* In a conversation the dock would cover the composer, and the role list still flags waits. */}
-      {showToolActivity || model.recruitingWorkspaceView === "conversation" ? null : (
+      {showToolActivity ? null : (
         <KruitDock
           groups={groups}
           groupId={model.groupId}
+          chatting={model.recruitingWorkspaceView === "conversation"}
           onOpen={(id) => {
             setPanel(null);
             setMobileSidebarOpen(false);
