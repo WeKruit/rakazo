@@ -802,7 +802,7 @@ export async function keepSearchHistory(
   let photos = 0;
   for (const { key, facts, effectId, createdAt } of keyed) {
     const before = current.get(key);
-    if (complete(before)) continue;
+    if (complete(before) && (before?.profileImageUrl || !facts.profileImageUrl)) continue;
     const merged = before
       ? {
           headline: before.headline,
@@ -848,6 +848,7 @@ export async function fillRecruitingRoleProfiles(
   actor: Actor,
   roleId: string,
   fetchPhoto?: Parameters<typeof inlineProfilePhotos>[1],
+  options: { dryRun?: boolean } = {},
 ) {
   const { personKeys, runIds } = await listRecruitingRolePoolRuns(prisma, actor, roleId);
   const saved = await listRecruitingSavedProfiles(prisma, actor, personKeys);
@@ -855,35 +856,154 @@ export async function fillRecruitingRoleProfiles(
   const incomplete = () => personKeys.filter((key) => !complete(saved.get(key))).length;
   const filled = new Set<string>();
   let photos = 0;
+  const fields = (profile: Facts | undefined) => ({
+    photo: Boolean(profile?.profileImageUrl),
+    work: Boolean(profile?.experience.length),
+    education: Boolean(profile?.education.length),
+    employerLogo: Boolean(profile?.experience.some((job) => job.company_logo_url)),
+    schoolLogo: Boolean(profile?.education.some((school) => school.school_logo_url)),
+  });
+  const fieldNames = ["photo", "work", "education", "employerLogo", "schoolLogo"] as const;
+  const initial = new Map(personKeys.map((key) => [key, fields(saved.get(key))]));
+  const missingBefore = Object.fromEntries(
+    fieldNames.map((field) => [
+      field,
+      personKeys.filter((key) => !initial.get(key)![field]).length,
+    ]),
+  ) as Record<(typeof fieldNames)[number], number>;
+  let sourceCalls = 0;
+  const name = (value: string | null) => value?.trim().replace(/\s+/g, " ").toLowerCase();
+  const unique = (values: (string | null)[]) => {
+    const known = [...new Set(values.filter((value): value is string => Boolean(value)))];
+    return known.length === 1 ? known[0]! : null;
+  };
   for (const runId of runIds) {
-    if (!incomplete()) break;
-    // Oldest call first, so each person keeps the history the role first found them with.
-    for (const call of (await listRunToolResults(prisma, actor, runId, 400)).reverse()) {
-      const found = peopleFromSearch(call.result, call.endpoint).filter((row) => {
-        const key = linkedinPersonKey(row.linkedin_url);
-        return (
-          key &&
-          pool.has(key) &&
-          !complete(saved.get(key)) &&
-          (row.experience || row.education || row.profile_image_url)
-        );
-      });
-      if (!found.length) continue;
-      // Only people without a saved photo need theirs copied.
-      for (const row of found)
-        if (saved.get(linkedinPersonKey(row.linkedin_url)!)?.profileImageUrl)
-          delete row.profile_image_url;
-      await inlineProfilePhotos(found, fetchPhoto);
-      const kept = await keepSearchHistory(
-        prisma,
-        actor,
+    const count = await prisma.externalEffect.count({
+      where: {
         runId,
-        found.map((row) => ({ row, effectId: call.effectId, createdAt: call.createdAt })),
-        saved,
-      );
-      for (const key of kept.filled) filled.add(key);
-      photos += kept.photos;
+        spaceId: actor.spaceId,
+        status: "completed",
+        request: { path: ["0"], equals: "__rakazoCatalogTool" },
+        run: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+    });
+    // Oldest call first, so each person keeps the history the role first found them with.
+    for (let end = count; end > 0; end -= 400) {
+      const offset = Math.max(0, end - 400);
+      for (const call of (
+        await listRunToolResults(prisma, actor, runId, end - offset, offset)
+      ).reverse()) {
+        sourceCalls += 1;
+        // ponytail: bounded saved-call scan; exact person identity is checked by the existing parser.
+        // Large pools can later batch that parser without changing this authorization boundary.
+        for (const key of pool) {
+          const found = profileFromLookup(call.result, call.endpoint, key);
+          if (!found) continue;
+          const before = saved.get(key);
+          const facts = found.facts;
+          const photo = {
+            profile_image_url: before?.profileImageUrl
+              ? undefined
+              : (found.photoUrl ?? facts.profileImageUrl ?? undefined),
+          };
+          if (photo.profile_image_url && !options.dryRun)
+            await inlineProfilePhotos([photo], fetchPhoto);
+          const merged: Facts = {
+            headline: before?.headline ?? facts.headline,
+            profileImageUrl: before?.profileImageUrl ?? photo.profile_image_url ?? null,
+            experience: before?.experience.length
+              ? before.experience.map((job) => {
+                  const matches = facts.experience.filter(
+                    (item) =>
+                      job.company_name &&
+                      name(item.company_name) === name(job.company_name) &&
+                      !(
+                        job.company_url &&
+                        item.company_url &&
+                        job.company_url !== item.company_url
+                      ),
+                  );
+                  return {
+                    ...job,
+                    company_logo_url:
+                      job.company_logo_url ?? unique(matches.map((item) => item.company_logo_url)),
+                    company_url: job.company_url ?? unique(matches.map((item) => item.company_url)),
+                    company_linkedin_url:
+                      job.company_linkedin_url ??
+                      unique(matches.map((item) => item.company_linkedin_url)),
+                  };
+                })
+              : facts.experience,
+            education: before?.education.length
+              ? before.education.map((school) => {
+                  const matches = facts.education.filter(
+                    (item) =>
+                      school.school_name &&
+                      name(item.school_name) === name(school.school_name) &&
+                      !(
+                        school.school_url &&
+                        item.school_url &&
+                        school.school_url !== item.school_url
+                      ),
+                  );
+                  return {
+                    ...school,
+                    school_logo_url:
+                      school.school_logo_url ?? unique(matches.map((item) => item.school_logo_url)),
+                    school_url: school.school_url ?? unique(matches.map((item) => item.school_url)),
+                  };
+                })
+              : facts.education,
+          };
+          if (
+            before &&
+            JSON.stringify({
+              headline: before.headline,
+              profileImageUrl: before.profileImageUrl,
+              experience: before.experience,
+              education: before.education,
+            }) === JSON.stringify(merged)
+          )
+            continue;
+          const profile = options.dryRun
+            ? {
+                ...merged,
+                personKey: key,
+                provider: before?.provider ?? found.provider,
+                fetchedAt: before?.fetchedAt ?? call.createdAt.toISOString(),
+              }
+            : await saveRecruitingSavedProfile(prisma, actor, runId, {
+                personKey: key,
+                provider: before?.provider ?? found.provider,
+                sourceEffectId: call.effectId,
+                fetchedAt: before ? new Date(before.fetchedAt) : call.createdAt,
+                profile: merged,
+              });
+          saved.set(key, profile);
+          filled.add(key);
+          if (profile.profileImageUrl && !before?.profileImageUrl) photos += 1;
+        }
+      }
     }
   }
-  return { people: personKeys.length, filled: filled.size, photos, missing: incomplete() };
+  const recoverable = Object.fromEntries(
+    fieldNames.map((field) => [
+      field,
+      personKeys.filter((key) => !initial.get(key)![field] && fields(saved.get(key))[field]).length,
+    ]),
+  ) as Record<(typeof fieldNames)[number], number>;
+  return {
+    people: personKeys.length,
+    filled: filled.size,
+    photos,
+    missing: incomplete(),
+    inventory: {
+      dryRun: Boolean(options.dryRun),
+      missingBefore,
+      recoverable,
+      sourceCalls,
+      sourcePageSize: 400 as const,
+      sourceCoverage: "owned_saved_results" as const,
+    },
+  };
 }

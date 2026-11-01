@@ -3,6 +3,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
+vi.mock("@lingui/react/macro", () => ({
+  Trans: ({ children }: { children: unknown }) => children,
+  useLingui: () => ({ t: (parts: TemplateStringsArray) => parts.join("") }),
+}));
 const session = vi.hoisted(() => ({ userId: "first" }));
 const read = vi.hoisted(() => vi.fn());
 const mark = vi.hoisted(() => vi.fn());
@@ -13,7 +17,9 @@ vi.mock("../../lib/rpc", () => ({
   rpc: { recruiting: { inboxReadState: read, markInboxThread: mark } },
 }));
 
+import { createRecruitingReadCache } from "../../lib/recruiting-read-cache";
 import type { EmailConversationItem } from "./EmailConversation";
+import { RecruitingReadCacheContext } from "./shared";
 import { useInboxReadState } from "./useInboxReadState";
 
 afterEach(() => {
@@ -121,6 +127,53 @@ it("reads every loaded thread in bounded batches, including saved unread after t
     expect(controls.ready).toBe(true);
   } finally {
     await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("invalidates this account's saved-mail navigation count after a successful mark", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  session.userId = "reader";
+  read.mockResolvedValue({ initializedAt: "2026-10-01T00:00:00Z", items: [] });
+  mark.mockResolvedValue({ ok: true });
+  const cache = createRecruitingReadCache();
+  const invalidate = vi.spyOn(cache.client, "invalidateQueries");
+  const email = {
+    id: "mail",
+    sourceId: "source",
+    organizationId: null,
+    eaccount: "host",
+    threadId: "thread",
+    direction: "received",
+    date: "2026-10-02T00:00:00Z",
+  } as EmailConversationItem;
+  let controls!: ReturnType<typeof useInboxReadState>;
+  function View() {
+    controls = useInboxReadState("space", [email]);
+    return null;
+  }
+  const root = createRoot(document.createElement("div"));
+  try {
+    await act(async () =>
+      root.render(
+        <RecruitingReadCacheContext.Provider value={cache}>
+          <View />
+        </RecruitingReadCacheContext.Provider>,
+      ),
+    );
+    await act(async () =>
+      controls.mark(
+        { sourceId: "source", organizationId: null, mailbox: "host", threadId: "thread" },
+        email.date!,
+        false,
+      ),
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["recruiting", `global-inbox:${JSON.stringify(["reader", "space"])}`],
+    });
+  } finally {
+    await act(async () => root.unmount());
+    cache.client.clear();
     vi.unstubAllGlobals();
   }
 });

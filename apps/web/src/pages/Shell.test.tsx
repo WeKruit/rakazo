@@ -75,6 +75,19 @@ const shellApi = vi.hoisted(() => ({
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
     accountView: vi.fn().mockResolvedValue({ roles: [], items: [], nextCursor: null }),
+    globalInbox: vi.fn().mockResolvedValue({
+      roles: [],
+      items: [],
+      nextCursor: null,
+      unread: { count: 0, unknownThreads: 0, scope: "indexed_stored_mail" },
+      coverage: {
+        importsComplete: true,
+        crmComplete: true,
+        native: "observed",
+        providerComplete: false,
+        checkedAt: "2026-11-01T00:00:00.000Z",
+      },
+    }),
     contacts: {
       list: vi.fn().mockResolvedValue({ items: [], total: 0, nextCursor: null }),
       facets: vi.fn().mockResolvedValue({ roles: [], statuses: [], tags: [] }),
@@ -670,7 +683,7 @@ async function renderFeedbackShell(
     let button: HTMLButtonElement | undefined;
     await vi.waitFor(async () => {
       await act(async () => {
-        button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+        button = [...document.body.querySelectorAll<HTMLButtonElement>("button,a")].find(
           (item) => item.textContent === name || item.getAttribute("aria-label") === name,
         );
       });
@@ -759,6 +772,8 @@ it("restarts the CRM role catalog after native invalidation without dispatching 
     act(async () =>
       root!.render(
         <RecruitingNavigation
+          viewHref={(view) => `/app?view=${view}`}
+          kruitHref="/app?view=conversation"
           groups={[]}
           archivedGroups={[]}
           archivedOpen={false}
@@ -875,6 +890,7 @@ it("unifies an exact canonical CRM role with its native conversation while keepi
   const nav = container!.querySelector('nav[aria-label="Role conversations"]')!;
   const rows = [...nav.querySelectorAll<HTMLButtonElement>(".hire-role-button")];
   expect(rows.map((button) => button.textContent)).toEqual([
+    "All roles",
     "Recruiting crew",
     "Existing role · Example client",
   ]);
@@ -887,9 +903,9 @@ it("unifies an exact canonical CRM role with its native conversation while keepi
     if (group.id !== "group-1") view.bootstrap.groups.push(group);
     return group;
   });
-  await act(async () => rows[0]!.click());
-  expect(view.getPath()).toBe("/app/g/group-1?view=results");
   await act(async () => rows[1]!.click());
+  expect(view.getPath()).toBe("/app/g/group-1?view=results");
+  await act(async () => rows[2]!.click());
   expect(view.getPath()).toBe("/app/g/group-other?view=results");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBeNull();
   expect(shellApi.createGroup).toHaveBeenCalledTimes(2);
@@ -1368,6 +1384,8 @@ async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingRea
   await act(async () =>
     root!.render(
       <RecruitingNavigation
+        viewHref={(view) => `/app?view=${view}`}
+        kruitHref="/app?view=conversation"
         groups={[]}
         archivedGroups={[]}
         archivedOpen={false}
@@ -1653,6 +1671,10 @@ it("uses the native current coordinator and exact managed member keys for ordina
     status: "idle",
   });
   await view.render();
+  await act(async () =>
+    container!.querySelector<HTMLButtonElement>('[data-testid="user-menu-trigger"]')!.click(),
+  );
+  await act(async () => vi.dynamicImportSettled());
   await view.click("Integrations");
   await act(async () => {
     await vi.dynamicImportSettled();
@@ -1663,7 +1685,7 @@ it("uses the native current coordinator and exact managed member keys for ordina
     memberBotIds: ["bot-1", "bot-2", "legacy-scheduling"],
     developerView: false,
   });
-  await view.click("New Role");
+  await view.click("New role");
   expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
     coordinatorBotId: undefined,
     memberBotIds: [],
@@ -1695,7 +1717,11 @@ it("connects personal apps from New Role using only this user's installed native
     spawnKey: "recruiting:user-1:main",
   } as never);
   await view.render();
-  await view.click("New Role");
+  await view.click("New role");
+  await act(async () =>
+    container!.querySelector<HTMLButtonElement>('[data-testid="user-menu-trigger"]')!.click(),
+  );
+  await act(async () => vi.dynamicImportSettled());
   await view.click("Integrations");
   await act(async () => {
     await vi.dynamicImportSettled();
@@ -2310,7 +2336,7 @@ it.each(["success", "error"] as const)(
           }
         : view.thread,
     );
-    await view.click("New Role");
+    await view.click("New role");
     const input = container!.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="Job description"]',
     )!;
@@ -2548,7 +2574,7 @@ it("creates a fresh role only from an explicitly selected archived role's exact 
     messages: view.thread.messages,
     bots: view.bots,
   });
-  await view.click("New Role");
+  await view.click("New role");
   expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
   const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
   const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -2605,7 +2631,7 @@ it("shows a new role in the sidebar the moment it is submitted", async () => {
     openFeedback: false,
     allGroupsArchived: true,
   });
-  await view.click("New Role");
+  await view.click("New role");
   const archived = container!.querySelector('fieldset[aria-label="Recruiting crew"]')!;
   const useCrew = [...archived.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "New role",
@@ -2620,7 +2646,7 @@ it("shows a new role in the sidebar the moment it is submitted", async () => {
   await view.click("Continue");
   const pending = () =>
     container!.querySelector('nav[aria-label="Role conversations"] [aria-busy="true"]');
-  expect(pending()?.textContent).toBe("New role");
+  expect(pending()?.textContent).toBe("Creating role…New role");
   await act(async () => create({ ...view.group, id: "group-new", name: "New role" }));
   expect(pending()).toBeNull();
 });
@@ -2640,7 +2666,7 @@ it("resets an archived source's draft and error, then keeps its team fixed durin
   };
   view.archivedGroups.push(second);
   await view.render();
-  await view.click("New Role");
+  await view.click("New role");
   const sourceButton = (name: string) =>
     [...container!.querySelectorAll<HTMLFieldSetElement>("fieldset")]
       .find((item) => item.getAttribute("aria-label") === name)!
@@ -2885,7 +2911,7 @@ it("keeps the same role chat widget, draft and native card across direct role pa
   expect(chat.hidden).toBe(true);
   await view.openRoleChat();
   expect(chat.hidden).toBe(false);
-  await view.click("New Role");
+  await view.click("New role");
   expect(chat.hidden).toBe(true);
   expect(container?.querySelector('button[aria-label="Open role chat"]')).toBeNull();
   expect(container?.querySelector("main")?.classList.contains("hire-role-chat-open")).toBe(false);
@@ -3408,13 +3434,7 @@ it("opens global Job Brief without waiting for a cold role thread", async () => 
     openFeedback: false,
     threadReady,
   });
-  const brief = [
-    ...container!.querySelectorAll<HTMLButtonElement>(
-      '[data-testid="recruiting-navigation"] button',
-    ),
-  ].find((button) => button.textContent === "Job Brief")!;
-  expect(brief.disabled).toBe(false);
-  await view.click("Job Brief");
+  await view.navigate("/app?view=brief&role=all");
   await act(async () => vi.dynamicImportSettled());
   expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
   expect(shellApi.recruiting.accountView).toHaveBeenCalledWith(
@@ -3483,20 +3503,10 @@ it("opens a normal recruiting role on native candidate results and restores coll
     expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
   const navigation = container!.querySelector('[data-testid="recruiting-navigation"]')!;
-  const labels = [...navigation.querySelectorAll(".hire-nav > button")].map(
+  const labels = [...navigation.querySelectorAll(".hire-nav > :is(button,a)")].map(
     (button) => button.textContent,
   );
-  expect(labels).toEqual([
-    "Kruit",
-    "New Role",
-    "Job Brief",
-    "Client feedback",
-    "Shortlist",
-    "Contacts",
-    "Sequence",
-    "Inbox",
-    "Interview",
-  ]);
+  expect(labels).toEqual(["Kruit", "Candidates", "Sequence", "Inbox", "Interview"]);
   const card = document.body.querySelector('[data-message-id="pending-main"]');
   await view.click("Collapse navigation");
   expect(
@@ -3537,14 +3547,14 @@ it("opens a normal recruiting role on native candidate results and restores coll
     total: shortlisted ? 0 : 1,
   }));
   await view.navigate("/app/g/group-1?view=shortlist");
-  expect(container?.querySelector("h1")?.textContent).toBe("Shortlist");
+  expect(container?.querySelector("h1")?.textContent).toBe("Candidates");
   expect(container?.textContent).toContain("No shortlisted candidates yet.");
   expect(container?.textContent).not.toContain("No saved candidates");
   await view.click("Browse all candidates");
   expect(view.getProps().view).toBe("contacts");
   expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);
   await view.navigate("/app/g/group-1?view=contacts");
-  expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
+  expect(container?.querySelector("h1")?.textContent).toBe("Candidates");
   expect(shellApi.recruiting.correspondence).toHaveBeenLastCalledWith({
     limit: 200,
     groupId: "group-1",
@@ -3812,7 +3822,7 @@ it("keeps the original chat attachment when the same file is removed with a canc
   Object.defineProperty(original, "files", { configurable: true, value: [file] });
   await act(async () => original.dispatchEvent(new Event("change", { bubbles: true })));
   expect(container?.textContent).toContain("same-role.txt");
-  await view.click("New Role");
+  await view.click("New role");
   const roleInput = container!.querySelector<HTMLInputElement>(
     'input[aria-label="Attach role files"]',
   )!;
@@ -3859,7 +3869,7 @@ it("retries an exact natural role request in its confirmed native group with the
       : view.thread,
   );
   shellApi.followUp.mockRejectedValueOnce(new Error("Connection lost after dispatch"));
-  await view.click("New Role");
+  await view.click("New role");
   const input = container!.querySelector<HTMLTextAreaElement>(
     'textarea[aria-label="Job description"]',
   )!;
@@ -3940,7 +3950,7 @@ it("uploads New Role files concurrently and retries only a failed file with its 
         }
       : view.thread,
   );
-  await view.click("New Role");
+  await view.click("New role");
   type(
     container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Job description"]')!,
     "Test parallel JD uploads.",
@@ -4007,7 +4017,7 @@ it.each([false, true])(
     expect(container?.querySelector('[data-product-view="recruiting"]')).not.toBeNull();
     expect(
       container?.querySelector('[data-testid="recruiting-navigation"]')?.textContent,
-    ).toContain("Role teams");
+    ).toContain("Roles");
     expect(container?.querySelector('[data-testid="create-menu-trigger"]')).toBeNull();
     expect(document.body.querySelector('select[aria-label="Send to"]')).toBeNull();
     expect(view.getProps().candidateFeedbackRecipients).toEqual([{ id: "bot-1", name: "Main" }]);
@@ -4076,7 +4086,7 @@ it("refuses a partial crew when membership changes while New role stays open", a
   const view = await renderFeedbackShell("group", undefined, { isDeploymentOwner: false });
   await view.click("Close");
   await view.click("Close panel");
-  await view.click("New Role");
+  await view.click("New role");
   const input = container!.querySelector<HTMLTextAreaElement>(
     'textarea[aria-label="Job description"]',
   )!;
@@ -6240,7 +6250,7 @@ it.each(["brief", "interview", "contacts"])(
       initialPath: `/app/g/group-1?view=${page}&role=all`,
     });
     expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
-    await view.click("New Role");
+    await view.click("New role");
     await act(async () => vi.dynamicImportSettled());
     expect(container?.querySelector('textarea[aria-label="Job description"]')).not.toBeNull();
     expect(container?.querySelector('[data-testid="account-recruiting-view"]')).toBeNull();
@@ -6259,11 +6269,59 @@ it("uses the canonical global crew when creating a role from an account page wit
   Object.assign(view.thread, { groupId: "recruiting-global-test" });
   await act(async () => view.navigate("/app?view=brief&role=all"));
   const create = [...container!.querySelectorAll<HTMLButtonElement>("button")].find(
-    (button) => button.textContent === "New Role",
+    (button) => button.getAttribute("aria-label") === "New role",
   )!;
   expect(create.disabled).toBe(false);
   await act(async () => create.click());
   await act(async () => vi.dynamicImportSettled());
   expect(container?.querySelector('textarea[aria-label="Job description"]')).not.toBeNull();
   expect(container?.querySelector('[data-testid="account-recruiting-view"]')).toBeNull();
+});
+
+it("keeps the resolved CRM role context in primary navigation links", async () => {
+  const query = "crmServer=crm-source&crmRevision=2&crmOrganization=org-1&crmRole=crm-role";
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: `/app/g/group-1?view=contacts&${query}`,
+    crmTarget: boundCrmTarget,
+  });
+  const nav = document.querySelector('nav[aria-label="Recruiting workspace"]')!;
+  for (const label of ["Candidates", "Sequence", "Inbox", "Interview", "Kruit"]) {
+    const link = [...nav.querySelectorAll("a")].find((item) => item.textContent?.trim() === label)!;
+    const url = new URL(link.href);
+    expect(url.pathname).toBe(new URL(view.getPath(), "http://localhost").pathname);
+    expect(url.searchParams.get("role")).not.toBe("all");
+  }
+  const inbox = [...nav.querySelectorAll("a")].find(
+    (item) => item.textContent?.trim() === "Inbox",
+  )!;
+  await act(async () => inbox.click());
+  expect(view.getPath()).toContain("view=inbox");
+  expect(view.getPath()).toMatch(/^\/app\/g\/group-new\?view=inbox$/);
+});
+
+it("opens preserved Work actions from a role through the actual account task and routine routes", async () => {
+  await import("../components/DeferredPopoverSurface");
+  await import("./recruiting/AccountRecruitingView");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    bootstrapGroup: true,
+    initialPath: "/app/g/group-1?view=conversation",
+  });
+  const open = async (label: string) => {
+    const button = [...document.body.querySelectorAll<HTMLElement>("button,a")].find(
+      (item) => item.textContent?.trim() === label,
+    )!;
+    expect(button, label).not.toBeUndefined();
+    await act(async () => button.click());
+  };
+  await open("Work");
+  await open("Tasks");
+  expect(view.getPath()).toBe("/app?view=tasks&role=all");
+  await view.navigate("/app/g/group-1?view=conversation");
+  await open("Work");
+  await open("Routines");
+  expect(view.getPath()).toBe("/app?view=routines&role=all");
 });

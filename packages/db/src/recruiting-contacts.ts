@@ -6,7 +6,10 @@ import type {
   RecruitingContactFilters,
   RecruitingSavedProfile,
 } from "@rakazo/contracts";
-import { ListRecruitingContactsInput as ListInputSchema } from "@rakazo/contracts";
+import {
+  ListRecruitingContactsInput as ListInputSchema,
+  RecruitingSavedProfileSchema,
+} from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
@@ -375,20 +378,36 @@ export async function listRecruitingContacts(
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})
           GROUP BY 1`),
-        prisma.$queryRaw<{ person_key: string; profile: RecruitingSavedProfile }[]>(Prisma.sql`
-          SELECT "personKey" AS person_key, profile
+        prisma.$queryRaw<
+          {
+            person_key: string;
+            provider: string;
+            fetched_at: Date;
+            profile: RecruitingSavedProfile;
+          }[]
+        >(Prisma.sql`
+          SELECT "personKey" AS person_key, provider, "fetchedAt" AS fetched_at, profile
           FROM recruiting_saved_profiles
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})`),
       ])
     : [[], []];
   const tagsByKey = new Map(tags.map((row) => [row.person_key, row.tags]));
-  const profilesByKey = new Map(profiles.map((row) => [row.person_key, row.profile]));
+  const profilesByKey = new Map(profiles.map((row) => [row.person_key, row]));
   const total = page.length ? Number(page[0]!.total) : 0;
   const iso = (date: Date | null) => (date ? date.toISOString() : null);
   return {
     items: rows.map((row) => {
-      const profile = profilesByKey.get(row.person_key);
+      const saved = profilesByKey.get(row.person_key);
+      const profile = saved?.profile;
+      const parsed =
+        saved &&
+        RecruitingSavedProfileSchema.safeParse({
+          ...profile,
+          personKey: row.person_key,
+          provider: saved.provider,
+          fetchedAt: saved.fetched_at?.toISOString(),
+        });
       const school = profile?.education[0];
       const normalize = (name: string | null) => name?.trim().replace(/\s+/g, " ").toLowerCase();
       const employers =
@@ -407,6 +426,7 @@ export async function listRecruitingContacts(
         company: row.company,
         location: row.location,
         school: school?.school_name ?? null,
+        savedProfile: parsed?.success ? parsed.data : null,
         profileImageUrl: profile?.profileImageUrl ?? null,
         companyLogoUrl: unique(employers.map((job) => job.company_logo_url)),
         companyWebsiteUrl: unique(employers.map((job) => job.company_url)),

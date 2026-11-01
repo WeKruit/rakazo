@@ -28,6 +28,7 @@ export function useRecruitingWorkspace({
   shortlistWeekFilter,
   onClearShortlistWeekFilter,
   userId,
+  ownerName,
   threadId,
   botId,
   groupId,
@@ -38,6 +39,7 @@ export function useRecruitingWorkspace({
   onBrowseCandidates,
   onRevealMessage,
   onDiscussCandidate,
+  onAskChat,
   onCandidateFeedback,
   candidateFeedbackRecipients,
   showDiagnostics = false,
@@ -46,7 +48,7 @@ export function useRecruitingWorkspace({
   view = "results",
   tab,
   onTabChange,
-}: Props & { userId?: string }) {
+}: Props & { userId?: string; ownerName?: string }) {
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -967,6 +969,7 @@ export function useRecruitingWorkspace({
     }
   }
   return {
+    ownerName,
     shortlistWeekFilter,
     onClearShortlistWeekFilter,
     threadId,
@@ -979,6 +982,7 @@ export function useRecruitingWorkspace({
     onBrowseCandidates,
     onRevealMessage,
     onDiscussCandidate,
+    onAskChat,
     onCandidateFeedback,
     candidateFeedbackRecipients,
     showDiagnostics,
@@ -1015,7 +1019,7 @@ export function useRecruitingWorkspace({
     candidateTrigger,
     candidateClose,
     candidateHandoff,
-    candidatePage,
+    candidatePage: displayedCandidateQuery.current === candidateQueryKey ? candidatePage : null,
     arrival,
     setCandidateFilters,
     setCandidateDetailOpen,

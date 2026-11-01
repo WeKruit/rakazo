@@ -112,11 +112,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
     return {
       tab: value.tab,
       candidateView: value.candidateView,
-      // Saved provider sorts now use the shared match groups; explicit name/recent choices persist.
-      filters:
-        value.userSort === true && (filters.data.sort === "name" || filters.data.sort === "recent")
-          ? { ...filters.data }
-          : { ...filters.data, sort: "ranking" },
+      filters: { ...filters.data },
       pageCount: value.pageCount,
       selectedCandidateKey: value.selectedCandidateKey,
       detailOpen: value.detailOpen,

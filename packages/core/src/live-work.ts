@@ -865,6 +865,7 @@ export function workSessionElapsedMs(session: WorkSession, now: number): number 
 
 /** A ticking clock: "0:07", "1:12", "1:02:03". */
 export function formatWorkClock(ms: number): string {
+  if (!Number.isFinite(ms)) return "—";
   const total = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);

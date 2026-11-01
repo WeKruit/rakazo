@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { IsoDate } from "./ids.js";
+import { RecruitingSavedProfileSchema } from "./recruiting.js";
 
 /** Everyone saved in any of the account's roles or its CRM, one row per person. */
 const PersonKey = z.string().min(1).max(600);
@@ -64,6 +65,7 @@ export const RecruitingContactSchema = z.strictObject({
   company: z.string().nullable(),
   location: z.string().nullable(),
   school: z.string().nullable(),
+  savedProfile: RecruitingSavedProfileSchema.nullable(),
   profileImageUrl: z.string().nullable(),
   companyLogoUrl: z.string().nullable(),
   companyWebsiteUrl: z.string().nullable(),

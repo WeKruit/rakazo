@@ -1,5 +1,13 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge, Button } from "@rakazo/ui-web";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@rakazo/ui-web";
 import type { VirtualItem } from "@tanstack/react-virtual";
 import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -24,6 +32,9 @@ import type { RoleCandidate } from "./useRoleCandidates";
 
 export type CandidateDirectoryProps = {
   rows: readonly RoleCandidate[];
+  board?: boolean;
+  ownerName?: string;
+  selection?: { keys: ReadonlySet<string>; set: (keys: Set<string>) => void };
   criterionRevision?: ProfileCriterionRevision;
   selectedKey?: string;
   toolbar?: ReactNode;
@@ -88,9 +99,11 @@ function OrganizationName({ name, href }: { name: string; href: string | null })
 const Company = memo(function Company({
   profile,
   title,
+  companyOnly = false,
 }: {
   profile: DirectoryProfile;
   title: string | null;
+  companyOnly?: boolean;
 }) {
   const { company, assets } = profile;
   return (
@@ -106,9 +119,13 @@ const Company = memo(function Company({
       ) : null}
       <div className="min-w-0">
         <p className="truncate font-medium" title={title ?? undefined}>
-          {title ?? "—"}
+          {companyOnly && company ? (
+            <OrganizationName name={company} href={organizationLogo(company, assets.companyLink)} />
+          ) : (
+            (title ?? "—")
+          )}
         </p>
-        {company ? (
+        {company && !companyOnly ? (
           <p className="mt-0.5 truncate text-xs text-muted-foreground" title={company}>
             <OrganizationName name={company} href={organizationLogo(company, assets.companyLink)} />
           </p>
@@ -214,62 +231,79 @@ const Fit = memo(function Fit({
           ) : null}
         </div>
       ) : null}
-      {criteria.map((criterion) => {
-        const name =
-          criterion.label ?? (criterion.criterionId ? t`Criterion name unavailable` : null);
-        const status =
-          criterion.status === "match"
-            ? t`Match`
-            : criterion.status === "gap"
-              ? t`Gap`
-              : criterion.status === "partial"
-                ? t`Partial match`
-                : t`Unknown`;
-        return (
-          <p key={criterion.key} className="flex items-start gap-1.5 text-xs">
-            <span
-              className={`mt-1 size-1.5 shrink-0 rounded-full ${
-                criterion.status === "match"
-                  ? "bg-success"
-                  : criterion.status === "gap"
-                    ? "bg-destructive"
-                    : criterion.status === "partial"
-                      ? "bg-warning"
-                      : "bg-muted-foreground"
-              }`}
-              aria-hidden
-            />
-            <span
-              className={compact ? "flex min-w-0 flex-1 items-center gap-1" : "min-w-0 break-words"}
-              title={
-                compact
-                  ? [name, criterion.criterionId, status].filter(Boolean).join(" · ")
-                  : undefined
-              }
-            >
-              {name ? (
-                <span className={compact ? "truncate font-medium" : "font-medium"}>{name} · </span>
-              ) : null}
-              {criterion.criterionId ? (
-                <span className="shrink-0 whitespace-nowrap text-muted-foreground">
-                  {criterion.criterionId} ·{" "}
+      {criteria.length ? (
+        <details open={!compact} className="text-xs">
+          <summary className={compact ? "cursor-pointer text-muted-foreground" : "hidden"}>
+            <Trans>Criteria</Trans>
+          </summary>
+          {criteria.map((criterion) => {
+            const name =
+              criterion.label ?? (criterion.criterionId ? t`Criterion name unavailable` : null);
+            const status =
+              criterion.status === "match"
+                ? t`Match`
+                : criterion.status === "gap"
+                  ? t`Gap`
+                  : criterion.status === "partial"
+                    ? t`Partial match`
+                    : t`Unknown`;
+            return (
+              <p key={criterion.key} className="flex items-start gap-1.5 text-xs">
+                <span
+                  className={`mt-1 size-1.5 shrink-0 rounded-full ${
+                    criterion.status === "match"
+                      ? "bg-success"
+                      : criterion.status === "gap"
+                        ? "bg-destructive"
+                        : criterion.status === "partial"
+                          ? "bg-warning"
+                          : "bg-muted-foreground"
+                  }`}
+                  aria-hidden
+                />
+                <span
+                  className={
+                    compact ? "flex min-w-0 flex-1 items-center gap-1" : "min-w-0 break-words"
+                  }
+                  title={
+                    compact
+                      ? [name, criterion.criterionId, status].filter(Boolean).join(" · ")
+                      : undefined
+                  }
+                >
+                  {name ? (
+                    <span className={compact ? "truncate font-medium" : "font-medium"}>
+                      {name} ·{" "}
+                    </span>
+                  ) : null}
+                  {criterion.criterionId ? (
+                    <span className="shrink-0 whitespace-nowrap text-muted-foreground">
+                      {criterion.criterionId} ·{" "}
+                    </span>
+                  ) : null}
+                  <span
+                    className={compact ? "shrink-0 text-muted-foreground" : "text-muted-foreground"}
+                  >
+                    {status}
+                  </span>
                 </span>
-              ) : null}
-              <span
-                className={compact ? "shrink-0 text-muted-foreground" : "text-muted-foreground"}
-              >
-                {status}
-              </span>
-            </span>
-          </p>
-        );
-      })}
+              </p>
+            );
+          })}
+        </details>
+      ) : null}
     </div>
   );
 });
 
 const Status = memo(function Status({ row }: { row: RoleCandidate }) {
-  const activity = row.crm?.stage || row.crm?.outreachStatus;
+  const activity =
+    row.crm?.stage ||
+    (row.autumn?.decision === "hold"
+      ? "on_hold"
+      : row.autumn?.decision === "pass"
+        ? "passed"
+        : null);
   return (
     <div className="flex flex-wrap gap-1">
       {activity ? (
@@ -292,6 +326,9 @@ const Status = memo(function Status({ row }: { row: RoleCandidate }) {
 /** Source-only contact presentation. Loading, permissions, writes and profile navigation stay with the caller. */
 export function CandidateDirectory({
   rows,
+  board = false,
+  ownerName,
+  selection,
   criterionRevision,
   selectedKey,
   toolbar,
@@ -299,7 +336,7 @@ export function CandidateDirectory({
   renderActions,
 }: CandidateDirectoryProps) {
   const { t } = useLingui();
-  const [view, setView] = useState<"table" | "cards">("table");
+  const [view, setView] = useState<"table" | "cards" | "board">("table");
   useEffect(preloadCandidateDetail, []);
   const profiles = useMemo(
     () => rows.map((row) => directoryProfile(row, criterionRevision)),
@@ -310,10 +347,14 @@ export function CandidateDirectory({
     table: { offset: 0, measurements: [] as VirtualItem[] },
     cards: { offset: 0, measurements: [] as VirtualItem[] },
   });
-  const showEducation = profiles.some((profile) => profile.school);
+  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<string>>(new Set());
+  const showEducation =
+    !hiddenColumns.has("education") && profiles.some((profile) => profile.school);
   // Fit is the research provider's own assessment; people from the quick search have none yet.
   const showFit = profiles.some(
-    (profile) => profile.ranking || profile.sections.fit || profile.sections.requirements.length,
+    (profile) =>
+      !hiddenColumns.has("fit") &&
+      (profile.ranking || profile.sections.fit || profile.sections.requirements.length),
   );
   const sourceLink = (profile: DirectoryProfile, name: string) =>
     profile.profileUrl ? (
@@ -324,7 +365,7 @@ export function CandidateDirectory({
         aria-label={t`Open ${name}'s source profile`}
         className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
       >
-        <Trans>Profile</Trans>
+        {view !== "table" ? <Trans>Profile</Trans> : null}
         {/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\//i.test(profile.profileUrl) ? (
           <LinkedInIcon className="size-3" />
         ) : (
@@ -332,6 +373,15 @@ export function CandidateDirectory({
         )}
       </a>
     ) : null;
+  const recordedStage = (row: RoleCandidate) =>
+    row.crm?.stage ||
+    (row.autumn?.decision === "hold"
+      ? t`On hold`
+      : row.autumn?.decision === "pass"
+        ? t`Passed`
+        : row.autumn?.shortlisted
+          ? t`Shortlisted`
+          : t`Saved`);
   const nameButton = (row: RoleCandidate, index: number) => (
     <button
       type="button"
@@ -348,8 +398,35 @@ export function CandidateDirectory({
   if (!rows.length) return null;
   return (
     <div className="min-w-0 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 bg-background py-2">
         {toolbar}
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button size="sm" variant="outline" />}>
+            <Trans>Display columns</Trans>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            {[
+              ["education", t`Education`],
+              ["location", t`Location`],
+              ["fit", t`Fit`],
+            ].map(([key, label]) => (
+              <DropdownMenuCheckboxItem
+                key={key}
+                checked={!hiddenColumns.has(key!)}
+                onCheckedChange={(checked) =>
+                  setHiddenColumns((current) => {
+                    const next = new Set(current);
+                    if (checked) next.delete(key!);
+                    else next.add(key!);
+                    return next;
+                  })
+                }
+              >
+                {label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <fieldset className="ml-auto flex min-w-0 justify-end" aria-label={t`Contact layout`}>
           <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
             <Button
@@ -370,35 +447,117 @@ export function CandidateDirectory({
               <LayoutGrid size={14} aria-hidden />
               <Trans>Cards</Trans>
             </Button>
+            {board ? (
+              <Button
+                size="sm"
+                variant={view === "board" ? "secondary" : "ghost"}
+                aria-pressed={view === "board"}
+                onClick={() => setView("board")}
+              >
+                <LayoutGrid size={14} aria-hidden />
+                <Trans>Board</Trans>
+              </Button>
+            ) : null}
           </div>
         </fieldset>
       </div>
-      {view === "table" ? (
+      {view === "board" ? (
+        <section
+          className="flex max-w-full gap-3 overflow-x-auto pb-3"
+          aria-label={t`Shortlist board`}
+        >
+          {[...new Set(rows.map(recordedStage))].map((stage) => {
+            const members = rows
+              .map((row, index) => ({ row, index }))
+              .filter(({ row }) => recordedStage(row) === stage);
+            return (
+              <section
+                key={stage}
+                aria-label={stage}
+                className="w-64 shrink-0 space-y-2 rounded-lg bg-muted/50 p-2"
+              >
+                <h3 className="flex items-center justify-between px-1 py-2 text-sm font-medium">
+                  {statusText(stage)}
+                  <span className="tabular-nums text-muted-foreground">{members.length}</span>
+                </h3>
+                {members.map(({ row, index }) => (
+                  <article key={row.key} className="space-y-3 rounded-lg border bg-card p-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <PersonAvatar
+                        name={row.name ?? t`Unnamed candidate`}
+                        src={profiles[index]!.assets.photo}
+                        size="sm"
+                      />
+                      <div className="min-w-0 flex-1">{nameButton(row, index)}</div>
+                    </div>
+                    <p className="line-clamp-2 break-words text-xs text-muted-foreground">
+                      {[row.title, profiles[index]!.company].filter(Boolean).join(" · ")}
+                    </p>
+                    {renderActions ? (
+                      <div className="flex flex-wrap gap-2">{renderActions(row, index)}</div>
+                    ) : null}
+                  </article>
+                ))}
+              </section>
+            );
+          })}
+        </section>
+      ) : view === "table" ? (
         <CandidateWindow
           key="table"
           mode="table"
+          tableClassName="w-full min-w-[1280px] table-fixed border-collapse text-left text-sm"
           itemKeys={itemKeys}
           offsets={offsets}
           label={t`Candidate table`}
           header={
             <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
               <tr>
-                <th scope="col" className="w-[16%] px-3 py-2 font-medium">
+                {selection ? (
+                  <th scope="col" className="w-10 px-3 py-2">
+                    <Checkbox
+                      aria-label={t`Select all on this page`}
+                      checked={rows.every((row) => selection.keys.has(row.key))}
+                      indeterminate={
+                        !rows.every((row) => selection.keys.has(row.key)) &&
+                        rows.some((row) => selection.keys.has(row.key))
+                      }
+                      onCheckedChange={(checked) =>
+                        selection.set(checked ? new Set(rows.map((row) => row.key)) : new Set())
+                      }
+                    />
+                  </th>
+                ) : null}
+                <th scope="col" className="w-56 px-3 py-2 font-medium">
                   <Trans>Name</Trans>
                 </th>
                 <th scope="col" className="w-[18%] px-3 py-2 font-medium">
                   <Trans>Current role</Trans>
                 </th>
+                <th scope="col" className="w-[15%] px-3 py-2 font-medium">
+                  <Trans>Company</Trans>
+                </th>
                 {showEducation ? (
-                  <th scope="col" className="w-[16%] px-3 py-2 font-medium">
+                  <th scope="col" className="w-48 px-3 py-2 font-medium">
                     <Trans>Education</Trans>
                   </th>
                 ) : null}
-                <th scope="col" className="w-[11%] px-3 py-2 font-medium">
-                  <Trans>Location</Trans>
-                </th>
+                {!hiddenColumns.has("location") ? (
+                  <th scope="col" className="w-[11%] px-3 py-2 font-medium">
+                    <Trans>Location</Trans>
+                  </th>
+                ) : null}
                 <th scope="col" className="w-[10%] px-3 py-2 font-medium">
                   <Trans>Status</Trans>
+                </th>
+                <th scope="col" className="w-28 px-3 py-2 font-medium">
+                  <Trans>Outreach</Trans>
+                </th>
+                <th scope="col" className="w-28 px-3 py-2 font-medium">
+                  <Trans>Owner</Trans>
+                </th>
+                <th scope="col" className="w-28 px-3 py-2 font-medium">
+                  <Trans>Date added</Trans>
                 </th>
                 {showFit ? (
                   <th scope="col" className="w-[13%] px-3 py-2 font-medium">
@@ -406,7 +565,7 @@ export function CandidateDirectory({
                   </th>
                 ) : null}
                 {renderActions ? (
-                  <th scope="col" className="w-[16%] px-3 py-2 font-medium">
+                  <th scope="col" className="w-56 px-3 py-2 font-medium">
                     <Trans>Actions</Trans>
                   </th>
                 ) : null}
@@ -423,28 +582,65 @@ export function CandidateDirectory({
                 data-selected={selectedKey === row.key || undefined}
                 className="border-t border-border align-middle hover:bg-muted/40 data-selected:bg-muted"
               >
+                {selection ? (
+                  <td className="px-3 py-2">
+                    <Checkbox
+                      aria-label={t`Select ${name}`}
+                      checked={selection.keys.has(row.key)}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selection.keys);
+                        if (checked) next.add(row.key);
+                        else next.delete(row.key);
+                        selection.set(next);
+                      }}
+                    />
+                  </td>
+                ) : null}
                 <th scope="row" className="px-3 py-2 font-normal">
                   <div className="flex min-w-0 items-center gap-2">
                     <PersonAvatar name={name} src={profile.assets.photo} size="sm" />
-                    <div className="min-w-0 space-y-0.5">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       {nameButton(row, index)}
                       {sourceLink(profile, name)}
                     </div>
                   </div>
                 </th>
+                <td className="truncate px-3 py-2" title={row.title ?? undefined}>
+                  {row.title ?? "—"}
+                </td>
                 <td className="px-3 py-2">
-                  <Company profile={profile} title={row.title} />
+                  <Company profile={profile} title={null} companyOnly />
                 </td>
                 {showEducation ? (
                   <td className="px-3 py-2">
                     <Education profile={profile} compact />
                   </td>
                 ) : null}
-                <td className="break-words px-3 py-2 text-xs text-muted-foreground">
-                  {row.location ?? "—"}
-                </td>
+                {!hiddenColumns.has("location") ? (
+                  <td
+                    className="truncate px-3 py-2 text-xs text-muted-foreground"
+                    title={row.location ?? undefined}
+                  >
+                    {row.location ?? "—"}
+                  </td>
+                ) : null}
                 <td className="px-3 py-2">
                   <Status row={row} />
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {row.crm?.outreachStatus ? (
+                    <Badge variant="outline">{statusText(row.crm.outreachStatus)}</Badge>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="truncate px-3 py-2 text-xs" title={ownerName}>
+                  {ownerName ?? "—"}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap text-xs">
+                  {row.autumn?.firstDiscoveredAt
+                    ? new Date(row.autumn.firstDiscoveredAt).toLocaleDateString()
+                    : "—"}
                 </td>
                 {showFit ? (
                   <td className="px-3 py-2">

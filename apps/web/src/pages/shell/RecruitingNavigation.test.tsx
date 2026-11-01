@@ -41,6 +41,7 @@ it("distinguishes duplicate role titles by creation time without showing interna
     preview: "",
     unread: false,
   });
+  const onView = vi.fn();
   const groups = [
     group("one", "Engineer", "2026-01-01T10:00:00Z"),
     group("two", "Engineer", "2026-01-02T10:00:00Z"),
@@ -50,6 +51,8 @@ it("distinguishes duplicate role titles by creation time without showing interna
     act(() =>
       root.render(
         <RecruitingNavigation
+          viewHref={(view) => `/app?view=${view}`}
+          kruitHref="/app?view=conversation"
           groups={groups}
           archivedGroups={[]}
           archivedOpen={false}
@@ -58,7 +61,7 @@ it("distinguishes duplicate role titles by creation time without showing interna
           canCreateRole
           onQueryChange={vi.fn()}
           view="results"
-          onView={vi.fn()}
+          onView={onView}
           onCollapse={vi.fn()}
           onOpenRole={vi.fn()}
           onNewRole={vi.fn()}
@@ -70,9 +73,30 @@ it("distinguishes duplicate role titles by creation time without showing interna
         />,
       ),
     );
+    const primary = container.querySelector('nav[aria-label="Recruiting workspace"]')!;
+    expect([...primary.querySelectorAll("a")].map((button) => button.textContent)).toEqual([
+      "Kruit",
+      "Candidates",
+      "Sequence",
+      "Inbox",
+      "Interview",
+    ]);
+    const inbox = primary.querySelector<HTMLAnchorElement>('a[href="/app?view=inbox"]')!;
+    const modified = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+    act(() => inbox.dispatchEvent(modified));
+    expect(modified.defaultPrevented).toBe(false);
+    expect(onView).not.toHaveBeenCalled();
+    act(() => inbox.click());
+    expect(onView).toHaveBeenCalledWith("inbox");
+    expect(primary.textContent).not.toMatch(/New Role|Job Brief|Client feedback|Routines|Tasks/);
+    expect(container.querySelector('button[aria-label="New role"]')).not.toBeNull();
+    expect(container.textContent).toContain("All roles");
     const times = [...container.querySelectorAll("time")];
     expect(times.map((item) => item.dateTime)).toEqual(
-      groups.slice(0, 2).map((item) => item.createdAt),
+      groups
+        .slice(0, 2)
+        .reverse()
+        .map((item) => item.createdAt),
     );
     expect(container.textContent).not.toContain("thread-one");
     expect(container.textContent).not.toContain("space-test");
@@ -125,6 +149,8 @@ it("lists saved sequences without a role, in business wording, and hides them wh
   const render = () =>
     root.render(
       <RecruitingNavigation
+        viewHref={(view) => `/app?view=${view}`}
+        kruitHref="/app?view=conversation"
         crmContext={{
           target: { groupId: "group-1" } as never,
           scope: "scope",

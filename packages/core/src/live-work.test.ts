@@ -914,3 +914,8 @@ it("follows the language of the recruiter's own latest message", () => {
   expect(writesChinese([user("找人"), user("internal wake", true)])).toBe(true);
   expect(writesChinese([])).toBe(false);
 });
+
+it("keeps an invalid work timestamp unknown instead of rendering a NaN clock", () => {
+  expect(formatWorkClock(Number.NaN)).toBe("—");
+  expect(formatWorkClock(Number.POSITIVE_INFINITY)).toBe("—");
+});

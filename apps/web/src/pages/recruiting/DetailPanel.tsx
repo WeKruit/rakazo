@@ -11,11 +11,14 @@ import {
   Download,
   Mail,
   MapPin,
+  Maximize2,
+  Minimize2,
   Phone,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { SidePanelSizeContext } from "../ResizableSidePanel";
 import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import { ActivityTab } from "./ActivityTab";
 import { AssessmentCard } from "./AssessmentCard";
@@ -25,9 +28,11 @@ import { fieldLabel } from "./fieldLabels";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./LazyViews";
+import { LinkedInIcon } from "./LinkedInIcon";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import { PersonAvatar } from "./ProfileImage";
+import { ProfileSequenceHistory } from "./ProfileSequenceHistory";
 import { CurrentPosition, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
@@ -37,7 +42,12 @@ import {
   storedProfileFields,
   withSavedProfile,
 } from "./profile";
-import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
+import {
+  organizationLogo,
+  profileAssets,
+  profileContentFields,
+  profileImageUrl,
+} from "./profileAssets";
 import { organizationHosts } from "./quickOutput";
 import { usePersonSequenceFacts } from "./SequenceStats";
 import { SkillEvidence } from "./SkillEvidence";
@@ -198,20 +208,22 @@ export function RecruitingDetailPanel({
 }) {
   const { t } = useLingui();
   const chatContext = useRecruitingChatContext();
+  const panelSize = useContext(SidePanelSizeContext);
   const current = controller.current;
   const heading = useRef<HTMLHeadingElement>(null);
   const person = current?.person;
   const profileView = useProfileView({
-    spaceId: current?.role.spaceId,
-    roleId: current?.role.roleId,
+    spaceId: current?.role?.spaceId,
+    roleId: current?.role?.roleId,
     candidateKey:
       reminderCandidateKeys(
-        current?.candidate?.candidateKey,
+        current?.candidate?.candidateKey ?? current?.person.searchCandidateKey,
         current?.crm !== false && person?.candidateId,
       )[0] ?? null,
     visible: current?.view === "contact",
   });
   const depth = controller.stack.length;
+  const [sequencePerson, setSequencePerson] = useState<string>();
   const [shortlisted, setShortlisted] = useState<{ key: string; value: boolean }>();
 
   useEffect(() => {
@@ -228,15 +240,21 @@ export function RecruitingDetailPanel({
   }, [depth, person?.candidateId]);
 
   if (!current || !person) return null;
-  const crm = current.crm !== false;
+  const crm = Boolean(current.role) && current.crm !== false;
   const reminderKeys = reminderCandidateKeys(
-    current.candidate?.candidateKey,
+    current.candidate?.candidateKey ?? person.searchCandidateKey,
     crm && person.candidateId,
   );
-  const reminderKey = reminderKeys[0] ?? null;
+  const reminderKey = current.role ? (reminderKeys[0] ?? null) : null;
   const views: { view: RecruitingDetailView; label: string }[] = [
     { view: "contact", label: t`Profile` },
-    { view: "activity", label: t`Activity` },
+    ...(person.roles?.length ? [{ view: "roles" as const, label: t`Roles` }] : []),
+    ...(current.role ? [{ view: "activity" as const, label: t`Activity` }] : []),
+    ...(crm &&
+    sequencePerson ===
+      JSON.stringify([current.role?.spaceId, current.role?.roleId, person.candidateId])
+      ? [{ view: "sequences" as const, label: t`Sequences` }]
+      : []),
     ...(crm
       ? [
           { view: "thread" as const, label: t`Emails` },
@@ -248,7 +266,7 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const fields = withSavedProfile(candidate?.savedProfile, [
+  const fields = withSavedProfile(candidate?.savedProfile ?? person.savedProfile, [
     ...(candidate?.latestSource?.report?.fields ?? []),
     ...storedProfileFields(person.profile),
   ]);
@@ -262,8 +280,10 @@ export function RecruitingDetailPanel({
     name: company,
     host: sections.company.host,
   });
-  const companyLogo = organizationLogo(company ?? undefined, assets.company);
+  const companyLogo =
+    person.companyLogoUrl ?? organizationLogo(company ?? undefined, assets.company);
   const companySite =
+    profileImageUrl(person.companyWebsiteUrl) ??
     organizationLogo(company ?? undefined, assets.companyLink) ??
     (sections.company.host ? `https://${sections.company.host}/` : null);
   const email = person.email ?? sections.email;
@@ -288,6 +308,19 @@ export function RecruitingDetailPanel({
     { label: t`Contact status`, value: person.contactStatus },
     { label: t`Outreach status`, value: person.outreachStatus },
   ].filter((item) => item.value);
+  const extraSections = [
+    { id: "projects", label: t`Projects`, pattern: /^projects?$/i },
+    { id: "courses", label: t`Courses`, pattern: /^(?:courses?|certifications?)$/i },
+    { id: "languages", label: t`Languages`, pattern: /^languages?$/i },
+  ]
+    .map((section) => ({
+      ...section,
+      fields: sections.findings.filter((field) => section.pattern.test(field.label.trim())),
+    }))
+    .filter((section) => section.fields.length);
+  const findings = sections.findings.filter(
+    (field) => !extraSections.some((section) => section.fields.includes(field)),
+  );
   const anchors = [
     candidate && (sections.fit || sections.requirements.length || sections.summary)
       ? { id: "fit", label: t`Assessment` }
@@ -297,7 +330,8 @@ export function RecruitingDetailPanel({
       : null,
     sections.education.length ? { id: "education", label: t`Education` } : null,
     sections.skills.length ? { id: "skills", label: t`Skills` } : null,
-    sections.findings.length ? { id: "findings", label: t`Research findings` } : null,
+    ...extraSections.map(({ id, label }) => ({ id, label })),
+    findings.length ? { id: "findings", label: t`Research findings` } : null,
     stage.length ? { id: "outreach", label: t`Outreach` } : null,
   ].filter((anchor): anchor is { id: string; label: string } => anchor !== null);
   const anchorId = (id: string) => `recruiting-detail-${id}`;
@@ -315,7 +349,7 @@ export function RecruitingDetailPanel({
         controller.close();
       }}
     >
-      <header className="flex items-center gap-1 border-b border-sidebar-border px-3 py-2">
+      <header className="flex min-h-16 items-center gap-1 border-b border-sidebar-border px-4 py-2 sm:px-6">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -324,7 +358,26 @@ export function RecruitingDetailPanel({
         >
           <ArrowLeft size={18} aria-hidden />
         </Button>
-        <span className="flex-1" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {current.collection
+            ? `${current.collection.label} · ${current.collection.index + 1}/${current.collection.total}`
+            : t`Profile`}
+        </span>
+        {panelSize ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="hidden md:inline-flex"
+            aria-label={panelSize.expanded ? t`Collapse profile` : t`Expand profile`}
+            onClick={panelSize.toggle}
+          >
+            {panelSize.expanded ? (
+              <Minimize2 size={16} aria-hidden />
+            ) : (
+              <Maximize2 size={16} aria-hidden />
+            )}
+          </Button>
+        ) : null}
         {current.walk ? (
           <>
             <Button
@@ -352,7 +405,7 @@ export function RecruitingDetailPanel({
         </Button>
       </header>
       <div className="rk-scroll min-h-0 flex-1 overflow-y-auto">
-        <div className="space-y-3 px-4 pt-4">
+        <div className="space-y-3 px-4 pt-4 sm:px-6 sm:pt-6">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <h2
@@ -421,8 +474,9 @@ export function RecruitingDetailPanel({
                       href={person.linkedinUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-foreground underline"
+                      className="inline-flex min-w-0 items-center gap-1.5 break-all text-foreground underline"
                     >
+                      <LinkedInIcon className="size-4 shrink-0" />
                       {handle}
                     </a>
                   ) : null}
@@ -432,9 +486,22 @@ export function RecruitingDetailPanel({
             <PersonAvatar
               key={person.candidateId}
               name={person.name}
-              src={assets.photo ?? sections.photoUrl}
+              src={person.profileImageUrl ?? assets.photo ?? sections.photoUrl}
             />
           </div>
+          {person.roles?.length ? (
+            <ul className="flex flex-wrap gap-1" aria-label={t`Associated roles`}>
+              {person.roles.map((role) => (
+                <li
+                  key={role.id}
+                  className="max-w-full truncate rounded bg-muted px-2 py-0.5 text-xs"
+                  title={role.title}
+                >
+                  {role.title}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <details open className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <summary className="cursor-pointer font-medium">
               <Trans>Contact details</Trans>
@@ -551,39 +618,70 @@ export function RecruitingDetailPanel({
             </NavigationRow>
           ) : null}
         </nav>
-        <div className="px-4 py-3">
-          {view === "activity" ? (
+        <div className="px-4 py-3 sm:px-6">
+          {view === "activity" && current.role ? (
             <ActivityTab
               key={person.candidateId}
               {...current.role}
               refreshSignal={profileView.status === "recorded" ? 1 : 0}
               person={person}
               crm={crm}
-              candidateKey={current.candidate?.candidateKey}
+              candidateKey={current.candidate?.candidateKey ?? person.searchCandidateKey}
             />
-          ) : view === "tasks" && reminderKey ? (
+          ) : view === "tasks" && reminderKey && current.role ? (
             <TasksTab
               key={reminderKey}
               roleId={current.role.roleId}
               candidateKey={reminderKey}
               candidateKeys={reminderKeys}
             />
-          ) : view === "notes" && reminderKey ? (
+          ) : view === "notes" && reminderKey && current.role ? (
             <NotesTab
               key={reminderKey}
               roleId={current.role.roleId}
+              conversation={current.role.conversation}
               createKey={reminderKey}
               candidateKeys={noteCandidateKeys(
-                current.candidate?.candidateKey,
+                current.candidate?.candidateKey ?? person.searchCandidateKey,
                 crm && person.candidateId,
               )}
             />
-          ) : view === "thread" ? (
+          ) : view === "thread" && current.role ? (
             <InboxWithReply
               key={person.candidateId}
               {...current.role}
               candidateId={person.candidateId}
               onDraftReply={onDraftReply}
+            />
+          ) : view === "roles" && person.roles?.length ? (
+            <section aria-label={t`Associated roles`} className="space-y-3">
+              <h3 className="font-semibold">
+                <Trans>Associated roles</Trans>
+              </h3>
+              <ul className="space-y-2">
+                {person.roles.map((role) => (
+                  <li
+                    key={role.id}
+                    className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm"
+                  >
+                    <span className="min-w-0 flex-1 break-words">{role.title}</span>
+                    {role.shortlisted ? (
+                      <span className="rounded bg-muted px-2 py-1 text-xs">
+                        <Trans>Shortlisted</Trans>
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : view === "sequences" && crm && current.role ? (
+            <ProfileSequenceHistory
+              role={current.role}
+              candidateId={person.candidateId}
+              name={person.name}
+              onAvailable={setSequencePerson}
+              onAskChat={onAskChat}
+              onReply={() => controller.replace({ ...current, view: "thread" })}
             />
           ) : view === "contact" ? (
             <div className="text-sm">
@@ -650,23 +748,40 @@ export function RecruitingDetailPanel({
               {sections.skills.length ? (
                 <Section id={anchorId("skills")} title={<Trans>Skills</Trans>}>
                   <SkillEvidence
-                    key={`${current.role.roleId}:${person.candidateId}`}
+                    key={`${current.role?.roleId ?? "contact"}:${person.candidateId}`}
                     skills={sections.skills}
                     evidence={sections.skillEvidence}
                   />
                 </Section>
               ) : null}
+              {extraSections.map((section) => (
+                <Section key={section.id} id={anchorId(section.id)} title={section.label}>
+                  <FieldList fields={section.fields} keywords={sections.skills} />
+                </Section>
+              ))}
               {anchors.some((anchor) => anchor.id === "findings") ? (
                 <Section id={anchorId("findings")} title={<Trans>Research findings</Trans>}>
-                  <FieldList fields={sections.findings} keywords={sections.skills} />
+                  <FieldList fields={findings} keywords={sections.skills} />
                 </Section>
               ) : null}
-              <OutreachSection
-                id={anchorId("outreach")}
-                role={current.role}
-                candidateId={crm ? person.candidateId : null}
-                stage={stage.map(({ label, value }) => ({ label, value: statusText(value) }))}
-              />
+              {crm && current.role ? (
+                <ProfileSequenceHistory
+                  role={current.role}
+                  candidateId={person.candidateId}
+                  name={person.name}
+                  onAvailable={setSequencePerson}
+                  onAskChat={onAskChat}
+                  onReply={() => controller.replace({ ...current, view: "thread" })}
+                />
+              ) : null}
+              {current.role ? (
+                <OutreachSection
+                  id={anchorId("outreach")}
+                  role={current.role}
+                  candidateId={crm ? person.candidateId : null}
+                  stage={stage.map(({ label, value }) => ({ label, value: statusText(value) }))}
+                />
+              ) : null}
             </div>
           ) : (
             <>
@@ -683,12 +798,14 @@ export function RecruitingDetailPanel({
                   <Trans>Schedule interview</Trans>
                 </Button>
               ) : null}
-              <InterviewTab
-                key={person.candidateId}
-                {...current.role}
-                candidateId={person.candidateId}
-                candidateEmail={person.email}
-              />
+              {current.role ? (
+                <InterviewTab
+                  key={person.candidateId}
+                  {...current.role}
+                  candidateId={person.candidateId}
+                  candidateEmail={person.email}
+                />
+              ) : null}
             </>
           )}
         </div>

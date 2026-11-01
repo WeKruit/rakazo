@@ -27,6 +27,7 @@ const campaign: RecruitingSequenceOutput = {
     name: "Engineer",
     status: 0,
     editable: true,
+    revision: "a".repeat(64),
     eaccount: "team@example.test",
     timezone: "America/Chicago",
     send_hours: "any_time",
@@ -49,10 +50,11 @@ it("reopens actual steps and save never activates; sending goes through the agen
       <SequenceEditor roleId="role" serverId="server" execute={execute} onAskAgent={ask} />,
     ),
   );
-  expect([...container.querySelectorAll("textarea")].map((el) => el.value)).toEqual([
-    "Hello",
-    "Any thoughts?",
-  ]);
+  expect(
+    [...container.querySelectorAll<HTMLTextAreaElement>('textarea[name^="body-"]')].map(
+      (el) => el.value,
+    ),
+  ).toEqual(["Hello", "Any thoughts?"]);
   expect(
     [...container.querySelectorAll('input[type="number"]')].map(
       (el) => (el as HTMLInputElement).value,
@@ -60,7 +62,7 @@ it("reopens actual steps and save never activates; sending goes through the agen
   ).toEqual(["0", "3"]);
   await act(async () =>
     container
-      .querySelector("form")!
+      .querySelector('form[id$="-form"]')!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
   );
   expect(execute).toHaveBeenLastCalledWith({
@@ -68,6 +70,7 @@ it("reopens actual steps and save never activates; sending goes through the agen
     roleId: "role",
     serverId: "server",
     campaignId: id,
+    expectedRevision: "a".repeat(64),
     draft: {
       name: "Engineer",
       eaccount: "team@example.test",
@@ -136,4 +139,36 @@ it("uses the browser timezone for a new draft", async () => {
     await act(async () => root.unmount());
     resolved.mockRestore();
   }
+});
+
+it("navigates saved email steps, previews without sending, and Done only exits", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const execute = vi.fn(async () => campaign);
+  const done = vi.fn();
+  await act(async () =>
+    root.render(<SequenceEditor roleId="role" serverId="server" execute={execute} onDone={done} />),
+  );
+  expect(host.querySelector('nav[aria-label="Email steps"]')).not.toBeNull();
+  const step = host.querySelector<HTMLButtonElement>('button[aria-label="Go to email 2"]')!;
+  await act(async () => step.click());
+  expect(step.getAttribute("aria-current")).toBe("step");
+  const before = execute.mock.calls.length;
+  await act(async () =>
+    [...host.querySelectorAll("button")]
+      .find((button) => button.textContent === "Preview email 2")!
+      .click(),
+  );
+  expect(host.querySelector('[aria-label="Email preview"]')?.textContent).toContain(
+    "Any thoughts?",
+  );
+  expect(execute).toHaveBeenCalledTimes(before);
+  await act(async () =>
+    [...host.querySelectorAll("button")].find((button) => button.textContent === "Done")!.click(),
+  );
+  expect(done).toHaveBeenCalledOnce();
+  expect(execute).toHaveBeenCalledTimes(before);
+  await act(async () => root.unmount());
 });

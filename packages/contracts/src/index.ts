@@ -24,6 +24,7 @@ export * from "./recruiting-account.js";
 export * from "./recruiting-analytics.js";
 export * from "./recruiting-contacts.js";
 export * from "./recruiting-crm.js";
+export * from "./recruiting-global-inbox.js";
 export * from "./recruiting-inbox.js";
 export * from "./recruiting-reply.js";
 export * from "./recruiting-scheduling.js";

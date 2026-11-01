@@ -274,7 +274,7 @@ export function EmailConversation({
         ) : null}
         {readState?.failed ? (
           <span role="alert" className="text-xs text-muted-foreground">
-            <Trans>Could not save read status.</Trans>
+            <Trans>Read status unavailable.</Trans>
           </span>
         ) : null}
         {onOpenProfile || (onDraftReply && selected) ? (

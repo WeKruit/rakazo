@@ -23,6 +23,7 @@ import type {
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
 import {
+  inboxMessageKey,
   RecruitingCorrespondenceSchema,
   RecruitingCrmCampaignLeadsReadSchema,
   RecruitingCrmCampaignsReadSchema,
@@ -64,6 +65,7 @@ import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "
 import * as recruiting from "@rakazo/db";
 import {
   IsolationError,
+  projectRecruitingInboxMessages,
   RecruitingConflictError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
@@ -554,8 +556,8 @@ export async function getRecruitingRoleCampaign(
       threadId: target.threadId,
     });
     if (!workspace) return none;
-    const selectedNative =
-      workspace.crmTarget?.bindingEffectId === null && selection.serverId && selection.campaignId
+    let selectedNative =
+      selection.serverId && selection.campaignId
         ? await deps.prisma.externalEffect.findUnique({
             where: {
               idempotencyKey: `instantly-role-campaign:${selection.serverId}:${workspace.role.id}`,
@@ -563,6 +565,18 @@ export async function getRecruitingRoleCampaign(
             select: { spaceId: true, status: true, result: true },
           })
         : null;
+    if (
+      selection.serverId &&
+      selection.campaignId &&
+      correspondenceRecord(selectedNative?.result)?.campaignId !== selection.campaignId
+    ) {
+      selectedNative = await deps.prisma.externalEffect.findUnique({
+        where: {
+          idempotencyKey: `instantly-role-campaign:${selection.serverId}:${workspace.role.id}:campaign:${selection.campaignId}`,
+        },
+        select: { spaceId: true, status: true, result: true },
+      });
+    }
     const nativeSelected =
       selectedNative?.spaceId === actor.spaceId &&
       selectedNative.status === "completed" &&
@@ -847,7 +861,12 @@ export async function getRecruitingRoleCampaign(
       campaign: {
         id: campaignId,
         name: typeof campaign.name === "string" ? campaign.name : campaignName,
-        eaccount,
+        eaccount:
+          Array.isArray(campaign.email_list) &&
+          campaign.email_list.length === 1 &&
+          typeof campaign.email_list[0] === "string"
+            ? campaign.email_list[0]
+            : eaccount,
         status: integer(campaign.status),
         stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
         observedDetails: campaignObservedDetails(campaign),
@@ -861,6 +880,14 @@ export async function getRecruitingRoleCampaign(
             email: lead.email,
             status: integer(lead.status),
             interestStatus: integer(lead.lt_interest_status),
+            name:
+              [lead.first_name, lead.last_name]
+                .filter((value) => typeof value === "string" && value.trim())
+                .join(" ") || null,
+            company: typeof lead.company_name === "string" ? lead.company_name : null,
+            openCount: count(lead.email_open_count),
+            clickCount: count(lead.email_click_count),
+            replyCount: count(lead.email_reply_count),
           },
         ];
       }),
@@ -1218,6 +1245,7 @@ export async function getRecruitingCorrespondence(
   crmReads?: Omit<RecruitingCrmReadDeps, "prisma">,
   timer?: PhaseTimer,
 ): Promise<RecruitingCorrespondence> {
+  const observedAt = new Date();
   return authenticated(async () => {
     if (
       page.cursor !== undefined &&
@@ -1558,15 +1586,10 @@ export async function getRecruitingCorrespondence(
           output.status = "ready";
       }
       // One provider message can arrive through live campaign mail and its CRM projection.
-      // Only exact campaign or mailbox provenance identifies the same message across sources.
+      // Exact source/organization and provider identity are required; no guessed source aliases.
       const uniqueMail = new Map<string, RecruitingCorrespondence["emails"][number]>();
       for (const email of output.emails) {
-        const identity = email.campaignId
-          ? ["campaign", email.campaignId, email.providerMessageId]
-          : email.eaccount
-            ? ["mailbox", email.eaccount.toLowerCase(), email.providerMessageId]
-            : ["source", email.id];
-        const key = JSON.stringify(identity);
+        const key = inboxMessageKey(email);
         const saved = uniqueMail.get(key);
         if (!saved) uniqueMail.set(key, email);
         else {
@@ -1599,6 +1622,21 @@ export async function getRecruitingCorrespondence(
           (a, b) =>
             (b.date ? Date.parse(b.date) : Number.NEGATIVE_INFINITY) -
               (a.date ? Date.parse(a.date) : Number.NEGATIVE_INFINITY) || b.id.localeCompare(a.id),
+        );
+      if (workspace && view === "inbox")
+        await projectRecruitingInboxMessages(
+          prisma,
+          actor,
+          {
+            roleId: workspace.role.id,
+            emails: output.emails.slice(start, end),
+            observedAt,
+          },
+          crmReads?.reauthorize
+            ? async () => {
+                await crmReads.reauthorize!();
+              }
+            : undefined,
         );
       // Offset over the merged inbox order; refresh from page one after new mail.
       const rows =
@@ -4279,6 +4317,7 @@ export async function mergeRoleCandidates(
         autumn: {
           candidateKey: candidate.candidateKey,
           ranking: candidate.ranking,
+          savedProfile: candidate.savedProfile ?? null,
           score: candidate.match?.score ?? null,
           rank: candidate.match?.rank ?? null,
           tier: candidate.match?.tier ?? null,

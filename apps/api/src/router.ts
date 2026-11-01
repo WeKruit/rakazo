@@ -82,6 +82,7 @@ import {
   expireComputerControl,
   fillRecruitingRoleProfiles,
   forgetBotSecret,
+  getGlobalRecruitingInbox,
   hasActiveComputerControl,
   hasPlatformMcpCredential,
   hostCredentialSource,
@@ -255,6 +256,7 @@ import {
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
   readRecruitingAnalytics,
+  readRecruitingAnalyticsPeople,
   recordClosedAskAnswer,
   recordDesktopActivity,
   recruitingContactFacets,
@@ -3975,6 +3977,14 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      globalInbox: authed.recruiting.globalInbox.handler(async ({ context, input }) => {
+        if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
+        return getGlobalRecruitingInbox(
+          { prisma: deps.prisma, stillAuthorized: context.stillAuthorized },
+          context.actor,
+          input,
+        );
+      }),
       inboxReadState: authed.recruiting.inboxReadState.handler(async ({ context, input }) => {
         if (
           input.spaceId !== context.actor.spaceId ||
@@ -3996,6 +4006,14 @@ export function createRouter(deps: RouterDeps) {
         if (context.stillAuthorized && !(await context.stillAuthorized()))
           throw new ORPCError("NOT_FOUND");
         return { ok: true as const };
+      }),
+      analyticsPeople: authed.recruiting.analyticsPeople.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const result = await readRecruitingAnalyticsPeople(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
       }),
       analytics: authed.recruiting.analytics.handler(async ({ context, input }) => {
         if (context.stillAuthorized && !(await context.stillAuthorized()))
@@ -4119,7 +4137,12 @@ export function createRouter(deps: RouterDeps) {
           },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
-          { campaignId: input.campaignId, campaignOffset: input.campaignOffset },
+          {
+            campaignId: input.campaignId,
+            campaignOffset: input.campaignOffset,
+            leadCursor: input.leadCursor,
+            serverId: input.serverId,
+          },
         ),
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
@@ -4256,7 +4279,9 @@ export function createRouter(deps: RouterDeps) {
         ),
       ),
       fillRoleProfiles: authed.recruiting.fillRoleProfiles.handler(({ context, input }) =>
-        fillRecruitingRoleProfiles(deps.prisma, context.actor, input.roleId),
+        fillRecruitingRoleProfiles(deps.prisma, context.actor, input.roleId, undefined, {
+          dryRun: input.dryRun,
+        }),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),

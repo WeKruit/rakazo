@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import type { RecruitingAccountViewOutput } from "@rakazo/contracts";
+import type {
+  GlobalRecruitingInboxOutput,
+  RecruitingAccountViewOutput,
+  RecruitingCorrespondence,
+} from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -15,14 +19,17 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 const read = vi.hoisted(() => vi.fn());
+const globalRead = vi.hoisted(() => vi.fn());
 const updateReminder = vi.hoisted(() => vi.fn());
 const listContacts = vi.hoisted(() => vi.fn());
 const contactFacets = vi.hoisted(() => vi.fn());
 const updateTags = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/auth", () => ({ authClient: { useSession: () => ({ data: null }) } }));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
     recruiting: {
       accountView: read,
+      globalInbox: globalRead,
       reminders: { update: updateReminder },
       contacts: { list: listContacts, facets: contactFacets, updateTags },
     },
@@ -69,6 +76,44 @@ const data: RecruitingAccountViewOutput = {
   items: roles.map((role) => ({ roleId: role.id, correspondence: correspondence(role.id) })),
   nextCursor: null,
 };
+const indexPage = (
+  emails: RecruitingCorrespondence["emails"],
+  partial = false,
+): GlobalRecruitingInboxOutput => ({
+  roles,
+  items: emails.map((email) => ({
+    roleId: "one",
+    key: `message:${email.id}`,
+    email,
+    person: null,
+    latestIncomingAt: email.direction === "received" ? email.date : null,
+  })),
+  nextCursor: null,
+  unread: {
+    count: 0,
+    unknownThreads: emails.filter((email) => !email.direction || !email.date).length,
+    scope: "indexed_stored_mail",
+  },
+  coverage: {
+    importsComplete: !partial,
+    crmComplete: true,
+    native: "observed",
+    providerComplete: false,
+    checkedAt: "2026-10-30T12:00:00Z",
+  },
+});
+const mockIndex = (page: GlobalRecruitingInboxOutput) =>
+  globalRead.mockImplementation(async (input: { thread?: { key: string; roleId: string } }) => ({
+    ...page,
+    items: input.thread
+      ? page.items.filter(
+          (row) => row.roleId === input.thread!.roleId && row.key === input.thread!.key,
+        )
+      : page.items,
+  }));
+beforeEach(() => {
+  mockIndex(indexPage([]));
+});
 const host = document.createElement("div");
 const root = createRoot(host);
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -86,6 +131,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
       root.render(
         <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -154,6 +200,7 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=sequence&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -187,7 +234,7 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
 });
 
 it.each([
-  { partial: false, nextCursor: null, count: 0, empty: true, retry: false, label: "0 replies" },
+  { partial: false, nextCursor: null, count: 0, empty: true, retry: false, label: null },
   { partial: true, nextCursor: null, count: 0, empty: false, retry: true, label: null },
   {
     partial: true,
@@ -208,14 +255,14 @@ it.each([
   },
 ])(
   "distinguishes known Inbox zero from partial reads ($partial/$nextCursor/$count)",
-  async ({ partial, nextCursor, count, empty, retry, label }) => {
+  async ({ partial, nextCursor, count, empty, retry }) => {
     const emails = Array.from({ length: count }, (_, index) => ({
       id: `reply-${index}`,
       sourceName: "Mailbox",
       sourceId: "mail-source",
       providerMessageId: `mail-${index}`,
       savedRead: null,
-      direction: "received",
+      direction: "received" as const,
       sender: "candidate@example.test",
       recipients: [],
       subject: `Reply ${index}`,
@@ -234,6 +281,8 @@ it.each([
       ],
       nextCursor: null,
     });
+    if (retry) globalRead.mockRejectedValue(new Error("saved index unavailable"));
+    else mockIndex(indexPage(emails, partial || !!nextCursor));
     const container = document.createElement("div");
     const pageRoot = createRoot(container);
     try {
@@ -241,6 +290,7 @@ it.each([
         pageRoot.render(
           <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
             <AccountRecruitingView
+              spaceId="space"
               accountKey="user-space"
               groups={[]}
               bots={[]}
@@ -251,15 +301,16 @@ it.each([
           </MemoryRouter>,
         ),
       );
-      expect(container.textContent?.includes("No replies yet.")).toBe(empty);
-      expect(container.textContent?.includes("Could not load replies.")).toBe(retry);
-      if (label) expect(container.textContent).toContain(label);
-      else expect(container.textContent).not.toContain("0 replies");
+      expect(container.textContent?.includes("No indexed mail matches this view.")).toBe(empty);
+      expect(container.textContent?.includes("Could not load recruiting records.")).toBe(retry);
+      expect(container.textContent).not.toContain("0 replies");
+      expect(container.textContent).not.toContain("0 unread");
       expect(
         [...container.querySelectorAll("button")].some(
-          (button) => button.textContent === "Load more",
+          (button) => button.textContent === "Continue loading saved mail",
         ),
-      ).toBe(Boolean(nextCursor));
+      ).toBe(!retry && (partial || !!nextCursor));
+      if (!retry) expect(container.textContent).toContain("Saved mail · partial source coverage");
     } finally {
       await act(async () => pageRoot.unmount());
     }
@@ -285,6 +336,7 @@ it("reports an unavailable campaign read without claiming that there is no campa
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=sequence&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -334,6 +386,7 @@ it.each(["missing", "failed", "unsupported", "not_checked"])(
         pageRoot.render(
           <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
             <AccountRecruitingView
+              spaceId="space"
               accountKey="user-space"
               groups={[]}
               bots={[]}
@@ -393,6 +446,7 @@ it("names the calendar that could not be read and still shows the others", async
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -454,6 +508,7 @@ it("loads the next interview page into the calendar without losing previous even
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -520,6 +575,8 @@ it("does not invent zero replies from an email whose direction is unknown", asyn
     ],
     nextCursor: null,
   });
+  const observed = await read();
+  mockIndex(indexPage(observed.items[0].correspondence.emails));
   const container = document.createElement("div");
   const pageRoot = createRoot(container);
   try {
@@ -527,6 +584,7 @@ it("does not invent zero replies from an email whose direction is unknown", asyn
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -537,7 +595,8 @@ it("does not invent zero replies from an email whose direction is unknown", asyn
         </MemoryRouter>,
       ),
     );
-    expect(container.textContent).toContain("Could not load replies.");
+    expect(container.textContent).toContain("Saved email");
+    expect(container.querySelector('[aria-label="Unread"]')).toBeNull();
     expect(container.textContent).not.toContain("0 replies");
     expect(container.textContent).not.toContain("No replies yet.");
   } finally {
@@ -566,6 +625,7 @@ it("continues feedback through the account read and keeps already displayed reco
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=feedback&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -618,6 +678,7 @@ it("does not claim zero people when candidate records could not be read", async 
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=shortlist&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -666,6 +727,7 @@ it("completes an open native reminder and does not offer Done on already complet
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=tasks&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -741,6 +803,7 @@ it("lists every role's people in one server-paged table", async () => {
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=contacts&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -789,6 +852,7 @@ it("shows the interview calendar for arrived roles and marks only the rest as lo
       pageRoot.render(
         <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
           <AccountRecruitingView
+            spaceId="space"
             accountKey="user-space"
             groups={[]}
             bots={[]}
@@ -803,6 +867,82 @@ it("shows the interview calendar for arrived roles and marks only the rest as lo
     const loading = [...container.querySelectorAll('[role="status"]')];
     expect(loading.length).toBeGreaterThan(0);
     expect(loading.every((node) => node.closest('[aria-busy="true"]'))).toBe(true);
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("groups Contacts and Shortlist under Candidates and keeps selected-role context links", async () => {
+  read.mockResolvedValue(data);
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=shortlist&role=two"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="account"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.querySelector("h1")?.textContent).toBe("Candidates");
+    const links = [...container.querySelectorAll<HTMLAnchorElement>("nav a")];
+    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["Contacts", "/app?view=contacts&role=two"],
+      ["Shortlist", "/app?view=shortlist&role=two"],
+      ["Job brief", "/app?view=brief&role=two"],
+      ["Client feedback", "/app?view=feedback&role=two"],
+    ]);
+    expect(
+      links.find((link) => link.textContent === "Shortlist")?.getAttribute("aria-current"),
+    ).toBe("page");
+    await act(async () => links.find((link) => link.textContent === "Job brief")!.click());
+    expect(container.querySelector("h1")?.textContent).toBe("Job Brief");
+    expect(read).toHaveBeenLastCalledWith(
+      expect.objectContaining({ view: "brief", roleId: "two" }),
+    );
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("keeps Work secondary links scoped and opens the existing global chat", async () => {
+  read.mockResolvedValue(data);
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=tasks&role=two"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="account"
+            groups={[{ id: "recruiting-global-fixture" } as never]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(
+      [...container.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Work"] a')].map((link) => [
+        link.textContent,
+        link.getAttribute("href"),
+      ]),
+    ).toEqual([
+      ["Chat", "/app/g/recruiting-global-fixture?view=conversation"],
+      ["Tasks", "/app?view=tasks&role=two"],
+      ["Routines", "/app?view=routines&role=two"],
+    ]);
   } finally {
     await act(async () => pageRoot.unmount());
   }

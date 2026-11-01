@@ -28,6 +28,7 @@ import {
   weekStart,
 } from "./dashboard";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
+import { KruitWorkMenu } from "./KruitWorkMenu";
 import { RecruitingAnalytics } from "./RecruitingAnalytics";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
@@ -562,6 +563,7 @@ export function HomeDashboard({
   refreshSignal = 0,
   onOpenRole,
   onGlobalChat,
+  onOpenWork,
   onOpenNavigation,
   navigationCollapsed = false,
 }: {
@@ -574,6 +576,7 @@ export function HomeDashboard({
   onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
   onOpenNavigation?: () => void;
   onGlobalChat?: () => void;
+  onOpenWork?: (view: "tasks" | "routines") => void;
   navigationCollapsed?: boolean;
 }) {
   const { t } = useLingui();
@@ -643,6 +646,7 @@ export function HomeDashboard({
           <h1 className="text-2xl font-semibold tracking-tight" dir="auto">
             {name ? <Trans>Hello, {name}</Trans> : <Trans>Hello</Trans>}
           </h1>
+          {onOpenWork ? <KruitWorkMenu onOpen={onOpenWork} /> : null}
           <Button variant="outline" className="ms-auto" onClick={() => setAnalyticsOpen(true)}>
             <Trans>View analytics</Trans>
           </Button>
