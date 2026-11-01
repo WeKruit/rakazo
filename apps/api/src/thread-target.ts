@@ -30,6 +30,7 @@ import {
   isActive,
   isConversationalRun,
   isStatusQuestion,
+  isWorkActivity,
   ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
@@ -153,13 +154,18 @@ async function answerStatusQuestion(
       select: { startedAt: true, completedAt: true },
     }),
   ]);
-  const tool = (called?.payload as { name?: unknown } | null)?.name;
+  const calledPayload = called?.payload as { name?: unknown; category?: unknown } | null;
+  const tool = calledPayload?.name;
   const since = timing?.startedAt ?? timing?.createdAt;
   const blocks: MessageBlock[] = [
     {
       kind: "text",
       text: statusAnswer({
-        activity: typeof tool === "string" ? workActivityForTool(tool) : "working",
+        activity: isWorkActivity(calledPayload?.category)
+          ? calledPayload.category
+          : typeof tool === "string"
+            ? workActivityForTool(tool)
+            : "working",
         elapsedMs: since ? Date.now() - since.getTime() : 0,
         typicalMs: typicalDurationMs(
           past.flatMap((done) =>

@@ -426,7 +426,6 @@ msgstr "Attached {path}"
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "Attachment"
 
@@ -583,10 +582,6 @@ msgstr "Can't reach the server."
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Cancel"
 msgstr "Cancel"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Cancel edit"
-msgstr "Cancel edit"
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -1150,10 +1145,6 @@ msgid "Could not update computer"
 msgstr "Could not update computer"
 
 #: src/pages/shell/useShellMessages.ts
-msgid "Could not update message"
-msgstr "Could not update message"
-
-#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "Could not update reaction"
 
@@ -1402,10 +1393,6 @@ msgstr "Duration not recorded"
 msgid "Edit"
 msgstr "Edit"
 
-#: src/pages/shell/queued-messages.tsx
-msgid "Edit queued message"
-msgstr "Edit queued message"
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
@@ -1601,10 +1588,6 @@ msgstr "Fit"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
 msgstr "Fixed date"
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
-msgstr "Follow up"
 
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
@@ -2563,13 +2546,8 @@ msgid "Qualifying work"
 msgstr "Qualifying work"
 
 #: src/lib/roster-status.ts
-#: src/pages/shell/queued-messages.tsx
 msgid "Queued"
 msgstr "Queued"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Queued messages"
-msgstr "Queued messages"
 
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
@@ -2757,10 +2735,6 @@ msgstr "Remove {name} from shortlist"
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "Remove mention {0}"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Remove queued message"
-msgstr "Remove queued message"
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -3006,7 +2980,6 @@ msgstr "Salary range"
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "Save"
 
@@ -3138,10 +3111,6 @@ msgstr "Send deletion code"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
 msgstr "Send feedback"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Send now"
-msgstr "Send now"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 msgid "Send outcome unknown"
@@ -3414,10 +3383,6 @@ msgstr "Statement"
 msgid "Status"
 msgstr "Status"
 
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
-msgstr "Steer"
-
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr "Step failed"
@@ -3493,10 +3458,6 @@ msgstr "Succeeded"
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
 msgstr "Switch bot"
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
-msgstr "Tab to switch"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx

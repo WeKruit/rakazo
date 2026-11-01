@@ -18,6 +18,7 @@ import {
   workStageKind,
   workStageLabel,
   workStageMessages,
+  workStepDetail,
   workTimeline,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
@@ -794,4 +795,109 @@ it("places each teammate's stage on the turn's timeline and keeps a running one 
     { botId: "reviewer", running: true, start: 0.3, end: 1, durationMs: 70_000 },
   ]);
   expect(workTimeline(null, T0).rows).toEqual([]);
+});
+
+describe("specific step labels", () => {
+  it("names what a call does from its tool and closed operation", () => {
+    expect(workActivityForTool("search_history", { query: "SWE" })).toBe("history");
+    expect(workActivityForTool("skill_read", { name: "playbook" })).toBe("playbook");
+    expect(workActivityForTool("recall_memory")).toBe("recall");
+    expect(workActivityForTool("recruiting_candidates", { operation: "roles" })).toBe("roles");
+    expect(workActivityForTool("recruiting_candidates", { operation: "list" })).toBe("candidates");
+    expect(workActivityForTool("recruiting_role", { operation: "create" })).toBe("role_save");
+    expect(workActivityForTool("delegate_to_role", { role_id: "r1" })).toBe("delegating");
+  });
+
+  it("quotes a recruiter-facing topic and never ids, links or tool names", () => {
+    expect(workStepDetail("search_history", { query: "  past SWE   hires " })).toBe(
+      "past SWE hires",
+    );
+    expect(
+      workStepDetail("recruiting_role", { operation: "create", title: "资深后端工程师" }),
+    ).toBe("资深后端工程师");
+    for (const query of [
+      "role 4f9c2a1b7e",
+      "https://example.test/jd",
+      "ada@example.test",
+      "recruiting_role",
+      '{"a":1}',
+    ])
+      expect(workStepDetail("search_history", { query })).toBeUndefined();
+    expect(workStepDetail("read_file", { path: "notes.md" })).toBeUndefined();
+    expect(workStepDetail("search_history", { query: "word ".repeat(30) })?.endsWith("…")).toBe(
+      true,
+    );
+  });
+
+  it("folds repeated finished calls into one row with their time and topics", () => {
+    const steps = runWorkSteps({
+      blocks: [
+        {
+          kind: "steps",
+          steps: [1, 2, 3, 4].map((n) => ({
+            label: "Search history",
+            count: 1,
+            activity: "history",
+            ...(n < 3 ? { detail: n === 1 ? "SWE" : "backend" } : {}),
+            startedAt: at(n),
+            durationMs: 100 * n,
+          })),
+        },
+      ],
+    });
+    expect(
+      workSessionSteps({
+        startedAt: at(0),
+        endedAt: at(10),
+        runIds: ["r"],
+        runBots: {},
+        earlier: { r: steps.done },
+        live: {},
+        current: null,
+      }),
+    ).toEqual([
+      {
+        activity: "history",
+        count: 4,
+        detail: "SWE · backend",
+        startedAt: at(1),
+        durationMs: 1000,
+      },
+    ]);
+  });
+
+  it("hides the agent's own messages and says what it is weighing between calls", () => {
+    const result = runWorkSteps({
+      blocks: [
+        {
+          kind: "steps",
+          steps: [
+            { label: "Message user", count: 1, durationMs: 300 },
+            { label: "Recruiting candidates", count: 1, activity: "roles", durationMs: 400 },
+          ],
+        },
+        { kind: "progress", activity: true, text: "Using recruiting_candidates" },
+      ],
+    });
+    expect(result.done).toEqual([{ activity: "roles", durationMs: 400 }]);
+    expect(result.current).toBe("thinking");
+  });
+
+  it("carries the topic of the call in flight", () => {
+    const result = runWorkSteps({
+      blocks: [
+        {
+          kind: "progress",
+          activity: true,
+          text: "",
+          pendingToolNames: ["search_history"],
+          pendingToolCalls: [
+            { name: "search_history", activity: "history", detail: "SWE", startedAt: at(1) },
+          ],
+        },
+      ],
+    });
+    expect(result).toMatchObject({ current: "history", currentDetail: "SWE" });
+    expect(workActivityLabel("history")).toBe("Looking back at earlier conversations");
+  });
 });

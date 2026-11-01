@@ -167,19 +167,9 @@ describe("thread composer isolation", () => {
     expect(props.send).toHaveBeenCalledOnce();
   });
 
-  it("captures the native follow-up mode with the draft, and keeps it across send updates", () => {
+  it("offers no queue mode while a reply works", () => {
     render({ working: true });
-    type("Next task");
-    expect(composer.current!.snapshot().queueMode).toBe("steer");
-    press("Steer");
-    expect(composer.current!.snapshot()).toMatchObject({
-      promptText: "Next task",
-      queueMode: "follow_up",
-    });
-    render({ working: false, sending: true });
-    expect(composer.current!.snapshot().queueMode).toBe("follow_up");
-    press("Follow up");
-    expect(composer.current!.snapshot().queueMode).toBe("steer");
+    expect(container.textContent).not.toContain("Steer");
   });
 
   it("preserves draft across reply, attachment, and sending updates and resets on thread switch", () => {

@@ -1693,7 +1693,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     let attempt: SendAttempt;
     try {
       attempt = feedback.sendAttempt({
-        queueMode: submitted.queueMode,
         originThreadKey: originThreadKey!,
         displayText: submitted.promptText,
         replyPreview: replyQuote ?? (replyTarget ? previewMessageText(replyTarget) : null),
@@ -1757,7 +1756,6 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       const attempt = feedback.sendAttempt({
         originThreadKey: threadKey!,
         displayText: "Try again",
-        queueMode: "steer",
         replyPreview: null,
         initialBotTarget,
         botTarget: initialBotTarget,

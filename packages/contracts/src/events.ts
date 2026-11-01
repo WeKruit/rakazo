@@ -35,6 +35,8 @@ export const ProductEventType = z.enum([
   "thread.message.deleted",
   "thread.message.reaction",
   "thread.progress",
+  /** Live-only guess at the user's next message after a finished reply. */
+  "thread.suggestion",
   "thread.artifact",
   "thread.ask",
   "thread.choice",
@@ -110,6 +112,8 @@ export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
   thinkingSince: IsoDate.optional(),
 });
 export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
+
+export const ThreadSuggestionPayloadSchema = z.object({ text: z.string().min(1).max(200) });
 
 export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
@@ -542,6 +546,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
           name: z.string(),
           executionId: z.string().optional(),
           startedAt: IsoDate.optional(),
+          /** Work category of the call, from its tool name and closed operation. */
+          activity: z.string().max(40).optional(),
+          /** Recruiter-facing topic of the call, e.g. a history query; never ids or JSON. */
+          detail: z.string().max(80).optional(),
         }),
       )
       .optional(),
@@ -565,6 +573,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
         executionId: z.string().optional(),
         startedAt: IsoDate.optional(),
         durationMs: z.number().int().nonnegative().optional(),
+        /** Work category of the call, from its tool name and closed operation. */
+        activity: z.string().max(40).optional(),
+        /** Recruiter-facing topic of the call, e.g. a history query; never ids or JSON. */
+        detail: z.string().max(80).optional(),
       }),
     ),
     durationMs: z.number().int().nonnegative().optional(),
@@ -837,10 +849,11 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
   "run.requeued": RunRequeuedPayloadSchema,
   "run.completed": RunCompletedPayloadSchema,
   "thread.progress": ThreadProgressPayloadSchema,
+  "thread.suggestion": ThreadSuggestionPayloadSchema,
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 6;
+export const EVENT_FORMAT_VERSION = 8;
 
 export const ProductEventSchema = z
   .object({

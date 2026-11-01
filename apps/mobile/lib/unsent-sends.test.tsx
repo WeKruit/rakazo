@@ -53,7 +53,6 @@ it("prepares a cold signed-in outbox before sending a failed-reply retry, withou
     return null;
   }
   const retry = {
-    queueMode: "steer" as const,
     originThreadKey: "bot",
     displayText: "Try again",
     replyPreview: null,
@@ -78,7 +77,7 @@ it("prepares a cold signed-in outbox before sending a failed-reply retry, withou
       expect.objectContaining({
         botId: "bot",
         text: "Try again",
-        queueMode: "steer",
+        interrupt: true,
         clientNonce: "retry-nonce",
       }),
       expect.objectContaining({

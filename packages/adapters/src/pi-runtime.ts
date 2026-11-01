@@ -172,19 +172,30 @@ const THINKING_SUMMARIES: Partial<Record<WorkActivity, string>> = {
   files: "Reviewing files",
   search: "Reviewing search results",
   page: "Reviewing the page",
-  context: "Reviewing context",
+  playbook: "Applying the hiring playbook",
+  recall: "Applying your preferences",
+  history: "Going over earlier conversations",
   emails: "Reviewing emails",
   availability: "Reviewing availability",
   drafting: "Working on the draft",
   role: "Reviewing the role",
+  role_save: "Reviewing the role",
+  roles: "Picking the right role",
   candidates: "Reviewing candidates",
+  candidate_lookup: "Reviewing the candidate",
+  replies: "Reviewing candidate replies",
+  assess: "Reviewing assessments",
   research: "Reviewing research results",
-  crm: "Reviewing CRM records",
+  crm: "Reviewing candidate records",
+  interview: "Planning the interview",
 };
 
 /** User-safe, ≤8-word thinking label derived from the last tool's category only. */
-export function thinkingSummary(lastToolName: string | undefined): string {
-  return (lastToolName && THINKING_SUMMARIES[workActivityForTool(lastToolName)]) || "Thinking";
+export function thinkingSummary(lastToolName: string | undefined, lastToolArgs?: unknown): string {
+  return (
+    (lastToolName && THINKING_SUMMARIES[workActivityForTool(lastToolName, lastToolArgs)]) ||
+    "Thinking"
+  );
 }
 
 function thinkingLevelFor(
@@ -690,7 +701,7 @@ export class PiAgentRuntime implements AgentRuntime {
                 phase: "thinking",
                 summary: thought
                   ? thought.split(" ").slice(0, 8).join(" ")
-                  : thinkingSummary(lastToolName),
+                  : thinkingSummary(lastToolName, lastToolArgs),
                 ...(thought ? { thought } : {}),
                 at: new Date(now).toISOString(),
                 thinkingSince,

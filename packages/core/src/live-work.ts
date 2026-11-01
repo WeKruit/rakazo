@@ -10,7 +10,9 @@ export type WorkActivity =
   | "files"
   | "search"
   | "page"
-  | "context"
+  | "playbook"
+  | "recall"
+  | "history"
   | "memory"
   | "connections"
   | "connected_action"
@@ -18,14 +20,68 @@ export type WorkActivity =
   | "availability"
   | "drafting"
   | "role"
+  | "role_save"
+  | "roles"
   | "candidates"
+  | "candidate_lookup"
+  | "replies"
+  | "assess"
+  | "profiles_save"
+  | "notes"
+  | "reminders"
+  | "interview"
   | "research"
   | "feedback"
   | "crm"
   | "question"
   | "specialist"
+  | "delegating"
+  | "routine"
   | "waiting"
+  | "writing"
+  | "thinking"
   | "working";
+
+const WORK_ACTIVITIES = new Set<string>([
+  "files",
+  "search",
+  "page",
+  "playbook",
+  "recall",
+  "history",
+  "memory",
+  "connections",
+  "connected_action",
+  "emails",
+  "availability",
+  "drafting",
+  "role",
+  "role_save",
+  "roles",
+  "candidates",
+  "candidate_lookup",
+  "replies",
+  "assess",
+  "profiles_save",
+  "notes",
+  "reminders",
+  "interview",
+  "research",
+  "feedback",
+  "crm",
+  "question",
+  "specialist",
+  "delegating",
+  "routine",
+  "waiting",
+  "writing",
+  "thinking",
+  "working",
+]);
+
+export function isWorkActivity(value: unknown): value is WorkActivity {
+  return typeof value === "string" && WORK_ACTIVITIES.has(value);
+}
 
 const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   read_file: "files",
@@ -35,11 +91,11 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   web_fetch: "page",
   browser_navigate: "page",
   browser_snapshot: "page",
-  skill_read: "context",
-  read_memory: "context",
-  read_history: "context",
-  search_history: "context",
-  recall_memory: "context",
+  skill_read: "playbook",
+  read_memory: "recall",
+  recall_memory: "recall",
+  read_history: "history",
+  search_history: "history",
   remember: "memory",
   save_memory: "memory",
   save_shared_memory: "memory",
@@ -54,6 +110,10 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_assess: "candidates",
   recruiting_research: "research",
   recruiting_feedback: "feedback",
+  recruiting_profiles: "candidates",
+  recruiting_notes: "notes",
+  recruiting_reminders: "reminders",
+  recruiting_scheduling: "interview",
   recruiting_reply: "drafting",
   recruiting_crm_target: "crm",
   recruiting_crm_import: "crm",
@@ -64,6 +124,34 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   message_bot: "specialist",
   handoff_to_bot: "specialist",
   message_agent: "specialist",
+  delegate_to_role: "delegating",
+  message_user: "writing",
+  request_connection: "connections",
+  schedule_create: "routine",
+  schedule_list: "routine",
+  schedule_update: "routine",
+  schedule_cancel: "routine",
+};
+
+/**
+ * Tools whose closed `operation` argument changes what the recruiter should read. Only the
+ * enum value is used, never free text, ids or other arguments.
+ */
+const OPERATION_ACTIVITIES: Record<string, Record<string, WorkActivity>> = {
+  recruiting_role: {
+    create: "role_save",
+    update: "role_save",
+    revise: "role_save",
+    archive: "role_save",
+    unarchive: "role_save",
+  },
+  recruiting_candidates: {
+    roles: "roles",
+    replies: "replies",
+    resolve: "candidate_lookup",
+  },
+  recruiting_assess: { ask: "question" },
+  recruiting_profiles: { save: "profiles_save", save_many: "profiles_save" },
 };
 
 /**
@@ -90,18 +178,53 @@ const CONNECTED_OPERATIONS: Record<string, WorkActivity> = {
 
 /**
  * Maps a native tool name, or the humanized label a saved steps block carries
- * ("Mcp  autumn  research"), to a work category.
+ * ("Mcp  autumn  research"), to a work category. Arguments refine it only through the
+ * closed `operation` value of the tools listed above.
  */
-export function workActivityForTool(name: string): WorkActivity {
+export function workActivityForTool(name: string, args?: unknown): WorkActivity {
   const key = name.trim().toLowerCase().replaceAll(" ", "_");
+  const operation =
+    args && typeof args === "object" ? (args as { operation?: unknown }).operation : undefined;
+  const refined =
+    typeof operation === "string" ? OPERATION_ACTIVITIES[key]?.[operation] : undefined;
+  if (refined) return refined;
   const builtin = BUILTIN_ACTIVITIES[key];
   if (builtin) return builtin;
   // Connected tools are <service>__<connection>__<operation>; older labels kept single spaces.
   if (!/^(?:mcp|instantly|cal)_/.test(key)) return "working";
-  const operation = Object.keys(CONNECTED_OPERATIONS)
+  const connected = Object.keys(CONNECTED_OPERATIONS)
     .filter((candidate) => key.endsWith(`_${candidate}`))
     .sort((a, b) => b.length - a.length)[0];
-  return operation ? CONNECTED_OPERATIONS[operation]! : "working";
+  return connected ? CONNECTED_OPERATIONS[connected]! : "working";
+}
+
+/** The recruiter-written words a step may quote, per tool: a query, a title or a name. */
+const DETAIL_FIELDS: Record<string, string> = {
+  search_history: "query",
+  recall_memory: "query",
+  web_search: "query",
+  recruiting_role: "title",
+  recruiting_candidates: "nameOrEmail",
+};
+
+const DETAIL_LIMIT = 48;
+
+/**
+ * A short topic that makes a step specific ("SWE hires"), or undefined. Anything that looks
+ * like an id, link, address or tool name is dropped rather than shown.
+ */
+export function workStepDetail(name: string, args: unknown): string | undefined {
+  const field = DETAIL_FIELDS[name];
+  if (!field || !args || typeof args !== "object") return undefined;
+  const value = (args as Record<string, unknown>)[field];
+  if (typeof value !== "string") return undefined;
+  const text = hideVendorNames(value).replaceAll(/\s+/g, " ").trim();
+  if (!text || /https?:|www\.|@|[0-9a-f]{8,}|\d{6,}|[a-z]+_[a-z_]+|[{}[\]<>]/i.test(text))
+    return undefined;
+  if (text.length <= DETAIL_LIMIT) return text;
+  const cut = text.slice(0, DETAIL_LIMIT);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > DETAIL_LIMIT / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 type WorkMessage = {
@@ -128,6 +251,7 @@ type WorkRun = {
 export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): {
   done: WorkItem[];
   current: WorkActivity | null;
+  currentDetail?: string;
   currentStartedAt?: string;
 } {
   if (!message) return { done: [], current: null };
@@ -135,13 +259,17 @@ export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): 
     block.kind === "steps"
       ? block.steps.flatMap((step) =>
           Array.from({ length: step.count }, (): WorkItem => {
-            const activity = workActivityForTool(step.label);
+            const activity = isWorkActivity(step.activity)
+              ? step.activity
+              : workActivityForTool(step.label);
             return step.status ||
               step.peopleWithEmail !== undefined ||
               step.durationMs !== undefined ||
-              step.startedAt
+              step.startedAt ||
+              step.detail
               ? {
                   activity,
+                  ...(step.detail ? { detail: step.detail } : {}),
                   ...(step.status ? { status: step.status } : {}),
                   ...(step.peopleWithEmail === undefined
                     ? {}
@@ -155,16 +283,19 @@ export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): 
       : [],
   );
   const marker = message.blocks.at(-1);
-  if (marker?.kind !== "progress" || marker.activity !== true) return { done, current: null };
-  if (marker.phase) return { done, current: null };
-  const pending = marker.pendingToolNames?.at(-1);
+  if (marker?.kind !== "progress" || marker.activity !== true)
+    return { done: withoutWriting(done), current: null };
+  if (marker.phase) return { done: withoutWriting(done), current: null };
+  const pendingCall = marker.pendingToolCalls?.at(-1);
+  const pending = pendingCall?.name ?? marker.pendingToolNames?.at(-1);
   if (pending)
     return {
-      done,
-      current: workActivityForTool(pending),
-      ...(marker.pendingToolCalls?.at(-1)?.startedAt
-        ? { currentStartedAt: marker.pendingToolCalls.at(-1)!.startedAt }
-        : {}),
+      done: withoutWriting(done),
+      current: isWorkActivity(pendingCall?.activity)
+        ? pendingCall.activity
+        : workActivityForTool(pending),
+      ...(pendingCall?.detail ? { currentDetail: pendingCall.detail } : {}),
+      ...(pendingCall?.startedAt ? { currentStartedAt: pendingCall.startedAt } : {}),
     };
   // The steps block already holds the call this empty marker follows.
   const currentIndex = done.findLastIndex(
@@ -173,13 +304,22 @@ export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): 
   const currentItem = done[currentIndex];
   if (marker.text === "" && currentItem)
     return {
-      done: done.filter((_, index) => index !== currentIndex),
+      done: withoutWriting(done.filter((_, index) => index !== currentIndex)),
       current: itemActivity(currentItem),
+      ...(typeof currentItem !== "string" && currentItem.detail
+        ? { currentDetail: currentItem.detail }
+        : {}),
       ...(typeof currentItem !== "string" && currentItem.startedAt
         ? { currentStartedAt: currentItem.startedAt }
         : {}),
     };
-  return { done, current: "working" };
+  // No call is open: the model is deciding what to do with what it just read.
+  return { done: withoutWriting(done), current: "thinking" };
+}
+
+/** A message the agent posted already shows as the message itself, not as a step. */
+function withoutWriting(items: WorkItem[]): WorkItem[] {
+  return items.filter((item) => itemActivity(item) !== "writing");
 }
 
 /**
@@ -201,6 +341,8 @@ export type WorkSession = {
   /** Latest live steps per run, to tell growth from a fresh row. */
   live: Record<string, WorkItem[]>;
   current: WorkActivity | null;
+  /** The recruiter-facing topic of the call in flight, when it has one. */
+  currentDetail?: string;
   currentStartedAt?: string;
   progress?: { phase: "thinking" | "compacting" | "retrying"; summary?: string };
 };
@@ -208,6 +350,8 @@ export type WorkSession = {
 export type WorkStep = {
   activity: WorkActivity;
   count: number;
+  /** Topics of the folded calls, e.g. a history query or a role title. */
+  detail?: string;
   status?: "failed" | "paused";
   peopleWithEmail?: number;
   startedAt?: string;
@@ -421,6 +565,7 @@ function observeForegroundWorkSession(
       earlier,
       live: {},
       current: null,
+      currentDetail: undefined,
       currentStartedAt: undefined,
       progress: undefined,
     };
@@ -466,6 +611,7 @@ function observeForegroundWorkSession(
   for (const [runId, steps] of Object.entries(base.live))
     if (!workingIds.has(runId)) addItems(earlier, runId, steps);
   let current: WorkActivity | null = null;
+  let currentDetail: string | undefined;
   let currentStartedAt: string | undefined;
   let currentSeq = -Infinity;
   let progress: WorkSession["progress"];
@@ -486,6 +632,7 @@ function observeForegroundWorkSession(
     live[run.id] = steps.done;
     if (steps.current && (row?.seq ?? 0) >= currentSeq) {
       current = steps.current;
+      currentDetail = steps.currentDetail;
       currentStartedAt = steps.currentStartedAt;
       currentSeq = row?.seq ?? 0;
     }
@@ -501,6 +648,7 @@ function observeForegroundWorkSession(
     earlier,
     live,
     current,
+    ...(currentDetail ? { currentDetail } : {}),
     ...(currentStartedAt ? { currentStartedAt } : {}),
     ...(progress ? { progress } : {}),
   };
@@ -670,26 +818,42 @@ export function workStageLabel(kind: WorkStageKind): string {
   return STAGE_LABELS[kind];
 }
 
+/**
+ * Consecutive calls of the same kind read as one step: finished calls add their time and
+ * topics, so four history lookups show once instead of four identical rows. A failed or
+ * paused call, an email count, or the call still running keeps its own row.
+ */
 function foldSteps(items: readonly WorkItem[]): WorkStep[] {
   const steps: WorkStep[] = [];
   for (const item of items) {
     const row = typeof item === "string" ? { activity: item } : item;
     const last = steps.at(-1);
+    const finished = (step: { durationMs?: number; startedAt?: string }) =>
+      step.durationMs !== undefined || !step.startedAt;
     if (
       last?.activity === row.activity &&
       !last.status &&
       !row.status &&
       last.peopleWithEmail === undefined &&
       row.peopleWithEmail === undefined &&
-      last.durationMs === undefined &&
-      row.durationMs === undefined &&
-      !last.startedAt &&
-      !row.startedAt
-    )
+      finished(last) &&
+      finished(row)
+    ) {
       last.count += 1;
-    else steps.push({ ...row, count: 1 });
+      if (row.durationMs !== undefined) last.durationMs = (last.durationMs ?? 0) + row.durationMs;
+      if (!last.startedAt && row.startedAt) last.startedAt = row.startedAt;
+      last.detail = mergeDetails(last.detail, row.detail);
+      if (!last.detail) delete last.detail;
+    } else steps.push({ ...row, count: 1 });
   }
   return steps;
+}
+
+const MAX_DETAILS = 3;
+
+function mergeDetails(a: string | undefined, b: string | undefined): string | undefined {
+  const parts = [...new Set([...(a ? a.split(" · ") : []), ...(b ? [b] : [])])];
+  return parts.length ? parts.slice(0, MAX_DETAILS).join(" · ") : undefined;
 }
 
 /** Milliseconds the session has run (live) or ran (ended); never negative. */
@@ -739,7 +903,9 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   files: "reading files",
   search: "searching the web",
   page: "reading a page",
-  context: "checking saved context",
+  playbook: "reading the hiring playbook",
+  recall: "recalling your preferences",
+  history: "looking back at earlier conversations",
   memory: "saving notes",
   connections: "checking connections",
   connected_action: "using a connected app",
@@ -747,14 +913,27 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   availability: "checking availability",
   drafting: "drafting email",
   role: "reviewing the role",
+  role_save: "saving the role",
+  roles: "looking up your roles",
   candidates: "reviewing candidates",
+  candidate_lookup: "finding the candidate",
+  replies: "checking candidate replies",
+  assess: "assessing candidates",
+  profiles_save: "saving candidates",
+  notes: "checking candidate notes",
+  reminders: "checking reminders",
+  interview: "planning the interview",
   research: "searching candidates",
   feedback: "recording feedback",
   crm: "checking candidate records",
   question: "preparing a question",
   specialist: "asking a specialist",
+  delegating: "handing this to the role team",
+  routine: "setting up a routine",
   waiting: "waiting for background work",
-  working: "working on it",
+  writing: "writing to you",
+  thinking: "deciding the next step",
+  working: "running a step",
 };
 
 /** The middle of past durations of the same kind of work, or undefined with fewer than three. */

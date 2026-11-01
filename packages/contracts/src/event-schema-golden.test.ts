@@ -21,8 +21,12 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
   // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
   5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
-  // 6: optional multiple flag on ask blocks (multi-select options).
-  6: "7e6ae24434eac7bf4f6888348234ec077dddf94d47f561c86872c0bdd5d85cf3",
+  // 6: thread.suggestion, a live-only guess at the user's next message.
+  6: "0bd043f12c8e8d6d8596eed263ace437610f90f6bae258354dd5ca4130ceb805",
+  // 7: optional activity and detail on steps and pending tool calls (specific step labels).
+  7: "2fc5725ccacec492105af88ca7f2a4dffff499de8284794d58090ba9f66ed3e2",
+  // 8: optional multiple flag on ask blocks (multi-select options).
+  8: "8e3ec5f2106a6e1fed52867abd4c4155253198d28e74738a06a2f28b6bb81031",
 };
 
 const OLD_ROWS: unknown[] = [
