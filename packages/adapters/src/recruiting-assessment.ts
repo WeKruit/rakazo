@@ -404,6 +404,7 @@ export async function executeRecruitingAssessmentTool(
           text: redact(input.question),
           status: "pending",
           actions: actions.map(({ id, label }) => ({ id, label: redact(label) })),
+          ...(input.multiple ? { multiple: true } : {}),
         },
       ],
       offeredActions: actions,

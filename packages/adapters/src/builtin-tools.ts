@@ -381,7 +381,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "ask_user",
     description:
-      "Ask the user a question, then wait. Read supplied facts and saved answers first; present the actual proposal and ask only the unresolved decision in ordinary business language. Questions, field labels and options must be understandable without internal gate, task, artifact, shard or test identifiers; resolve those internally. Supply options for two to four concise choices (a custom-answer input is also shown, so offer real decisions without an extra custom-input option; put the choice you recommend first and give your pick with its reason in one sentence of the question), or requestedSchema for a standard MCP form with multiple primitive fields, enums and multi-select arrays. Do not collect secrets or approvals in a form; use their native tools.",
+      "Ask the user a question, then wait. Read supplied facts and saved answers first; present the actual proposal and ask only the unresolved decision in ordinary business language. Questions, field labels and options must be understandable without internal gate, task, artifact, shard or test identifiers; resolve those internally. Supply options for two to four concise choices (a custom-answer input is also shown, so offer real decisions without an extra custom-input option; put the choice you recommend first and give your pick with its reason in one sentence of the question; set multiple:true when several options can apply together, so the person can tick more than one), or requestedSchema for a standard MCP form with multiple primitive fields, enums and multi-select arrays. Do not collect secrets or approvals in a form; use their native tools.",
     inputSchema: AskUserInputJsonSchema,
   },
   {

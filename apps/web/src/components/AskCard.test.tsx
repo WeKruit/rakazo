@@ -497,3 +497,47 @@ it("closes an expired card even before its run ends, then shows the answer a mes
     act(() => root.unmount());
   }
 });
+
+it("submits every picked option plus typed text on a multi-select question", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const answer = vi.fn().mockResolvedValue(undefined);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "Which experience counts?",
+    status: "pending",
+    multiple: true,
+    actions: [
+      { id: "choice-1", label: "LLM agent projects" },
+      { id: "choice-2", label: "Production agents" },
+      { id: "choice-3", label: "Coursework" },
+    ],
+  };
+  try {
+    act(() => root.render(<AskCard block={block} canAnswer onAnswer={answer} />));
+    const send = () =>
+      [...container.querySelectorAll("button")].find((b) => b.textContent === "Send answer")!;
+    expect(send().disabled).toBe(true);
+    const boxes = [...container.querySelectorAll<HTMLElement>('[role="checkbox"]')];
+    expect(boxes).toHaveLength(3);
+    act(() => boxes[2]!.click());
+    act(() => boxes[0]!.click());
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        textarea,
+        "open source counts too",
+      );
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => send().click());
+    expect(answer).toHaveBeenCalledExactlyOnceWith(
+      "LLM agent projects; Coursework; open source counts too",
+      undefined,
+    );
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+  }
+});

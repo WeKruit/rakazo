@@ -659,6 +659,8 @@ export type AgentRuntimeEvent =
       text: string;
       detail?: string;
       actions?: Array<{ id: string; label: string }>;
+      /** The person may pick several of the actions. */
+      multiple?: boolean;
       requestedSchema?: AskRequestedSchema;
       /** People-search queries planned on the last recruiting intake question. */
       plannedSearches?: string[];
