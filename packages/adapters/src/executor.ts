@@ -837,6 +837,8 @@ async function savedRoleCandidateKeys(
   });
 }
 
+/** How long a turn waits past its own setup for the judge's lasting-preference nudge. */
+const PREFERENCE_NOTE_GRACE_MS = 150;
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -6370,8 +6372,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // The model's first tools run once the role from a job link is saved.
-          if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
+          // Tools that use the role from a job wait for its save; the first question and progress
+          // lines do not, so the save never holds them up. The turn still ends after the save.
+          if (
+            !executionId.startsWith(`${runId}:job-`) &&
+            name !== "ask_user" &&
+            name !== "message_user"
+          )
+            await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           // import_csv still names its role, so it gets the thread's role instead.
@@ -8610,10 +8618,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const replayRole = async () => {
             try {
-              return await deliverRecruitingRoleResult(
-                await executeRole(),
+              // Timing for the role save that runs before the first question; the rest of the
+              // call's duration is approval gating and the effect claim.
+              const executeAt = Date.now();
+              const executed = await executeRole();
+              const deliverAt = Date.now();
+              const delivered = await deliverRecruitingRoleResult(
+                executed,
                 args.operation === "read",
               );
+              getLogger().info("recruiting.role.timing", {
+                runId,
+                operation: args.operation,
+                executeMs: deliverAt - executeAt,
+                deliverMs: Date.now() - deliverAt,
+              });
+              return delivered;
             } catch (error) {
               return roleError(error);
             }
@@ -12945,7 +12965,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
-          preferenceNote: await preferenceNotePromise,
+          // The judge's preference nudge never holds up the turn: it joins only if ready by now.
+          preferenceNote: await Promise.race([
+            preferenceNotePromise,
+            new Promise<undefined>((resolve) => setTimeout(resolve, PREFERENCE_NOTE_GRACE_MS)),
+          ]),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13124,7 +13148,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
         if (runModel === configuredRunModel) {
-          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+          runModel = {
+            ...configuredRunModel,
+            ...(turnModel.thinkingLevel ? { thinkingLevel: turnModel.thinkingLevel } : {}),
+            routed: "configured",
+            routeReason: turnModel.reason,
+          };
         }
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first

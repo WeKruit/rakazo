@@ -6457,6 +6457,7 @@ describe("native candidate results without domain actions", () => {
         groupId: null,
         OR: [{ botId: "bot" }, { externalConversation: { botId: "bot" } }],
       },
+      select: { id: true },
     });
     expect(f.tx.artifact.findUniqueOrThrow).not.toHaveBeenCalled();
   });
