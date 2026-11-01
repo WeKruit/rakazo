@@ -682,7 +682,10 @@ suite("stored global Inbox projection", () => {
         where: { userId: actor.userId, spaceId: actor.spaceId, receiptId },
       }),
     ).toBe(24_000);
+    const firstPageStarted = performance.now();
     const first = await read({ query: "Subject volume", limit: 50 });
+    const firstPageMs = performance.now() - firstPageStarted;
+    expect(firstPageMs).toBeLessThan(5_000);
     const second = await read({ query: "Subject volume", limit: 50, cursor: first.nextCursor! });
     expect(new Set([...first.items, ...second.items].map((row) => row.key)).size).toBe(100);
     // A numbered page reads only its rows and carries the full count of matching threads.

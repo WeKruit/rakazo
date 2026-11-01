@@ -471,6 +471,8 @@ export async function readGlobalRecruitingInbox(
     const base = corpus(actor);
     const filter = Prisma.sql`${input.roleId ? Prisma.sql`AND mail.role_id=${input.roleId}` : Prisma.empty}${input.sourceId ? Prisma.sql`AND source_id=${input.sourceId}` : Prisma.empty}`;
     const thread = input.thread;
+    // ponytail: window the scalar corpus directly. A materialized match-key join can choose
+    // a quadratic plan before a fresh import has planner statistics; hydrate only the page.
     const rows = await tx.$queryRaw<
       {
         id: string;
@@ -483,14 +485,14 @@ export async function readGlobalRecruitingInbox(
         latest_incoming_at: Date | null;
         total: bigint;
       }[]
-    >(Prisma.sql`${base}${input.query && !thread ? Prisma.sql`, matching_threads AS MATERIALIZED (SELECT DISTINCT view_key FROM mail WHERE search_text ILIKE ${safeLike(input.query)})` : Prisma.empty}, annotated AS (
+    >(Prisma.sql`${base}, annotated AS (
       SELECT mail.*,
         bool_or(direction='received' OR direction IS NULL) OVER(PARTITION BY role_id,view_key) AS has_incoming,
         ${input.query ? Prisma.sql`bool_or(search_text ILIKE ${safeLike(input.query)}) OVER(PARTITION BY role_id,view_key)` : Prisma.sql`true`} AS matches,
         bool_or(direction IS NULL OR (direction='received' AND (message_at IS NULL OR message_at>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')))) OVER(PARTITION BY view_key) AS unknown,
         CASE WHEN bool_or(direction IS NULL OR (direction='received' AND message_at IS NULL)) OVER(PARTITION BY view_key) THEN NULL
           ELSE max(message_at) FILTER(WHERE direction='received') OVER(PARTITION BY view_key) END AS latest_incoming_at
-      FROM mail ${input.query && !thread ? Prisma.sql`JOIN matching_threads USING(view_key)` : Prisma.empty} ${thread ? Prisma.sql`WHERE view_key=${thread.key}` : Prisma.empty}
+      FROM mail ${thread ? Prisma.sql`WHERE view_key=${thread.key}` : Prisma.empty}
     ), eligible AS (
       SELECT mail.* FROM annotated mail ${input.unreadOnly ? Prisma.sql`LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=mail.thread_key` : Prisma.empty}
       WHERE true ${filter}

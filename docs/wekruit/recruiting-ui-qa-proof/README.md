@@ -8,4 +8,6 @@ All images here contain synthetic data. They show the actual app, not hosted cus
 
 The search PostgreSQL check seeds 30,000 owned contacts and 30,000 saved messages. Filtering preserves canonical identity, source revisions, corrections, aliases, attachments, unread state and owner/space isolation. The query sorts scalar identity/state and hydrates message bodies and files only for the selected page. There is no provider read or new search store on this path.
 
+The 24,000-message Inbox check must also run against a newly created, fully migrated local fixture database before `ANALYZE`. A materialized matching-thread join could choose a quadratic plan without statistics, so the query directly windows the narrow corpus instead. The broad first-page assertion has a five-second budget. The complete 12-test Inbox suite passes on two independently created databases with autovacuum disabled for the fixture message table and both analyze timestamps still absent.
+
 Local measurements are implementation evidence. Staging must separately confirm the real search latency, direct typing on reopen, and phone drawer navigation. The Sequence saved-page repair is a separate change.
