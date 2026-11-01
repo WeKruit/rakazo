@@ -1330,6 +1330,31 @@ export async function declineConnectionAskInTransaction(
 }
 
 /**
+ * A form card cannot be answered by typing. A person who writes past it has moved on, so the form
+ * closes as cancelled and the run resumes; the caller delivers the message as steering. Approval
+ * and secret cards are never closed this way.
+ */
+export async function cancelFormAskInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { spaceId: string; threadId: string; runId: string; answeredByUserId: string },
+): Promise<boolean> {
+  const found = await findPendingAsk(tx, input);
+  if (
+    !found?.pendingAsk.requestedSchema ||
+    isApprovalAskBlock(found.pendingAsk) ||
+    isSecretAskBlock(found.pendingAsk)
+  )
+    return false;
+  return Boolean(
+    await commitAnswerRunInput(tx, {
+      ...input,
+      messageId: found.messageId,
+      answer: { action: "cancel" },
+    }),
+  );
+}
+
+/**
  * A recruiter who writes while the turn is still finishing (for example "find 100" typed as soon
  * as the ten appear) can land after the turn's last steering read and just before it pauses on a
  * question card. Sent a moment later, the same text would have answered the card, so it answers
