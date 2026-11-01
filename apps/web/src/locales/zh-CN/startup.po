@@ -56,6 +56,11 @@ msgstr "{0} MB"
 msgid "{0} selected"
 msgstr "已选 {0} 人"
 
+#. placeholder {0}: data.shortlistDateUnknownPeople
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "{0} shortlisted people have no recorded shortlist date."
+msgstr "有 {0} 位入选者没有记录入选日期。"
+
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
 #. placeholder {2}: data.total
@@ -250,6 +255,10 @@ msgstr "为此一次性任务添加运行时间。"
 msgid "Add a schedule, webhook, GitHub, or message trigger"
 msgstr "添加定时、Webhook、GitHub 或消息触发器"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Add email"
+msgstr "添加邮件"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Add MCP server"
 msgstr "添加 MCP 服务器"
@@ -325,9 +334,17 @@ msgstr "全部内部评估"
 msgid "All internal verdicts"
 msgstr "全部内部结论"
 
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All matches"
+msgstr "全部匹配"
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "All of"
 msgstr "全部满足"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "All roles"
+msgstr "全部岗位"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -353,6 +370,14 @@ msgstr "已有账户？"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "此提供方存储的是 API 密钥，不是订阅登录。"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Analytics"
+msgstr "统计"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Analytics could not be read."
+msgstr "无法读取统计。"
+
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "AND"
 msgstr "且"
@@ -366,6 +391,7 @@ msgid "Any of"
 msgstr "满足任一项"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Any time"
 msgstr "不限时间"
 
@@ -494,6 +520,10 @@ msgstr ""
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "Bearer token"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Best match"
+msgstr "最佳匹配"
 
 #: src/lib/ticket-status.ts
 msgid "Blocked"
@@ -694,6 +724,10 @@ msgstr "选择机器人形状和颜色，或上传图片"
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "设置新密码"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Choose a valid date range."
+msgstr "请选择有效的日期范围。"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
@@ -1037,6 +1071,10 @@ msgstr ""
 msgid "Could not load notes."
 msgstr "无法加载备注。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Could not load or save this sequence. Reopen it to try again."
+msgstr "无法加载或保存此序列，请重新打开再试。"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load recruiting"
 msgstr "无法加载招聘"
@@ -1116,6 +1154,10 @@ msgstr ""
 msgid "Could not run routine"
 msgstr "无法运行例行任务"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Could not save read status."
+msgstr "无法保存已读状态。"
+
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not save routine"
 msgstr "无法保存例行任务"
@@ -1184,6 +1226,10 @@ msgstr "创建"
 #: src/pages/Auth.tsx
 msgid "Create account"
 msgstr "创建账户"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Create draft"
+msgstr "创建草稿"
 
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1315,6 +1361,10 @@ msgstr "已删除"
 msgid "Deletion code"
 msgstr "删除验证码"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Delivery"
+msgstr "发送设置"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "描述"
@@ -1400,6 +1450,10 @@ msgstr "截止时间"
 msgid "Duration not recorded"
 msgstr "未记录耗时"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Earliest observed contact in period"
+msgstr "期间内最早观察到的联系"
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1414,6 +1468,11 @@ msgstr "教育经历"
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
 msgstr "邮箱"
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Email {0}"
+msgstr "邮件 {0}"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Email content unavailable."
@@ -1609,6 +1668,10 @@ msgstr "忘记密码？"
 msgid "From"
 msgstr "来自"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "From (UTC)"
+msgstr "开始（UTC）"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Full assessment"
 msgstr "查看完整评估"
@@ -1738,6 +1801,10 @@ msgstr ""
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "输入"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Insert variable"
+msgstr "插入变量"
 
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Instance API key"
@@ -1895,6 +1962,10 @@ msgstr "加载更早的消息"
 msgid "Load more"
 msgstr "加载更多"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Loading analytics…"
+msgstr "正在加载统计…"
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Loading costs…"
 msgstr ""
@@ -1920,6 +1991,7 @@ msgstr "正在加载追踪…"
 #: src/components/markdown-link-prompt.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 #: src/pages/shell/StackedConversation.tsx
@@ -1972,6 +2044,14 @@ msgstr "低"
 msgid "Low"
 msgstr "低"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Mark read"
+msgstr "标为已读"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Mark unread"
+msgstr "标为未读"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -1979,12 +2059,8 @@ msgid "Match"
 msgstr "符合"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Match score"
-msgstr "匹配分数"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Match tier"
-msgstr "匹配等级"
+msgid "Match group"
+msgstr "匹配分组"
 
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
@@ -2015,6 +2091,7 @@ msgstr "提及"
 
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Message"
@@ -2113,6 +2190,7 @@ msgstr "静音"
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Name"
 msgstr "名称"
 
@@ -2218,6 +2296,10 @@ msgstr "这个岗位还没有联系人。"
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No contacts match."
 msgstr "没有符合条件的联系人。"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "No dated CRM messages are available for this scope."
+msgstr "此范围内没有带日期的 CRM 邮件。"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "No dated sends in the available records."
@@ -2370,6 +2452,10 @@ msgstr "打开"
 msgid "Open {0}"
 msgstr "打开 {0}"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Open {name} on LinkedIn"
+msgstr "在 LinkedIn 上打开 {name}"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Open {name}'s source profile"
 msgstr "打开 {name} 的来源档案"
@@ -2394,6 +2480,7 @@ msgstr "在完整窗口中打开"
 msgid "Open navigation"
 msgstr "打开导航"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open role"
 msgstr "打开岗位"
@@ -2461,6 +2548,11 @@ msgstr "原收件人：{0}"
 msgid "Original sender: {0}"
 msgstr "原发件人：{0}"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Outdated review"
+msgstr "旧版评估"
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Output"
 msgstr "输出"
@@ -2490,6 +2582,15 @@ msgstr "整体方向：{direction}"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Overdue ({0})"
 msgstr "已逾期（{0}）"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Partial"
+msgstr "部分符合"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Partial coverage · Stored CRM messages only. Native and imported correspondence are not included. Complete first-contact and shortlist history, automated-reply classification, and unmatched identities are unknown."
+msgstr "部分覆盖 · 仅含已保存的 CRM 邮件，不含原生和导入的往来邮件。完整的首次联系与入选历史、自动回复分类和未匹配的身份均未知。"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -2521,6 +2622,10 @@ msgstr "两次密码不一致"
 msgid "Paste your API key, then test again."
 msgstr "请粘贴你的 API 密钥，然后重新测试。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Pause"
+msgstr "暂停"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Pause consideration"
 msgstr "暂停考虑"
@@ -2529,6 +2634,10 @@ msgstr "暂停考虑"
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
 msgstr "已暂停"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "People, deduplicated by saved identity."
+msgstr "按已保存身份去重后的人数。"
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
@@ -2596,10 +2705,6 @@ msgstr "排队中"
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
 msgstr "引用"
-
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Rank"
-msgstr "排名"
 
 #: src/pages/ShellMessage.tsx
 msgid "React"
@@ -2712,6 +2817,10 @@ msgstr "此岗位的招聘人员消息暂不可用。"
 msgid "Recruiting"
 msgstr "招聘"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Recruiting analytics"
+msgstr "招聘统计"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Recruiting assistant"
 msgstr "招聘助手"
@@ -2759,6 +2868,10 @@ msgstr "交还控制权"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Reminder"
 msgstr "提醒"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Remove"
+msgstr "移除"
 
 #. placeholder {0}: attachment.file.name
 #. placeholder {0}: item.name
@@ -2809,6 +2922,10 @@ msgstr "已回复"
 msgid "Replied {replied}"
 msgstr "回复 {replied}"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Replies follow the original observed contact cohort, including replies after this period. Automated replies may be included. Rates require complete history."
+msgstr "回复归入最初观察到联系的那一批，包括本期间之后的回复；可能含自动回复。回复率需要完整历史。"
+
 #: src/pages/ShellMessage.tsx
 msgid "Reply"
 msgstr "回复"
@@ -2816,6 +2933,10 @@ msgstr "回复"
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
 msgstr "已取消回复"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Reply rate"
+msgstr "回复率"
 
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Reply to the selected email"
@@ -2916,6 +3037,7 @@ msgstr "重启后已恢复"
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/InternalCostsSettingsPanel.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
@@ -2933,11 +3055,20 @@ msgstr "重试屏幕"
 msgid "Return to the original role before saving this draft."
 msgstr "保存这份草稿前，请返回原岗位。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Review and send"
+msgstr "检查并发送"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Review the saved sequence and prepare the send confirmation for this role."
+msgstr "检查已保存的序列，并为此岗位准备发送确认。"
+
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Role"
 msgstr "岗位"
@@ -3033,12 +3164,17 @@ msgstr "保存"
 msgid "Save as CSV"
 msgstr "请另存为 CSV"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Save draft"
+msgstr "保存草稿"
+
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
 msgstr "保存工作区并安装最新软件。"
 
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/SequenceEditor.tsx
 msgid "Saved"
 msgstr "已保存"
 
@@ -3057,6 +3193,10 @@ msgstr "已保存的邮件"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Saved emails"
 msgstr "已保存的邮件"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Saved match score"
+msgstr "已保存的匹配分数"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Saved results"
@@ -3146,6 +3286,10 @@ msgstr "选择 {name}"
 msgid "Select a bot"
 msgstr "选择 Bot"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Select a mailbox"
+msgstr "选择发件邮箱"
+
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Select all on this page"
 msgstr "全选本页"
@@ -3179,6 +3323,10 @@ msgstr "发送重置链接"
 msgid "Sender unavailable"
 msgstr "发件人不可用"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Sending mailbox"
+msgstr "发件邮箱"
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Sending schedule"
 msgstr "发送安排"
@@ -3194,6 +3342,10 @@ msgstr "已发送"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr "邮件序列"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Sequence draft"
+msgstr "序列草稿"
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Sequence status"
@@ -3262,6 +3414,10 @@ msgstr "已入围"
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Shortlisted {0} in {1}."
 msgstr "已在「{1}」中加入 {0} 人。"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Shortlisted in period"
+msgstr "期间内入选"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Shortlisted only"
@@ -3488,6 +3644,15 @@ msgstr "被人工停止"
 msgid "Stopped."
 msgstr "已停止。"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Strong Match"
+msgstr "强匹配"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Subject"
+msgstr "主题"
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Subject unavailable."
 msgstr "暂无主题。"
@@ -3496,6 +3661,10 @@ msgstr "暂无主题。"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Subject: {0}"
 msgstr "主题：{0}"
+
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Subsequently replied"
+msgstr "之后回复"
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Succeeded"
@@ -3661,6 +3830,10 @@ msgstr "此重置链接无效或已过期"
 msgid "This role changed. Select the candidate again."
 msgstr "这个岗位已变更，请重新选择候选人。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "This sequence is available to review in the conversation."
+msgstr "可在对话中检查此序列。"
+
 #. placeholder {0}: formatToolActivityDuration(row.thinkingMs)
 #: src/components/RunTrace.tsx
 msgid "Thought for {0}"
@@ -3670,9 +3843,17 @@ msgstr "思考了 {0}"
 msgid "Thread"
 msgstr "对话"
 
+#: src/pages/recruiting/RecruitingAnalytics.tsx
+msgid "Through (UTC)"
+msgstr "截至（UTC）"
+
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Time not recorded"
 msgstr "未记录时间"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Timezone"
+msgstr "时区"
 
 #. placeholder {0}: candidate.title
 #: src/pages/shell/Composer.tsx
@@ -3741,8 +3922,14 @@ msgstr "未回复消息"
 msgid "Unavailable"
 msgstr "不可用"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Uncertain"
+msgstr "不确定"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 #: src/pages/recruiting/VerdictLabel.tsx
 msgid "Unknown"
@@ -3770,9 +3957,21 @@ msgstr "未命名候选人"
 msgid "Unpriced usage"
 msgstr ""
 
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
 msgstr "未读"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Unreviewed"
+msgstr "未经评估"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Unscored"
+msgstr "未评分"
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Unsubscribed"
@@ -3866,6 +4065,10 @@ msgstr "语音聊天"
 msgid "Wait a moment and test again."
 msgstr "请稍候并重新测试。"
 
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Wait days"
+msgstr "等待天数"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Wait for this role to finish loading before saving."
 msgstr "保存前请等待这个岗位加载完成。"
@@ -3889,6 +4092,10 @@ msgstr "周"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Week"
 msgstr "周"
+
+#: src/pages/recruiting/SequenceEditor.tsx
+msgid "Weekdays, 9–5"
+msgstr "工作日 9–5 点"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "WeKruit home"
@@ -3935,6 +4142,11 @@ msgstr "处理中…"
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Worth checking"
 msgstr "需要留意"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Worth Talking"
+msgstr "值得沟通"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"
