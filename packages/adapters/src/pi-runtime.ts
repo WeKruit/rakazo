@@ -104,7 +104,7 @@ import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
 import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
-import { normalizeRecruitingRoleArgs } from "./recruiting-tools.js";
+import { normalizeRecruitingRoleArgs, repairSourceRefs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -1695,6 +1695,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       // Repair slips before the schema check so they never reject a regenerated brief.
       if (tool.name === "recruiting_role")
         return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
+      // A preference cites the recruiter's words; a citation written in another tool's shape is
+      // rewritten to this one instead of failing the save.
+      if (tool.name === "recruiting_feedback" && raw.target === "preference") {
+        const sourceRefs = repairSourceRefs(raw.sourceRefs, new Date().toISOString());
+        return sourceRefs ? { ...raw, sourceRefs } : raw;
+      }
       // The server fills sources and names the people; an empty list reaches it for a precise error.
       if (tool.name === "recruiting_feedback" && raw.target !== "preference") {
         const { candidateKeys, ...rest } = raw;
