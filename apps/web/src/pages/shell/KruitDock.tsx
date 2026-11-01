@@ -36,7 +36,7 @@ export function KruitDock({
   if (chatting && !showCard) return null;
   return (
     <div
-      className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "bottom-28" : "bottom-4"}`}
+      className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "top-20" : "bottom-4"}`}
     >
       {showCard ? (
         <div
