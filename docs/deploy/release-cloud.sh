@@ -38,7 +38,8 @@ case "$TARGET" in
       MODAL_VOLUME_NAME=wekruit-recruiting-files MODAL_ENVIRONMENT=main ;;
   test)
     URL=${RAKAZO_TEST_URL:?set RAKAZO_TEST_URL to the test Modal app URL}
-    ORIGIN=$URL
+    # The test app trusts its own public origin (RAKAZO_TEST_ORIGIN), not the Modal URL.
+    ORIGIN=${RAKAZO_TEST_ORIGIN:-$URL}
     export MODAL_APP_NAME=wekruit-recruiting-test MODAL_SECRET_NAME=wekruit-recruiting-test-config \
       MODAL_VOLUME_NAME=wekruit-recruiting-test-files MODAL_ENVIRONMENT=test
     # Release logs and builds stay apart from production's.
