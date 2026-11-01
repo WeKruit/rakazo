@@ -549,6 +549,33 @@ describe("Pi connector tool dispatch", () => {
     );
   });
 
+  it("passes a partial memory edit through to the save", async () => {
+    fakeAgentState.mode = "empty";
+    for await (const _event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "remember",
+        history: [],
+        instructions: "Remember",
+        tools: [builtinAgentTools.find((tool) => tool.name === "remember")!],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      /* Exhaust the runtime. */
+    }
+    const remember = fakeAgentState.tools.find((tool) => tool.name === "remember")!;
+    const edit = { find: "Reply in English", replace: "Reply in Chinese" };
+    expect(remember.prepareArguments!({ edit, expectedRevision: 2 })).toMatchObject({
+      edit,
+      path: "MEMORY.md",
+      expectedRevision: 2,
+    });
+  });
+
   it("shortens an over-long question option instead of failing the card", async () => {
     fakeAgentState.mode = "empty";
     for await (const _event of new PiAgentRuntime().run(
