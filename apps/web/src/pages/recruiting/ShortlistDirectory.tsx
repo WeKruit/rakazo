@@ -282,15 +282,15 @@ export function ShortlistDirectory({
         </p>
       ) : null}
       <footer className="sticky bottom-0 z-20 flex min-h-12 items-center justify-between gap-2 border-t bg-background py-2 text-sm">
+        <span className="tabular-nums text-muted-foreground">
+          <Plural value={candidatePage.total} _1="# candidate" other="# candidates" />
+        </span>
         <ListPager
           page={model.candidatePageIndex}
           pageCount={Math.ceil(candidatePage.total / 30)}
           onPage={model.goToCandidatePage}
           disabled={model.candidateLoading}
         />
-        <span className="tabular-nums text-muted-foreground">
-          <Plural value={candidatePage.total} _1="# candidate" other="# candidates" />
-        </span>
       </footer>
       <AddToSequenceDialog
         open={enroll}
