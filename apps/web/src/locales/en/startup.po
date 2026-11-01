@@ -145,6 +145,11 @@ msgstr "{people} people"
 msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
 msgstr "{peopleAdded, plural, one {# person added} other {# people added}}"
 
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{RECRUITING_GLOBAL_AGENT_NAME}, {0} waiting"
+msgstr "{RECRUITING_GLOBAL_AGENT_NAME}, {0} waiting"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} left · bot is watching, not acting"
@@ -737,6 +742,7 @@ msgstr "Client secret"
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "Close"
@@ -1329,7 +1335,6 @@ msgid "Direct MCP"
 msgstr "Direct MCP"
 
 #: src/components/teach/TeachComputerOverlay.tsx
-#: src/pages/shell/KruitDock.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
 
@@ -2130,11 +2135,13 @@ msgid "Needs an answer"
 msgstr "Needs an answer"
 
 #: src/pages/shell/KruitDock.tsx
+msgid "Needs approval"
+msgstr "Needs approval"
+
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
 msgstr "Needs confirmation"
 
-#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs input"
 msgstr "Needs input"
@@ -2147,6 +2154,14 @@ msgstr "Needs scheduling"
 #: src/pages/Shell.tsx
 msgid "Needs you"
 msgstr "Needs you"
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your attention"
+msgstr "Needs your attention"
+
+#: src/pages/shell/KruitDock.tsx
+msgid "Needs your response"
+msgstr "Needs your response"
 
 #: src/pages/Auth.tsx
 msgid "New password"
