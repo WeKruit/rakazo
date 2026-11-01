@@ -5986,13 +5986,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
             knownOnly: true,
             heading: `${role.title}${range}:`,
+            firstNumber: first ?? 1,
           });
           if (!text) return undefined;
           await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+          const start = first ?? 1;
+          const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
           return {
             ...(result as object),
-            shownInChat:
-              "These people are already listed in chat as the role team lists them, with their place in the list. Do not list them again; add at most one line, such as that nobody is graded yet. For the next, previous or any other page, call list again with the same roleId and page.",
+            shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
         const showRoundList = async (text: string) => {
