@@ -19,13 +19,11 @@ import {
   createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
-  createCompanySiteResolver,
   createConnectorStack,
   createDeploymentEmbedder,
   createJobReconciler,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
-  createPrismaOrganizationLogoStore,
   createRunExecutor,
   createRunSandbox,
   createRunSecretWriter,
@@ -35,7 +33,6 @@ import {
   DISCOVERY_PREWARM_REFRESH_MS,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
-  fillOrganizationLogos,
   firstPartyMcpUrl,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
@@ -89,10 +86,6 @@ import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
 import { MarkdownMemoryStore } from "@rakazo/memory";
 
-/** The logo fill waits for boot and the first queued jobs to settle. */
-const LOGO_FILL_DELAY_MS = 60_000;
-// Organization lookups per start for logos not saved yet; each is one company-index search.
-const LOGO_FILL_MAX_LOOKUPS = 6_000;
 // Recent messages get meaning vectors for history search; about US$0.10 a day at most.
 const EMBED_INTERVAL_MS = 60_000;
 const EMBED_MAX_TOKENS_PER_DAY = 5_000_000;
@@ -398,16 +391,6 @@ async function main() {
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
   });
   reconciler.start();
-  // Every saved person's companies and schools get a saved logo, for all users at once.
-  setTimeout(() => {
-    void fillOrganizationLogos(
-      prisma,
-      createCompanySiteResolver({
-        store: createPrismaOrganizationLogoStore(prisma),
-      }),
-      { signal: shutdown.signal, maxLookups: LOGO_FILL_MAX_LOOKUPS },
-    ).catch((error) => logger.warn("organization.logos.fill failed", { error: String(error) }));
-  }, LOGO_FILL_DELAY_MS).unref();
   if (embedder) {
     let embedding = false;
     setInterval(() => {
