@@ -599,6 +599,7 @@ import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js"
 import { suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
+import { startRoleFromRecruiterMessage } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -12028,21 +12029,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             if (!group.thread)
               return finish({ error: "The role conversation could not be opened." });
-            const sent = await messageBot(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
-              {
-                bot_id: bot.id,
-                thread_id: group.thread.id,
-                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${title} team`,
-                message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
-                intent: "request",
-                deliveryKey: effectKey,
-              },
-            );
-            if (!sent.ok) return finish({ error: sent.error });
+            // The role starts from the recruiter's own message, so its team runs intake and
+            // saves the role as if it had been written there. A request with no recruiter
+            // message behind it (a routine) is handed over as a brief instead.
+            const started = await startRoleFromRecruiterMessage(deps, run, {
+              threadId: group.thread.id,
+              botId: bot.id,
+              deliveryKey: effectKey,
+            });
+            if (!started) {
+              const sent = await messageBot(
+                deps,
+                { ...run, sourceMessageId: run.sourceMessageId },
+                { id: bot.id, name: bot.name },
+                {
+                  bot_id: bot.id,
+                  thread_id: group.thread.id,
+                  sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                  target_label: `${title} team`,
+                  message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                  intent: "request",
+                  deliveryKey: effectKey,
+                },
+              );
+              if (!sent.ok) return finish({ error: sent.error });
+            }
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
