@@ -6370,8 +6370,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // The model's first tools run once the role from a job link is saved.
-          if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
+          // Tools that use the role from a job wait for its save; the first question and progress
+          // lines do not, so the save never holds them up. The turn still ends after the save.
+          if (
+            !executionId.startsWith(`${runId}:job-`) &&
+            name !== "ask_user" &&
+            name !== "message_user"
+          )
+            await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           // import_csv still names its role, so it gets the thread's role instead.
