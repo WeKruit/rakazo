@@ -22,7 +22,7 @@ export interface TurnModelChoice {
   model: { provider: string; id: string };
   routed: "fast" | "configured";
   reason: string;
-  /** Overrides the bot's thinking level on the fast model. */
+  /** Overrides the bot's thinking level for this turn. */
   thinkingLevel?: "low" | "off";
 }
 
@@ -39,7 +39,10 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (!fastId) return { ...configured, reason: "fast_model_disabled" };
   const fastProvider = env.RAKAZO_FAST_MODEL_PROVIDER?.trim() || input.configured.provider;
   if (fastProvider === input.configured.provider && fastId === input.configured.id)
-    return { ...configured, reason: "already_fast" };
+    // A bot already on the fast model still opens a role without reasoning.
+    return input.recruitingIntake && !input.pendingToolLoop
+      ? { ...configured, reason: "recruiting_intake", thinkingLevel: "off" }
+      : { ...configured, reason: "already_fast" };
   const fast = { model: { provider: fastProvider, id: fastId }, routed: "fast" as const };
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };

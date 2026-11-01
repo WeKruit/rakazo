@@ -146,7 +146,10 @@ function repairSourceRef(
   };
 }
 
-function repairSourceRefs(value: unknown, now: string): Record<string, unknown>[] | undefined {
+export function repairSourceRefs(
+  value: unknown,
+  now: string,
+): Record<string, unknown>[] | undefined {
   if (value === undefined) return undefined;
   return (Array.isArray(value) ? value : [value]).flatMap((item, index) => {
     const repaired = repairSourceRef(item, now, index);
