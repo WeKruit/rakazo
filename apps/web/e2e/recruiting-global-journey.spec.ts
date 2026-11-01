@@ -55,7 +55,7 @@ async function assertPageFacts(page: Page, view: string) {
 async function newRole(page: Page, title: string) {
   await page
     .getByTestId("recruiting-navigation")
-    .getByRole("button", { name: "New Role", exact: true })
+    .getByRole("button", { name: "New role", exact: true })
     .click();
   await expect(page.getByRole("textbox", { name: "Job description", exact: true })).toBeVisible();
   await page
