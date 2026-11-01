@@ -1780,9 +1780,7 @@ export async function appendEvent(
   }
   const pending = (tails.get(input.threadId) ?? Promise.resolve()).then(async () => {
     // Cross-process writers can still deadlock on the thread row.
-    const event = await withTransactionRetry(() =>
-      prisma.$transaction((tx: Prisma.TransactionClient) => appendEventInTransaction(tx, input)),
-    );
+    const event = await withTransactionRetry(() => appendEventStatement(prisma, input));
     const productEvent = mapProductEvent(event);
     await notifyRealtime(realtime, event.threadId, event.seq);
     return productEvent;
@@ -2142,6 +2140,75 @@ export async function appendEventInTransaction(
   return alarmOnSeqConflict(input.threadId, seq, 1, () =>
     tx.event.create({ data: eventRow(input, seq) }),
   );
+}
+
+/**
+ * One event outside a caller's transaction, as a single statement: the run check, the thread's
+ * sequence bump and the insert run together, so the event costs one round trip instead of five
+ * (begin, bump, run check, insert, commit). The thread row lock still orders the sequence.
+ */
+async function appendEventStatement(prisma: PrismaClient, input: AppendEventInput) {
+  const row = eventRow(input, 0);
+  const runId = row.runId ?? null;
+  const cancelledOnly = input.type === "run.cancelled";
+  if (cancelledOnly && !runId) throw new RunHistoryWriteError();
+  const rows = await alarmOnSeqConflict(input.threadId, -1, 1, () =>
+    prisma.$queryRaw<
+      {
+        id: string | null;
+        spaceId: string | null;
+        threadId: string | null;
+        botId: string | null;
+        seq: number | null;
+        type: string | null;
+        payload: unknown;
+        runId: string | null;
+        createdAt: Date | null;
+        userId: string | null;
+        runOk: boolean;
+      }[]
+    >`
+      WITH run_ok AS (
+        SELECT CASE
+          WHEN ${runId}::text IS NULL THEN true
+          WHEN ${cancelledOnly} THEN EXISTS (
+            SELECT 1 FROM runs WHERE id = ${runId}::text AND status = 'cancelled')
+          ELSE EXISTS (
+            SELECT 1 FROM runs WHERE id = ${runId}::text
+              AND (status <> 'cancelled' OR ${input.allowCancelledRun === true}))
+        END AS ok
+      ), bumped AS (
+        UPDATE threads SET "nextEventSeq" = "nextEventSeq" + 1
+        WHERE id = ${row.threadId} AND (SELECT ok FROM run_ok)
+        RETURNING "nextEventSeq" - 1 AS seq, "userId"
+      ), inserted AS (
+        INSERT INTO events (id, "spaceId", "threadId", "botId", seq, type, payload, "runId")
+        SELECT ${randomUUID()}, ${row.spaceId}, ${row.threadId}, ${row.botId}, bumped.seq,
+          ${row.type}, ${JSON.stringify(row.payload)}::jsonb, ${runId}::text
+        FROM bumped
+        RETURNING id, "spaceId", "threadId", "botId", seq, type, payload, "runId",
+          ("createdAt" AT TIME ZONE 'UTC') AS "createdAt"
+      )
+      SELECT inserted.*, (SELECT "userId" FROM bumped) AS "userId",
+        (SELECT ok FROM run_ok) AS "runOk"
+      FROM (SELECT 1) AS one LEFT JOIN inserted ON true`,
+  );
+  const result = rows[0];
+  if (!result?.runOk) throw new RunHistoryWriteError();
+  if (!result.id || result.seq === null || !result.createdAt)
+    throw new Error("Thread not found for event append");
+  stashSidebarSignal(input, result.seq, result.userId ?? undefined);
+  return {
+    id: result.id,
+    spaceId: result.spaceId!,
+    threadId: result.threadId!,
+    botId: result.botId!,
+    seq: result.seq,
+    type: result.type!,
+    payload: result.payload,
+    runId: result.runId,
+    createdAt: result.createdAt,
+  };
 }
 
 /**
