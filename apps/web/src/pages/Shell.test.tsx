@@ -270,7 +270,8 @@ function renderComposer(
     activeName: "Ada",
     running: false,
     pendingAttachments: [],
-    attachmentNotice: null,
+    attachmentNotice: [],
+    onRemoveSkippedAttachment: vi.fn(),
     sendError: null,
     runError: null,
     runErrorId: null,
@@ -3743,6 +3744,31 @@ it.each(["user", "thread", "view"] as const)(
     expect(shellApi.answer).not.toHaveBeenCalled();
   },
 );
+
+it("shows each skipped attachment with its reason and lets it be removed", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const input = container!.querySelector<HTMLInputElement>('input[type="file"]')!;
+  expect(input.accept).toContain(".md");
+  const big = new File(["x"], "huge.pdf", { type: "application/pdf" });
+  Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 });
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File(["x"], "Untitled.blend"), big],
+  });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  const skipped = container!.querySelector('[data-testid="skipped-attachments"]');
+  expect(skipped?.textContent).toContain("Untitled.blendUnsupported format");
+  expect(skipped?.textContent).toContain("huge.pdfOver 10 MB");
+  await act(async () =>
+    container!
+      .querySelector<HTMLButtonElement>('button[aria-label="Remove Untitled.blend"]')!
+      .click(),
+  );
+  expect(container?.textContent).not.toContain("Untitled.blend");
+  expect(container?.textContent).toContain("huge.pdf");
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+});
 
 it("keeps the original chat attachment when the same file is removed with a cancelled new role", async () => {
   setToolActivityPreference("off");

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTACHMENT_ACCEPT,
   AttachmentValidationError,
   attachmentExtensionForMimeType,
   attachmentsForBot,
@@ -147,6 +148,9 @@ describe("attachment helpers", () => {
   });
 
   it("infers attachment mime types from extensions", () => {
+    expect(ATTACHMENT_ACCEPT.split(",")).toEqual(
+      expect.arrayContaining(["application/pdf", ".pdf", ".md", "text/markdown", ".zip"]),
+    );
     expect(inferAttachmentMimeType("photo.JPG", "")).toBe("image/jpeg");
     expect(inferAttachmentMimeType("notes.pdf", "")).toBe("application/pdf");
     expect(inferAttachmentMimeType("notes.md", "")).toBe("text/markdown");

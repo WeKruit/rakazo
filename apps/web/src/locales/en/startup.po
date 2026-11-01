@@ -31,21 +31,6 @@ msgstr "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool
 msgid "{0, plural, one {# person with email} other {# people with email}}"
 msgstr "{0, plural, one {# person with email} other {# people with email}}"
 
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
-msgstr "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (over 10 MiB)"
-msgstr "{0} (over 10 MiB)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
-msgstr "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
-
 #. placeholder {0}: archivedRouteGroup.name
 #: src/pages/shell/ShellConversation.tsx
 msgid "{0} is archived."
@@ -1995,6 +1980,10 @@ msgstr "Match tier"
 msgid "Max"
 msgstr "Max"
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Max {ATTACHMENT_MAX_COUNT} files"
+msgstr "Max {ATTACHMENT_MAX_COUNT} files"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "MCP endpoint"
 msgstr "MCP endpoint"
@@ -2451,6 +2440,10 @@ msgstr "Outreach drafts"
 msgid "Outreach status"
 msgstr "Outreach status"
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Over {maxMegabytes} MB"
+msgstr "Over {maxMegabytes} MB"
+
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Overall direction"
 msgstr "Overall direction"
@@ -2739,7 +2732,9 @@ msgid "Reminder"
 msgstr "Reminder"
 
 #. placeholder {0}: attachment.file.name
+#. placeholder {0}: item.name
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/skipped-attachments.tsx
 msgid "Remove {0}"
 msgstr "Remove {0}"
 
@@ -3009,6 +3004,10 @@ msgstr "Salary range"
 #: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "Save"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Save as CSV"
+msgstr "Save as CSV"
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
@@ -3343,11 +3342,6 @@ msgstr "Skip or deploy key"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Skipped"
 msgstr "Skipped"
-
-#. placeholder {0}: skipped.join(", ")
-#: src/pages/shell/useShellMessages.ts
-msgid "Skipped {0}"
-msgstr "Skipped {0}"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
@@ -3777,6 +3771,10 @@ msgstr "Unsubscribed"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Unsupported file type: {0}"
 msgstr "Unsupported file type: {0}"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Unsupported format"
+msgstr "Unsupported format"
 
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx
