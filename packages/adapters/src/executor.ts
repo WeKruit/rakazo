@@ -13142,7 +13142,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
         if (runModel === configuredRunModel) {
-          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+          runModel = {
+            ...configuredRunModel,
+            ...(turnModel.thinkingLevel ? { thinkingLevel: turnModel.thinkingLevel } : {}),
+            routed: "configured",
+            routeReason: turnModel.reason,
+          };
         }
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
