@@ -13,6 +13,11 @@
 #                                   # deploy any commit to the test environment (own App, Volume, Secret
 #                                   # and database; needs RAKAZO_TEST_URL). No unit tests, no gap wait.
 #                                   # Production only accepts a main SHA whose code passed there first.
+#                                   # A test deploy then runs the staging journeys (real sign-in, chat,
+#                                   # small capped searches, a restart mid-search); only a pass marks the
+#                                   # commit as passed. Needs RELEASE_CASES and RAKAZO_EMAIL/RAKAZO_PASSWORD.
+#   RELEASE_TARGET=test release-cloud.sh <SHA> journeys
+#                                   # rerun the staging journeys on the test app already serving SHA
 #   RELEASE_SKIP_TEST_ENV=<short> ... deploy  # production without a test-environment pass (emergency)
 #   RELEASE_TEST_DATABASE_URL=postgresql://…@localhost/scratch  # also run the real-Postgres journeys
 #                                   # (pnpm test:integration) after the unit tests; local scratch DB only
@@ -112,7 +117,7 @@ else
 fi
 SHORT=${SHA:0:8}
 # Keep the whole timestamped run on disk; wrappers often show only the tail.
-case "$MODE" in check|deploy) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
+case "$MODE" in check|deploy|journeys) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
 # Unit tests run in one persistent checkout ($WORK/testtree) so node_modules, the Prisma client
 # and vitest's cache survive between releases; install is a near no-op while the lockfile is unchanged.
 # A commit is tested once: its code (everything outside docs/) matching an already tested commit
@@ -173,6 +178,29 @@ if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 
   && [ "${RELEASE_SKIP_TEST_ENV:-}" != "$SHORT" ] && ! passed_on_test; then
   die "$SHORT has not passed on the test environment; run RELEASE_TARGET=test first (RELEASE_SKIP_TEST_ENV=$SHORT for an emergency)"
 fi
+# The recruiter's real path on the test environment, run on the deployed build: sign-in, pages,
+# chat, the first question, searches with a countdown, mid-search messages, Kruit memory and a
+# server restart mid-search. About 20 minutes and a few dollars of capped searches;
+# nothing is sent (the test environment has no mail or outreach credentials).
+staging_journeys() {
+  [ -n "${RELEASE_CASES:-}" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] \
+    || die "staging journeys need RELEASE_CASES and RAKAZO_EMAIL/RAKAZO_PASSWORD; $SHORT is not marked as passed"
+  log "staging journeys for $SHORT"
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
+    node "$1/infra/acceptance/regression.mjs" --suite staging --paid --staging \
+      --cases "$RELEASE_CASES" --out "$WORK/staging-$SHORT" > "$WORK/staging-$SHORT.log" 2>&1 \
+    || { cat "$WORK/staging-$SHORT/summary.md" 2>/dev/null || tail -20 "$WORK/staging-$SHORT.log"
+         die "staging journeys failed for $SHORT (log: $WORK/staging-$SHORT.log)"; }
+  log "staging journeys passed: $(head -1 "$WORK/staging-$SHORT/summary.md")"
+}
+if [ "$MODE" = journeys ]; then
+  [ "$TARGET" = test ] || die "journeys run only on the test environment (RELEASE_TARGET=test)"
+  [ "$(live_revision)" = "$SHA" ] || die "the test app does not serve $SHORT; deploy it first"
+  J="$WORK/journeys/$SHA"; rm -rf "$J"; mkdir -p "$J"
+  git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$J"
+  staging_journeys "$J"
+  mkdir -p "$PASSED"; touch "$PASSED/$SHA"; log "JOURNEYS OK $SHORT (marked as passed)"; exit 0
+fi
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = premerge ] && { run_tests; log "PREMERGE OK $SHA_IN on main ${SHORT} (safe to merge)"; exit 0; }
 if [ "$MODE" = prebuild ]; then
@@ -197,7 +225,7 @@ log "active runs (30 min): $ACTIVE"
 LEDGER_BEFORE=$(db_query "$LEDGER_SQL") || LEDGER_BEFORE="unknown (db query failed)"
 log "ledger before: $LEDGER_BEFORE"
 [ "$MODE" = check ] && { log "CHECK DONE $SHORT (nothing deployed)"; exit 0; }
-[ "$MODE" = deploy ] || die "mode must be check, test or deploy"
+[ "$MODE" = deploy ] || die "mode must be check, test, journeys or deploy"
 # The cross-role readback needs a private file listing the test copies plus a sign-in; without
 # either it is skipped with a warning so the release itself is not blocked.
 GLOBAL_FIXTURES=${RAKAZO_GLOBAL_FIXTURES:-${RELEASE_REGRESSION_CASES:+$RELEASE_REGRESSION_CASES/global-recruiting.json}}
@@ -332,6 +360,7 @@ if [ "$GLOBAL_CHECK" = 1 ]; then
 else
   log "WARN global recruiting check skipped: set RAKAZO_GLOBAL_FIXTURES and a sign-in"
 fi
+[ "$TARGET" = test ] && staging_journeys "$DIR"
 for _ in $(seq 1 40); do [ "$(containers)" = 1 ] && break; sleep 3; done
 [ "$(containers)" = 1 ] || die "more than one container after deploy"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" = 200 ] || die "/health not 200"
