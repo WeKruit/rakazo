@@ -837,8 +837,34 @@ async function savedRoleCandidateKeys(
   });
 }
 
-/** How long a turn waits past its own setup for the judge's lasting-preference nudge. */
-const PREFERENCE_NOTE_GRACE_MS = 150;
+/**
+ * A note computed beside the turn that must never hold it up: taken into the opening context
+ * when already back, else handed to the run's next model step with its other context notices.
+ */
+export function lateNote(pending: Promise<string | undefined>) {
+  let ready: string | undefined;
+  let delivered = false;
+  void pending.then(
+    (note) => {
+      ready = note;
+    },
+    () => undefined,
+  );
+  const take = () => {
+    if (delivered || !ready) return undefined;
+    delivered = true;
+    return ready;
+  };
+  return {
+    takeReady: take,
+    async withNotice(notice: Promise<string | undefined> | undefined) {
+      const context = await notice;
+      const note = take();
+      return [context, note].filter(Boolean).join("\n\n") || undefined;
+    },
+  };
+}
+
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -4574,7 +4600,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const listing = await loadLivePluginSlugs(deps.listConnectedPluginSlugs, run.userId);
           if (listing.ok) {
             liveSlugs = listing.slugs;
-            await persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
+            // Bookkeeping for the next run; this run already uses the live list.
+            void persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
               () => undefined,
             );
           }
@@ -4841,6 +4868,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .catch(() => undefined)
             : Promise.resolve(undefined),
         );
+        const lateNotes = lateNote(preferenceNotePromise);
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -5305,15 +5333,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           resolved.acceptsImages,
         );
         const acceptsImages = deps.runtime.describe().capabilities.scripted || modelSeesImages;
-        const groupContext = thread.groupId
-          ? await loadGroupContext(deps.prisma, thread.groupId, {
-              id: bot.id,
-              name: bot.name,
-            })
-          : undefined;
-        const hasMessagingIdentity = deps.messaging
-          ? await deps.messaging.hasIdentity(bot.id)
-          : false;
+        // Independent reads for the prompt run together rather than one after another.
+        const [groupContext, hasMessagingIdentity, sourceClientNonce] = await Promise.all([
+          thread.groupId
+            ? loadGroupContext(deps.prisma, thread.groupId, { id: bot.id, name: bot.name })
+            : undefined,
+          deps.messaging ? deps.messaging.hasIdentity(bot.id) : false,
+          // Calls carry no schema flag: the sending client encodes them in the clientNonce.
+          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
+            ? deps.prisma.message
+                .findUnique({
+                  where: { id: run.sourceMessageId },
+                  select: { clientNonce: true },
+                })
+                .then((row) => row?.clientNonce ?? null)
+            : null,
+        ]);
         const messagingContext = hasMessagingIdentity
           ? [messagingDmSurfaceNote(), messagingChannelRun ? messagingChannelPrivacyBlock() : null]
               .filter(Boolean)
@@ -5332,16 +5367,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ));
           }
         }
-        // Calls carry no schema flag: the sending client encodes them in the clientNonce.
-        const sourceClientNonce =
-          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
-            ? ((
-                await deps.prisma.message.findUnique({
-                  where: { id: run.sourceMessageId },
-                  select: { clientNonce: true },
-                })
-              )?.clientNonce ?? null)
-            : null;
         // A hang-up run has no source message: its own nonce carries the call it closes.
         const callEndRun = run.trigger === "call_end";
         const callClientNonceForRun = callEndRun ? run.clientNonce : sourceClientNonce;
@@ -12965,11 +12990,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
-          // The judge's preference nudge never holds up the turn: it joins only if ready by now.
-          preferenceNote: await Promise.race([
-            preferenceNotePromise,
-            new Promise<undefined>((resolve) => setTimeout(resolve, PREFERENCE_NOTE_GRACE_MS)),
-          ]),
+          // The judge's preference nudge never holds up the turn: it joins now only if already
+          // back, otherwise at the run's next model step.
+          preferenceNote: lateNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13179,6 +13202,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (usage.cacheReadTokens ?? 0) +
               (usage.cacheWriteTokens ?? 0);
           };
+          // Spend is counted in memory above; the usage row and timing audit are written in the
+          // background so a model call's end never waits on the database.
+          const recordUsageInBackground = (
+            event: Extract<AgentRuntimeEvent, { type: "usage" }>,
+          ) => {
+            void recordUsage(
+              deps.prisma,
+              event,
+              {
+                spaceId: run.spaceId,
+                botId: bot.id,
+                userId: run.userId,
+                runId,
+                parentRunId: runId,
+                operationId: runId,
+              },
+              estimateCatalogTokenCostUsd,
+            )
+              .then(() =>
+                appendUsageTimingAudit(
+                  deps,
+                  { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                  event,
+                ),
+              )
+              .catch((error) =>
+                getLogger().warn("usage record failed", { runId, error: String(error) }),
+              );
+          };
           let firstModelEventMs: number | null = null;
           // Logged for a turn that ends with a question too, not only a completed one.
           const logRunTiming = (outcome: "completed" | "waiting_input") =>
@@ -13234,27 +13286,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   threadId: thread.id,
                   runId,
                   sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
-                  onUsage: async (event) => {
+                  onUsage: (event) => {
                     runCostUsd += event.costUsd ?? 0;
                     countPromptCache(event);
-                    await recordUsage(
-                      deps.prisma,
-                      event,
-                      {
-                        spaceId: run.spaceId,
-                        botId: bot.id,
-                        userId: run.userId,
-                        runId,
-                        parentRunId: runId,
-                        operationId: runId,
-                      },
-                      estimateCatalogTokenCostUsd,
-                    );
-                    await appendUsageTimingAudit(
-                      deps,
-                      { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                      event,
-                    );
+                    recordUsageInBackground(event);
                   },
                   prompt,
                   contextStrategy,
@@ -13475,7 +13510,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       completeRunStep,
                     );
                   },
-                  claimContextNotice: scripted ? undefined : contextWatch?.claimNotice,
+                  claimContextNotice: scripted
+                    ? undefined
+                    : () => lateNotes.withNotice(contextWatch?.claimNotice()),
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
@@ -14058,24 +14095,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } else if (event.type === "usage" && !event.accounted) {
               runCostUsd += event.costUsd ?? 0;
               countPromptCache(event);
-              await recordUsage(
-                deps.prisma,
-                event,
-                {
-                  spaceId: run.spaceId,
-                  botId: bot.id,
-                  userId: run.userId,
-                  runId,
-                  parentRunId: runId,
-                  operationId: runId,
-                },
-                estimateCatalogTokenCostUsd,
-              );
-              await appendUsageTimingAudit(
-                deps,
-                { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                event,
-              );
+              recordUsageInBackground(event);
             } else if (event.type === "thinking") {
               const { type: _type, ...thinking } = event;
               lastThinking = thinking;
