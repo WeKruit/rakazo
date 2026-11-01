@@ -133,6 +133,7 @@ import {
   wakeMessageRoutines,
 } from "./messaging-inbound.js";
 import { mountMessagingWebhookRoutes } from "./messaging-webhook.js";
+import { startRecruitingCrmAutoSync } from "./recruiting-crm-autosync.js";
 import { mountApiRequestBodyLimits } from "./request-body-limit.js";
 import { createRouter } from "./router.js";
 import { mountScreenTarget } from "./screen-proxy.js";
@@ -611,6 +612,13 @@ export async function createApp(
       })
     : undefined;
   reconciler?.start();
+  if (env.firstPartyMcpUrl)
+    startRecruitingCrmAutoSync({
+      prisma,
+      connectors: stack.connector,
+      firstPartyMcpUrl: env.firstPartyMcpUrl,
+      signal: shutdown.signal,
+    });
 
   // Auth, webhook and worker composition retain their explicit privileged client.
   // The protected RPC client has no privileged fallback when actor context is missing.
