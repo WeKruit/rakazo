@@ -58,7 +58,7 @@ import {
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
@@ -2806,7 +2806,7 @@ export const readRecruitingSource = (
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new IsolationError();
       const json = row.mimeType === "application/json" || row.mimeType.endsWith("+json");
-      const pdf = row.mimeType === "application/pdf";
+      const pdf = isExtractedDocumentMimeType(row.mimeType);
       const path =
         selection?.kind === "artifact_json_string"
           ? selection.path
@@ -2818,7 +2818,7 @@ export const readRecruitingSource = (
       const text = path
         ? readRecruitingJsonString(bytes, path)
         : pdf
-          ? await extractPdfText(bytes)
+          ? await extractDocumentText(bytes, row.mimeType)
           : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const start = selection?.start ?? text.indexOf(source.quote);
       const end = selection?.end ?? start + source.quote.length;

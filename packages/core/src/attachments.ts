@@ -8,6 +8,7 @@ import type {
 import {
   ATTACHMENT_MAX_BASE64_LENGTH,
   ATTACHMENT_MAX_BYTES,
+  DOCX_MIME_TYPE,
   isAllowedAttachmentMimeType,
   isAttachmentImageMimeType,
 } from "@rakazo/contracts";
@@ -177,6 +178,7 @@ const EXTENSION_MIME_TYPES: Record<string, AttachmentMimeType> = {
   ".webp": "image/webp",
   ".gif": "image/gif",
   ".pdf": "application/pdf",
+  ".docx": DOCX_MIME_TYPE,
   ".txt": "text/plain",
   ".md": "text/markdown",
   ".markdown": "text/markdown",
@@ -198,6 +200,7 @@ const MIME_TYPE_EXTENSIONS: Record<AttachmentMimeType, string> = {
   "image/webp": ".webp",
   "image/gif": ".gif",
   "application/pdf": ".pdf",
+  [DOCX_MIME_TYPE]: ".docx",
   "text/plain": ".txt",
   "text/markdown": ".md",
   "text/csv": ".csv",
