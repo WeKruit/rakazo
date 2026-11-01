@@ -553,6 +553,8 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 // approval joins once the test environment has a calendar connection of its own: today Scheduling
 // cannot read a calendar there, so no booking card appears.
 const STAGING_WAVES = [["smoke", "pages", "memory"], ["progress", "midwork"], ["resume"]];
+// The release gate's quick part: free and about three minutes. The full suite runs beside it.
+const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 1) : STAGING_WAVES;
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
