@@ -44,3 +44,10 @@ it("keeps a dragged position inside the window", () => {
     bottom: 744,
   });
 });
+
+it("when every spot is partly covered, picks the least covered one, not the corner", () => {
+  // Controls fill the bottom 200px across the width except a 60px gap at the very top of it.
+  const strip = { l: 0, t: 600, w: 1000, h: 200 };
+  const offset = findFreeOffset(box, viewport, (x, y) => inRect(x, y, strip) && y > 640);
+  expect(offset.bottom).toBeGreaterThan(16);
+});
