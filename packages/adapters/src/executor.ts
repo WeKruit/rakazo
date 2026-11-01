@@ -1319,6 +1319,21 @@ export function pastedJobTitle(text: string): string | null {
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
+/**
+ * A working title for a short role request that is not a full JD: its first line, when the
+ * message has more lines after it and that line reads as a name, not a sentence.
+ */
+export function requestTitle(text: string): string | null {
+  const lines = text
+    .split("\n")
+    .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(first))
+    return null;
+  return first;
+}
+
 const NO_RECRUITING_ROLE_CONTEXT =
   "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never bind a role in global Main; to open a new role use start_role when offered.";
 
@@ -12782,7 +12797,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   })
                 )?.name.trim()
               : undefined;
-            const title = named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : NEW_ROLE_TITLE;
+            const title =
+              named && named !== NEW_ROLE_TITLE
+                ? named.slice(0, 120)
+                : (requestTitle(request) ?? NEW_ROLE_TITLE);
             return {
               saving: create(title, [], request),
               note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
