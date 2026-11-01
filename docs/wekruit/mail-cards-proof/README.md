@@ -30,6 +30,6 @@ Reproduce with the web Playwright specs `mail-reply-cards.spec.ts` and `sender-c
 
 Choose an eligible domain already ordered in the connected sending service; do not purchase another domain. Show actual setup and warm-up states without estimated completion dates. The mailbox cap defaults to two through existing deployment settings.
 
-This branch includes the earlier recruiting UI branch. Merge its dependency first or review the combined change. Apply only the two named migrations: `20261101170000_recruiting_profile_projection_intent_index` (concurrent index outside a transaction) and `20261101180000_recruiting_sender_mailbox_limit` (existing settings column). No production migration is included in acceptance.
+The earlier recruiting UI dependency, #788, has merged into stage. Its profile migration is `20261101170000_recruiting_profile_projection_intent_index` (concurrent index outside a transaction); the sender change adds `20261101180000_recruiting_sender_mailbox_limit` (existing settings column). Check the migration ledger and apply only outstanding named changes once. No production migration is included in acceptance.
 
 Hosted acceptance remains separate: verify the deployed revision, fresh-account setup, confirmed sender reuse across roles, cap enforcement, and edited reply delivery/discard/history through the test environment. Private mailbox addresses and screenshots must remain outside this public repository.

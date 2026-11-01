@@ -25,30 +25,28 @@ async function send(page: Page, text: string, mode: "enter" | "button" = "enter"
   await expect(page.getByTestId("transcript").getByText(text, { exact: true })).toBeVisible();
 }
 async function assertPageFacts(page: Page, view: string) {
-  const main = page.getByTestId("account-recruiting-view");
-  if (["shortlist", "contacts", "sequence", "inbox"].includes(view)) {
-    const role = main.getByRole("region", { name: "Fixture Engineer", exact: true });
-    if (view === "sequence") {
-      for (const [label, count] of [
-        ["Sent", "4"],
-        ["Opened", "3"],
-        ["Replied", "1"],
-      ])
-        await expect(
-          role
-            .locator("dt")
-            .filter({ hasText: new RegExp(`^${label}$`) })
-            .locator("..")
-            .locator("dd"),
-        ).toHaveText(count);
-      await expect(
-        role.getByText("morgan.reed@example.test", { exact: true }).first(),
-      ).toBeVisible();
-    } else if (view === "inbox") {
-      await expect(role.getByText("1 replies", { exact: true })).toBeVisible();
-    } else {
-      await expect(role.getByText("1 people", { exact: true })).toBeVisible();
-    }
+  if (view === "sequence") {
+    const table = page.getByTestId("account-sequences").getByRole("table");
+    await expect(
+      table.getByRole("link", { name: "Fixture Engineer sequence", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      table.getByRole("row").filter({ hasText: "Fixture Engineer sequence" }),
+    ).toContainText("Fixture Engineer");
+  } else if (view === "inbox") {
+    await expect(
+      page.getByRole("list", { name: "Email threads", exact: true }).getByRole("button", {
+        name: "morgan.reed@example.test · Fixture Engineer · Interested in the interview",
+        exact: true,
+      }),
+    ).toHaveCount(1);
+  } else if (view === "shortlist") {
+    await expect(
+      page
+        .getByTestId("account-recruiting-view")
+        .getByRole("region", { name: "Fixture Engineer", exact: true })
+        .getByText("1 people", { exact: true }),
+    ).toBeVisible();
   }
 }
 
@@ -128,10 +126,13 @@ test("fresh ordinary chat creates two product roles and all global pages share t
     ["routines", "Routines", "Fixture Engineer follow up"],
   ] as const;
   for (const [view, label, row] of pages) {
-    const navigation = page.getByTestId("recruiting-navigation");
-    if (!(await navigation.isVisible()))
-      await page.getByRole("button", { name: "Show navigation", exact: true }).click();
-    await navigation.getByRole("button", { name: label, exact: true }).click();
+    if (view === "brief" || view === "feedback") {
+      await page.goto(`/app?view=shortlist&role=${engineer.id}`);
+      await page
+        .getByRole("link", { name: view === "brief" ? "Job brief" : label, exact: true })
+        .click();
+      await page.getByRole("combobox", { name: "Role", exact: true }).selectOption("all");
+    } else await page.goto(`/app?view=${view}&role=all`);
     await expect(page).toHaveURL(new RegExp(`view=${view}.*role=all`));
     if (view === "contacts") {
       // Everyone across roles in one table; the role is a filter, not a page switch.
@@ -142,7 +143,12 @@ test("fresh ordinary chat creates two product roles and all global pages share t
       continue;
     }
     const picker = page.getByRole("combobox", {
-      name: view === "routines" ? "Routine conversation" : "Role",
+      name:
+        view === "routines"
+          ? "Routine conversation"
+          : view === "sequence"
+            ? "Sequence role filter"
+            : "Role",
       exact: true,
     });
     await expect(picker).toBeVisible();
@@ -190,6 +196,31 @@ test("fresh ordinary chat creates two product roles and all global pages share t
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
   }
+  await page.goto("/app?view=sequence&role=all");
+  await page
+    .getByTestId("account-sequences")
+    .getByRole("link", { name: "Fixture Engineer sequence", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/app/g/${engineer.groupId}.*view=sequence.*campaign=`));
+  const nativeSequence = page.getByRole("region", { name: "Sequence", exact: true });
+  for (const [label, count] of [
+    ["Opened", "3"],
+    ["Replied", "1"],
+  ])
+    await expect(
+      nativeSequence
+        .locator("dt")
+        .filter({ hasText: new RegExp(`^${label}$`) })
+        .locator("..")
+        .locator("dd"),
+    ).toHaveText(count);
+  await expect(
+    nativeSequence.getByRole("combobox", {
+      name: "Response for morgan.reed@example.test",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await captureScreenshot(page, testInfo, "journey-native-sequence-actual-metrics-and-contact");
   await page.goto("/app?view=shortlist&role=all");
   const designer = data.roles.find((role) => role.title === "Fixture Designer")!;
   await page.getByRole("combobox", { name: "Role", exact: true }).selectOption(designer.id);
@@ -224,7 +255,7 @@ test("fresh ordinary chat creates two product roles and all global pages share t
   await captureScreenshot(page, testInfo, "journey-role-chat-Send-button-actual-answer");
   await page
     .getByTestId("recruiting-navigation")
-    .getByRole("button", { name: "Kruit", exact: true })
+    .getByRole("link", { name: "Kruit", exact: true })
     .click();
   await send(page, "what interviews are coming up");
   await expect(
