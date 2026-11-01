@@ -549,13 +549,17 @@ describe("profile lookups through the people search", () => {
 });
 
 describe("fillRecruitingRoleProfiles", () => {
+  const prisma = { externalEffect: { count: vi.fn().mockResolvedValue(1) } };
   const actor = {
     spaceId: "s1",
     userId: "u1",
     email: "owner@example.com",
     isDeploymentOwner: false,
   };
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    prisma.externalEffect.count.mockResolvedValue(1);
+  });
 
   it("saves history and photo from the role's earlier searches for people missing it", async () => {
     const createdAt = new Date("2026-10-27T10:00:00Z");
@@ -609,13 +613,13 @@ describe("fillRecruitingRoleProfiles", () => {
         createdAt,
       },
     ]);
-    const result = await fillRecruitingRoleProfiles({} as never, actor, "role1", async () => {
+    const result = await fillRecruitingRoleProfiles(prisma as never, actor, "role1", async () => {
       const { default: sharp } = await import("sharp");
       return sharp({ create: { width: 8, height: 8, channels: 3, background: "#777777" } })
         .png()
         .toBuffer();
     });
-    expect(result).toEqual({ people: 3, filled: 2, photos: 1, missing: 1 });
+    expect(result).toMatchObject({ people: 3, filled: 2, photos: 1, missing: 1 });
     expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(2);
     // A saved work history stays; the search only adds the missing education.
     expect(db.saveRecruitingSavedProfile.mock.calls[1]![3]).toMatchObject({
@@ -656,6 +660,98 @@ describe("fillRecruitingRoleProfiles", () => {
       },
     });
   });
+
+  it("inventories exact retained profile media without fetching or saving, preserving full histories", async () => {
+    const facts = profileFromLookup(mcpResult, ENDPOINT, KEY)!.facts;
+    const before = {
+      ...facts,
+      personKey: KEY,
+      provider: "coresignal",
+      fetchedAt: "2026-10-26T10:00:00.000Z",
+      profileImageUrl: null,
+      experience: facts.experience.map((job) => ({
+        ...job,
+        description: "Retained detailed history",
+        company_logo_url: null,
+      })),
+      education: facts.education.map((school) => ({ ...school, school_logo_url: null })),
+    };
+    db.listRecruitingRolePoolRuns.mockResolvedValue({
+      personKeys: [KEY, "linkedin:/in/missing"],
+      runIds: ["run1"],
+    });
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map([[KEY, before]]));
+    db.listRunToolResults.mockResolvedValue([
+      {
+        effectId: "e1",
+        endpoint: ENDPOINT,
+        result: mcpResult,
+        createdAt: new Date(before.fetchedAt),
+      },
+    ]);
+    const fetchPhoto = vi.fn();
+    const result = await fillRecruitingRoleProfiles(prisma as never, actor, "role1", fetchPhoto, {
+      dryRun: true,
+    });
+    expect(result.inventory).toEqual({
+      dryRun: true,
+      missingBefore: { photo: 2, work: 1, education: 1, employerLogo: 2, schoolLogo: 2 },
+      recoverable: { photo: 1, work: 0, education: 0, employerLogo: 1, schoolLogo: 1 },
+      sourceCalls: 1,
+      sourcePageSize: 400,
+      sourceCoverage: "owned_saved_results",
+    });
+    expect(fetchPhoto).not.toHaveBeenCalled();
+    expect(db.saveRecruitingSavedProfile).not.toHaveBeenCalled();
+    expect(db.listRecruitingRolePoolRuns).toHaveBeenCalledWith(prisma, actor, "role1");
+    expect(before.experience[0]!.description).toBe("Retained detailed history");
+    expect(before.experience[0]!.company_logo_url).toBeNull();
+    db.listRecruitingSavedProfiles.mockResolvedValue(
+      new Map([[KEY, { ...before, profileImageUrl: "data:image/webp;base64,YQ==" }]]),
+    );
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => ({
+      ...input.profile,
+      personKey: input.personKey,
+      provider: input.provider,
+      fetchedAt: input.fetchedAt.toISOString(),
+    }));
+    await fillRecruitingRoleProfiles(prisma as never, actor, "role1", fetchPhoto);
+    expect(fetchPhoto).not.toHaveBeenCalled();
+    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(1);
+    expect(db.saveRecruitingSavedProfile.mock.calls[0]![3]).toMatchObject({
+      personKey: KEY,
+      sourceEffectId: "e1",
+      profile: {
+        experience: [
+          { ...facts.experience[0], description: "Retained detailed history" },
+          { ...facts.experience[1], description: "Retained detailed history" },
+        ],
+        education: facts.education,
+      },
+    });
+  });
+
+  it("reads beyond the old 400-call ceiling with bounded oldest-first pages", async () => {
+    prisma.externalEffect.count.mockResolvedValue(401);
+    db.listRecruitingRolePoolRuns.mockResolvedValue({ personKeys: [KEY], runIds: ["run1"] });
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map());
+    db.listRunToolResults.mockResolvedValue([]);
+    await fillRecruitingRoleProfiles(prisma as never, actor, "role1", undefined, { dryRun: true });
+    expect(db.listRunToolResults.mock.calls.map((call) => call.slice(2))).toEqual([
+      ["run1", 400, 1],
+      ["run1", 1, 0],
+    ]);
+    expect(prisma.externalEffect.count).toHaveBeenCalledWith({
+      where: {
+        runId: "run1",
+        spaceId: actor.spaceId,
+        status: "completed",
+        request: { path: ["0"], equals: "__rakazoCatalogTool" },
+        run: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+    });
+    expect(db.saveRecruitingSavedProfile).not.toHaveBeenCalled();
+  });
 });
 
 describe("keepSearchHistory", () => {
@@ -666,6 +762,40 @@ describe("keepSearchHistory", () => {
     isDeploymentOwner: false,
   };
   beforeEach(() => vi.resetAllMocks());
+
+  it("fills a missing retained photo even when both saved histories already exist", async () => {
+    const before = {
+      personKey: KEY,
+      provider: "people_search",
+      fetchedAt: "2026-10-26T10:00:00.000Z",
+      headline: null,
+      profileImageUrl: null,
+      experience: [{ title: "Retained work" }],
+      education: [{ school_name: "Retained school" }],
+    };
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map([[KEY, before]]));
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => ({
+      ...input.profile,
+      personKey: KEY,
+    }));
+    const result = await keepSearchHistory({} as never, actor, "run1", [
+      {
+        row: {
+          name: "Ada",
+          linkedin_url: "https://www.linkedin.com/in/ada-example",
+          profile_image_url: "data:image/webp;base64,YQ==",
+        },
+        effectId: "e1",
+        createdAt: new Date(),
+      },
+    ]);
+    expect(result.photos).toBe(1);
+    expect(db.saveRecruitingSavedProfile.mock.calls[0]![3].profile).toMatchObject({
+      profileImageUrl: "data:image/webp;base64,YQ==",
+      experience: before.experience,
+      education: before.education,
+    });
+  });
 
   it("keeps a search's education on the saved profile so a later grading row cannot hide it", async () => {
     const complete = {

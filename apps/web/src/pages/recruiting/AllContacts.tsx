@@ -27,13 +27,16 @@ import {
   Input,
   Textarea,
 } from "@rakazo/ui-web";
-import { ChevronDown, ListFilter, Search, X } from "lucide-react";
+import { ChevronDown, ListFilter, Mail, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { ListPager } from "../../components/ListPager";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
+import { AddToSequenceDialog } from "./AddToSequenceDialog";
 import { CompanyLogo } from "./CompanyLogo";
+import type { RecruitingDetailTarget } from "./detail";
+import { pendingDetailTarget, useRecruitingDetail } from "./detail";
 import { LinkedInIcon } from "./LinkedInIcon";
 import { PersonAvatar } from "./ProfileImage";
 import { profileImageUrl } from "./profileAssets";
@@ -58,12 +61,15 @@ type FlagKey = "contacted" | "replied" | "shortlisted";
 export function AllContacts({
   groups,
   refreshSignal,
+  spaceId,
 }: {
   groups: readonly Group[];
   refreshSignal: number;
+  spaceId?: string;
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const detail = useRecruitingDetail();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filters, setFilters] = useState<RecruitingContactFilters>({});
@@ -77,6 +83,7 @@ export function AllContacts({
   }>();
   const [failed, setFailed] = useState(false);
   const [facets, setFacets] = useState<Facets>();
+  const [enroll, setEnroll] = useState(false);
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());
   const [dialog, setDialog] = useState<"tag" | "activity">();
   const [dialogText, setDialogText] = useState("");
@@ -150,6 +157,46 @@ export function AllContacts({
   const loading = page?.key !== readKey && !failed;
   const rows = data?.items ?? [];
   const allOnPage = rows.length > 0 && rows.every((row) => selected.has(row.personKey));
+  function profileTarget(index: number): RecruitingDetailTarget | undefined {
+    const person = rows[index];
+    const home = person?.roles.find((role) => role.threadId && role.groupId && role.candidateKey);
+    if (!person) return undefined;
+    const crm = Boolean(home?.candidateKey?.startsWith("crm:"));
+    return {
+      view: "contact",
+      collection: { label: t`Contacts`, index, total: rows.length },
+      crm,
+      role:
+        home && spaceId
+          ? { roleId: home.id, spaceId, conversation: { groupId: home.groupId! } }
+          : null,
+      person: {
+        candidateId:
+          home?.candidateKey?.replace(/^crm:/, "") ?? person.noteKey.replace(/^crm:/, ""),
+        searchCandidateKey: home?.candidateKey && !crm ? home.candidateKey : undefined,
+        name: person.name ?? person.email ?? t`Unnamed`,
+        email: person.email,
+        title: person.title,
+        company: person.company,
+        location: person.location,
+        linkedinUrl: person.linkedinUrl,
+        savedProfile: person.savedProfile,
+        profileImageUrl: person.profileImageUrl,
+        companyLogoUrl: person.companyLogoUrl,
+        companyWebsiteUrl: person.companyWebsiteUrl,
+        roles: person.roles,
+      },
+      walk: (step) => profileTarget(index + step),
+    };
+  }
+  useEffect(() => {
+    if (!detail?.pending) return;
+    for (let index = 0; index < rows.length; index++) {
+      const target = profileTarget(index);
+      const restored = target && pendingDetailTarget(target, detail.pending);
+      if (restored) return detail.restore(restored);
+    }
+  }, [rows, detail?.pending, spaceId]);
   const productRoles = (facets?.roles ?? []).filter((role) => !role.id.startsWith("crm:"));
   const globalGroup = groups.find((group) => group.id.startsWith("recruiting-global-"));
 
@@ -378,9 +425,9 @@ export function AllContacts({
   ];
 
   return (
-    <section aria-label={t`All contacts`} className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1 sm:max-w-sm">
+    <section aria-label={t`All contacts`} className="min-w-0 space-y-3">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 bg-background py-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-sm">
           <Search
             size={15}
             aria-hidden
@@ -394,6 +441,15 @@ export function AllContacts({
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t`Refresh contacts`}
+          disabled={loading || busy}
+          onClick={() => setReload((value) => value + 1)}
+        >
+          <RefreshCw size={15} aria-hidden />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline" />}>
             <ListFilter size={15} aria-hidden />
@@ -549,12 +605,7 @@ export function AllContacts({
             </DropdownMenuSub>
             <DropdownMenuItem
               disabled={!people.length || !globalGroup}
-              onClick={() =>
-                askAssistant(
-                  t`Add these people to an outreach sequence. Show me the recipients and the email before anything is sent:` +
-                    `\n${peopleLines(people)}`,
-                )
-              }
+              onClick={() => setEnroll(true)}
             >
               <Trans>Add to sequence</Trans>
             </DropdownMenuItem>
@@ -565,6 +616,34 @@ export function AllContacts({
         </DropdownMenu>
       </div>
 
+      {people.length ? (
+        <div
+          role="toolbar"
+          aria-label={t`Selected contacts`}
+          className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2"
+        >
+          <span className="text-sm">
+            <Trans>{people.length} selected</Trans>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!globalGroup || busy}
+            onClick={() => setEnroll(true)}
+          >
+            <Trans>Add to sequence</Trans>
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setDialog("tag")}>
+            <Trans>Add tag</Trans>
+          </Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void exportCsv()}>
+            <Trans>Export selected</Trans>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
+            <Trans>Clear selection</Trans>
+          </Button>
+        </div>
+      ) : null}
       {activeChips.length || Object.keys(text).length ? (
         <div className="flex flex-wrap items-center gap-2">
           {(Object.keys(text) as TextKey[]).map((key) => (
@@ -648,14 +727,17 @@ export function AllContacts({
             )}
           </p>
           {rows.length ? (
-            <div className="overflow-x-auto rounded-xl border border-border">
+            <div className="max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
               <table className="w-full min-w-[1100px] text-left text-sm" aria-busy={loading}>
-                <thead className="bg-muted text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
                   <tr>
                     <th className="w-10 px-3 py-2">
                       <Checkbox
                         aria-label={t`Select all on this page`}
                         checked={allOnPage}
+                        indeterminate={
+                          !allOnPage && rows.some((row) => selected.has(row.personKey))
+                        }
                         onCheckedChange={(checked) =>
                           setSelected((current) => {
                             const next = new Map(current);
@@ -695,13 +777,19 @@ export function AllContacts({
                     <th className="px-3 py-2 font-medium">
                       <Trans>Last contacted</Trans>
                     </th>
+                    <th className="px-3 py-2 font-medium">
+                      <Trans>Date added</Trans>
+                    </th>
+                    <th className="px-3 py-2 font-medium">
+                      <Trans>Last replied</Trans>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((person) => {
+                  {rows.map((person, index) => {
                     const name = person.name ?? person.email ?? t`Unnamed`;
                     const linkedinUrl = profileImageUrl(person.linkedinUrl);
-                    const home = person.roles.find((role) => role.groupId && role.candidateKey);
+                    const target = profileTarget(index);
                     return (
                       <tr key={person.personKey} className="border-t border-border align-top">
                         <td className="px-3 py-2">
@@ -721,24 +809,30 @@ export function AllContacts({
                         <td className="px-3 py-2 font-medium">
                           <div className="flex w-56 min-w-0 items-center gap-2">
                             <PersonAvatar name={name} src={person.profileImageUrl} size="sm" />
-                            {home ? (
-                              <Link
+                            {target && detail ? (
+                              <button
+                                type="button"
                                 className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring"
                                 title={name}
-                                to={`/app/g/${encodeURIComponent(home.groupId!)}?${new URLSearchParams(
-                                  {
-                                    view: "contacts",
-                                    detail: `contact.${home.candidateKey!.replace(/^crm:/, "")}`,
-                                  },
-                                )}`}
+                                aria-haspopup="dialog"
+                                onClick={() => detail.open(target)}
                               >
                                 {name}
-                              </Link>
+                              </button>
                             ) : (
                               <span className="min-w-0 flex-1 truncate" title={name}>
                                 {name}
                               </span>
                             )}
+                            {person.email ? (
+                              <a
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={`mailto:${encodeURIComponent(person.email)}`}
+                                aria-label={t`Email ${name}`}
+                              >
+                                <Mail size={15} aria-hidden />
+                              </a>
+                            ) : null}
                             {linkedinUrl ? (
                               <a
                                 className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -766,6 +860,18 @@ export function AllContacts({
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex max-w-40 flex-wrap gap-1">
+                            {!person.tags.length ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setSelected(new Map([[person.personKey, person]]));
+                                  setDialog("tag");
+                                }}
+                              >
+                                <Trans>Add tags</Trans>
+                              </Button>
+                            ) : null}
                             {person.tags.map((tag) => (
                               <span
                                 key={tag}
@@ -818,6 +924,14 @@ export function AllContacts({
                             ? new Date(person.lastContactedAt).toLocaleDateString()
                             : "—"}
                         </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {person.addedAt ? new Date(person.addedAt).toLocaleDateString() : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {person.lastRepliedAt
+                            ? new Date(person.lastRepliedAt).toLocaleDateString()
+                            : "—"}
+                        </td>
                       </tr>
                     );
                   })}
@@ -825,15 +939,30 @@ export function AllContacts({
               </table>
             </div>
           ) : null}
-          <ListPager
-            page={Math.floor(offset / PAGE_SIZE)}
-            pageCount={Math.ceil(data.total / PAGE_SIZE)}
-            onPage={(next) => setOffset(next * PAGE_SIZE)}
-            disabled={loading}
-          />
+          {data.total > PAGE_SIZE ? (
+            <div className="sticky bottom-0 z-10 flex min-h-12 items-center gap-2 border-t bg-background py-2">
+              <ListPager
+                page={Math.floor(offset / PAGE_SIZE)}
+                pageCount={Math.ceil(data.total / PAGE_SIZE)}
+                onPage={(next) => setOffset(next * PAGE_SIZE)}
+                disabled={loading}
+              />
+            </div>
+          ) : null}
         </>
       ) : null}
 
+      <AddToSequenceDialog
+        open={enroll}
+        onOpenChange={setEnroll}
+        people={people.map((person) => ({
+          key: person.personKey,
+          name: person.name ?? person.email ?? t`Unnamed`,
+          email: person.email,
+          linkedinUrl: person.linkedinUrl,
+        }))}
+        onContinue={askAssistant}
+      />
       <Dialog
         open={Boolean(dialog)}
         onOpenChange={(open) => {

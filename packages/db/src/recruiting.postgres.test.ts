@@ -20,6 +20,7 @@ import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
 import * as recruiting from "./index.js";
+import { chatReplyToAsk } from "./events.js";
 import { IsolationError } from "./scope.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -2100,7 +2101,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.blocks).toEqual([
         { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
-      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
+      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : kind === "composer" ? chatReplyToAsk(rawAnswer) : rawAnswer}`;
       expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
         resumedPrompt,
       );
@@ -6562,13 +6563,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       next.items.map((item) => item.candidateKey),
     );
     expect(jumped.total).toBe(4);
-    await expect(
-      recruiting.listRecruitingCandidates(prisma, actor, {
-        roleId: f.role.role.id,
-        offset: 2,
-        cursor: page.nextCursor!,
-      }),
-    ).rejects.toBeInstanceOf(recruiting.RecruitingConflictError);
     const filtered = await recruiting.listRecruitingCandidates(prisma, actor, {
       roleId: f.role.role.id,
       query: "new company",

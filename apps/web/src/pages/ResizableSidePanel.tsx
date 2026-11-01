@@ -1,5 +1,6 @@
 import { t } from "@lingui/core/macro";
 import type { CSSProperties, ReactNode } from "react";
+import { createContext, useState } from "react";
 
 import { PaneResizeHandle } from "../components/PaneResizeHandle";
 import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
@@ -7,9 +8,13 @@ import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 const STORAGE_KEY = "rakazo:right-panel-width";
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 384;
-const DETAIL_DEFAULT_WIDTH = 600;
+const DETAIL_DEFAULT_WIDTH = 720;
 const ABSOLUTE_MAX = 1000;
 const MIN_CHAT_WIDTH = 320;
+
+export const SidePanelSizeContext = createContext<{ expanded: boolean; toggle: () => void } | null>(
+  null,
+);
 
 export function ResizableSidePanel({
   open,
@@ -30,28 +35,36 @@ export function ResizableSidePanel({
     Math.min(ABSOLUTE_MAX, viewportWidth - botsSidebarWidth - MIN_CHAT_WIDTH),
   );
   const [preferredWidth, setPreferredWidth] = usePaneWidth(STORAGE_KEY, defaultWidth);
-  const width = clampWidth(preferredWidth, MIN_WIDTH, maxWidth);
+  const [expanded, setExpanded] = useState(false);
+  const width = expanded ? maxWidth : clampWidth(preferredWidth, MIN_WIDTH, maxWidth);
 
   return (
-    <aside
-      data-testid="side-panel"
-      data-panel={panel}
-      style={{ "--panel-width": `${width}px` } as CSSProperties}
-      className={`absolute inset-y-0 end-0 z-20 flex min-h-0 shrink-0 flex-col overflow-hidden bg-background transition-[width] duration-150 ease-out md:relative ${open ? `w-full ${detail ? "max-w-none" : "max-w-[384px]"} border-s border-sidebar-border md:w-(--panel-width) md:max-w-none` : "pointer-events-none w-0"}`}
+    <SidePanelSizeContext.Provider
+      value={{ expanded, toggle: () => setExpanded((value) => !value) }}
     >
-      {open ? (
-        <PaneResizeHandle
-          label={t`Resize panel`}
-          className="md:block"
-          edge="start"
-          width={width}
-          min={MIN_WIDTH}
-          max={maxWidth}
-          onResize={setPreferredWidth}
-          onReset={() => setPreferredWidth(defaultWidth)}
-        />
-      ) : null}
-      {children}
-    </aside>
+      <aside
+        data-testid="side-panel"
+        data-panel={panel}
+        style={{ "--panel-width": `${width}px` } as CSSProperties}
+        className={`absolute inset-y-0 end-0 z-20 flex min-h-0 shrink-0 flex-col overflow-hidden bg-background transition-[width] duration-150 ease-out md:relative ${open ? `w-full ${detail ? "max-w-none" : "max-w-[384px]"} border-s border-sidebar-border md:w-(--panel-width) md:max-w-none` : "pointer-events-none w-0"}`}
+      >
+        {open ? (
+          <PaneResizeHandle
+            label={t`Resize panel`}
+            className="md:block"
+            edge="start"
+            width={width}
+            min={MIN_WIDTH}
+            max={maxWidth}
+            onResize={(next) => {
+              setExpanded(false);
+              setPreferredWidth(next);
+            }}
+            onReset={() => setPreferredWidth(defaultWidth)}
+          />
+        ) : null}
+        {children}
+      </aside>
+    </SidePanelSizeContext.Provider>
   );
 }

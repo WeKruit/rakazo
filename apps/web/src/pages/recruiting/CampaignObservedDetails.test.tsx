@@ -5,6 +5,10 @@ import { CampaignObservedDetails } from "./CampaignObservedDetails";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
+  useLingui: () => ({
+    t: (parts: TemplateStringsArray, ...values: unknown[]) =>
+      parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
+  }),
 }));
 
 it("renders every observed entry, escapes provider HTML, and does not invent weekday names", () => {

@@ -519,8 +519,8 @@ describe("account recruiting reads", () => {
         Object.assign(deps, { firstPartyMcpUrl: "https://crm.example.test/mcp" });
       }
       vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([
-        { idempotencyKey: "instantly-role-campaign:one:a", result: { campaignId: "one" } },
-        { idempotencyKey: "instantly-role-campaign:two:a", result: { campaignId: "two" } },
+        { request: { roleId: "a", serverId: "one" }, result: { campaignId: "one" } },
+        { request: { roleId: "a", serverId: "two" }, result: { campaignId: "two" } },
       ] as never);
       vi.mocked(reads.getRecruitingRoleCampaign).mockImplementation(
         async (_deps, _actor, _target, selection) => ({

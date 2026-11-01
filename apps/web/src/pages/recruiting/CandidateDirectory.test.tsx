@@ -159,7 +159,10 @@ it("keeps actual supplied fit states and stored statuses separate", async () => 
   expect(view.textContent).toContain("Rust · Gap");
   expect(view.textContent).toContain("Not interested");
   expect(view.textContent).toContain("Shortlisted");
-  expect(view.textContent).not.toContain("Replied");
+  const headers = [...view.querySelectorAll("thead th")].map((cell) => cell.textContent);
+  const cells = view.querySelector("tbody tr")!.children;
+  expect(cells[headers.indexOf("Status")]!.textContent).not.toContain("Replied");
+  expect(cells[headers.indexOf("Outreach")]!.textContent).toContain("Replied");
   await render(
     <CandidateDirectory
       rows={[
@@ -324,4 +327,22 @@ it("shows education from a graded row and from the saved profile when the newest
   const cells = [...view.querySelectorAll("tbody tr")].map((item) => item.textContent ?? "");
   expect(cells[0]).toContain("Example State University");
   expect(cells[1]).toContain("Example Institute of Technology");
+});
+
+it("shows the same people in a board grouped only by their recorded states", async () => {
+  const one = row("one");
+  const two = row("two");
+  one.autumn!.shortlisted = true;
+  two.autumn!.decision = "hold";
+  const onOpen = vi.fn();
+  const { view } = await mount(<CandidateDirectory rows={[one, two]} onOpen={onOpen} board />);
+  await act(async () => button(view, "Board").click());
+  expect(view.querySelector('[aria-label="Shortlisted"]')?.textContent).toContain("Candidate one");
+  expect(view.querySelector('[aria-label="On hold"]')?.textContent).toContain("Candidate two");
+  expect(view.textContent).not.toContain("Hired");
+  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(2);
+  await act(async () => view.querySelector<HTMLButtonElement>("[data-candidate-name]")!.click());
+  expect(onOpen.mock.calls[0]?.[0]).toBe(one);
+  await act(async () => button(view, "Table").click());
+  expect(view.querySelectorAll("[data-candidate-name]")).toHaveLength(2);
 });

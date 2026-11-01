@@ -34,7 +34,9 @@ import {
   readShortlistWeekFilter,
   writeShortlistWeekFilter,
 } from "../recruiting/dashboard-drilldown";
+import { KruitWorkMenu } from "../recruiting/KruitWorkMenu";
 import { RetryNotice } from "../recruiting/RetryNotice";
+import { RoleDetailsMenu } from "../recruiting/RoleDetailsMenu";
 
 const RoleSetupCard = lazyPanel(() =>
   import("../recruiting/RoleSetup").then((m) => m.RoleSetupCard),
@@ -685,6 +687,13 @@ export function ShellConversation({
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  {!showToolActivity ? <KruitWorkMenu onOpen={openRecruitingView} /> : null}
+                  {!showToolActivity &&
+                  inGroup &&
+                  groupId &&
+                  !groupId.startsWith("recruiting-global-") ? (
+                    <RoleDetailsMenu />
+                  ) : null}
                   {roleChatWorkspace ? (
                     <Button
                       variant="ghost"

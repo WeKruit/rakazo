@@ -1132,6 +1132,22 @@ describe("native cross-role recruiting reads", () => {
     expect(db.candidates).toHaveBeenLastCalledWith(f.deps.prisma, actor, { roleId: "current" });
   });
 
+  it("turns a numbered page into an offset of whole pages", async () => {
+    const f = fixture();
+    db.candidates.mockResolvedValue({ roleId: "selected", items: [], total: 0, nextCursor: null });
+    await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list", roleId: "selected", page: 3 },
+      context,
+    );
+    expect(db.candidates).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      roleId: "selected",
+      limit: 10,
+      offset: 20,
+    });
+  });
+
   it("reads a named role's saved sources where no role is linked", async () => {
     const f = fixture();
     db.sources.mockResolvedValue({ roleId: "selected", items: [], nextCursor: null });

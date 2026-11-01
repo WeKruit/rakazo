@@ -49,6 +49,7 @@ export function AssessmentCard({
   const { t } = useLingui();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [allCriteria, setAllCriteria] = useState(false);
   const statusLabel: Record<RequirementStatus, string | null> = {
     match: t`Match`,
     gap: t`Gap`,
@@ -164,7 +165,7 @@ export function AssessmentCard({
       ) : null}
       {rows.length ? (
         <ul className="divide-y border-y">
-          {rows.map((row) => {
+          {(allCriteria ? rows : rows.slice(0, 3)).map((row) => {
             const { Icon, className } = ICONS[row.status];
             const label = statusLabel[row.status];
             const name =
@@ -188,7 +189,12 @@ export function AssessmentCard({
                     aria-label={label ?? undefined}
                     className={`shrink-0 ${className}`}
                   />
-                  {name ? <span className="shrink-0 font-medium">{name}</span> : null}
+                  {name ? <span className="min-w-0 break-words font-medium">{name}</span> : null}
+                  {row.priority === "preferred" ? (
+                    <Badge variant="outline">
+                      <Trans>Preferred</Trans>
+                    </Badge>
+                  ) : null}
                   {row.criterionId ? (
                     <span className="shrink-0 text-xs text-muted-foreground">
                       {row.criterionId}
@@ -224,6 +230,20 @@ export function AssessmentCard({
             );
           })}
         </ul>
+      ) : null}
+      {rows.length > 3 ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-expanded={allCriteria}
+          onClick={() => setAllCriteria((value) => !value)}
+        >
+          {allCriteria ? (
+            <Trans>Show fewer criteria</Trans>
+          ) : (
+            <Trans>Show all {rows.length} criteria</Trans>
+          )}
+        </Button>
       ) : null}
       {summary ? (
         quick.headline && !summaryOpen ? (

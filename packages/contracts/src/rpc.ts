@@ -184,6 +184,8 @@ import {
 import {
   RecruitingAnalyticsInputSchema,
   RecruitingAnalyticsOutputSchema,
+  RecruitingAnalyticsPeopleInputSchema,
+  RecruitingAnalyticsPeopleOutputSchema,
 } from "./recruiting-analytics.js";
 import {
   ListRecruitingContactsInput,
@@ -192,6 +194,11 @@ import {
   UpdateRecruitingContactTagsInput,
 } from "./recruiting-contacts.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
+import {
+  GlobalRecruitingInboxInputSchema,
+  GlobalRecruitingInboxOutputSchema,
+  GlobalRecruitingInboxSummaryOutputSchema,
+} from "./recruiting-global-inbox.js";
 import {
   ListRecruitingInboxInputSchema,
   MarkRecruitingInboxInputSchema,
@@ -783,6 +790,15 @@ export const appContract = {
       .input(MarkRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
       .output(z.object({ ok: z.literal(true) })),
     analytics: oc.input(RecruitingAnalyticsInputSchema).output(RecruitingAnalyticsOutputSchema),
+    globalInbox: oc
+      .input(GlobalRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(GlobalRecruitingInboxOutputSchema),
+    globalInboxSummary: oc
+      .input(z.strictObject({ spaceId: Id }))
+      .output(GlobalRecruitingInboxSummaryOutputSchema),
+    analyticsPeople: oc
+      .input(RecruitingAnalyticsPeopleInputSchema)
+      .output(RecruitingAnalyticsPeopleOutputSchema),
     sequenceDraft: oc
       .input(threadTarget.safeExtend({ command: RecruitingSequenceInputSchema }))
       .output(RecruitingSequenceOutputSchema),
@@ -828,9 +844,13 @@ export const appContract = {
             .object({
               campaignId: Id.optional(),
               campaignOffset: z.number().int().min(0).max(1_000_000).optional(),
+              leadCursor: z.string().min(1).max(1600).optional(),
+              serverId: Id.optional(),
             })
             .refine(
-              (input) => input.campaignOffset === undefined || input.campaignId !== undefined,
+              (input) =>
+                (input.campaignOffset === undefined && input.leadCursor === undefined) ||
+                input.campaignId !== undefined,
               "Campaign offset requires an exact campaign selection",
             ),
         ),
@@ -901,14 +921,30 @@ export const appContract = {
       .input(threadTarget.safeExtend(RecruitingCrmSyncInputFields))
       .output(RecruitingCrmSyncOutputSchema),
     /** Fill people's saved work history and photo from the role's earlier people searches. */
-    fillRoleProfiles: oc.input(z.strictObject({ roleId: RecruitingId })).output(
-      z.strictObject({
-        people: z.number().int().nonnegative(),
-        filled: z.number().int().nonnegative(),
-        photos: z.number().int().nonnegative(),
-        missing: z.number().int().nonnegative(),
-      }),
-    ),
+    fillRoleProfiles: oc
+      .input(z.strictObject({ roleId: RecruitingId, dryRun: z.boolean().optional() }))
+      .output(
+        z.strictObject({
+          people: z.number().int().nonnegative(),
+          filled: z.number().int().nonnegative(),
+          photos: z.number().int().nonnegative(),
+          missing: z.number().int().nonnegative(),
+          inventory: z.strictObject({
+            dryRun: z.boolean(),
+            missingBefore: z.record(
+              z.enum(["photo", "work", "education", "employerLogo", "schoolLogo"]),
+              z.number().int().nonnegative(),
+            ),
+            recoverable: z.record(
+              z.enum(["photo", "work", "education", "employerLogo", "schoolLogo"]),
+              z.number().int().nonnegative(),
+            ),
+            sourceCalls: z.number().int().nonnegative(),
+            sourcePageSize: z.literal(400),
+            sourceCoverage: z.literal("owned_saved_results"),
+          }),
+        }),
+      ),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),

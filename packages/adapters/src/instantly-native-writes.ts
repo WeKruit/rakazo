@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -7,6 +9,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
 
@@ -44,7 +47,17 @@ const CampaignSetup = {
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
-const UpdateRoleDraftInput = RoleDraftInput.extend({ campaign_id: Uuid });
+const CloneRoleDraftInput = z.strictObject({
+  client_nonce: z.string().min(1).max(200),
+  role_id: z.string().min(1).max(100),
+  campaign_id: Uuid,
+  name: z.string().trim().min(1).max(200),
+});
+const CreateRoleDraftInput = RoleDraftInput.extend({ client_nonce: z.string().min(1).max(200) });
+const UpdateRoleDraftInput = RoleDraftInput.extend({
+  campaign_id: Uuid,
+  expected_revision: z.string().regex(/^[a-f0-9]{64}$/),
+});
 const ReadRoleDraftInput = z.strictObject({
   role_id: z.string().min(1).max(100),
   campaign_id: Uuid.optional(),
@@ -171,8 +184,14 @@ export const nativeInstantlyWrites = [
     "Reads the exact role-bound campaign and connected sending mailboxes; never sends.",
   ),
   tool(
+    "clone_role_draft",
+    CloneRoleDraftInput,
+    false,
+    "Clones an exact role-associated sequence into a new zero-recipient draft, retaining original content and history. Never activates or sends.",
+  ),
+  tool(
     "create_role_draft",
-    RoleDraftInput,
+    CreateRoleDraftInput,
     false,
     "Creates a zero-recipient draft for a role without a bound campaign. Never sends or adopts a campaign by name.",
   ),
@@ -660,6 +679,66 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
   );
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
+/** Every campaign this mail connection's roles are bound to. */
+export async function ownedInstantlyCampaigns(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+): Promise<string[]> {
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId,
+      kind: "instantly_role_campaign",
+      status: "completed",
+      request: { path: ["serverId"], equals: serverId },
+    },
+    select: { result: true },
+  });
+  const ids = effects.map(({ result }) => (result as Partial<RoleBinding> | null)?.campaignId);
+  return [...new Set(ids.filter((id): id is string => typeof id === "string"))].sort();
+}
+
+const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause))?$/i;
+
+/**
+ * The shared account's REST boundary: only this connection's own campaigns (and one it creates in
+ * this call) can be read or changed, and nothing searches or deduplicates across the account.
+ */
+export function ownedInstantlyRest(rest: InstantlyRest, owned: ReadonlySet<string>): InstantlyRest {
+  const mine = new Set(owned);
+  const refuse = () => {
+    throw new IsolationError("That campaign does not belong to this account");
+  };
+  const own = (id: unknown) => {
+    if (typeof id !== "string" || !mine.has(id)) refuse();
+  };
+  return async (method, path, body) => {
+    const [route, query = ""] = path.split("?");
+    const fields = (body ?? {}) as Record<string, unknown>;
+    if (route === "/campaigns" && method === "GET") return { items: [] };
+    if (route === "/campaigns" && method === "POST") {
+      const created = await rest(method, path, body);
+      if (typeof created.id === "string") mine.add(created.id);
+      return created;
+    }
+    const campaign = CAMPAIGN_PATH.exec(route!);
+    if (campaign) own(campaign[1]);
+    else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
+    else if (route === "/leads/list") own(fields.campaign);
+    else if (route === "/leads/add") {
+      own(fields.campaign_id);
+      if (fields.skip_if_in_workspace) refuse();
+    } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
+    else if (
+      !route!.startsWith("/accounts") &&
+      !route!.startsWith("/emails") &&
+      !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)
+    )
+      refuse();
+    return rest(method, path, body);
+  };
+}
+
 export async function readRoleCampaignBinding(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
@@ -1797,23 +1876,263 @@ function editableDraft(campaign: Record<string, unknown>) {
   );
 }
 
+/** Verify only supplied configuration; provider metadata is not part of the write. */
+function requireSavedConfiguration(
+  campaign: Record<string, unknown>,
+  expected: Record<string, unknown>,
+) {
+  if (Object.entries(expected).some(([key, value]) => !isDeepStrictEqual(campaign[key], value)))
+    throw new Error(
+      "The saved configuration does not match the requested changes. Reopen the sequence to review it.",
+    );
+}
+
+/** Hash only editable configuration, not telemetry or provider timestamps. */
+export function sequenceConfigurationRevision(campaign: Record<string, unknown>) {
+  return createHash("sha256")
+    .update(
+      stableJsonValue(
+        Object.fromEntries(
+          ["name", "sequences", "campaign_schedule", "email_list", "stop_on_reply"].map((key) => [
+            key,
+            campaign[key] ?? null,
+          ]),
+        ),
+      ),
+    )
+    .digest("hex");
+}
+
+async function reserveSequenceEffect(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  key: string,
+  input: object,
+  payload?: object,
+) {
+  const existing = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
+  if (existing) {
+    const request = existing.request as { input?: unknown; payload?: Record<string, unknown> };
+    if (
+      existing.spaceId !== context.spaceId ||
+      existing.kind !== "instantly_sequence_draft" ||
+      stableJsonValue(request.input) !== stableJsonValue(input)
+    )
+      throw new Error("This draft changed in another request. Reopen it before saving again.");
+    const result = existing.result as { campaignId?: string } | null;
+    if (typeof result?.campaignId === "string")
+      return { existing, campaignId: result.campaignId, payload: request.payload };
+    throw new Error(
+      "The previous draft request is still unconfirmed. Review the saved sequences before retrying.",
+    );
+  }
+  if (!context.runId) throw new Error("Open the role conversation before changing a draft");
+  try {
+    await prisma.externalEffect.create({
+      data: {
+        spaceId: context.spaceId,
+        runId: context.runId,
+        kind: "instantly_sequence_draft",
+        idempotencyKey: key,
+        status: "executing",
+        request: { input, ...(payload ? { payload } : {}) } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002")
+      return reserveSequenceEffect(prisma, context, key, input, payload);
+    throw error;
+  }
+  return {
+    existing: null,
+    campaignId: null,
+    payload: payload as Record<string, unknown> | undefined,
+  };
+}
+
+/** No network call runs under a database lock. Unknown delivery consumes the nonce. */
+async function createAssociatedDraft(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  roleId: string,
+  operation: "create" | "clone",
+  nonce: string,
+  input: object,
+  payload: Record<string, unknown>,
+) {
+  const key = `instantly-sequence-draft:${serverId}:${roleId}:${operation}:${nonce}`;
+  const reservation = await reserveSequenceEffect(prisma, context, key, input, payload);
+  let id = reservation.campaignId;
+  if (reservation.existing?.status === "completed" && id) {
+    await context.reauthorize?.();
+    return roleDraft(prisma, rest, context, serverId, { role_id: roleId, campaign_id: id });
+  }
+  const expected = reservation.payload ?? payload;
+  try {
+    if (!id) {
+      const created = await rest("POST", "/campaigns", payload);
+      id = Uuid.parse(created.id);
+    }
+    const binding = {
+      campaignId: id,
+      campaignName: String(expected.name),
+      eaccount:
+        Array.isArray(expected.email_list) && typeof expected.email_list[0] === "string"
+          ? expected.email_list[0]
+          : "",
+      leads: {},
+      created: true,
+    };
+    const associationKey = `${bindingKey(serverId, roleId)}:campaign:${id}`;
+    // Commit the returned id and role association together; no provider I/O runs in this transaction.
+    await prisma.$transaction(async (tx) => {
+      await tx.externalEffect.updateMany({
+        where: { idempotencyKey: key },
+        data: { status: "created", result: { campaignId: id! } },
+      });
+      await tx.externalEffect.upsert({
+        where: { idempotencyKey: associationKey },
+        create: {
+          spaceId: context.spaceId,
+          runId: context.runId!,
+          kind: "instantly_role_campaign",
+          idempotencyKey: associationKey,
+          status: "completed",
+          request: { roleId, serverId },
+          result: binding,
+        },
+        update: {},
+      });
+      if (operation === "create")
+        await tx.externalEffect.upsert({
+          where: { idempotencyKey: bindingKey(serverId, roleId) },
+          create: {
+            spaceId: context.spaceId,
+            runId: context.runId!,
+            kind: "instantly_role_campaign",
+            idempotencyKey: bindingKey(serverId, roleId),
+            status: "completed",
+            request: { roleId, serverId },
+            result: binding,
+          },
+          update: {},
+        });
+    });
+    // Receipt and exact role association survive revocation after the provider accepted creation.
+    await context.reauthorize?.();
+    const saved = await rest("GET", `/campaigns/${id}`);
+    const people = await rest("POST", "/leads/list", { campaign: id, limit: 1 });
+    if (saved.status !== DRAFT || !Array.isArray(people.items) || people.items.length !== 0)
+      throw new Error("The saved draft could not be verified. Reopen the sequence to review it.");
+    requireSavedConfiguration(saved, expected);
+    await prisma.externalEffect.updateMany({
+      where: { idempotencyKey: key },
+      data: { status: "completed", result: { campaignId: id } },
+    });
+    return roleDraft(
+      prisma,
+      rest,
+      context,
+      serverId,
+      { role_id: roleId, campaign_id: id },
+      expected,
+    );
+  } catch (error) {
+    // ponytail: the provider has no idempotency keys; never re-POST an uncertain create. A
+    // known id resumes readback; an unknown id needs provider reconciliation, not a blind retry.
+    await prisma.externalEffect.updateMany({
+      where: { idempotencyKey: key, status: "executing" },
+      data: { status: "unknown" },
+    });
+    throw error;
+  }
+}
+
+/** An explicit secondary sequence never replaces the role's primary outreach binding. */
+async function roleDraftBinding(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  serverId: string,
+  roleId: string,
+  campaignId?: string,
+) {
+  const key = bindingKey(serverId, roleId);
+  const primary = await readBinding(prisma, context, key);
+  if (!campaignId || primary?.binding.campaignId === campaignId) return primary;
+  const selected = await readBinding(prisma, context, `${key}:campaign:${campaignId}`);
+  if (selected?.binding.campaignId !== campaignId) throw new IsolationError();
+  return selected;
+}
+
 async function roleDraft(
   prisma: PrismaClient,
   rest: InstantlyRest,
   context: AdapterContext,
   serverId: string,
   args: z.output<typeof ReadRoleDraftInput>,
+  expected?: Record<string, unknown>,
+  verifiedReceipt?: string,
 ) {
   const role = await requireRole(prisma, context, args.role_id);
-  const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
+  const existing = await roleDraftBinding(prisma, context, serverId, role.id, args.campaign_id);
   if (args.campaign_id && args.campaign_id !== existing?.binding.campaignId)
     throw new IsolationError();
   const campaign = existing ? await rest("GET", `/campaigns/${existing.binding.campaignId}`) : null;
+  if (expected && campaign) requireSavedConfiguration(campaign, expected);
   const accounts = await rest("GET", "/accounts?limit=100");
   const mailboxes = (Array.isArray(accounts.items) ? accounts.items : []).flatMap((item) =>
     typeof item?.email === "string" ? [item.email as string] : [],
   );
-  if (!campaign) return { roleId: role.id, roleTitle: role.title, mailboxes, campaign: null };
+  const associations = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: context.spaceId,
+      run: { userId: context.userId },
+      OR: [
+        {
+          kind: "instantly_role_campaign",
+          status: "completed",
+          AND: [
+            { request: { path: ["roleId"], equals: role.id } },
+            { request: { path: ["serverId"], equals: serverId } },
+          ],
+        },
+        {
+          kind: "instantly_sequence_draft",
+          status: { in: ["executing", "unknown"] },
+          idempotencyKey: { startsWith: `instantly-sequence-draft:${serverId}:${role.id}:` },
+        },
+      ],
+    },
+    select: { result: true, kind: true, status: true, idempotencyKey: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const unconfirmedDrafts = associations.filter(
+    (effect) =>
+      effect.kind === "instantly_sequence_draft" &&
+      ["executing", "unknown"].includes(effect.status) &&
+      effect.idempotencyKey !== verifiedReceipt,
+  ).length;
+  const campaigns = [
+    ...new Map(
+      associations.flatMap((effect) => {
+        const binding = effect.result as Partial<RoleBinding> | null;
+        return typeof binding?.campaignId === "string" && typeof binding.campaignName === "string"
+          ? [[binding.campaignId, { id: binding.campaignId, name: binding.campaignName }] as const]
+          : [];
+      }),
+    ).values(),
+  ];
+  if (!campaign)
+    return {
+      roleId: role.id,
+      roleTitle: role.title,
+      mailboxes,
+      campaigns,
+      unconfirmedDrafts,
+      campaign: null,
+    };
   const { timezone, hours } = draftDelivery(campaign);
   const raw = Array.isArray(campaign.sequences) ? campaign.sequences : [];
   const steps = editableDraft(campaign)
@@ -1829,10 +2148,15 @@ async function roleDraft(
     roleId: role.id,
     roleTitle: role.title,
     mailboxes,
+    campaigns,
+    unconfirmedDrafts,
     campaign: {
       id: existing!.binding.campaignId,
       name: String(campaign.name ?? role.title),
       status: campaign.status,
+      revision: sequenceConfigurationRevision(campaign),
+      observedDetails: campaignObservedDetails(campaign),
+      stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
       editable:
         campaign.status === DRAFT &&
         editableDraft(campaign) &&
@@ -1852,41 +2176,103 @@ async function roleDraft(
 
 export async function runInstantlyWrite(
   prisma: PrismaClient,
-  rest: InstantlyRest,
+  accountRest: InstantlyRest,
   context: AdapterContext,
   serverId: string,
   toolName: string,
   args: unknown,
+  /** Set on the shared account: the campaigns this connection owns. */
+  owned?: ReadonlySet<string>,
 ): Promise<unknown> {
+  if (owned && toolName === "native_instantly_create_campaign")
+    throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  const rest = owned ? ownedInstantlyRest(accountRest, owned) : accountRest;
   switch (toolName) {
     case "native_instantly_get_role_draft":
       return roleDraft(prisma, rest, context, serverId, ReadRoleDraftInput.parse(args));
-    case "native_instantly_create_role_draft": {
-      const input = RoleDraftInput.parse(args);
+    case "native_instantly_clone_role_draft": {
+      const input = CloneRoleDraftInput.parse(args);
       const role = await requireRole(prisma, context, input.role_id);
-      if (await readBinding(prisma, context, bindingKey(serverId, role.id)))
-        throw new Error("This role already has a campaign; reopen it before editing");
-      if (!context.runId) throw new Error("Start a role conversation before creating a draft");
-      const campaign = await createCampaign(rest, input);
-      if (typeof campaign.id !== "string") throw new Error("No campaign id returned");
-      await recordBinding(prisma, context, bindingKey(serverId, role.id), role.id, serverId, {
-        campaignId: campaign.id,
-        campaignName: input.name,
-        eaccount: input.eaccount,
-        leads: {},
-        created: true,
-      });
-      if (input.steps) await requireSavedEmail(rest, campaign.id);
-      return roleDraft(prisma, rest, context, serverId, {
-        role_id: role.id,
-        campaign_id: campaign.id,
-      });
+      await roleDraftBinding(prisma, context, serverId, role.id, input.campaign_id);
+      if (!context.runId) throw new Error("Start a role conversation before cloning a draft");
+      const original = await rest("GET", `/campaigns/${input.campaign_id}`);
+      if (
+        original.id !== input.campaign_id ||
+        !Array.isArray(original.sequences) ||
+        !original.campaign_schedule
+      )
+        throw new Error("The complete saved sequence could not be read");
+      // Copy template fields verbatim. Status, recipients, analytics and historical run state
+      // are not POSTed; the provider's create operation always makes a new inactive draft.
+      const fields = [
+        "campaign_schedule",
+        "sequences",
+        "email_list",
+        "stop_on_reply",
+        "stop_on_auto_reply",
+        "stop_for_company",
+        "open_tracking",
+        "link_tracking",
+        "text_only",
+        "insert_unsubscribe_header",
+        "daily_limit",
+        "daily_max_leads",
+        "email_gap",
+        "random_wait_max",
+        "allow_risky_contacts",
+      ];
+      const body = Object.fromEntries(
+        fields
+          .filter((field) => original[field] !== undefined)
+          .map((field) => [field, original[field]]),
+      );
+      return createAssociatedDraft(
+        prisma,
+        rest,
+        context,
+        serverId,
+        role.id,
+        "clone",
+        input.client_nonce,
+        input,
+        { ...body, name: input.name },
+      );
+    }
+    case "native_instantly_create_role_draft": {
+      const input = CreateRoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      await requireOwnMailbox(rest, input.eaccount);
+      return createAssociatedDraft(
+        prisma,
+        rest,
+        context,
+        serverId,
+        role.id,
+        "create",
+        input.client_nonce,
+        input,
+        campaignBody(input.name, input),
+      );
     }
     case "native_instantly_update_role_draft": {
       const input = UpdateRoleDraftInput.parse(args);
       const role = await requireRole(prisma, context, input.role_id);
-      const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
+      const existing = await roleDraftBinding(
+        prisma,
+        context,
+        serverId,
+        role.id,
+        input.campaign_id,
+      );
       if (existing?.binding.campaignId !== input.campaign_id) throw new IsolationError();
+      const effectKey = `instantly-sequence-draft:${serverId}:${role.id}:save:${input.campaign_id}:${input.expected_revision}`;
+      const previous = await prisma.externalEffect.findUnique({
+        where: { idempotencyKey: effectKey },
+      });
+      if (previous) {
+        await reserveSequenceEffect(prisma, context, effectKey, input);
+        return roleDraft(prisma, rest, context, serverId, input, campaignBody(input.name, input));
+      }
       const campaign = await rest("GET", `/campaigns/${input.campaign_id}`);
       if (campaign.status !== DRAFT) throw new Error("Only a draft can be edited here");
       if (
@@ -1896,10 +2282,32 @@ export async function runInstantlyWrite(
         campaign.email_list.length !== 1
       )
         throw new Error("This sequence needs to be edited in its existing mail workspace");
+      if (sequenceConfigurationRevision(campaign) !== input.expected_revision)
+        throw new Error(
+          "This sequence changed since it was opened. Reopen it before saving again.",
+        );
       await requireOwnMailbox(rest, input.eaccount);
-      await rest("PATCH", `/campaigns/${input.campaign_id}`, campaignBody(input.name, input));
-      if (input.steps) await requireSavedEmail(rest, input.campaign_id);
-      return roleDraft(prisma, rest, context, serverId, input);
+      await reserveSequenceEffect(prisma, context, effectKey, input);
+      try {
+        // ponytail: this revision claim fences native editors. The provider has no CAS;
+        // an external writer racing final GET/PATCH needs provider ETag/If-Match support.
+        const expected = campaignBody(input.name, input);
+        await rest("PATCH", `/campaigns/${input.campaign_id}`, expected);
+        await context.reauthorize?.();
+        const output = await roleDraft(prisma, rest, context, serverId, input, expected, effectKey);
+        await prisma.externalEffect.updateMany({
+          where: { idempotencyKey: effectKey },
+          data: { status: "completed", result: { campaignId: input.campaign_id } },
+        });
+        await context.reauthorize?.();
+        return output;
+      } catch (error) {
+        await prisma.externalEffect.updateMany({
+          where: { idempotencyKey: effectKey, status: "executing" },
+          data: { status: "unknown" },
+        });
+        throw error;
+      }
     }
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);

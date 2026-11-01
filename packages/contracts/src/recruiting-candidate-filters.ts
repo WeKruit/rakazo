@@ -7,9 +7,9 @@ const Text = z.string().trim().min(1);
 export const ListRecruitingCandidatesInput = z.strictObject({
   roleId: RecruitingId,
   cursor: Text.optional(),
-  /** Rows to skip, to jump straight to a numbered page. Not combined with `cursor`. */
-  offset: z.number().int().min(0).max(100_000).optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  /** Rows to skip for a numbered page; a cursor takes precedence. */
+  offset: z.number().int().min(0).max(6000).optional(),
   query: z.string().max(240).optional(),
   assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
   verdict: VerdictSchema.optional(),

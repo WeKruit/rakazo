@@ -25,7 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { NavigateFunction, SetURLSearchParams } from "react-router-dom";
+import type { NavigateFunction } from "react-router-dom";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { newClientId } from "../../lib/client-id";
 import { readFileAsBase64, revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
@@ -73,7 +73,6 @@ export function useShellRecruiting({
   activeGroupId,
   roleChatOpen,
   roleChatSection,
-  setSearchParams,
   setMobileSidebarOpen,
   setPanel,
   recruitingTab,
@@ -118,7 +117,6 @@ export function useShellRecruiting({
   activeGroupId: RefObject<string | undefined>;
   roleChatOpen: boolean;
   roleChatSection: RefObject<HTMLElement | null>;
-  setSearchParams: SetURLSearchParams;
   setMobileSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setPanel: (next: Panel | ((current: Panel) => Panel)) => void;
   recruitingTab: { threadId: string; tab: RecruitingPanelState["tab"] } | null;
@@ -174,6 +172,7 @@ export function useShellRecruiting({
     "sequence",
     "inbox",
     "interview",
+    "analytics",
     "workflow",
     "routines",
     "tasks",
@@ -412,7 +411,9 @@ export function useShellRecruiting({
     !boundRoleCrmMode &&
     !workspaceNewRole &&
     ["brief", "feedback"].includes(recruitingWorkspaceView);
-  function openRecruitingView(view: RecruitingWorkspaceView) {
+  function recruitingViewHref(view: RecruitingWorkspaceView) {
+    if (view === "tasks" || view === "routines")
+      return `/app?${new URLSearchParams({ view, role: searchParams.get("role") ?? "all" })}`;
     if (
       [
         "brief",
@@ -424,20 +425,30 @@ export function useShellRecruiting({
         "interview",
         "routines",
         "tasks",
+        "analytics",
       ].includes(view)
     ) {
-      navigate(`/app?${new URLSearchParams({ view, role: "all" })}`);
-    } else {
-      setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.set("view", view);
-          next.delete("role");
-          return next;
-        },
-        { replace: true },
-      );
+      if (crmMode) {
+        const next = new URLSearchParams(searchParams);
+        next.set("view", view);
+        next.delete("detail");
+        return `${inGroup && groupId ? `/app/g/${groupId}` : active?.id ? `/app/${active.id}` : "/app"}?${next}`;
+      }
+      const scope = searchParams.get("role");
+      if (!scope && !inGroup && active?.id && knownThreadId)
+        return `/app/${active.id}?${new URLSearchParams({ view })}`;
+      return groupId && !groupId.startsWith("recruiting-global-") && !scope
+        ? `/app/g/${groupId}?${new URLSearchParams({ view })}`
+        : `/app?${new URLSearchParams({ view, role: scope ?? "all" })}`;
     }
+    if (view === "home") return "/app?view=home";
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    next.delete("role");
+    return `${inGroup && groupId ? `/app/g/${groupId}` : active?.id ? `/app/${active.id}` : "/app"}?${next}`;
+  }
+  function openRecruitingView(view: RecruitingWorkspaceView) {
+    navigate(recruitingViewHref(view));
     setMobileSidebarOpen(false);
     setPanel(null);
   }
@@ -1147,6 +1158,7 @@ export function useShellRecruiting({
     roleChatHidden,
     workspaceBrief,
     openRecruitingView,
+    recruitingViewHref,
     activeRecruitingTab,
     changeRecruitingTab,
     composerRef,

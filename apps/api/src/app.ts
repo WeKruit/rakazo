@@ -612,13 +612,12 @@ export async function createApp(
       })
     : undefined;
   reconciler?.start();
-  if (env.firstPartyMcpUrl)
-    startRecruitingCrmAutoSync({
-      prisma,
-      connectors: stack.connector,
-      firstPartyMcpUrl: env.firstPartyMcpUrl,
-      signal: shutdown.signal,
-    });
+  startRecruitingCrmAutoSync({
+    prisma,
+    connectors: stack.connector,
+    firstPartyMcpUrl: env.firstPartyMcpUrl,
+    signal: shutdown.signal,
+  });
 
   // Auth, webhook and worker composition retain their explicit privileged client.
   // The protected RPC client has no privileged fallback when actor context is missing.

@@ -5,7 +5,7 @@ import type {
   RecruitingSequenceInput,
   RecruitingSequenceOutput,
 } from "@rakazo/contracts";
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
@@ -18,6 +18,12 @@ import "../../src/styles.css";
 const roleTitle = "Senior Platform Engineer · 全球平台工程与基础设施招聘";
 const analytics: RecruitingAnalyticsOutput = {
   roles: [{ id: "role-example", title: roleTitle, groupId: "group-example" }],
+  trend: [
+    { date: "2026-10-02", contacted: 2, replied: 1 },
+    { date: "2026-10-09", contacted: 4, replied: 1 },
+    { date: "2026-10-16", contacted: 3, replied: 1 },
+  ],
+  groups: [{ roleId: "role-example", title: roleTitle, contacted: 9, replied: 3 }],
   observedShortlistedPeople: 14,
   shortlistDateUnknownPeople: 2,
   observedContactedPeople: 9,
@@ -45,6 +51,7 @@ const initialSequence: RecruitingSequenceOutput = {
     name: "Platform engineering introductions",
     status: 0,
     editable: true,
+    revision: "a".repeat(64),
     eaccount: "recruiter@example.test",
     steps: [
       {
@@ -63,13 +70,56 @@ const initialSequence: RecruitingSequenceOutput = {
   },
 };
 function Fixture() {
-  const saved = useRef(initialSequence);
+  const params = new URLSearchParams(location.search);
+  const rich = params.has("rich");
+  const [open, setOpen] = useState(true);
+  const [mount, setMount] = useState(0);
+  const saved = useRef<RecruitingSequenceOutput>(
+    params.has("new")
+      ? { ...initialSequence, campaign: null }
+      : rich
+        ? {
+            ...initialSequence,
+            campaign: {
+              ...initialSequence.campaign!,
+              editable: false,
+              steps: [],
+              observedDetails: {
+                schedules: [],
+                sequences: [
+                  {
+                    steps: [
+                      {
+                        type: "email",
+                        delay: 0,
+                        delayUnit: "days",
+                        variants: [
+                          {
+                            subject: "Retained rich subject",
+                            body: "<p>Hello <strong>{{first_name}}</strong></p>",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }
+        : initialSequence,
+  );
   const execute = useCallback(
     async (input: RecruitingSequenceInput): Promise<RecruitingSequenceOutput> => {
       if (input.operation === "save" || input.operation === "create") {
         saved.current = {
           ...saved.current,
-          campaign: { id: initialSequence.campaign!.id, status: 0, editable: true, ...input.draft },
+          campaign: {
+            id: initialSequence.campaign!.id,
+            status: 0,
+            editable: true,
+            revision: "a".repeat(64),
+            ...input.draft,
+          },
         };
       } else if (input.operation === "pause" && saved.current.campaign) {
         saved.current = { ...saved.current, campaign: { ...saved.current.campaign, status: 2 } };
@@ -82,9 +132,26 @@ function Fixture() {
   return (
     <main className="mx-auto min-w-0 max-w-7xl space-y-8 p-4 text-foreground">
       {surface !== "sequence" && <RecruitingAnalytics accountKey="synthetic-account" load={load} />}
-      {surface !== "analytics" && (
-        <SequenceEditor roleId="role-example" serverId="source-example" execute={execute} />
-      )}
+      {surface !== "analytics" &&
+        (open ? (
+          <SequenceEditor
+            key={mount}
+            roleId="role-example"
+            serverId="source-example"
+            execute={execute}
+            onDone={() => setOpen(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setMount((value) => value + 1);
+              setOpen(true);
+            }}
+          >
+            Reopen saved sequence
+          </button>
+        ))}
     </main>
   );
 }
