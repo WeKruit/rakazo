@@ -28,7 +28,7 @@ import {
   Textarea,
 } from "@rakazo/ui-web";
 import { ChevronDown, ListFilter, RefreshCw, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ListPager } from "../../components/ListPager";
 import { writeComposerDraft } from "../../lib/composer-draft";
@@ -40,9 +40,10 @@ import { pendingDetailTarget, useRecruitingDetail } from "./detail";
 import { LinkedInIcon } from "./LinkedInIcon";
 import { PersonAvatar } from "./ProfileImage";
 import { ProfileMailIcon } from "./ProfileMailIcon";
-import { profileImageUrl } from "./profileAssets";
+import { ProfileSourceIcon } from "./ProfileSourceIcon";
+import { profileImageUrl, profileLinkUrl } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
-import { statusText, TabLoading } from "./shared";
+import { RecruitingReadCacheContext, statusText, TabLoading, useKeyedRead } from "./shared";
 
 const PAGE_SIZE = 50;
 const EXPORT_MAX = 5000;
@@ -53,17 +54,18 @@ function websiteHost(value: string | null) {
   return url ? new URL(url).hostname : null;
 }
 
-type Facets = Awaited<ReturnType<typeof rpc.recruiting.contacts.facets>>;
 type TextKey = "location" | "company" | "title" | "school" | "skills";
 type DateKey = "added" | "contacted" | "replied";
 type FlagKey = "contacted" | "replied" | "shortlisted";
 
 /** Everyone across the account's roles and CRM in one filterable list. */
 export function AllContacts({
+  accountKey,
   groups,
   refreshSignal,
   spaceId,
 }: {
+  accountKey: string;
   groups: readonly Group[];
   refreshSignal: number;
   spaceId?: string;
@@ -82,12 +84,7 @@ export function AllContacts({
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
-  const [page, setPage] = useState<{
-    key: string;
-    data: ListRecruitingContactsOutput;
-  }>();
-  const [failed, setFailed] = useState(false);
-  const [facets, setFacets] = useState<Facets>();
+  const cache = useContext(RecruitingReadCacheContext);
   const [enroll, setEnroll] = useState(false);
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());
   const [dialog, setDialog] = useState<"tag" | "activity">();
@@ -134,42 +131,29 @@ export function AllContacts({
     } satisfies RecruitingContactFilters;
   }, [filters, debouncedText, debouncedQuery, days]);
   const filterKey = JSON.stringify(request);
-  const readKey = JSON.stringify([filterKey, offset, reload, refreshSignal]);
+  const readKey = JSON.stringify([accountKey, filterKey, offset, reload, refreshSignal]);
 
   // A new filter starts from the first page with nothing selected.
   useEffect(() => {
     setOffset(0);
     setSelected(new Map());
   }, [filterKey]);
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    rpc.recruiting.contacts
-      .list({
+  const { data, loading, failed } = useKeyedRead(
+    readKey,
+    () =>
+      rpc.recruiting.contacts.list({
         filters: request,
         limit: PAGE_SIZE,
         ...(offset ? { cursor: String(offset) } : {}),
-      })
-      .then((data) => {
-        if (!cancelled) setPage({ key: readKey, data });
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [readKey]);
+      }),
+    { cache, key: `contacts:${JSON.stringify([accountKey, filterKey, offset])}` },
+  );
+  const { data: facets } = useKeyedRead(
+    JSON.stringify([accountKey, refreshSignal, reload]),
+    () => rpc.recruiting.contacts.facets({}),
+    { cache, key: `contact-facets:${accountKey}` },
+  );
 
-  useEffect(() => {
-    void rpc.recruiting.contacts
-      .facets({})
-      .then(setFacets)
-      .catch(() => undefined);
-  }, [refreshSignal, reload]);
-
-  const data = page?.data;
-  const loading = page?.key !== readKey && !failed;
   const rows = data?.items ?? [];
   const allOnPage = rows.length > 0 && rows.every((row) => selected.has(row.personKey));
   function profileTarget(index: number): RecruitingDetailTarget | undefined {
@@ -769,6 +753,9 @@ export function AllContacts({
                       <Trans>Name</Trans>
                     </th>
                     <th className="px-3 py-2 font-medium">
+                      <Trans>Profiles</Trans>
+                    </th>
+                    <th className="px-3 py-2 font-medium">
                       <Trans>Roles</Trans>
                     </th>
                     <th className="px-3 py-2 font-medium">
@@ -804,6 +791,16 @@ export function AllContacts({
                   {rows.map((person, index) => {
                     const name = person.name ?? person.email ?? t`Unnamed`;
                     const linkedinUrl = profileImageUrl(person.linkedinUrl);
+                    const socialLinks = new Map<string, string>();
+                    for (const [label, value] of [
+                      ["GitHub", person.savedProfile?.githubUrl],
+                      [t`Website`, person.savedProfile?.websiteUrl],
+                      ["Stack Overflow", person.savedProfile?.stackOverflowUrl],
+                    ]) {
+                      const href = profileLinkUrl(value);
+                      if (href && href !== linkedinUrl && !socialLinks.has(href))
+                        socialLinks.set(href, label!);
+                    }
                     const target = profileTarget(index);
                     return (
                       <tr key={person.personKey} className="border-t border-border align-top">
@@ -839,6 +836,10 @@ export function AllContacts({
                                 {name}
                               </span>
                             )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1">
                             {person.email ? (
                               <a
                                 className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -858,6 +859,21 @@ export function AllContacts({
                               >
                                 <LinkedInIcon className="size-4" />
                               </a>
+                            ) : null}
+                            {[...socialLinks].map(([href, label]) => (
+                              <a
+                                key={href}
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`${name} · ${label}`}
+                              >
+                                <ProfileSourceIcon href={href} className="size-4" />
+                              </a>
+                            ))}
+                            {!person.email && !linkedinUrl && socialLinks.size === 0 ? (
+                              <span className="text-muted-foreground">—</span>
                             ) : null}
                           </div>
                         </td>

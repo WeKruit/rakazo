@@ -81,6 +81,8 @@ for (const width of [1440, 390]) {
     await mockRecruitingApp(page, { nativeScheduling: true });
     const reads: { filters: Record<string, unknown>; cursor?: string }[] = [];
     const tagged: unknown[] = [];
+    let holdContactRead = false;
+    let releaseContactRead: (() => void) | undefined;
     const person = (key: string, name: string, role: (typeof roles)[number], tags: string[]) => ({
       personKey: key,
       name,
@@ -89,7 +91,20 @@ for (const width of [1440, 390]) {
       location: "Los Angeles, California",
       school: "University of Example",
       linkedinUrl: `https://www.linkedin.com/in/${key}`,
-      email: null,
+      email: `${key}@example.test`,
+      savedProfile: {
+        personKey: `linkedin:/in/${key}`,
+        provider: "search",
+        fetchedAt: checkedAt,
+        headline: "Staff Engineer",
+        email: `${key}@example.test`,
+        githubUrl: `https://github.com/${key}`,
+        websiteUrl: `http://${key}.example.test/`,
+        stackOverflowUrl: `https://stackoverflow.com/users/123/${key}`,
+        profileImageUrl: null,
+        experience: [],
+        education: [],
+      },
       status: "shortlisted",
       noteKey: `autumn:linkedin:/in/${key}`,
       roles: [
@@ -111,6 +126,10 @@ for (const width of [1440, 390]) {
     await page.route("**/rpc/recruiting/contacts/list", async (route) => {
       const input = route.request().postDataJSON().json;
       reads.push(input);
+      if (holdContactRead)
+        await new Promise<void>((resolve) => {
+          releaseContactRead = resolve;
+        });
       const items = [
         person("avery", "Avery Example", roles[0]!, tagged.length ? ["Hot"] : []),
         person("blake", "Blake Example", roles[1]!, []),
@@ -162,6 +181,24 @@ for (const width of [1440, 390]) {
     const list = page.getByRole("region", { name: "All contacts", exact: true });
     await expect(list.getByText("Avery Example")).toBeVisible();
     await expect(list.getByText("Blake Example")).toBeVisible();
+    const avery = list.getByRole("row").filter({ hasText: "Avery Example" });
+    await expect(avery.locator('a[href="https://github.com/avery"]')).toBeVisible();
+    await expect(avery.locator('a[href="http://avery.example.test/"]')).toBeVisible();
+    await expect(
+      avery.locator('a[href="https://stackoverflow.com/users/123/avery"]'),
+    ).toBeVisible();
+    await expect(
+      avery.getByRole("link", { name: "Email Avery Example", exact: true }).locator("svg"),
+    ).toHaveCSS("color", "rgb(37, 99, 235)");
+    // A slow refresh must leave cached contacts visible and interactive.
+    holdContactRead = true;
+    const beforeRefresh = reads.length;
+    await list.getByRole("button", { name: "Refresh contacts", exact: true }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(beforeRefresh);
+    await expect(list.getByText("Avery Example")).toBeVisible();
+    await expect(list.getByRole("textbox", { name: "Search contacts", exact: true })).toBeEnabled();
+    holdContactRead = false;
+    releaseContactRead?.();
     const tableScroll = list.locator(".hire-contact-table-scroll");
     await page.mouse.move(0, 0);
     await expect(tableScroll).toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");

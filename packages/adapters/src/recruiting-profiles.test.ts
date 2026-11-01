@@ -14,6 +14,7 @@ import {
   keepSearchHistory,
   linkedinPersonKey,
   peopleFromSearch,
+  prepareRecruitingProfileRows,
   profileFromLookup,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
@@ -285,7 +286,7 @@ describe("peopleFromSearch", () => {
       },
     };
     const result = { content: [{ type: "text", text: JSON.stringify(body) }] };
-    expect(peopleFromSearch(result, PLATFORM_SEARCH)).toEqual([
+    expect(peopleFromSearch(result, PLATFORM_SEARCH)).toMatchObject([
       {
         name: "Ada Example",
         linkedin_url: "https://www.linkedin.com/in/ada-example",
@@ -331,7 +332,7 @@ describe("peopleFromSearch", () => {
         },
       ],
     };
-    expect(peopleFromSearch(json, ENDPOINT)).toEqual([
+    expect(peopleFromSearch(json, ENDPOINT)).toMatchObject([
       {
         name: "Ada Example",
         linkedin_url: "https://www.linkedin.com/in/ada-example",
@@ -400,7 +401,7 @@ describe("peopleFromSearch", () => {
       "URL: https://www.linkedin.com/company/acme",
     ].join("\n");
     const listing = { content: [{ type: "text", text }] };
-    expect(peopleFromSearch(listing, PLATFORM_SEARCH)).toEqual([
+    expect(peopleFromSearch(listing, PLATFORM_SEARCH)).toMatchObject([
       {
         name: "Ada Example",
         linkedin_url: "https://www.linkedin.com/in/ada-example",
@@ -466,7 +467,7 @@ describe("peopleFromSearch", () => {
         { url: "https://www.linkedin.com/company/acme", title: "Acme" },
       ],
     });
-    expect(peopleFromSearch({ content: [{ type: "text", text }] }, PLATFORM_SEARCH)).toEqual([
+    expect(peopleFromSearch({ content: [{ type: "text", text }] }, PLATFORM_SEARCH)).toMatchObject([
       {
         name: "Cara Example",
         linkedin_url: "https://www.linkedin.com/in/cara-example",
@@ -868,4 +869,32 @@ describe("keepSearchHistory", () => {
       },
     });
   });
+});
+
+it("retains supplied CDN and structured photos without fetching them", () => {
+  const photo = "https://images.example.test/actual-person.png";
+  const profile = {
+    headline: null,
+    profileImageUrl: photo,
+    experience: [],
+    education: [],
+    email: null,
+    githubUrl: null,
+    websiteUrl: null,
+    stackOverflowUrl: null,
+  };
+  expect(
+    prepareRecruitingProfileRows([
+      { name: "Supplied", linkedin_url: "https://linkedin.com/in/supplied", _profile: profile },
+    ]),
+  ).toMatchObject([{ _profile: { profileImageUrl: photo }, _profile_image_source_url: photo }]);
+  expect(
+    prepareRecruitingProfileRows([
+      {
+        name: "Supplied",
+        linkedin_url: "https://linkedin.com/in/supplied",
+        profile_image_url: photo,
+      },
+    ]),
+  ).toMatchObject([{ _profile: { profileImageUrl: photo } }]);
 });

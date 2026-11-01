@@ -6954,6 +6954,10 @@ msgstr ""
 msgid "Webhook"
 msgstr "Вебхук"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"
 msgstr ""

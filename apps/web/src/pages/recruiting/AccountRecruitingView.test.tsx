@@ -890,17 +890,27 @@ it("lists every role's people in one server-paged table", async () => {
     );
     expect(read).not.toHaveBeenCalled();
     expect(listContacts).toHaveBeenCalledWith({ filters: {}, limit: 50 });
-    expect(container.textContent).toContain("Ada Lovelace");
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain("Ada Lovelace");
+    });
     expect(container.textContent).toContain("UCLA");
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),
     );
-    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+      expect(container.textContent).toContain("51–52 of 120");
+    });
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
     );
-    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
+    });
   } finally {
     await act(async () => pageRoot.unmount());
     container.remove();

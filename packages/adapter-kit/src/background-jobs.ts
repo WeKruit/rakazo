@@ -34,6 +34,7 @@ const payloadSchemas = {
     attempt: z.number().int().nonnegative().optional(),
   }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
+  "recruiting_profile.project": z.strictObject({ pageEffectId: z.string().min(1) }),
   "recruiting_agent_run.wait": z.object({
     threadId: z.string().min(1),
     botId: z.string().min(1),
@@ -73,6 +74,15 @@ export async function dispatchBackgroundJob(
 
 export function runJobKey(runId: string): string {
   return `run:${runId}`;
+}
+
+export function recruitingCandidateProfilesJob(pageEffectId: string): BackgroundJob {
+  return {
+    name: "recruiting_profile.project",
+    payload: { pageEffectId },
+    replaceKey: `recruiting_profile.project:${pageEffectId}`,
+    keepExisting: true,
+  };
 }
 
 export function routineJobKey(routineId: string): string {

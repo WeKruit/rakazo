@@ -1,8 +1,14 @@
 import type { JobPublisher, NotificationProvider } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, routineWakeupJob, runContinueJob } from "@rakazo/adapter-kit";
+import {
+  messagingDeliverJob,
+  recruitingCandidateProfilesJob,
+  routineWakeupJob,
+  runContinueJob,
+} from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import { stuckWorkStatusMessages } from "@rakazo/core";
 import type { Pool, PrismaClient, ThreadEvents } from "@rakazo/db";
+import { Prisma } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
@@ -128,6 +134,7 @@ export function createJobReconciler(
   let runCursor: Cursor | undefined;
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
+  let profileCursor: Cursor | undefined;
   let controlScanDeadline: Date | undefined;
   let idleSweptAt = 0;
   let stagesWatchedAt = 0;
@@ -149,6 +156,31 @@ export function createJobReconciler(
       }
 
       const now = new Date();
+      try {
+        // Newly marked save receipts are the durable intent. Never load raw profile facts here.
+        const pages = await deps.prisma.$queryRaw<
+          { id: string; createdAt: Date; pageEffectId: string }[]
+        >(Prisma.sql`
+          SELECT saving.id, saving."createdAt", page."effectId" AS "pageEffectId"
+          FROM external_effects saving
+          JOIN recruiting_candidate_pages page ON page."effectId"=saving.result->>'sourceEffectId'
+          WHERE saving.kind='recruiting_research' AND saving.status='completed'
+            AND saving.result->>'profileFactsVersion'='1'
+            AND NOT EXISTS (SELECT 1 FROM external_effects done
+              WHERE done.kind='recruiting_profile_projection' AND done.status='completed'
+                AND done."idempotencyKey"='recruiting-profile-project:'||page."effectId"||':'||page."artifactHash")
+            ${profileCursor ? Prisma.sql`AND (saving."createdAt",saving.id)>(${profileCursor.at},${profileCursor.id})` : Prisma.empty}
+          ORDER BY saving."createdAt",saving.id LIMIT ${batchSize}
+        `);
+        await Promise.all(
+          pages.map((page) => deps.jobs.enqueue(recruitingCandidateProfilesJob(page.pageEffectId))),
+        );
+        const last = pages.at(-1);
+        profileCursor =
+          pages.length === batchSize && last ? { at: last.createdAt, id: last.id } : undefined;
+      } catch (error) {
+        getLogger().error("recruiting profile reconciliation", error);
+      }
       try {
         questionCursor = await reconcileRecruitingQuestions({
           ...deps,

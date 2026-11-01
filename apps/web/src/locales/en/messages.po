@@ -6957,6 +6957,10 @@ msgstr "Web, desktop and mobile apps"
 msgid "Webhook"
 msgstr "Webhook"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr "Website"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"
 msgstr "Website login"

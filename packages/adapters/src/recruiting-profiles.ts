@@ -5,13 +5,16 @@ import type {
   RecruitingProfilesToolInput,
   RecruitingSavedProfile,
 } from "@rakazo/contracts";
+import { RecruitingSavedProfileSchema } from "@rakazo/contracts";
 import { recruitingCalibrationIdentity } from "@rakazo/core";
-import type { PrismaClient } from "@rakazo/db";
+import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
+  appendEventInTransaction,
   listRecruitingRolePoolRuns,
   listRecruitingSavedProfiles,
   listRunToolResults,
   saveRecruitingSavedProfile,
+  saveRecruitingSavedProfiles,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
@@ -22,6 +25,51 @@ const LOOKUP_CALLS_MAX = 200;
 
 type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
 type Record_ = Record<string, unknown>;
+const factsSchema = RecruitingSavedProfileSchema.omit({
+  personKey: true,
+  provider: true,
+  fetchedAt: true,
+});
+
+function contactFacts(record: Record_) {
+  const emailValue = first(record, [
+    "email",
+    "email_address",
+    "work_email",
+    "professional_email",
+    "personal_email",
+  ]);
+  const addresses = [
+    emailValue,
+    ...(Array.isArray(record.emails)
+      ? record.emails.map((value) =>
+          isRecord(value) ? first(value, ["address", "email"]) : text(value),
+        )
+      : []),
+  ];
+  const email = addresses
+    .map((value) => RecruitingSavedProfileSchema.shape.email.safeParse(value))
+    .find((value) => value.success && value.data);
+  const social = (keys: string[], host?: RegExp) => {
+    const value = link(first(record, keys));
+    return value && (!host || host.test(new URL(value).hostname)) ? value : null;
+  };
+  return {
+    email: email?.success ? (email.data ?? null) : null,
+    githubUrl: social(["github_url", "githubUrl", "github"], /(^|\.)github\.com$/i),
+    websiteUrl: social([
+      "website_url",
+      "websiteUrl",
+      "personal_website",
+      "website",
+      "portfolio_url",
+    ]),
+    stackOverflowUrl: social(
+      ["stackoverflow_url", "stack_overflow_url", "stackOverflowUrl"],
+      /(^|\.)stackoverflow\.com$/i,
+    ),
+  };
+}
 
 export class RecruitingProfileError extends Error {}
 
@@ -42,6 +90,7 @@ function providerFor(endpoint: string) {
 }
 
 function text(value: unknown, max = 4000): string | null {
+  if (isRecord(value) && Object.hasOwn(value, "value")) value = value.value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -103,35 +152,45 @@ function coresignalProfile(record: Record_): Facts | null {
     return {
       title: first(job, ["position_title", "title"]),
       company_name: first(job, ["company_name"]),
-      company_url: link(job.company_website),
+      company_url: link(job.company_website ?? job.company_url),
       company_linkedin_url: link(job.company_linkedin_url ?? job.company_url),
-      company_logo_url: link(job.company_logo_url),
+      company_logo_url: link(job.company_logo_url ?? job.companyLogoUrl),
       company_industry: first(job, ["company_industry"]),
       company_size: first(job, ["company_size_range", "company_employees_count"]),
       location: first(job, ["location", "company_location"]),
-      start_date: date(job, "date_from"),
-      end_date: end,
-      is_current: active === true || active === 1 ? true : end ? false : null,
+      start_date: date(job, "date_from") ?? text(job.start_date, 40),
+      end_date: end ?? text(job.end_date, 40),
+      is_current:
+        typeof job.is_current === "boolean"
+          ? job.is_current
+          : active === true || active === 1
+            ? true
+            : end
+              ? false
+              : null,
       description: first(job, ["description"]),
     };
   });
   const education = schools.slice(0, 40).map(
     (school): RecruitingProfileEducation => ({
-      school_name: first(school, ["institution_name", "title"]),
+      school_name: first(school, ["institution_name", "school_name", "title"]),
       degree: first(school, ["degree"]),
       field_of_study: first(school, ["field_of_study", "major"]),
-      school_url: link(school.institution_website),
-      school_logo_url: link(school.institution_logo_url),
-      start_date: date(school, "date_from"),
-      end_date: date(school, "date_to"),
+      school_url: link(school.institution_website ?? school.school_url),
+      school_logo_url: link(school.institution_logo_url ?? school.school_logo_url),
+      start_date: date(school, "date_from") ?? text(school.start_date, 40),
+      end_date: date(school, "date_to") ?? text(school.end_date, 40),
     }),
   );
-  const profileImageUrl = link(record.picture_url ?? record.profile_picture_url);
+  const profileImageUrl = link(
+    record.picture_url ?? record.profile_picture_url ?? record.profile_image_url ?? record.image,
+  );
   const headline = first(record, ["headline", "generated_headline"]);
   if (!experience.length && !education.length && !profileImageUrl && !headline) return null;
   return {
     headline,
     profileImageUrl,
+    ...contactFacts(record),
     experience: experience.filter((job) => job.title || job.company_name),
     education: education.filter((school) => school.school_name || school.degree),
   };
@@ -265,6 +324,13 @@ export type PeopleSearchRow = {
   education?: string;
   /** The source photo link; the save replaces it with our own copy or drops it. */
   profile_image_url?: string;
+  email?: string | null;
+  github_url?: string | null;
+  website_url?: string | null;
+  stackoverflow_url?: string | null;
+  /** Exact normalized facts stay in the immutable receipt without becoming report findings. */
+  _profile?: Facts;
+  _profile_image_source_url?: string | null;
 };
 
 type SearchJob = {
@@ -362,7 +428,24 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (typeof record.experience === "string" && record.experience)
       row.experience = record.experience;
     if (typeof record.education === "string" && record.education) row.education = record.education;
-    const photo = linkedinPhotoUrl(record.profile_image_url ?? record.image);
+    const retained =
+      providerFor(endpoint)?.normalize(record) ??
+      factsSchema.safeParse(record._profile).data ??
+      coresignalProfile(record);
+    const contacts = contactFacts(record);
+    row.email = retained?.email ?? contacts.email;
+    row.github_url = retained?.githubUrl ?? contacts.githubUrl;
+    row.website_url = retained?.websiteUrl ?? contacts.websiteUrl;
+    row.stackoverflow_url = retained?.stackOverflowUrl ?? contacts.stackOverflowUrl;
+    if (retained) row._profile = retained;
+    const photo = linkedinPhotoUrl(
+      record.profile_image_url ??
+        record.profile_picture_url ??
+        record.picture_url ??
+        record.image ??
+        retained?.profileImageUrl,
+    );
+    row._profile_image_source_url = photo ?? null;
     if (photo) row.profile_image_url = photo;
     people.set(key, row);
   }
@@ -508,17 +591,20 @@ function peopleFromAgentRun(parsed: unknown): Record_[] {
   return Object.values(structured as Record_).flatMap((list) =>
     Array.isArray(list)
       ? list.flatMap((item: Record_) =>
-          item && typeof item === "object" && typeof item.name === "string"
+          item && typeof item === "object" && text(item.name)
             ? [
                 {
-                  full_name: item.name,
-                  linkedin_url: item.linkedin_url,
-                  job_title: typeof item.current_role === "string" ? item.current_role : null,
+                  ...item,
+                  full_name: text(item.name),
+                  linkedin_url: text(item.linkedin_url),
+                  job_title: text(item.current_role ?? item.current_title),
                   company_name:
                     typeof item.current_company === "string" ? item.current_company : null,
                   location: typeof item.location === "string" ? item.location : null,
                   snippet: typeof item.evidence === "string" ? snippetOf(item.evidence) : undefined,
-                  education: educationText(item.education),
+                  ...(Array.isArray(item.education) && item.education.some(isRecord)
+                    ? {}
+                    : { education: educationText(item.education) }),
                 },
               ]
             : [],
@@ -553,13 +639,27 @@ function peopleFromResults(body: string): Record_[] {
       location?: unknown;
       workHistory?: Array<{
         title?: unknown;
-        company?: { name?: unknown };
+        company?: {
+          name?: unknown;
+          website?: unknown;
+          url?: unknown;
+          linkedin_url?: unknown;
+          logo_url?: unknown;
+          logoUrl?: unknown;
+        };
+        company_logo_url?: unknown;
         location?: unknown;
         dates?: { from?: unknown; to?: unknown };
       }>;
       educationHistory?: Array<{
         degree?: unknown;
-        institution?: { name?: unknown };
+        institution?: {
+          name?: unknown;
+          website?: unknown;
+          url?: unknown;
+          logo_url?: unknown;
+          logoUrl?: unknown;
+        };
         dates?: { from?: unknown; to?: unknown };
       }>;
     };
@@ -572,8 +672,37 @@ function peopleFromResults(body: string): Record_[] {
       : typeof item.text === "string"
         ? item.text
         : "";
+    const fullProfile = coresignalProfile({
+      ...person,
+      ...contactFacts({ ...item, ...person }),
+      picture_url: item.image ?? (person as Record_).profile_image_url,
+      experience: jobs.map((entry) => ({
+        position_title: entry.title,
+        company_name: entry.company?.name,
+        company_website: entry.company?.website ?? entry.company?.url,
+        company_linkedin_url: entry.company?.linkedin_url,
+        company_logo_url:
+          entry.company_logo_url ?? entry.company?.logo_url ?? entry.company?.logoUrl,
+        location: entry.location,
+        date_from: monthText(entry.dates?.from),
+        date_to: monthText(entry.dates?.to),
+        active_experience: !entry.dates?.to,
+      })),
+      education: (Array.isArray(person.educationHistory) ? person.educationHistory : []).map(
+        (entry) => ({
+          institution_name: entry.institution?.name,
+          degree: entry.degree,
+          institution_website: entry.institution?.website ?? entry.institution?.url,
+          institution_logo_url: entry.institution?.logo_url ?? entry.institution?.logoUrl,
+          date_from: monthText(entry.dates?.from),
+          date_to: monthText(entry.dates?.to),
+        }),
+      ),
+    });
     return [
       {
+        ...contactFacts({ ...item, ...person }),
+        ...(fullProfile ? { _profile: fullProfile } : {}),
         full_name: name,
         linkedin_url: item.url,
         image: item.image,
@@ -765,14 +894,255 @@ export function factsFromSearchRow(row: PeopleSearchRow): Facts | null {
       },
     ];
   });
-  const photo = row.profile_image_url?.startsWith("data:image/") ? row.profile_image_url : null;
-  if (!experience.length && !education.length && !photo) return null;
-  return { headline: null, profileImageUrl: photo, experience, education };
+  const retained = row._profile;
+  const suppliedPhoto = row.profile_image_url ?? retained?.profileImageUrl;
+  const photo = suppliedPhoto?.startsWith("data:image/") ? suppliedPhoto : link(suppliedPhoto);
+  const contacts = {
+    email: row.email ?? retained?.email ?? null,
+    githubUrl: row.github_url ?? retained?.githubUrl ?? null,
+    websiteUrl: row.website_url ?? retained?.websiteUrl ?? null,
+    stackOverflowUrl: row.stackoverflow_url ?? retained?.stackOverflowUrl ?? null,
+  };
+  if (
+    !experience.length &&
+    !education.length &&
+    !photo &&
+    !retained &&
+    !Object.values(contacts).some(Boolean)
+  )
+    return null;
+  return {
+    headline: retained?.headline ?? null,
+    profileImageUrl: photo,
+    experience: retained?.experience.length ? retained.experience : experience,
+    education: retained?.education.length ? retained.education : education,
+    ...contacts,
+  };
+}
+
+/** The existing native save lane retains canonical supplied facts before a later grading row. */
+export function prepareRecruitingProfileRows(rows: readonly unknown[]) {
+  const prepared = rows.map((value) => (isRecord(value) ? { ...value } : value));
+  const people = prepared.flatMap((value) => {
+    if (!isRecord(value)) return [];
+    const retained = factsSchema.safeParse(value._profile).data ?? coresignalProfile(value);
+    const contacts = contactFacts(value);
+    const source = text(
+      value.profile_image_url ??
+        value.picture_url ??
+        value.profile_picture_url ??
+        value.image ??
+        retained?.profileImageUrl,
+    );
+    const row: PeopleSearchRow = {
+      name: text(value.name) ?? "",
+      linkedin_url: text(value.linkedin_url ?? value.profile_url) ?? "",
+      experience: typeof value.experience === "string" ? value.experience : undefined,
+      education: typeof value.education === "string" ? value.education : undefined,
+      ...{
+        email: retained?.email ?? contacts.email,
+        github_url: retained?.githubUrl ?? contacts.githubUrl,
+        website_url: retained?.websiteUrl ?? contacts.websiteUrl,
+        stackoverflow_url: retained?.stackOverflowUrl ?? contacts.stackOverflowUrl,
+      },
+      ...(retained ? { _profile: retained } : {}),
+      profile_image_url: source?.match(/^data:image\/(?:png|jpeg|webp);base64,/)
+        ? source
+        : source
+          ? (link(source) ?? undefined)
+          : undefined,
+    };
+    return [{ value, row, source }];
+  });
+  for (const { value, row, source } of people) {
+    value._profile_image_source_url = source;
+    value._profile = factsFromSearchRow(row) ?? {
+      headline: null,
+      profileImageUrl: null,
+      experience: [],
+      education: [],
+      email: null,
+      githubUrl: null,
+      websiteUrl: null,
+      stackOverflowUrl: null,
+    };
+  }
+  return prepared;
 }
 
 /** A saved profile is complete once it has both a work history and an education history. */
 const complete = (profile: RecruitingSavedProfile | undefined) =>
   Boolean(profile?.experience.length && profile.education.length);
+
+/** Durable, post-save projection only: candidate response paths never invoke this worker. */
+export async function projectRecruitingCandidateProfiles(
+  deps: { prisma: PrismaClient; events: Pick<ThreadEvents, "notify"> },
+  payload: { pageEffectId: string },
+  fetchPhoto?: Parameters<typeof inlineProfilePhotos>[1],
+) {
+  const { prisma } = deps;
+  const page = await prisma.recruitingCandidatePage.findUnique({
+    where: { effectId: payload.pageEffectId },
+    include: {
+      role: true,
+      artifact: true,
+      occurrences: { select: { candidateKey: true, rowIndex: true } },
+      effect: { include: { run: { include: { bot: true, thread: true } } } },
+    },
+  });
+  if (!page) return;
+  const run = page.effect.run;
+  const userId = run.userId,
+    spaceId = run.spaceId;
+  if (
+    page.role.sourceThreadId !== run.threadId ||
+    page.role.userId !== userId ||
+    page.role.spaceId !== spaceId ||
+    page.effect.spaceId !== spaceId ||
+    run.bot.userId !== userId ||
+    run.bot.spaceId !== spaceId ||
+    run.thread.userId !== userId ||
+    run.thread.spaceId !== spaceId ||
+    page.artifact.userId !== userId ||
+    page.artifact.spaceId !== spaceId ||
+    page.artifact.hash !== page.artifactHash ||
+    page.artifact.runId !== run.id ||
+    page.artifact.botId !== run.botId
+  )
+    return;
+  const receipts = await prisma.externalEffect.findMany({
+    where: {
+      spaceId,
+      runId: run.id,
+      kind: "recruiting_research",
+      status: "completed",
+      AND: [
+        { result: { path: ["profileFactsVersion"], equals: 1 } },
+        { result: { path: ["sourceEffectId"], equals: page.effectId } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+  });
+  const receipt = receipts[0]?.result;
+  if (!isRecord(receipt) || !Array.isArray(receipt.candidateRows)) return;
+  const actor = { userId, spaceId } as Actor;
+  const entries = receipt.candidateRows.flatMap((row) => {
+    if (
+      !isRecord(row) ||
+      !page.occurrences.some(
+        (item) => item.rowIndex === row.rowIndex && item.candidateKey === row.candidateKey,
+      )
+    )
+      return [];
+    const parsed = factsSchema.safeParse(row._profile);
+    return parsed.success &&
+      typeof row.candidateKey === "string" &&
+      typeof row._profileSourceEffectId === "string"
+      ? [
+          {
+            personKey: row.candidateKey,
+            sourceEffectId: row._profileSourceEffectId,
+            profile: parsed.data,
+            provider: "people_search",
+            fetchedAt: page.observedAt,
+          },
+        ]
+      : [];
+  });
+  const key = `recruiting-profile-project:${page.effectId}:${page.artifactHash}`;
+  const authorized = async (tx: Pick<PrismaClient, "$queryRaw">) => {
+    const rows = await tx.$queryRaw<
+      Array<{ id: string }>
+    >`SELECT r.id FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" JOIN space_members sm ON sm."spaceId"=r."spaceId" AND sm."userId"=r."userId" WHERE r.id=${page.roleId} AND r."userId"=${userId} AND r."spaceId"=${spaceId} AND r."archivedAt" IS NULL AND t.id=${run.threadId} AND t."userId"=${userId} AND t."spaceId"=${spaceId} AND t."activeRecruitingRoleId"=r.id FOR SHARE OF r,t,sm`;
+    return rows.length === 1;
+  };
+  // Membership and the current role stay locked only for writes, never while fetching pixels.
+  const marker = await prisma.$transaction(async (tx) => {
+    if (!(await authorized(tx))) return null;
+    const marker = await tx.externalEffect.upsert({
+      where: { idempotencyKey: key },
+      create: {
+        spaceId,
+        runId: run.id,
+        kind: "recruiting_profile_projection",
+        idempotencyKey: key,
+        status: "executing",
+        request: {
+          pageEffectId: page.effectId,
+          roleId: page.roleId,
+          roleRevisionId: page.roleRevisionId,
+          artifactHash: page.artifactHash,
+        },
+      },
+      update: {},
+    });
+    if (marker.status === "completed") return null;
+    await saveRecruitingSavedProfiles(tx, actor, run.id, entries);
+    return marker;
+  });
+  if (!marker) return;
+  const profiles = entries.length
+    ? await prisma.recruitingSavedProfile.findMany({
+        where: {
+          ownerUserId: userId,
+          spaceId,
+          personKey: { in: entries.map((item) => item.personKey) },
+        },
+      })
+    : [];
+  const copies = profiles.flatMap((item) => {
+    const value = isRecord(item.profile) ? item.profile.profileImageUrl : null;
+    return typeof value === "string" &&
+      linkedinPhotoUrl(value) &&
+      entries.some(
+        (entry) =>
+          entry.personKey === item.personKey &&
+          entry.sourceEffectId === item.sourceEffectId &&
+          entry.fetchedAt.getTime() === item.fetchedAt.getTime(),
+      )
+      ? [
+          {
+            personKey: item.personKey,
+            sourceEffectId: item.sourceEffectId,
+            fetchedAt: item.fetchedAt.toISOString(),
+            source: value,
+            profile_image_url: value,
+          },
+        ]
+      : [];
+  });
+  await inlineProfilePhotos(copies, fetchPhoto);
+  const copied = copies.flatMap((item) =>
+    item.profile_image_url?.startsWith("data:image/")
+      ? [{ ...item, photo: item.profile_image_url }]
+      : [],
+  );
+  const event = await prisma.$transaction(async (tx) => {
+    if (!(await authorized(tx))) return null;
+    if (copied.length)
+      await tx.$executeRaw`UPDATE recruiting_saved_profiles p SET profile=jsonb_set(p.profile,'{profileImageUrl}',to_jsonb(copy.photo)),"updatedAt"=now() FROM jsonb_to_recordset(${JSON.stringify(copied)}::jsonb) AS copy("personKey" text,"sourceEffectId" text,"fetchedAt" text,source text,photo text) WHERE p."ownerUserId"=${userId} AND p."spaceId"=${spaceId} AND p."personKey"=copy."personKey" AND p."sourceEffectId"=copy."sourceEffectId" AND p."fetchedAt"=copy."fetchedAt"::timestamp AND p.profile->>'profileImageUrl'=copy.source`;
+    await tx.externalEffect.update({
+      where: { id: marker.id },
+      data: {
+        status: "completed",
+        result: {
+          projected: entries.length,
+          copied: copied.length,
+          sourcePreserved: copies.length - copied.length,
+        },
+      },
+    });
+    return appendEventInTransaction(tx, {
+      spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      type: "recruiting.changed",
+      payload: { roleId: page.roleId },
+    });
+  });
+  if (event) await deps.events.notify(run.threadId, event.seq);
+}
 
 /**
  * Keep the history a people search returned on each person's saved profile, at no lookup cost:

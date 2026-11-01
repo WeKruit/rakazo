@@ -280,9 +280,13 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
 
   afterAll(async () => {
     if (!prisma) return;
-    await prisma.organization.deleteMany({ where: { id: spaceId } });
-    await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
-    await close();
+    try {
+      await prisma.recruitingCandidatePage.deleteMany({ where: { role: { spaceId } } });
+      await prisma.organization.deleteMany({ where: { id: spaceId } });
+      await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+    } finally {
+      await close();
+    }
   });
 
   it("lists each person once across roles and the CRM, owner-scoped", async () => {
@@ -342,6 +346,96 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     ).toEqual(["Cy 100%_off"]);
     const recent = await listRecruitingContacts(prisma, actor, { sort: "replied" });
     expect(recent.items[0]!.name).toBe("Ada Lovelace");
+  });
+
+  it("searches and displays newly saved profile email and media only for the exact owner", async () => {
+    const personKey = "linkedin:/in/bob";
+    const profile = {
+      headline: "Backend Engineer",
+      profileImageUrl: "https://img.example/bob.jpg",
+      email: "source-bob@example.test",
+      githubUrl: "https://github.com/synthetic-bob",
+      websiteUrl: "https://bob.example/",
+      stackOverflowUrl: null,
+      experience: [
+        {
+          company_name: "Globex",
+          title: "Backend Engineer",
+          is_current: true,
+          company_logo_url: "https://img.example/globex.png",
+          company_url: null,
+          company_linkedin_url: null,
+          company_industry: null,
+          company_size: null,
+          location: null,
+          start_date: null,
+          end_date: null,
+          description: null,
+        },
+      ],
+      education: [
+        {
+          school_name: "Example School",
+          school_logo_url: "https://img.example/school.png",
+          school_url: null,
+          degree: null,
+          field_of_study: null,
+          start_date: null,
+          end_date: null,
+        },
+      ],
+    };
+    await prisma.recruitingSavedProfile.createMany({
+      data: [
+        {
+          ownerUserId: userId,
+          spaceId,
+          personKey,
+          provider: "supplied",
+          sourceEffectId: `${suffix}-p1`,
+          fetchedAt: new Date(),
+          profile,
+        },
+        {
+          ownerUserId: otherUserId,
+          spaceId,
+          personKey,
+          provider: "supplied",
+          sourceEffectId: `${suffix}-p3`,
+          fetchedAt: new Date(),
+          profile: { ...profile, email: "foreign-bob@example.test" },
+        },
+      ],
+    });
+    try {
+      const page = await listRecruitingContacts(prisma, actor, {
+        filters: { query: "source-bob@example.test" },
+      });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0]).toMatchObject({
+        personKey,
+        email: profile.email,
+        profileImageUrl: profile.profileImageUrl,
+        companyLogoUrl: profile.experience[0]!.company_logo_url,
+        schoolLogoUrl: profile.education[0]!.school_logo_url,
+        savedProfile: {
+          email: profile.email,
+          githubUrl: profile.githubUrl,
+          websiteUrl: profile.websiteUrl,
+        },
+      });
+      expect(
+        (
+          await listRecruitingContacts(prisma, actor, {
+            filters: { query: "foreign-bob@example.test" },
+          })
+        ).items,
+      ).toEqual([]);
+    } finally {
+      await prisma.recruitingSavedProfile.deleteMany({
+        where: { spaceId, personKey, ownerUserId: { in: [userId, otherUserId] } },
+      });
+    }
   });
 
   it("tags people and filters by tag; another user's tags stay separate", async () => {

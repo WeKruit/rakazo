@@ -764,6 +764,8 @@ export interface BackgroundJobPayloads {
   "recruiting_checkin.start": { threadId: string };
   /** Bring a people-search agent run that outlived its turn back to the agent that started it. */
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
+  /** Project facts from one newly saved candidate page; authorization is re-read by the worker. */
+  "recruiting_profile.project": { pageEffectId: string };
   /** After a conversation goes quiet, make sure the person's newest message got a reply. */
   "thread.reply_check": { threadId: string };
   /** Deliver a run notification whose first push failed; the queue retries with backoff. */

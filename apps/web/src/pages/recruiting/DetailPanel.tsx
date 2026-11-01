@@ -48,6 +48,7 @@ import {
   profileAssets,
   profileContentFields,
   profileImageUrl,
+  profileLinkUrl,
 } from "./profileAssets";
 import { organizationHosts } from "./quickOutput";
 import { usePersonSequenceFacts } from "./SequenceStats";
@@ -274,7 +275,8 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const fields = withSavedProfile(candidate?.savedProfile ?? person.savedProfile, [
+  const savedProfile = candidate?.savedProfile ?? person.savedProfile;
+  const fields = withSavedProfile(savedProfile, [
     ...(candidate?.latestSource?.report?.fields ?? []),
     ...storedProfileFields(person.profile),
   ]);
@@ -294,7 +296,17 @@ export function RecruitingDetailPanel({
     profileImageUrl(person.companyWebsiteUrl) ??
     organizationLogo(company ?? undefined, assets.companyLink) ??
     (sections.company.host ? `https://${sections.company.host}/` : null);
-  const email = person.email ?? sections.email;
+  const email = person.email ?? savedProfile?.email ?? sections.email;
+  const socialLinks = new Map<string, string>();
+  for (const [label, value] of [
+    ["GitHub", savedProfile?.githubUrl],
+    [t`Website`, savedProfile?.websiteUrl],
+    ["Stack Overflow", savedProfile?.stackOverflowUrl],
+  ]) {
+    const href = profileLinkUrl(value);
+    if (href && href !== person.linkedinUrl && !socialLinks.has(href))
+      socialLinks.set(href, label!);
+  }
   const phone = person.phone ?? sections.phone;
   const sizeFact = shortFact(sections.company.size);
   const companySize =
@@ -489,6 +501,23 @@ export function RecruitingDetailPanel({
                     </a>
                   ) : null}
                 </p>
+              ) : null}
+              {socialLinks.size ? (
+                <div className="flex flex-wrap gap-2">
+                  {[...socialLinks].map(([href, label]) => (
+                    <a
+                      key={href}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm hover:underline"
+                      aria-label={`${person.name} · ${label}`}
+                    >
+                      <ProfileSourceIcon href={href} className="size-4" />
+                      {label}
+                    </a>
+                  ))}
+                </div>
               ) : null}
             </div>
             <PersonAvatar

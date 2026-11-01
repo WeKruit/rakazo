@@ -3579,6 +3579,10 @@ msgstr ""
 msgid "Profile"
 msgstr ""
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Profiles"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
 msgstr ""
@@ -5496,6 +5500,10 @@ msgstr "Esperando a que vuelva la API…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "Esperando en la cola…"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Website"
+msgstr ""
 
 #: src/lib/billing.ts
 msgid "week"

@@ -20,18 +20,27 @@ const SCHOOL_LINK = /^(?:school|university) (?:url|website(?: url)?)$/i;
 /** Our own re-encoded copy of a person's photo, saved inline with the row. */
 const SAVED_PHOTO = /^data:image\/(?:webp|png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
 
-/** Only an explicitly supplied asset URL; never derive a logo/photo from a name or source host. */
-export function profileImageUrl(value: string | null | undefined): string | null {
+/** An explicitly supplied public profile link, without credentials or an executable scheme. */
+export function profileLinkUrl(value: string | null | undefined): string | null {
   if (!value || /\s/.test(value.trim())) return null;
   try {
     const url = new URL(value.trim());
     // A provider-hosted image would show the provider in the page source and network log.
-    return url.protocol === "https:" && !url.username && !url.password && !isVendorUrl(url.href)
+    return (url.protocol === "https:" || url.protocol === "http:") &&
+      !url.username &&
+      !url.password &&
+      !isVendorUrl(url.href)
       ? url.href
       : null;
   } catch {
     return null;
   }
+}
+
+/** Images require HTTPS; never derive a logo/photo from a name or source host. */
+export function profileImageUrl(value: string | null | undefined): string | null {
+  const url = profileLinkUrl(value);
+  return url?.startsWith("https:") ? url : null;
 }
 
 export function isProfileAssetField(field: Field) {

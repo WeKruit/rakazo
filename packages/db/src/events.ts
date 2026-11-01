@@ -2342,6 +2342,7 @@ export const SIDEBAR_EVENT_TYPES: ReadonlySet<ProductEvent["type"]> = new Set<Pr
     "bot.updated",
     "bot.archived",
     "bot.deleted",
+    "recruiting.changed",
   ],
 );
 

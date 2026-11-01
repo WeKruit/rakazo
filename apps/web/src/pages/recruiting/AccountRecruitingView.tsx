@@ -601,7 +601,12 @@ export function AccountRecruitingView({
       {view === "routines" ? (
         <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} />
       ) : allContacts ? (
-        <AllContacts spaceId={spaceId} groups={groups} refreshSignal={refreshSignal} />
+        <AllContacts
+          accountKey={accountKey}
+          spaceId={spaceId}
+          groups={groups}
+          refreshSignal={refreshSignal}
+        />
       ) : (
         <>
           {loading ? <TabLoading /> : null}

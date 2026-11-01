@@ -88,6 +88,7 @@ import {
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   RecruitingRoleToolInputSchema,
+  RecruitingSavedProfileSchema,
   RecruitingShortlistToolInputSchema,
   RecruitingShortlistToolResultSchema,
   RecruitingSourceRefSchema,
@@ -141,7 +142,10 @@ import {
   loadRunHumanSources,
   validateRunHumanSourceRows,
 } from "./messages.js";
-import { listRecruitingSavedProfiles } from "./recruiting-saved-profiles.js";
+import {
+  listRecruitingSavedProfiles,
+  mergeRecruitingProfileFacts,
+} from "./recruiting-saved-profiles.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -7456,7 +7460,19 @@ export async function saveNativeRecruitingCandidatePage(
       roleRevisionId: source.role.currentRevisionId,
       sourceEffectId: source.effect.id,
       outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-      candidateRows,
+      profileFactsVersion: 1,
+      candidateRows: candidateRows.map((entry) => {
+        const facts = RecruitingSavedProfileSchema.omit({
+          personKey: true,
+          provider: true,
+          fetchedAt: true,
+        }).safeParse((captured.rows[entry.rowIndex] as { _profile?: unknown } | null)?._profile);
+        return {
+          ...entry,
+          ...(facts.success ? { _profile: facts.data } : {}),
+          _profileSourceEffectId: source.effect.id,
+        };
+      }),
     };
     const completed = await tx.externalEffect.updateMany({
       where: {
@@ -7630,7 +7646,7 @@ export function recruitingPeopleSearchReceipt(
   captured: {
     /** Completed connector calls of this run the rows were read from. */
     sources: ReadonlyArray<{ effectId: string; toolName: string; host: string }>;
-    rows: ReadonlyArray<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }>;
+    rows: ReadonlyArray<{ rowIndex: number; sourceEffectId: string; row: Record<string, unknown> }>;
     truncated: boolean;
   },
 ) {
@@ -7708,7 +7724,7 @@ export async function saveRecruitingCandidatePeopleSearch(
       file.clientNonce !== `recruiting-people-search:${saving.id}`
     )
       throw new IsolationError();
-    return saveUnassessedCandidatePage(
+    const saved = await saveUnassessedCandidatePage(
       tx,
       actor,
       { run, thread, role, saving, trusted, file },
@@ -7721,6 +7737,7 @@ export async function saveRecruitingCandidatePeopleSearch(
             observedAt: observedAt.toISOString(),
           },
           /** People never returned before for this role; only they may fill a later round. */
+          profileFactsVersion: 1,
           newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
           candidateRows: candidateRows.map((row) => {
@@ -7732,12 +7749,16 @@ export async function saveRecruitingCandidatePeopleSearch(
               company: saved.current_company ?? null,
               location: saved.location ?? null,
               snippet: saved.snippet ?? null,
+              email: (saved._profile as { email?: string | null } | undefined)?.email ?? null,
+              _profile: saved._profile,
+              _profileSourceEffectId: captured.rows[row.rowIndex]!.sourceEffectId,
             };
           }),
           truncated: captured.truncated,
         }),
       },
     );
+    return saved;
   });
 }
 
@@ -7873,7 +7894,7 @@ async function saveUnassessedCandidatePage(
   input: {
     rows: ReadonlyArray<{
       rowIndex: number;
-      row: Record<string, string>;
+      row: Record<string, unknown>;
       /** A grade's score and tier, kept as the role's match for this person. */
       matchFields?: Prisma.InputJsonObject;
     }>;
@@ -8077,6 +8098,7 @@ async function candidatePageArtifacts(
   canonical = false,
   afterRead?: Array<() => void>,
   pageOnly = false,
+  receipts?: Map<string, unknown>,
 ): Promise<Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>> {
   const nativeIds = pages
     .filter((page) => page.taskId === null && page.actionId === null)
@@ -8164,13 +8186,53 @@ async function candidatePageArtifacts(
         where: {
           spaceId: actor.spaceId,
           runId: { in: runIds },
-          type: "recruiting.candidates.saved",
-          OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+          ...(receipts
+            ? {
+                OR: [
+                  {
+                    type: "recruiting.candidates.saved",
+                    OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+                  },
+                  {
+                    type: "effect.recorded",
+                    AND: [
+                      { payload: { path: ["tool"], equals: "recruiting_research" } },
+                      { payload: { path: ["profileFactsVersion"], equals: 1 } },
+                    ],
+                    OR: nativeIds.map((id) => ({
+                      payload: { path: ["sourceEffectId"], equals: id },
+                    })),
+                  },
+                ],
+              }
+            : {
+                type: "recruiting.candidates.saved",
+                OR: nativeIds.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+              }),
         },
       })
     : [];
+  const byFacts = new Map<string, typeof events>();
   const byEvent = new Map<string, typeof events>();
   for (const event of events) {
+    if (event.type === "effect.recorded") {
+      const payload = event.payload as {
+        sourceEffectId?: unknown;
+        tool?: unknown;
+        profileFactsVersion?: unknown;
+      };
+      if (
+        typeof payload.sourceEffectId === "string" &&
+        payload.tool === "recruiting_research" &&
+        payload.profileFactsVersion === 1
+      ) {
+        const facts = byFacts.get(payload.sourceEffectId) ?? [];
+        facts.push(event);
+        byFacts.set(payload.sourceEffectId, facts);
+      }
+      continue;
+    }
+    if (event.type !== "recruiting.candidates.saved") continue;
     const id = (event.payload as { effectId: string }).effectId;
     const saved = byEvent.get(id) ?? [];
     saved.push(event);
@@ -8230,6 +8292,7 @@ async function candidatePageArtifacts(
         result?.outputArtifact?.sha256 !== artifact.hash
       )
         throw new IsolationError();
+      receipts?.set(page.effectId, result);
       artifacts.set(page.effectId, artifact);
       continue;
     }
@@ -8289,6 +8352,34 @@ async function candidatePageArtifacts(
     // Mutating callers omit afterRead and keep this check inside their atomic transaction.
     if (afterRead) afterRead.push(verifyBytes);
     else verifyBytes();
+    if (receipts) {
+      const facts = (byFacts.get(page.effectId) ?? [])
+        .filter((event) => {
+          const payload = event.payload as {
+            roleId?: unknown;
+            roleRevisionId?: unknown;
+            sourceEffectId?: unknown;
+            outputArtifact?: unknown;
+          };
+          return (
+            event.spaceId === actor.spaceId &&
+            event.runId === run.id &&
+            event.threadId === run.threadId &&
+            event.botId === run.botId &&
+            payload.roleId === page.roleId &&
+            payload.roleRevisionId === page.roleRevisionId &&
+            payload.sourceEffectId === page.effectId &&
+            stableJsonValue(payload.outputArtifact) ===
+              stableJsonValue({ artifactId: artifact.id, sha256: artifact.hash })
+          );
+        })
+        .sort(
+          (a, b) =>
+            b.createdAt.getTime() - a.createdAt.getTime() ||
+            (a.seq < b.seq ? 1 : a.seq > b.seq ? -1 : 0),
+        );
+      if (facts[0]) receipts.set(page.effectId, facts[0].payload);
+    }
     artifacts.set(page.effectId, artifact);
   }
   return artifacts;
@@ -8502,7 +8593,16 @@ export function candidateIndexQuery(
     FROM rank_page
   ),`
       : Prisma.empty
-  } base AS (
+  } profile_fact_pages AS MATERIALIZED (
+    -- Read only newly marked source receipts once per role, using the partial intent index.
+    -- Grades can repeat every display field without becoming the source of profile/media facts.
+    SELECT DISTINCT page."effectId" AS "pageId"
+    FROM "external_effects" saving
+    JOIN "recruiting_candidate_pages" page ON page."effectId" = saving.result->>'sourceEffectId'
+    WHERE page."roleId" = ${roleId} ${sourceScope}
+      AND saving.kind = 'recruiting_research' AND saving.status = 'completed'
+      AND saving.result->>'profileFactsVersion' = '1'
+  ), base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted",
       to_char(c."shortlistedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "shortlistedAt",
       c."revision", c."consideration",
@@ -8520,6 +8620,7 @@ export function candidateIndexQuery(
       ARRAY(SELECT DISTINCT value->>'pageId' FROM (VALUES ${Prisma.join(
         fields.map(([column]) => Prisma.sql`(profile.${Prisma.raw(`"${column}"`)})`),
       )}) fields(value) WHERE value IS NOT NULL
+      UNION SELECT profile."factsPageId" WHERE profile."factsPageId" IS NOT NULL
       ${
         includeRanking
           ? Prisma.sql`UNION SELECT reviewer."pageId" WHERE reviewer."pageId" IS NOT NULL
@@ -8550,7 +8651,9 @@ export function candidateIndexQuery(
             ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC
           ) FILTER (WHERE NOT (o."issues" ? ${`missing_field:${key}`}) ${sourceScope}))[1] AS ${Prisma.raw(`"${column}"`)}`,
         ),
-      )}
+      )},
+      (array_agg(o."pageId" ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC)
+        FILTER (WHERE o."pageId" IN (SELECT "pageId" FROM profile_fact_pages) ${sourceScope}))[1] AS "factsPageId"
       ${
         explicitSource
           ? Prisma.sql`, (array_agg(o."linkedinUrl"
@@ -8697,6 +8800,7 @@ async function candidateProfilePages(
   rows: Pick<CandidateQueryRow, "sourcePageId" | "profileSourcePageIds">[],
   afterRead?: Array<() => void>,
   pageOnly = false,
+  receipts?: Map<string, unknown>,
 ) {
   const pageIds = [
     ...new Set(
@@ -8719,7 +8823,15 @@ async function candidateProfilePages(
   for (const page of pages.values()) {
     if (page.roleId !== roleId) throw new IsolationError();
   }
-  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead, pageOnly);
+  await candidatePageArtifacts(
+    tx,
+    actor,
+    [...pages.values()],
+    false,
+    afterRead,
+    pageOnly,
+    receipts,
+  );
   return pages;
 }
 
@@ -11179,7 +11291,16 @@ export async function listRecruitingCandidates(
       );
       const selected = rows.slice(0, limit);
       // The list renders match fields and page provenance only, never action artifacts.
-      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead, true);
+      const sourceReceipts = new Map<string, unknown>();
+      const pages = await candidateProfilePages(
+        tx,
+        actor,
+        role.id,
+        selected,
+        afterRead,
+        true,
+        sourceReceipts,
+      );
 
       const last = selected.at(-1);
       const {
@@ -11237,6 +11358,52 @@ export async function listRecruitingCandidates(
         actor,
         selected.map((row) => row.candidateKey),
       );
+      // The source receipt is already read and authorized with these pages. Display its facts
+      // before the background projection finishes, without another query or waiting for media.
+      const selectedSources = new Map(
+        selected.map((row) => [
+          row.candidateKey,
+          {
+            rowIndex: row.sourceRowIndex,
+            latestPageId: row.sourcePageId,
+            pageIds: new Set([row.sourcePageId, ...row.profileSourcePageIds]),
+          },
+        ]),
+      );
+      for (const page of pages.values()) {
+        const result = sourceReceipts.get(page.effectId) as {
+          profileFactsVersion?: unknown;
+          candidateRows?: unknown;
+        } | null;
+        if (result?.profileFactsVersion !== 1 || !Array.isArray(result.candidateRows)) continue;
+        for (const entry of result.candidateRows) {
+          if (!entry || typeof entry !== "object" || typeof entry.candidateKey !== "string")
+            continue;
+          const selectedSource = selectedSources.get(entry.candidateKey);
+          if (
+            !selectedSource?.pageIds.has(page.effectId) ||
+            !Number.isInteger(entry.rowIndex) ||
+            entry.rowIndex < 0 ||
+            page.rowCount === null ||
+            entry.rowIndex >= page.rowCount ||
+            (selectedSource.latestPageId === page.effectId &&
+              entry.rowIndex !== selectedSource.rowIndex)
+          )
+            continue;
+          const source = RecruitingSavedProfileSchema.safeParse({
+            ...entry._profile,
+            personKey: entry.candidateKey,
+            provider: "people_search",
+            fetchedAt: page.observedAt.toISOString(),
+          });
+          const saved = savedProfiles.get(entry.candidateKey);
+          if (source.success && (!saved || source.data.fetchedAt > saved.fetchedAt))
+            savedProfiles.set(entry.candidateKey, {
+              ...source.data,
+              ...mergeRecruitingProfileFacts(saved, source.data),
+            });
+        }
+      }
       return ListRecruitingCandidatesOutput.parse({
         sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
         crmTarget: attached

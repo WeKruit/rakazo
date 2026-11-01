@@ -1372,6 +1372,11 @@ export const RecruitingSavedProfileSchema = z.strictObject({
   fetchedAt: IsoDate,
   headline: ProfileText,
   profileImageUrl: ProfileText,
+  /** Historical profiles may predate these facts; every new save writes explicit nulls. */
+  email: z.email().nullable().optional(),
+  githubUrl: z.httpUrl().nullable().optional(),
+  websiteUrl: z.httpUrl().nullable().optional(),
+  stackOverflowUrl: z.httpUrl().nullable().optional(),
   experience: z.array(RecruitingProfileExperienceSchema).max(80),
   education: z.array(RecruitingProfileEducationSchema).max(40),
 });

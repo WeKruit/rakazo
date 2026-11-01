@@ -19,6 +19,8 @@ export const RECRUITING_CANDIDATE_PROFILE_COLUMNS = [
   '- experience: list[str], one entry per position, newest first, formatted "Title | Company | company website URL | Start – End | Location" (use "Present" for a current role; keep the dates as precise as the source).',
   '- education: list[str], one entry per degree, formatted "School | Degree, field of study | school website URL | Start – End".',
   "- profile_image_url: url of the person's own profile photo.",
+  "- email, github_url, website_url, stackoverflow_url: actual contact/profile links already supplied by the source; null when absent. Never invent an address or profile URL, and do not perform another lookup just to fill these columns.",
+  "- company_logo_url and school_logo_url: actual logo URLs supplied for the named employer/school; null when absent. Do not construct image URLs from names. Retain structured experience/education objects and their own company_logo_url/company_url/company_linkedin_url or school_logo_url/school_url when the source supplies them.",
   "- current_company_url: url of the current employer's own website.",
   '- current_company_industry: str, a short industry label such as "Logistics".',
   '- current_company_size: str, the employee count or range only, such as "1,001-5,000".',

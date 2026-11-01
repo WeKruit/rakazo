@@ -3579,6 +3579,10 @@ msgstr "隐私"
 msgid "Profile"
 msgstr "资料"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Profiles"
+msgstr "个人资料"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
 msgstr "项目 ID"
@@ -5496,6 +5500,10 @@ msgstr "正在等待 API 恢复…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "排队等候…"
+
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Website"
+msgstr "个人网站"
 
 #: src/lib/billing.ts
 msgid "week"

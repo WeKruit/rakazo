@@ -6957,6 +6957,10 @@ msgstr "网页、桌面和移动应用"
 msgid "Webhook"
 msgstr "Webhook"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr "个人网站"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"
 msgstr "网站登录"
