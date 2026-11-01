@@ -66,7 +66,12 @@ import {
   startJobQueueReporter,
   withSecretPersistence,
 } from "@rakazo/adapters";
-import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
+import {
+  createAuth,
+  createFirstPartyAccessToken,
+  firstPartySessionConfigFromEnv,
+  oidcConfigFromEnv,
+} from "@rakazo/auth";
 import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
   backfillRecruitingCrews,
@@ -205,8 +210,12 @@ async function main() {
         trustedMcpEndpoint && firstPartyOidc && firstPartyAuth
           ? {
               endpoint: trustedMcpEndpoint,
-              accessToken: (context, rejectedToken) =>
-                getOidcAccessToken(prisma, firstPartyAuth, firstPartyOidc, context, rejectedToken),
+              accessToken: createFirstPartyAccessToken({
+                prisma,
+                auth: firstPartyAuth,
+                oidc: firstPartyOidc,
+                session: firstPartySessionConfigFromEnv(process.env, firstPartyOidc),
+              }),
             }
           : undefined,
     },
