@@ -728,7 +728,6 @@ msgstr ""
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
-#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "बंद करें"
@@ -2059,6 +2058,7 @@ msgstr "माइक्रोफ़ोन विफल"
 msgid "Minimal"
 msgstr "न्यूनतम"
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Minimize"
 msgstr "छोटा करें"

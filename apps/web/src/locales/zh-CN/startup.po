@@ -728,7 +728,6 @@ msgstr "客户端密钥"
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
-#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
 msgstr "关闭"
@@ -2059,6 +2058,7 @@ msgstr "麦克风失败"
 msgid "Minimal"
 msgstr "最低"
 
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Minimize"
 msgstr "最小化"

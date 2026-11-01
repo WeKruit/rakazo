@@ -2,24 +2,31 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { Group } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
-import { X } from "lucide-react";
+import { Minus } from "lucide-react";
 import { useState } from "react";
 
+const SURFACE =
+  "border border-border/60 bg-card/80 text-card-foreground ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150";
+
 /**
- * Kruit's bottom-right button. Its badge counts what waits on the recruiter; a new wait shows a
- * small reminder that can be closed, and the list of waits opens only when asked for.
+ * Kruit's corner entry at the bottom of the page, beside the sidebar. While something waits it
+ * shows a small reminder that minimizes to the Kruit button with a count; the list of waits
+ * opens only when asked for.
  */
 export function KruitDock({
   groups,
   groupId,
   chatting = false,
+  start = 0,
   onOpen,
 }: {
   groups: Group[];
   /** The open conversation: its own card is already in view. */
   groupId?: string;
-  /** A chat is on screen: no button over its composer, and cards sit at the top instead. */
+  /** A chat is on screen: start minimized so the reminder stays clear of its composer. */
   chatting?: boolean;
+  /** Width of the sidebar the entry sits beside. */
+  start?: number;
   onOpen: (groupId: string) => void;
 }) {
   const { t } = useLingui();
@@ -27,47 +34,33 @@ export function KruitDock({
   const waiting = groups.filter(
     (group) => group.id !== groupId && (group.attention ?? group.needsInput),
   );
-  const key = waiting.map((group) => `${group.id}:${group.updatedAt}`).join(",");
-  // A new wait shows the small reminder; closing it keeps it closed until something changes.
-  const [closedFor, setClosedFor] = useState<string | null>(null);
+  const [minimizedPref, setMinimized] = useState<boolean>();
   const [expanded, setExpanded] = useState(false);
+  const minimized = minimizedPref ?? chatting;
   const showList = expanded && waiting.length > 0;
-  const showReminder = !showList && waiting.length > 0 && closedFor !== key;
-  if (chatting ? !showList && !showReminder : !kruit && !waiting.length) return null;
-  const close = () => {
-    setClosedFor(key);
+  const showReminder = !showList && !minimized && waiting.length > 0;
+  if (chatting ? !waiting.length : !kruit && !waiting.length) return null;
+  const minimize = () => {
+    setMinimized(true);
     setExpanded(false);
   };
+  const minimizeButton = (
+    <Button variant="ghost" size="icon-sm" aria-label={t`Minimize`} onClick={minimize}>
+      <Minus />
+    </Button>
+  );
   return (
     <div
-      className={`fixed end-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 ${chatting ? "top-20" : "bottom-4"}`}
+      className="fixed bottom-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2"
+      style={{ insetInlineStart: `calc(${start}px + 1rem)` }}
     >
-      {showReminder ? (
-        <div
-          role="status"
-          className="flex items-center gap-1 rounded-full border border-border/60 bg-card/80 py-1 ps-3 pe-1 text-card-foreground shadow-xl ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150"
-        >
-          <button type="button" className="text-sm font-medium" onClick={() => setExpanded(true)}>
-            <Plural
-              value={waiting.length}
-              one="# item needs your attention"
-              other="# items need your attention"
-            />
-          </button>
-          <Button variant="ghost" size="icon-sm" aria-label={t`Close`} onClick={close}>
-            <X />
-          </Button>
-        </div>
-      ) : null}
       {showList ? (
-        <div className="w-80 max-w-full rounded-xl border border-border/60 bg-card/80 p-2 text-card-foreground shadow-2xl ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150">
+        <div className={`w-80 max-w-full rounded-xl p-2 shadow-2xl ${SURFACE}`}>
           <div className="flex items-center justify-between ps-2">
             <span className="text-sm font-medium">
               <Trans>Needs your attention</Trans>
             </span>
-            <Button variant="ghost" size="icon-sm" aria-label={t`Close`} onClick={close}>
-              <X />
-            </Button>
+            {minimizeButton}
           </div>
           <ul className="space-y-1">
             {waiting.slice(0, 5).map((group) => (
@@ -76,7 +69,7 @@ export function KruitDock({
                   type="button"
                   className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-foreground/5"
                   onClick={() => {
-                    close();
+                    setExpanded(false);
                     onOpen(group.id);
                   }}
                 >
@@ -96,7 +89,21 @@ export function KruitDock({
           </ul>
         </div>
       ) : null}
-      {chatting ? null : (
+      {showReminder ? (
+        <div
+          role="status"
+          className={`flex items-center gap-1 rounded-full py-1 ps-3 pe-1 shadow-xl ${SURFACE}`}
+        >
+          <button type="button" className="text-sm font-medium" onClick={() => setExpanded(true)}>
+            <Plural
+              value={waiting.length}
+              one="# item needs your attention"
+              other="# items need your attention"
+            />
+          </button>
+          {minimizeButton}
+        </div>
+      ) : (
         <button
           type="button"
           aria-label={
@@ -104,10 +111,11 @@ export function KruitDock({
               ? t`${RECRUITING_GLOBAL_AGENT_NAME}, ${waiting.length} waiting`
               : RECRUITING_GLOBAL_AGENT_NAME
           }
-          className="relative grid size-12 place-items-center rounded-full border border-border/60 bg-card/80 shadow-xl ring-1 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150 hover:bg-accent"
+          className={`relative grid size-12 place-items-center rounded-full shadow-xl hover:bg-accent ${SURFACE}`}
           onClick={() => {
-            // With something waiting the button lists it; otherwise it opens Kruit.
-            if (waiting.length) setExpanded((open) => !open);
+            // With something waiting the button brings the reminder back; otherwise it opens Kruit.
+            if (showList) setExpanded(false);
+            else if (waiting.length) setMinimized(false);
             else if (kruit && kruit.id !== groupId) onOpen(kruit.id);
           }}
         >
