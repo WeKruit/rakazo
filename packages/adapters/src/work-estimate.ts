@@ -21,6 +21,8 @@ export const WORK_ESTIMATE_KIND = "work_estimate";
 /** Work nobody finished after this long is not shown any more. */
 const MAX_AGE_MS = 12 * 60 * 60_000;
 const BUSY = ["queued", "leased", "running"];
+/** A new wave of the same search within this long continues its countdown. */
+const SAME_ASK_MS = 60 * 60_000;
 
 type Turn = { id: string; spaceId: string; threadId: string };
 type Request = {
@@ -31,11 +33,16 @@ type Request = {
   /** A search's role and how many people its Results held when the search started. */
   roleId?: string;
   saved?: number;
+  /** When the countdown started, for a search that continues an earlier one. */
+  since?: string;
 };
 
 const key = (ref: string) => `${WORK_ESTIMATE_KIND}:${ref}`;
 
-/** Start the countdown for one piece of work; returns it only the first time. */
+/**
+ * Start the countdown for one piece of work; returns it only the first time. A search that
+ * continues the same ask (same role, same Results target) keeps the countdown already running.
+ */
 export async function startWorkEstimate(
   prisma: PrismaClient,
   run: Turn,
@@ -46,12 +53,15 @@ export async function startWorkEstimate(
     select: { id: true },
   });
   if (existing) return null;
-  const request: Request = {
+  const saved =
+    work.kind === "search" ? await savedSoFar(prisma, run.threadId).catch(() => ({})) : {};
+  const earlier = await sameAsk(prisma, run, saved, work.people).catch(() => null);
+  const request: Request = earlier?.request ?? {
     threadId: run.threadId,
     kind: work.kind,
     people: work.people,
     estimateMs: estimateWorkMs(work.kind, work.people),
-    ...(work.kind === "search" ? await savedSoFar(prisma, run.threadId).catch(() => ({})) : {}),
+    ...saved,
   };
   const row = await prisma.externalEffect
     .create({
@@ -62,18 +72,62 @@ export async function startWorkEstimate(
         idempotencyKey: key(work.ref),
         status: "running",
         request,
+        ...(earlier ? { result: { reported: earlier.reported } } : {}),
       },
       select: { createdAt: true },
     })
     .catch(() => null);
-  return row
-    ? {
-        kind: request.kind,
-        people: request.people,
-        estimateMs: request.estimateMs,
-        startedAt: row.createdAt.toISOString(),
-      }
-    : null;
+  if (!row || earlier) return null;
+  return {
+    kind: request.kind,
+    people: request.people,
+    estimateMs: request.estimateMs,
+    startedAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * The countdown of an earlier search for the same ask in this conversation: a new wave toward
+ * the same Results target continues it instead of starting over, and the earlier one stops
+ * counting so the recruiter hears one report per run-out countdown.
+ */
+async function sameAsk(
+  prisma: PrismaClient,
+  run: Turn,
+  saved: { roleId?: string; saved?: number },
+  people: number,
+): Promise<{ request: Request; reported: number } | null> {
+  if (!saved.roleId || saved.saved === undefined) return null;
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      kind: WORK_ESTIMATE_KIND,
+      spaceId: run.spaceId,
+      status: { in: ["running", "done"] },
+      createdAt: { gte: new Date(Date.now() - SAME_ASK_MS) },
+      run: { threadId: run.threadId },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { id: true, request: true, result: true, createdAt: true },
+  });
+  for (const row of rows) {
+    const request = row.request as Partial<Request> | null;
+    if (request?.kind !== "search" || request.roleId !== saved.roleId) continue;
+    if (typeof request.saved !== "number") continue;
+    // Still short of the earlier target, and this wave stays within it.
+    const target = request.saved + (Number(request.people) || 0);
+    if (saved.saved >= target || saved.saved + people > target) continue;
+    await prisma.externalEffect.updateMany({
+      where: { id: row.id, status: "running" },
+      data: { status: "done" },
+    });
+    const open = openEstimate(row);
+    return {
+      request: { ...(request as Request), since: open?.startedAt },
+      reported: open?.reported ?? 0,
+    };
+  }
+  return null;
 }
 
 /** Whether the recruiter stopped this work; a stopped search is not followed any more. */
@@ -168,7 +222,10 @@ function openEstimate(row: {
     kind: request.kind,
     people: Number(request.people) || 0,
     estimateMs: typeof request.estimateMs === "number" ? request.estimateMs : null,
-    startedAt: row.createdAt.toISOString(),
+    startedAt:
+      typeof request.since === "string" && !Number.isNaN(Date.parse(request.since))
+        ? request.since
+        : row.createdAt.toISOString(),
     reported: Number.isFinite(reported) ? reported : 0,
   };
 }
