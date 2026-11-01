@@ -40,6 +40,11 @@ export function KruitDock({
   const showList = expanded && waiting.length > 0;
   const showReminder = !showList && !minimized && waiting.length > 0;
   if (chatting ? !waiting.length : !kruit && !waiting.length) return null;
+  // One click reaches the content: a single wait opens straight away, several show the list.
+  const reveal = () => {
+    if (waiting.length === 1) onOpen(waiting[0].id);
+    else setExpanded(true);
+  };
   const minimize = () => {
     setMinimized(true);
     setExpanded(false);
@@ -94,7 +99,7 @@ export function KruitDock({
           role="status"
           className={`flex items-center gap-1 rounded-full py-1 ps-3 pe-1 shadow-xl ${SURFACE}`}
         >
-          <button type="button" className="text-sm font-medium" onClick={() => setExpanded(true)}>
+          <button type="button" className="text-sm font-medium" onClick={reveal}>
             <Plural
               value={waiting.length}
               one="# item needs your attention"
@@ -113,9 +118,9 @@ export function KruitDock({
           }
           className={`relative grid size-12 place-items-center rounded-full shadow-xl hover:bg-accent ${SURFACE}`}
           onClick={() => {
-            // With something waiting the button brings the reminder back; otherwise it opens Kruit.
+            // With something waiting the button opens it; otherwise it opens Kruit.
             if (showList) setExpanded(false);
-            else if (waiting.length) setMinimized(false);
+            else if (waiting.length) reveal();
             else if (kruit && kruit.id !== groupId) onOpen(kruit.id);
           }}
         >

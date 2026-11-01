@@ -67,13 +67,32 @@ it("shows a small reminder and lists what waits only when asked", async () => {
   expect(host.querySelector('[role="status"]')).not.toBeNull();
 });
 
-it("minimizes the reminder to the Kruit button and brings it back", async () => {
-  const { host } = await render([group(KRUIT), group("Designer", { attention: "approval" })]);
+it("opens a single wait straight from the reminder or the Kruit button", async () => {
+  const { host, onOpen } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+  ]);
+  await act(async () => find(host, "1 items").click());
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
   await act(async () => find(host, "Minimize").click());
   expect(host.querySelector('[role="status"]')).toBeNull();
   expect(find(host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(host, "Kruit").click());
-  expect(host.querySelector('[role="status"]')).not.toBeNull();
+  expect(onOpen).toHaveBeenCalledTimes(2);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
+});
+
+it("opens the list in one click from the Kruit button when several wait", async () => {
+  const { host } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  await act(async () => find(host, "Minimize").click());
+  await act(async () => find(host, "Kruit").click());
+  expect(host.textContent).toContain("Needs approval");
+  expect(host.textContent).toContain("Open role");
 });
 
 it("sits beside the sidebar", async () => {
@@ -95,7 +114,5 @@ it("in a conversation starts minimized and shows only waits from other conversat
   expect(other.host.querySelector('[role="status"]')).toBeNull();
   expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(other.host, "Kruit").click());
-  expect(other.host.querySelector('[role="status"]')?.textContent).toContain(
-    "1 items need your attention",
-  );
+  expect(other.onOpen).toHaveBeenCalledWith("Open role");
 });
