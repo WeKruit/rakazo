@@ -362,6 +362,55 @@ it.each(["missing", "failed", "unsupported", "not_checked"])(
   },
 );
 
+it("names the calendar that could not be read and still shows the others", async () => {
+  read.mockResolvedValue({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        correspondence: {
+          ...correspondence("one"),
+          events: [],
+          status: "empty",
+          partial: true,
+          connections: [
+            {
+              name: "Google Calendar",
+              status: "configured",
+              checkIssue: { status: "failed", checkedAt: "2026-11-01T00:00:00.000Z" },
+            },
+            { name: "Cal.com", status: "configured", checkIssue: null },
+          ],
+        },
+      },
+    ],
+    nextCursor: null,
+  });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=interview&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).toContain("Could not read Google Calendar.");
+    expect(container.textContent).not.toContain("Could not load calendar records.");
+    expect(container.querySelector('[aria-label="Calendar"]')).not.toBeNull();
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
 it("loads the next interview page into the calendar without losing previous events or sibling roles", async () => {
   const event = correspondence("one").events[0]!;
   read.mockImplementation(async (input: { itemCursor?: string; roleId?: string }) => ({

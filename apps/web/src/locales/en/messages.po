@@ -1819,6 +1819,10 @@ msgid "Could not reach the server"
 msgstr "Could not reach the server"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not read {failedCalendars}."
+msgstr "Could not read {failedCalendars}."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "Could not read this campaign."
