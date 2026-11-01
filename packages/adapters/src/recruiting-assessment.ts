@@ -269,11 +269,11 @@ export async function executeRecruitingCandidatesTool(
         }),
       };
     }
-    if (!roleId) {
-      succeeded = true;
-      return { status: "no_current_role" as const };
-    }
     if (input.operation === "round") {
+      if (!roleId) {
+        succeeded = true;
+        return { status: "no_current_role" as const };
+      }
       const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
         threadId: trusted.threadId,
       });
@@ -281,16 +281,21 @@ export async function executeRecruitingCandidatesTool(
       succeeded = true;
       return round ? { status: "found" as const, round } : { status: "no_round" as const };
     }
-    const { operation: _operation, ...query } = input;
+    const { operation: _operation, roleId: namedSourceRoleId, ...query } = input;
+    const sourceRoleId = roleId ?? namedSourceRoleId;
+    if (!sourceRoleId) {
+      succeeded = true;
+      return { status: "no_current_role" as const };
+    }
     if (!deps.artifacts) throw new IsolationError();
     const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
-      roleId,
+      roleId: sourceRoleId,
       ...query,
     });
     queryMs = Math.round(performance.now() - queryStarted);
     itemCount = result.items.length;
     const reportsStarted = performance.now();
-    const readReport = createRecruitingCandidateReportReader(deps, trusted.actor, roleId, {
+    const readReport = createRecruitingCandidateReportReader(deps, trusted.actor, sourceRoleId, {
       fromTool: true,
     });
     // Read distinct saved pages together; sources sharing a page stay sequential so the

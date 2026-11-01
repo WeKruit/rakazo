@@ -148,12 +148,8 @@ describe("jsonSchemaParameters", () => {
         { threadId: "foreign" },
       ])
         expect(() => parseConnectorToolArgs(wire, { ...input, ...override })).toThrow();
-      // A list may name a role (the executor reads it only where no role is linked, owner
-      // scoped); source reads still refuse one.
-      if (input.operation === "sources")
-        expect(() =>
-          RecruitingCandidatesToolInputSchema.parse({ ...input, roleId: "foreign" }),
-        ).toThrow();
+      // List and source reads may name a role; the executor reads it only where no role is
+      // linked, and the role read is owner scoped.
     }
     for (const input of [
       { operation: "list", limit: 0 },

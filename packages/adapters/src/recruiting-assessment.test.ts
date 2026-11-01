@@ -1132,6 +1132,21 @@ describe("native cross-role recruiting reads", () => {
     expect(db.candidates).toHaveBeenLastCalledWith(f.deps.prisma, actor, { roleId: "current" });
   });
 
+  it("reads a named role's saved sources where no role is linked", async () => {
+    const f = fixture();
+    db.sources.mockResolvedValue({ roleId: "selected", items: [], nextCursor: null });
+    await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "sources", candidateKey: "candidate", roleId: "selected" },
+      context,
+    );
+    expect(db.sources).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      roleId: "selected",
+      candidateKey: "candidate",
+    });
+  });
+
   it("uses the current role by default and honors an explicit owned role filter", async () => {
     const f = fixture();
     db.roleId.mockResolvedValue("current");
