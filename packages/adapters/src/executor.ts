@@ -1329,7 +1329,9 @@ export function requestTitle(text: string): string | null {
     .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
     .filter(Boolean);
   const first = lines[0] ?? "";
-  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(first))
+  // A clock time ("17:20") is part of a name; any other colon or sentence mark is not.
+  const marks = first.replace(/\d[:：]\d/g, "");
+  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(marks))
     return null;
   return first;
 }
