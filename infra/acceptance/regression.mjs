@@ -30,6 +30,7 @@
 //                  reports when its countdown runs out and answers a bare "再来点"). Cases in a
 //                  wave run side by side; resume runs alone. approval (--only approval: a new
 //                  message never answers a waiting booking card) needs a calendar connection.
+//   --suite staging-quick  only the first, free wave (smoke, pages, memory): the deploy gate
 //   --staging      allows the cases that touch shared state or restart the test server
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
 //   --paid         required for any case that searches (first10, progress, t1, t3, contacts, cards,
@@ -571,8 +572,8 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : SUITE === "staging"
-        ? STAGING_WAVES.flat()
+      : SUITE === "staging" || SUITE === "staging-quick"
+        ? stagingWaves.flat()
         : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3", "contacts"]),
 );
 
@@ -1572,10 +1573,11 @@ try {
     }
     if (!groupId) return failures.push("find-100 never started scaling; see resume.log");
     if (!restart) failures.push("the search ended before the server could be restarted");
-    if (exit !== 0)
-      failures.push("find-100 did not reach its target after the restart; see resume.log");
     const messages = await settled(groupId, { limitMs: 10 * 60_000 });
     const report = reportOf("resume");
+    if (exit !== 0 && !report.milestones?.target_reached)
+      failures.push("find-100 did not reach its target after the restart; see resume.log");
+    for (const item of report.violations ?? []) failures.push(`${item.kind}: ${item.detail}`);
     scaleReportChecks(messages, failures, report.milestones?.scale_sent);
     if (!countdown) failures.push("the 100-person search showed no countdown");
     else if (countdown.running) {
@@ -1596,8 +1598,8 @@ try {
   });
 
   const waves =
-    SUITE === "staging" && !option("--only")
-      ? STAGING_WAVES
+    SUITE.startsWith("staging") && !option("--only")
+      ? stagingWaves
       : [...defined.keys()].map((name) => [name]);
   for (const wave of waves)
     await Promise.all(
