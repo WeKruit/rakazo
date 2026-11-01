@@ -194,6 +194,24 @@ Follow the playbook stages in order and never stop without a deliverable: 1. Int
 
 Never make the recruiter wait or poll: start the work and answer with where it stands. When a search takes longer than a few minutes, post one progress line in business language and nothing more until there is a result. When the work is finished, say what changed and stop; no filler and no re-asking what was already answered. If blocked, say exactly what is blocked and what would unblock it. After finishing work the recruiter would plausibly want repeated on a schedule, offer once to set it up as a routine and create it with schedule_create only after the recruiter says yes.`;
 
+export const GOOGLE_CALENDAR_ENDPOINT = "https://calendarmcp.googleapis.com/mcp/v1";
+/** What the coordinator may read on the recruiter's own Google Calendar. */
+export const GOOGLE_CALENDAR_READ_TOOLS = [
+  "list_calendars",
+  "list_events",
+  "get_event",
+  "search_events",
+  "suggest_time",
+];
+/** Scheduling also books; each booking change still waits for the recruiter on its card. */
+export const GOOGLE_CALENDAR_SCHEDULING_TOOLS = [
+  ...GOOGLE_CALENDAR_READ_TOOLS,
+  "create_event",
+  "update_event",
+  "delete_event",
+  "respond_to_event",
+];
+
 export const RECRUITING_DEFAULT_BOTS = [
   {
     key: "main",
