@@ -19,6 +19,12 @@ import { formatDate, TabLoading } from "./shared";
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
 const MAIL_PER_PAGE = 30;
+/** One campaign's recipient pages read so far, and the provider cursor after each. */
+type LeadPages = {
+  pages: RecruitingRoleCampaign["leads"][];
+  next: (string | null)[];
+  page: number;
+};
 // The all-roles pages read each role on its own and show it when it arrives, so one role with a
 // large CRM never holds back the others. The roles on one page read together.
 const PER_ROLE_VIEWS = new Set(["sequence", "inbox", "interview"]);
@@ -72,6 +78,10 @@ export function AccountRecruitingView({
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState<string>();
+  const [leadPages, setLeadPages] = useState<{
+    key: string;
+    byCampaign: Record<string, LeadPages>;
+  }>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
   const pageKey = JSON.stringify([
@@ -336,15 +346,26 @@ export function AccountRecruitingView({
       setLoadingMore(undefined);
     }
   };
-  const loadMoreLeads = async (roleId: string, campaign: RecruitingRoleCampaign) => {
-    if (
-      !page ||
-      !campaign.campaign ||
-      !campaign.serverId ||
-      !campaign.nextLeadCursor ||
-      loadingMore
-    )
-      return;
+  const leadKey = (roleId: string, campaign: RecruitingRoleCampaign) =>
+    JSON.stringify([roleId, campaign.serverId, campaign.campaign?.id]);
+  const leadPagesOf = (roleId: string, campaign: RecruitingRoleCampaign): LeadPages =>
+    (leadPages?.key === readKey ? leadPages.byCampaign[leadKey(roleId, campaign)] : undefined) ?? {
+      pages: [campaign.leads],
+      next: [campaign.nextLeadCursor ?? null],
+      page: 0,
+    };
+  // Recipients page by the provider's cursor: pages already read are kept, a new one is read once.
+  const openLeadPage = async (roleId: string, campaign: RecruitingRoleCampaign, index: number) => {
+    const current = leadPagesOf(roleId, campaign);
+    const key = leadKey(roleId, campaign);
+    const save = (value: LeadPages) =>
+      setLeadPages((saved) => ({
+        key: readKey,
+        byCampaign: { ...(saved?.key === readKey ? saved.byCampaign : {}), [key]: value },
+      }));
+    if (index < current.pages.length) return save({ ...current, page: index });
+    const cursor = current.next[index - 1];
+    if (!page || !campaign.campaign || !campaign.serverId || !cursor || loadingMore) return;
     setLoadingMore(roleId);
     try {
       const next = await rpc.recruiting.accountView({
@@ -352,45 +373,16 @@ export function AccountRecruitingView({
         roleId,
         campaignId: campaign.campaign.id,
         campaignServerId: campaign.serverId,
-        campaignLeadCursor: campaign.nextLeadCursor,
+        campaignLeadCursor: cursor,
         limit: 20,
       });
       const update = next.items[0]?.campaigns?.[0];
       if (update)
-        setRead((current) =>
-          current?.key !== readKey
-            ? current
-            : {
-                key: readKey,
-                data: {
-                  ...current.data,
-                  items: current.data.items.map((item) =>
-                    item.roleId !== roleId
-                      ? item
-                      : {
-                          ...item,
-                          campaigns: (item.campaigns ?? (item.campaign ? [item.campaign] : [])).map(
-                            (saved) =>
-                              saved.serverId === update.serverId &&
-                              saved.campaign?.id === update.campaign?.id
-                                ? {
-                                    ...update,
-                                    leads: [
-                                      ...new Map(
-                                        [...saved.leads, ...update.leads].map((lead) => [
-                                          lead.email.toLowerCase(),
-                                          lead,
-                                        ]),
-                                      ).values(),
-                                    ],
-                                  }
-                                : saved,
-                          ),
-                        },
-                  ),
-                },
-              },
-        );
+        save({
+          pages: [...current.pages, update.leads],
+          next: [...current.next, update.nextLeadCursor ?? null],
+          page: index,
+        });
     } catch {
       setFailed(true);
     } finally {
@@ -948,21 +940,26 @@ export function AccountRecruitingView({
                                 <dd>{campaign.stats?.replied ?? "—"}</dd>
                               </div>
                             </dl>
-                            <ul className="space-y-2 text-sm">
-                              {campaign.leads.map((lead) => (
-                                <li key={lead.email}>{lead.email}</li>
-                              ))}
-                            </ul>
-                            {campaign.nextLeadCursor ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={Boolean(loadingMore)}
-                                onClick={() => void loadMoreLeads(item.roleId, campaign)}
-                              >
-                                <Trans>Load more</Trans>
-                              </Button>
-                            ) : null}
+                            {(() => {
+                              const leads = leadPagesOf(item.roleId, campaign);
+                              return (
+                                <>
+                                  <ul className="space-y-2 text-sm">
+                                    {(leads.pages[leads.page] ?? []).map((lead) => (
+                                      <li key={lead.email}>{lead.email}</li>
+                                    ))}
+                                  </ul>
+                                  <ListPager
+                                    page={leads.page}
+                                    pageCount={leads.pages.length + (leads.next.at(-1) ? 1 : 0)}
+                                    onPage={(index) =>
+                                      void openLeadPage(item.roleId, campaign, index)
+                                    }
+                                    disabled={Boolean(loadingMore)}
+                                  />
+                                </>
+                              );
+                            })()}
                           </div>
                         ))
                       ) : item.campaign?.status === "unavailable" ? (

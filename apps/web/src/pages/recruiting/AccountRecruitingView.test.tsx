@@ -171,7 +171,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
   }
 });
 
-it("loads the next campaign lead page without losing sibling campaigns or repeating a person", async () => {
+it("pages campaign recipients back and forth without losing sibling campaigns or rereading a page", async () => {
   const lead = (email: string) => ({ candidateKey: null, email, status: 1, interestStatus: null });
   const campaign = (id: string) => ({
     status: "ready" as const,
@@ -188,7 +188,7 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       {
         roleId: "one",
         campaigns: input.campaignId
-          ? [{ ...first, leads: [...first.leads, lead("new@example.test")], nextLeadCursor: null }]
+          ? [{ ...first, leads: [lead("new@example.test")], nextLeadCursor: null }]
           : [first, second],
       },
     ],
@@ -217,11 +217,9 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       expect.objectContaining({ view: "roles", briefedOnly: true }),
       expect.anything(),
     );
-    await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Load more")!
-        .click(),
-    );
+    const button = (label: string) =>
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+    await act(async () => button("Next page").click());
     expect(read).toHaveBeenLastCalledWith({
       view: "sequence",
       roleId: "one",
@@ -230,10 +228,18 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       campaignLeadCursor: "lead-page-two",
       limit: 20,
     });
-    expect(container.textContent?.match(/one@example.test/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain("one@example.test");
     expect(container.textContent).toContain("new@example.test");
     expect(container.textContent).toContain("Campaign two");
     expect(container.textContent).toContain("two@example.test");
+    const reads = read.mock.calls.length;
+    await act(async () => button("Page 1").click());
+    expect(container.textContent).toContain("one@example.test");
+    expect(container.textContent).not.toContain("new@example.test");
+    await act(async () => button("Page 2").click());
+    expect(container.textContent).toContain("new@example.test");
+    // Pages already read are shown again without another provider read.
+    expect(read.mock.calls.length).toBe(reads);
   } finally {
     await act(async () => pageRoot.unmount());
   }
