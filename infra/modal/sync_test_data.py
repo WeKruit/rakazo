@@ -4,8 +4,9 @@ Run through docs/deploy/sync-test-data.sh, which stops the test app first and re
 Production is only read (read-only transaction). The test copy is made safe to run: scheduled
 routines are paused, unfinished runs cancelled, queued jobs dropped, sign-in sessions and push
 tokens removed, and personal model credentials dropped so runs use the platform key. Connections
-stay encrypted with the production key, which the test environment does not have, so they cannot
-send anything. Nothing is printed except counts.
+copied from production stay encrypted with the production key, which the test environment does not
+have, so they cannot send anything. Connections made on the test environment itself are kept across
+syncs, so they don't need to be reconnected. Nothing is printed except counts.
 """
 
 import modal
@@ -26,6 +27,42 @@ SANITIZE = [
     ("model_credentials_removed", "delete from user_model_credentials"),
     ("voice_credentials_removed", "delete from user_voice_credentials"),
 ]
+
+
+# Connections made on the test environment are sealed with its own key. They are saved before the
+# restore and put back after it, together with the connector rows that point at them.
+KEEP = "test_keep"
+SECRET_COLUMNS = '"id", "userId", "spaceId", "kind", "ciphertext", "createdAt"'
+LINKED = ["mcp_servers", "connections"]
+
+
+def save_test_connections(cursor):
+    cursor.execute("select to_regclass('public.secrets') is not null")
+    if not cursor.fetchone()[0]:
+        return
+    cursor.execute(f"drop schema if exists {KEEP} cascade; create schema {KEEP}; "
+                   f"create table {KEEP}.secrets as select {SECRET_COLUMNS} from public.secrets")
+    for table in LINKED:
+        cursor.execute(f'create table {KEEP}.{table} as select "id", "secretId" from public.{table} '
+                       'where "secretId" is not null')
+
+
+def restore_test_connections(cursor):
+    cursor.execute(f"select to_regclass('{KEEP}.secrets') is not null")
+    if not cursor.fetchone()[0]:
+        return {}
+    cursor.execute(f'insert into secrets ({SECRET_COLUMNS}) select {SECRET_COLUMNS} from {KEEP}.secrets k '
+                   'where not exists (select 1 from secrets s where s.id = k.id) '
+                   'and exists (select 1 from "user" u where u.id = k."userId") '
+                   'and (k."spaceId" is null or exists (select 1 from spaces p where p.id = k."spaceId"))')
+    counts = {"test_secrets_kept": cursor.rowcount}
+    for table in LINKED:
+        cursor.execute(f'update {table} t set "secretId" = k."secretId" from {KEEP}.{table} k '
+                       'where t.id = k.id and t."secretId" is distinct from k."secretId" '
+                       'and exists (select 1 from secrets s where s.id = k."secretId")')
+        counts[f"test_{table}_kept"] = cursor.rowcount
+    cursor.execute(f"drop schema {KEEP} cascade")
+    return counts
 
 
 def host_of(url):
@@ -65,8 +102,9 @@ def restore_into_test(production_user):
     connection = psycopg2.connect(url)
     connection.autocommit = True
     cursor = connection.cursor()
-    cursor.execute("set default_transaction_read_only = off; "
-                   "drop schema if exists graphile_worker cascade; drop schema if exists public cascade")
+    cursor.execute("set default_transaction_read_only = off")
+    save_test_connections(cursor)
+    cursor.execute("drop schema if exists graphile_worker cascade; drop schema if exists public cascade")
     result = subprocess.run(["pg_restore", "--no-owner", "--no-acl", "--jobs=2", f"--dbname={url}", DUMP],
                             capture_output=True, text=True)
     if result.returncode:
@@ -75,6 +113,7 @@ def restore_into_test(production_user):
     for name, statement in SANITIZE:
         cursor.execute(statement)
         counts[name] = cursor.rowcount
+    counts.update(restore_test_connections(cursor))
     cursor.execute('select (select count(*) from "user"), (select count(*) from runs), '
                    "(select count(*) from routines where active)")
     counts["users"], counts["runs"], counts["active_routines"] = cursor.fetchone()
