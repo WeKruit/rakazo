@@ -11149,6 +11149,7 @@ export async function listRecruitingCandidates(
         SELECT *, ${sortValue} AS "sortValue" FROM filtered
       ), candidate_page AS (
         SELECT * FROM ordered WHERE ${after} ORDER BY ${order} LIMIT ${limit + 1}
+          OFFSET ${input.cursor ? 0 : (input.offset ?? 0)}
       ), totals AS (
         SELECT (SELECT count(*) FROM filtered) AS "total",
           (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
