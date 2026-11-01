@@ -170,7 +170,8 @@ export async function readRecruitingAccountView(
       throw new ORPCError("NOT_FOUND");
     if (
       (input.itemCursor && !input.roleId) ||
-      (input.cursor && input.roleId && input.view !== "routines")
+      (input.cursor && input.roleId && input.view !== "routines") ||
+      (input.offset && (input.cursor || input.roleId || input.view === "routines"))
     )
       throw new ORPCError("BAD_REQUEST");
     if (
@@ -185,6 +186,7 @@ export async function readRecruitingAccountView(
         ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
       },
       orderBy: { id: "asc" },
+      ...(input.offset ? { skip: input.offset } : {}),
       take: input.limit + 1,
       select: {
         id: true,

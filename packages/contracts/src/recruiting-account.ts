@@ -36,6 +36,8 @@ export const RecruitingAccountViewInputSchema = z.strictObject({
   groupId: Id.optional(),
   itemCursor: z.string().min(1).max(10000).optional(),
   cursor: Id.optional(),
+  /** Roles to skip, to open a numbered page of roles. Not combined with `cursor`. */
+  offset: z.number().int().min(0).max(10_000).optional(),
   limit: z.number().int().min(1).max(50).default(20),
   since: IsoDate.optional(),
 });

@@ -89,6 +89,7 @@ const shellApi = vi.hoisted(() => ({
       roles: [],
       items: [],
       nextCursor: null,
+      total: 0,
       unread: { count: 0, unknownThreads: 0, scope: "indexed_stored_mail" },
       coverage: {
         importsComplete: true,

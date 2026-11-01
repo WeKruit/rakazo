@@ -89,6 +89,7 @@ const indexPage = (
     latestIncomingAt: email.direction === "received" ? email.date : null,
   })),
   nextCursor: null,
+  total: emails.length,
   unread: {
     count: 0,
     unknownThreads: emails.filter((email) => !email.direction || !email.date).length,
@@ -144,7 +145,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
     );
     expect(read).toHaveBeenCalledTimes(3);
     expect(read.mock.calls.map(([input]) => input)).toEqual([
-      { view: "roles", cursor: undefined, limit: 5 },
+      { view: "roles", limit: 5 },
       { view: "interview", roleId: "one", limit: 1 },
       { view: "interview", roleId: "two", limit: 1 },
     ]);
@@ -314,6 +315,42 @@ it.each([
     }
   },
 );
+
+it("pages saved mail by number and reads only the chosen page", async () => {
+  mockIndex({ ...indexPage([]), total: 75 });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offset: expect.anything() }),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 60, limit: 30 }));
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Previous page"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 30 }));
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
 
 it("reports an unavailable campaign read without claiming that there is no campaign", async () => {
   read.mockResolvedValue({
