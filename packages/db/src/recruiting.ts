@@ -3120,12 +3120,16 @@ export async function executeRecruitingRoleMutation(
     requireResearchLease(run, context);
     if (effect.status !== "executing") throw new IsolationError();
     if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
+    // A role stays the recruiter's request when they add a detail while it is being written
+    // ("recent graduates preferred"): the create may cite their earlier message from this run.
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
       run,
       context.sourceMessageId,
       input.intent.quote,
+      input.operation === "create",
+      undefined,
       input.operation === "create",
     );
     const currentRole = thread.activeRecruitingRoleId
