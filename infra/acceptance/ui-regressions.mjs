@@ -41,7 +41,12 @@ const FIXTURE_MARK = "测试固定 · ";
 const tag = `T${Date.now().toString(36).slice(-5)}`;
 
 const browser = await chromium.launch();
-const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+// Reuse the release's saved sign-in: every deploy and thread signing in again hits the auth limit.
+const SESSION_FILE = process.env.RAKAZO_SESSION_FILE;
+const context = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  ...(SESSION_FILE && fs.existsSync(SESSION_FILE) ? { storageState: SESSION_FILE } : {}),
+});
 const results = [];
 async function check(name, body) {
   if (ONLY && !ONLY.includes(name)) return;
@@ -108,8 +113,15 @@ async function ask(groupId, text, until, limitMs = 3 * 60_000) {
   return replies;
 }
 
-let signedIn = false;
-for (const wait of [0, 60_000]) {
+let signedIn =
+  (
+    await context.request.post(`${ORIGIN}/rpc/me`, {
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      data: "{}",
+      failOnStatusCode: false,
+    })
+  ).status() === 200;
+for (const wait of signedIn ? [] : [0, 60_000]) {
   await sleep(wait);
   const response = await context.request.post(`${ORIGIN}/api/auth/sign-in/email`, {
     headers: { origin: ORIGIN },
@@ -118,6 +130,7 @@ for (const wait of [0, 60_000]) {
   });
   if (response.status() === 200) {
     signedIn = true;
+    if (SESSION_FILE) await context.storageState({ path: SESSION_FILE });
     break;
   }
   if (response.status() !== 429) break;
