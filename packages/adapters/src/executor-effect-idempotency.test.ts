@@ -53,6 +53,7 @@ import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   continuedCandidateKey,
   createRunExecutor,
+  INTAKE_ASK_FIRST,
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
@@ -5516,8 +5517,16 @@ describe("native recruiting assessment effect delivery", () => {
         createdAt: new Date(),
       },
     ]) as never);
-    f.setCalls([]);
+    f.setCalls([
+      {
+        name: "handoff_to_bot",
+        args: { confirm_name: "Sourcer", message: text },
+        executionId: "handoff-1",
+      },
+    ]);
     await f.run();
+    // The first question comes from the coordinator itself, not after a teammate starts up.
+    expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "New role",
@@ -5525,6 +5534,30 @@ describe("native recruiting assessment effect delivery", () => {
       intent: { basis: "direct", quote: text },
     });
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
+  });
+
+  it("streams a question and its choices while the card is still being written", async () => {
+    const f = fixture("streamed-question");
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      request.onToolCallDelta?.({ id: "ask-1", name: "ask_user", args: { question: "Where" } });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      request.onToolCallDelta?.({
+        id: "ask-1",
+        name: "ask_user",
+        args: { question: "Where should they be?", options: ["Remote", "Bay Area"] },
+      });
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+    const publish = f.executorDeps.events.publishTransient as unknown as ReturnType<typeof vi.fn>;
+    await vi.waitFor(() =>
+      expect(
+        publish.mock.calls
+          .map(([event]) => event as { type: string; payload: { text?: string } })
+          .filter((event) => event.type === "thread.progress")
+          .map((event) => event.payload.text),
+      ).toEqual(expect.arrayContaining(["Where", "Where should they be?\n· Remote\n· Bay Area"])),
+    );
   });
 
   it("posts a progress line while the pasted JD's role is still saving", async () => {

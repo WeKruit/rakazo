@@ -1225,6 +1225,8 @@ export const REPORT_IN_FINAL_REPLY =
 export const STEERING_ACK =
   "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it.";
 
+export const INTAKE_ASK_FIRST =
+  "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_RECRUITER_LANGUAGE =
@@ -5669,6 +5671,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -5973,6 +5976,48 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .catch((error) =>
               getLogger().warn("round picks not streamed", { error: String(error) }),
             );
+        };
+        // The question streams into the live bubble as it is written, its choices under it, so
+        // the person reads it before the card (and the search plan written after it) is complete.
+        let questionStream:
+          | { callId: string; text: string; at: number; posting: Promise<void> }
+          | undefined;
+        const streamQuestion = (call: {
+          id: string;
+          name: string;
+          args: Record<string, unknown>;
+        }) => {
+          if (call.name !== "ask_user" || scripted || isBackgroundRunTrigger(run.trigger)) return;
+          const question = typeof call.args.question === "string" ? call.args.question.trim() : "";
+          if (!question) return;
+          const options = Array.isArray(call.args.options)
+            ? call.args.options.filter(
+                (option): option is string => typeof option === "string" && Boolean(option.trim()),
+              )
+            : [];
+          const text = [question, ...options.map((option) => `· ${option.trim()}`)].join("\n");
+          const previous = questionStream?.callId === call.id ? questionStream : undefined;
+          if (previous?.text === text || (previous && Date.now() - previous.at < 100)) return;
+          const posting = (questionStream?.posting ?? Promise.resolve())
+            .then(() =>
+              deps.events.publishTransient({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: {
+                  text: visible(redactSecrets(text, runSecrets)),
+                  streaming: true,
+                  ...runTiming,
+                },
+              }),
+            )
+            .then(() => undefined)
+            .catch((error) => getLogger().warn("question not streamed", { error: String(error) }));
+          questionStream = { callId: call.id, text, at: Date.now(), posting };
+          // Text written after a bounced question replaces it instead of appending to it.
+          hasStreamedText = false;
         };
         const saveBriefAfterRound = async (roleId: string) => {
           const quote = currentTurnMessage?.blocks.flatMap((block) =>
@@ -12220,6 +12265,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            // A new role's first question is the coordinator's own: a handoff first costs the
+            // recruiter a second agent's start-up before anything appears.
+            if (linkRole && !intakeHandoffRefused && recruitingBotKey(bot) === "main") {
+              intakeHandoffRefused = true;
+              return finish({ error: INTAKE_ASK_FIRST });
+            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
@@ -13369,7 +13420,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.
-        if (plannedNote || handedIn) runModel = { ...runModel, firstStepThinkingLevel: "low" };
+        // A turn routed to no thinking (a new role's first question) stays without it.
+        if ((plannedNote || handedIn) && runModel.thinkingLevel !== "off")
+          runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
         try {
           setupMark("runtimeStart");
@@ -13600,7 +13653,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         resolveConnectedModel(run, provider, modelId, (values) =>
                           runSecrets.push(...values),
                         ),
-                  onToolCallDelta: streamRoundPicks,
+                  onToolCallDelta: (call) => {
+                    streamRoundPicks(call);
+                    streamQuestion(call);
+                  },
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     // Workloop: work running behind the conversation never asks the person after
