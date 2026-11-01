@@ -1145,7 +1145,7 @@ const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
-  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines with message_user and end the turn without a question.`;
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
 
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
@@ -14238,7 +14238,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // run's last saved message counts too.
           if (
             run.trigger !== "bot_message" &&
-            blocks.every((block) => block.kind === "text") &&
+            blocks.some((block) => block.kind === "text") &&
+            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
             (restatesUpdate(text, midTurnUserTexts.at(-1)) ||
               restatesUpdate(text, await lastRunMessageText()))
           ) {
