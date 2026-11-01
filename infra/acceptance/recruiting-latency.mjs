@@ -797,11 +797,11 @@ function measureFirstTen(events, round) {
   // The recruiter sees the first people within 20 s of their last answer (or of the JD with no questions).
   if (result.firstPeopleInChatS == null || result.firstPeopleInChatS > 20)
     violation("first_people_slow", `first people at ${result.firstPeopleInChatS ?? "never"} s`);
-  // The recruiter sees the turn working within 3 s of the JD and its first question within 5 s,
+  // The recruiter sees the turn working within 3 s of the JD and its first question within 4 s,
   // whether the JD is pasted, linked or a file.
   if (result.firstSignS == null || result.firstSignS > 3)
     violation("first_sign_slow", `working shown at ${result.firstSignS ?? "never"} s`);
-  if (result.firstQuestionS != null && result.firstQuestionS > 5)
+  if (result.firstQuestionS != null && result.firstQuestionS > 4)
     violation("first_question_slow", `first question at ${result.firstQuestionS} s`);
   if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
   if (result.questions && !result.plannedSearches)

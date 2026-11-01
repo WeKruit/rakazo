@@ -28,6 +28,7 @@ export function useRecruitingWorkspace({
   shortlistWeekFilter,
   onClearShortlistWeekFilter,
   userId,
+  ownerName,
   threadId,
   botId,
   groupId,
@@ -38,6 +39,7 @@ export function useRecruitingWorkspace({
   onBrowseCandidates,
   onRevealMessage,
   onDiscussCandidate,
+  onAskChat,
   onCandidateFeedback,
   candidateFeedbackRecipients,
   showDiagnostics = false,
@@ -46,7 +48,7 @@ export function useRecruitingWorkspace({
   view = "results",
   tab,
   onTabChange,
-}: Props & { userId?: string }) {
+}: Props & { userId?: string; ownerName?: string }) {
   const { t } = useLingui();
   const shortlistFilterId = useId();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -496,21 +498,9 @@ export function useRecruitingWorkspace({
     roleRevisionId,
     selection,
   };
-  const userSortRef = useRef(candidateList.userSort === true);
-  userSortRef.current = candidateList.userSort === true;
   const resetUnavailableCandidateSort = useCallback(
     (page: ListRecruitingCandidatesOutput, filters: RecruitingPanelState["filters"]) => {
-      const sort = filters.sort ?? "score";
-      // A list that was sorted by a fallback returns to score order once scores exist.
-      if (!userSortRef.current && sort !== "score" && page.sortAvailability.score) {
-        setCandidatePage(null);
-        setCandidateList((current) => ({
-          ...current,
-          filters: { ...current.filters, sort: "score" },
-          pageCount: 1,
-        }));
-        return true;
-      }
+      const sort = filters.sort ?? "ranking";
       if (
         (sort === "rank" || sort === "tier" || sort === "score") &&
         !page.sortAvailability[sort]
@@ -979,6 +969,7 @@ export function useRecruitingWorkspace({
     }
   }
   return {
+    ownerName,
     shortlistWeekFilter,
     onClearShortlistWeekFilter,
     threadId,
@@ -991,6 +982,7 @@ export function useRecruitingWorkspace({
     onBrowseCandidates,
     onRevealMessage,
     onDiscussCandidate,
+    onAskChat,
     onCandidateFeedback,
     candidateFeedbackRecipients,
     showDiagnostics,
@@ -1027,7 +1019,7 @@ export function useRecruitingWorkspace({
     candidateTrigger,
     candidateClose,
     candidateHandoff,
-    candidatePage,
+    candidatePage: displayedCandidateQuery.current === candidateQueryKey ? candidatePage : null,
     arrival,
     setCandidateFilters,
     setCandidateDetailOpen,

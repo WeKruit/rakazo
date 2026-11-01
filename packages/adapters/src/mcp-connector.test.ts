@@ -6,16 +6,19 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
+import { sequenceConfigurationRevision } from "./instantly-native-writes.js";
 import {
   allowlistDrift,
   DISCOVERY_CACHE_TTL_MS,
   DISCOVERY_FAILURE_TTL_MS,
   DISCOVERY_REFRESH_OPERATION,
   firstPartyMcpUrl,
+  hasPlatformMcpCredential,
   loadMcpCredentialRecord,
   McpConnector,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
+  sharedInstantlyAccount,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
@@ -284,7 +287,36 @@ describe("local native Instantly thread history", () => {
         events.push(event);
       return events;
     };
-    return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
+    const discover = async (toolName: string, args: Record<string, unknown> = {}) => {
+      const tools = await connector.discoverTools(context as never);
+      const direct = tools.find((tool) => tool.route?.toolName === toolName);
+      if (direct) return direct;
+      const execute = tools.find((tool) => tool.route?.toolName === "__catalog_execute");
+      if (!execute) return undefined;
+      return (
+        await connector.resolveCall(
+          {
+            tool: execute.name,
+            route: execute.route,
+            executionId: "fixture-discovery",
+            args: { id: `${server.id}:${toolName}`, arguments: args },
+          },
+          context as never,
+        )
+      )?.tool;
+    };
+    return {
+      connector,
+      context,
+      state,
+      server,
+      assignment,
+      prisma,
+      secrets,
+      rest,
+      collect,
+      discover,
+    };
   }
   it("keeps the local mail tools when the remote server cannot list its tools", async () => {
     const f = fixture();
@@ -319,8 +351,7 @@ describe("local native Instantly thread history", () => {
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
     const f = fixture();
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === route.toolName);
+      const tool = await f.discover(route.toolName, { anchor_id: anchor.id });
       expect(tool).toMatchObject({
         name: "instantly__demo__get_thread_history",
         readOnly: true,
@@ -388,8 +419,7 @@ describe("local native Instantly thread history", () => {
     };
     f.state.page = { items: [anchor, outbound], next_starting_after: "provider-next" };
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === contactRoute.toolName);
+      const tool = await f.discover(contactRoute.toolName, { email: anchor.from_address_email });
       expect(tool).toMatchObject({
         name: "instantly__demo__search_contact_emails",
         readOnly: true,
@@ -615,8 +645,7 @@ describe("local native Instantly thread history", () => {
     const direct = { ...anchor, campaign_id: null, subject: "Direct note" };
     f.state.page = { items: [direct] };
     try {
-      const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find((tool) => tool.route?.toolName === mailboxRoute.toolName);
+      const tool = await f.discover(mailboxRoute.toolName, { eaccount: anchor.eaccount });
       expect(tool).toMatchObject({
         name: "instantly__demo__list_mailbox_emails",
         readOnly: true,
@@ -1217,7 +1246,8 @@ describe("local native Instantly thread history", () => {
         ),
       ).toMatchObject([{ type: "error" }]);
       expect(f.rest).not.toHaveBeenCalled();
-      const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+      const remote = (await f.discover(toolName))!;
+      expect(remote.name).toBe(`mcp__demo__${toolName}`);
       expect(remote.readOnly).not.toBe(true);
       if (toolName === localName) {
         expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
@@ -3423,6 +3453,53 @@ describe("allowlistDrift", () => {
   });
 });
 
+describe("deployment Instantly credentials", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const context = {
+    userId: "new-user",
+    spaceId: "private-space",
+    signal: new AbortController().signal,
+  };
+  const server = {
+    secretId: "saved-secret",
+    transport: "streamable_http",
+    endpoint: "https://mcp.instantly.ai/mcp",
+  };
+
+  it("uses the product's account for every user, even one holding an old saved key", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
+    const findFirst = vi.fn();
+    const load = vi.fn();
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst } } as never,
+      { load } as never,
+      server,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-mail-key" });
+    expect(result.secret).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+    expect(hasPlatformMcpCredential(server)).toBe(true);
+    expect(sharedInstantlyAccount(server)).toBe(true);
+  });
+
+  it("keeps the user's own key when the deployment has no account", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", " ");
+    const row = { id: "saved-secret", ciphertext: "encrypted-reference" };
+    const load = vi.fn().mockResolvedValue('{"secret":"own-key"}');
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst: vi.fn().mockResolvedValue(row) } } as never,
+      { load } as never,
+      server,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "own-key" });
+    expect(hasPlatformMcpCredential({ ...server, secretId: null })).toBe(false);
+    expect(sharedInstantlyAccount(server)).toBe(false);
+  });
+});
+
 describe.each([
   ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
   ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
@@ -3761,6 +3838,7 @@ describe("local native Instantly campaign and lead tools", () => {
       botId: "bot-1",
       runId: "run-1",
       signal: new AbortController().signal,
+      reauthorize: undefined as (() => Promise<void>) | undefined,
     };
     const server = {
       ...SERVER,
@@ -3964,8 +4042,91 @@ describe("local native Instantly campaign and lead tools", () => {
     const result = (events: unknown[]) =>
       (events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }).data
         .structuredContent.result;
-    return { state, run, result, prisma };
+    return { state, run, result, prisma, context };
   }
+
+  it.each(["assignment", "credential"])(
+    "refuses a native draft write when %s changes during its mailbox read",
+    async (change) => {
+      const f = fixture();
+      const fetch = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          const response = await fetch(input, init);
+          if (new URL(logicalHref(input, init)).pathname.includes("/accounts/")) {
+            if (change === "assignment")
+              f.prisma.botMcpServer.findFirst.mockResolvedValue(null as never);
+            else f.state.key = "rotated-private-key";
+          }
+          return response;
+        }),
+      );
+      const events = await f.run("create_campaign", {
+        name: "Draft",
+        eaccount: "team@example.test",
+      });
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.state.requests).toEqual([
+        { method: "GET", path: "/api/v2/accounts/team%40example.test" },
+      ]);
+      expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
+    },
+  );
+
+  it.each(["create_campaign", "create_role_draft", "update_role_draft"])(
+    "rechecks trusted role authorization after provider reads before %s writes",
+    async (name) => {
+      const f = fixture();
+      f.context.reauthorize = vi.fn(async () => {
+        throw new IsolationError("Role authorization changed");
+      });
+      f.state.campaign = {
+        ...f.state.campaign,
+        email_list: ["team@example.test"],
+        sequences: [],
+        campaign_schedule: {
+          schedules: [
+            {
+              name: "Weekdays",
+              timezone: "America/Chicago",
+              timing: { from: "09:00", to: "17:00" },
+              days: {
+                "0": false,
+                "1": true,
+                "2": true,
+                "3": true,
+                "4": true,
+                "5": true,
+                "6": false,
+              },
+            },
+          ],
+        },
+      };
+      if (name === "update_role_draft")
+        f.state.effects.set(`instantly-role-campaign:${SERVER.id}:role-1`, {
+          spaceId: "w1",
+          result: { campaignId: CAMPAIGN },
+        });
+      const events = await f.run(name, {
+        name: "Draft",
+        eaccount: "team@example.test",
+        ...(name === "create_campaign" ? {} : { role_id: "role-1" }),
+        ...(name === "update_role_draft"
+          ? {
+              campaign_id: CAMPAIGN,
+              expected_revision: sequenceConfigurationRevision(f.state.campaign),
+            }
+          : {}),
+        ...(name === "create_role_draft" ? { client_nonce: "authorization-regression" } : {}),
+      });
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.context.reauthorize).toHaveBeenCalledOnce();
+      expect(f.state.requests.length).toBeGreaterThan(0);
+      expect(f.state.requests.every((request) => request.method === "GET")).toBe(true);
+    },
+  );
 
   it("creates a draft stop-on-reply campaign from an own mailbox", async () => {
     const f = fixture();

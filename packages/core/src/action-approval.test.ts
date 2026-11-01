@@ -31,6 +31,9 @@ describe("internalMcpWriteEndpoint", () => {
   it("treats Instantly writes that never send as internal, and keeps activation confirmed", () => {
     for (const name of [
       "native_instantly_create_campaign",
+      "native_instantly_create_role_draft",
+      "native_instantly_update_role_draft",
+      "native_instantly_clone_role_draft",
       "native_instantly_ensure_role_campaign",
       "native_instantly_add_leads",
       "native_instantly_add_shortlist_leads",

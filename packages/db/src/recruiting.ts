@@ -93,6 +93,7 @@ import {
   RecruitingSourceRefSchema,
   RetainedRecruitingApprovalRequestSchema,
   ReviseRecruitingRoleInput,
+  recruitingCandidateRanking,
   SaveRecruitingAssessmentInput,
   SetRecruitingCandidateShortlistInput,
 } from "@rakazo/contracts";
@@ -8401,14 +8402,15 @@ function scoreCellPart(fields: Prisma.Sql, part: "plain" | "fraction") {
 export const RECRUITING_GRADE_NONCE_PREFIX = "recruiting-grade:";
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
-function candidateIndexQuery(
+export function candidateIndexQuery(
   roleId: string,
   sort?: CandidatesInput["sort"],
   rankDomainPageId?: string,
-  displayScope?: Pick<CandidatesInput, "sourceEffectId" | "actionId">,
+  displayScope?: Pick<CandidatesInput, "sourceEffectId" | "actionId" | "rankingGroup">,
 ) {
   const includeMatches = sort !== undefined;
-  const matchSort = sort === "rank" || sort === "tier" || sort === "score";
+  const includeRanking = sort === "ranking" || displayScope?.rankingGroup !== undefined;
+  const matchSort = sort === "rank" || sort === "tier" || sort === "score" || sort === "ranking";
   const explicitSource =
     displayScope?.sourceEffectId !== undefined || displayScope?.actionId !== undefined;
   const sourceScope = Prisma.sql`${displayScope?.sourceEffectId !== undefined ? Prisma.sql`AND page."effectId" = ${displayScope.sourceEffectId}` : Prisma.empty}
@@ -8437,6 +8439,11 @@ function candidateIndexQuery(
         WHERE s.v IS NOT NULL)
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
+  const rankingValue = Prisma.sql`CASE WHEN reviewer."roleRevisionId" IS NOT NULL THEN
+    CASE WHEN reviewer."roleRevisionId" <> (SELECT "currentRevisionId" FROM "recruiting_roles" WHERE "id" = ${roleId}) THEN 4000
+      ELSE CASE reviewer.grade WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1000
+        WHEN 'Partial' THEN 2000 ELSE 3000 END + COALESCE(100 - reviewer.score, 101) END
+    WHEN provider.score IS NOT NULL THEN 5000 + 100 - provider.score ELSE 6000 END`;
   const fields = [
     ["name", "name"],
     ["title", "current_title"],
@@ -8472,11 +8479,15 @@ function candidateIndexQuery(
     -- Grading batches answer one grade schema on 0–100 against the same requirements, so while
     -- the newest scored result is one of them, their scores compare across batches like one
     -- result. Read once per role, never per row.
-    SELECT page."effectId" FROM "recruiting_candidate_pages" page
+    SELECT page."effectId", page."roleRevisionId" FROM "recruiting_candidate_pages" page
     JOIN "external_effects" e ON e."id" = page."effectId"
-    JOIN "runs" r ON r."id" = e."runId"
+    LEFT JOIN "runs" r ON r."id" = e."runId"
     WHERE page."roleId" = ${roleId} ${sourceScope}
-      AND starts_with(r."clientNonce", ${RECRUITING_GRADE_NONCE_PREFIX})
+      -- Reviewer supports direct self-grades and provider-backed grading batches. The latter
+      -- are identified by the scheduler's run nonce, not by returned tier labels.
+      AND (starts_with(r."clientNonce", ${RECRUITING_GRADE_NONCE_PREFIX}) OR
+        (e."kind" = 'recruiting_research' AND e."status" = 'completed'
+          AND e."request"->>'operation' = 'save_grades'))
   ), rank_scope AS MATERIALIZED (
     -- Scores are shown on 0–100. A saved result whose plain scores all fit 0–10 (or 0–1 with a
     -- fraction) was answered on that scale; this converts units only and never rescores.
@@ -8495,8 +8506,8 @@ function candidateIndexQuery(
     SELECT c."roleId", c."candidateKey", c."shortlisted",
       to_char(c."shortlistedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "shortlistedAt",
       c."revision", c."consideration",
-      ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue", match."scoreValue",` : Prisma.empty}
-      ${matchSort ? Prisma.sql`match.${Prisma.raw(`"${sort}Value"`)} AS "matchValue",` : Prisma.empty}
+      ${includeMatches ? Prisma.sql`match."rankValue", match."tierValue", match."scoreValue", reviewer."pageId" AS "reviewerPageId", provider."pageId" AS "providerPageId", reviewer."roleRevisionId" AS "reviewerRoleRevisionId", reviewer.grade AS "reviewerGrade", reviewer.score AS "reviewerScore", provider.score AS "providerScore", provider."roleRevisionId" AS "providerRoleRevisionId", ${rankingValue} AS "rankingValue",` : Prisma.empty}
+      ${matchSort ? (sort === "ranking" ? Prisma.sql`${rankingValue} AS "matchValue",` : Prisma.sql`match.${Prisma.raw(`"${sort}Value"`)} AS "matchValue",`) : Prisma.empty}
       p."pageId" AS "sourcePageId", p."rowIndex" AS "sourceRowIndex",
       ${Prisma.join(
         fields.map(([column]) =>
@@ -8509,7 +8520,13 @@ function candidateIndexQuery(
       ARRAY(SELECT DISTINCT value->>'pageId' FROM (VALUES ${Prisma.join(
         fields.map(([column]) => Prisma.sql`(profile.${Prisma.raw(`"${column}"`)})`),
       )}) fields(value) WHERE value IS NOT NULL
-      ${matchSort ? Prisma.sql`UNION SELECT match.${Prisma.raw(`"${sort}PageId"`)} WHERE match.${Prisma.raw(`"${sort}PageId"`)} IS NOT NULL` : Prisma.empty}) AS "profileSourcePageIds",
+      ${
+        includeRanking
+          ? Prisma.sql`UNION SELECT reviewer."pageId" WHERE reviewer."pageId" IS NOT NULL
+        UNION SELECT provider."pageId" WHERE provider."pageId" IS NOT NULL`
+          : Prisma.empty
+      }
+      ${matchSort && sort !== "ranking" ? Prisma.sql`UNION SELECT match.${Prisma.raw(`"${sort}PageId"`)} WHERE match.${Prisma.raw(`"${sort}PageId"`)} IS NOT NULL` : Prisma.empty}) AS "profileSourcePageIds",
       COALESCE(p."issues", '[]'::jsonb) AS "issues",
       d."discoveryCount",
       to_char(d."firstDiscoveredAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "firstDiscoveredAt",
@@ -8590,7 +8607,30 @@ function candidateIndexQuery(
           ${sourceScope}
           AND source.present
       ) m
-    ) match ON true`
+    ) match ON true
+    LEFT JOIN LATERAL (
+      SELECT o."pageId", gp."roleRevisionId", CASE
+        WHEN jsonb_typeof(o."matchFields"->'match_tier') = 'object'
+          THEN o."matchFields"#>>'{match_tier,value}' ELSE o."matchFields"->>'match_tier' END AS grade,
+        CASE WHEN reviewer_score.value IS NOT NULL
+          THEN round(LEAST(100, GREATEST(0, reviewer_score.value))) END AS score
+      FROM "recruiting_candidate_occurrences" o
+      JOIN grade_pages gp ON gp."effectId" = o."pageId"
+      JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+      CROSS JOIN LATERAL (SELECT COALESCE(
+        ${scoreCellPart(Prisma.sql`o."matchFields"`, "fraction")},
+        ${scoreCellPart(Prisma.sql`o."matchFields"`, "plain")}) AS value) reviewer_score
+      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+      ORDER BY page."observedAt" DESC, page."effectId" COLLATE "C" DESC, o."rowIndex" DESC LIMIT 1
+    ) reviewer ON true
+    LEFT JOIN LATERAL (
+      -- Use exactly the visible score projection: one saved provider result, never an older
+      -- per-person score outside rank_scope. Reviewer batches have their own projection above.
+      SELECT page."effectId" AS "pageId", page."roleRevisionId", match."scoreValue" AS score
+      FROM "recruiting_candidate_pages" page
+      WHERE page."effectId" = match."scorePageId" AND match."scoreValue" IS NOT NULL
+        AND page."effectId" NOT IN (SELECT "effectId" FROM grade_pages)
+    ) provider ON true`
         : Prisma.empty
     }
     LEFT JOIN LATERAL (
@@ -8611,6 +8651,14 @@ function candidateIndexQuery(
 
 type CandidateQueryRow = {
   consideration: Prisma.JsonValue | null;
+  reviewerPageId?: string | null;
+  providerPageId?: string | null;
+  reviewerRoleRevisionId?: string | null;
+  reviewerGrade?: string | null;
+  reviewerScore?: unknown;
+  providerScore?: unknown;
+  providerRoleRevisionId?: string | null;
+  rankingValue?: unknown;
   matchValue?: unknown;
   rankValue?: unknown;
   tierValue?: unknown;
@@ -10973,8 +11021,9 @@ export async function listRecruitingCandidates(
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
-      const sort = input.sort ?? "rank";
-      const matchSort = sort === "rank" || sort === "tier" || sort === "score";
+      const sort = input.sort ?? "ranking";
+      const matchSort =
+        sort === "rank" || sort === "tier" || sort === "score" || sort === "ranking";
       const limit = input.limit ?? 25;
       const explicitSource = input.sourceEffectId !== undefined || input.actionId !== undefined;
       // Every sort reads the same domain, so availability does not depend on the current sort
@@ -10997,10 +11046,11 @@ export async function listRecruitingCandidates(
       const scope = candidateCursorScope({
         roleId: role.id,
         roleRevisionId: role.currentRevisionId,
-        sort,
-        // Reject old cursors that treated provider-native match fields as unknown.
+        sort: input.sort ?? "ranking",
+        ...(sort === "ranking" ? { rankingProjection: 2 } : {}),
         ...(sort === "rank" ? { rankProjection: 3 } : {}),
         ...(sort === "score" ? { scoreProjection: 1 } : {}),
+        ...(input.rankingGroup ? { rankingGroup: input.rankingGroup } : {}),
         ...(explicitSource ? { sourceProjection: 2 } : {}),
         ...(input.sourceEffectId === undefined && rankDomainPageId !== undefined
           ? { rankDomainPageId }
@@ -11019,12 +11069,16 @@ export async function listRecruitingCandidates(
       if (
         matchSort &&
         cursor?.value &&
-        (sort === "score"
-          ? !/^-?\d+(?:\.\d+)?$/.test(cursor.value) || !Number.isFinite(Number(cursor.value))
-          : !/^\d+$/.test(cursor.value) ||
+        (sort === "ranking"
+          ? !/^\d+$/.test(cursor.value) ||
             !Number.isSafeInteger(Number(cursor.value)) ||
-            Number(cursor.value) < (sort === "rank" ? 1 : 0) ||
-            (sort === "tier" && Number(cursor.value) > 3))
+            Number(cursor.value) > 6000
+          : sort === "score"
+            ? !/^-?\d+(?:\.\d+)?$/.test(cursor.value) || !Number.isFinite(Number(cursor.value))
+            : !/^\d+$/.test(cursor.value) ||
+              !Number.isSafeInteger(Number(cursor.value)) ||
+              Number(cursor.value) < (sort === "rank" ? 1 : 0) ||
+              (sort === "tier" && Number(cursor.value) > 3))
       )
         throw new RecruitingConflictError();
       const clauses = [Prisma.sql`true`];
@@ -11046,6 +11100,18 @@ export async function listRecruitingCandidates(
           Prisma.sql`b."shortlistedAt"::timestamptz >= ${new Date(input.shortlistedSince)}`,
         );
       if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
+      if (input.rankingGroup) {
+        const group = [
+          "strong_match",
+          "worth_talking",
+          "partial",
+          "uncertain",
+          "outdated",
+          "unreviewed",
+          "unscored",
+        ].indexOf(input.rankingGroup);
+        clauses.push(Prisma.sql`floor(b."rankingValue" / 1000) = ${group}`);
+      }
       const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const sortValue = matchSort
         ? Prisma.sql`COALESCE("matchValue"::text, '')`
@@ -11083,6 +11149,7 @@ export async function listRecruitingCandidates(
         SELECT *, ${sortValue} AS "sortValue" FROM filtered
       ), candidate_page AS (
         SELECT * FROM ordered WHERE ${after} ORDER BY ${order} LIMIT ${limit + 1}
+          OFFSET ${input.cursor ? 0 : (input.offset ?? 0)}
       ), totals AS (
         SELECT (SELECT count(*) FROM filtered) AS "total",
           (SELECT COALESCE(bool_or("rankValue" IS NOT NULL), false) FROM filtered) AS "rankAvailable",
@@ -11185,6 +11252,14 @@ export async function listRecruitingCandidates(
             assessmentRoleRevisionId,
             assessmentCreatedAt,
             hardGate,
+            reviewerPageId,
+            providerPageId,
+            reviewerRoleRevisionId,
+            reviewerGrade,
+            reviewerScore,
+            providerScore,
+            providerRoleRevisionId,
+            rankingValue: _ranking,
             matchValue: _match,
             rankValue: _rank,
             tierValue: _tier,
@@ -11202,6 +11277,24 @@ export async function listRecruitingCandidates(
               value === null || value === undefined ? null : Number(value);
             return {
               ...profile,
+              ...(sort === "ranking" || input.rankingGroup
+                ? {
+                    ranking: recruitingCandidateRanking({
+                      source: reviewerRoleRevisionId
+                        ? "reviewer"
+                        : numeric(providerScore) !== null
+                          ? "provider"
+                          : "none",
+                      roleRevisionId: reviewerRoleRevisionId ?? providerRoleRevisionId ?? null,
+                      sourceEffectId: reviewerPageId ?? providerPageId ?? null,
+                      currentRoleRevisionId: role.currentRevisionId,
+                      grade: reviewerGrade ?? null,
+                      score: reviewerRoleRevisionId
+                        ? numeric(reviewerScore)
+                        : numeric(providerScore),
+                    }),
+                  }
+                : {}),
               match: {
                 rank: numeric(_rank),
                 tier: ["Strong", "Promising", "Partial", "Uncertain"][numeric(_tier) ?? -1] ?? null,
@@ -11263,6 +11356,25 @@ export async function listRecruitingCandidateLinkedinUrls(
       distinct: ["linkedinUrl"],
     });
     return rows.flatMap((row) => (row.linkedinUrl ? [row.linkedinUrl] : []));
+  });
+}
+
+/** Shortlisted people's shortlist dates for one role; one narrow indexed read, no reports. */
+export async function listRecruitingShortlistDates(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<{ total: number; dates: (string | null)[] }> {
+  return prisma.$transaction(async (tx) => {
+    const role = await requireRole(tx, actor, roleId);
+    const rows = await tx.recruitingCandidate.findMany({
+      where: { roleId: role.id, shortlisted: true },
+      select: { shortlistedAt: true },
+    });
+    return {
+      total: rows.length,
+      dates: rows.map((row) => row.shortlistedAt?.toISOString() ?? null),
+    };
   });
 }
 

@@ -1742,6 +1742,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
           ...(options === undefined ? {} : { options }),
+          ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
           ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
         };
@@ -1897,7 +1898,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                     type: "text",
                     text:
                       typeof known === "string"
-                        ? `Already answered in this conversation: ${known}\nUse this answer and continue; never ask it again.`
+                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
                         : known.instead,
                   },
                 ],

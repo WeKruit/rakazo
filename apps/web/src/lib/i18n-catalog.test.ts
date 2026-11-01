@@ -54,7 +54,7 @@ function readProductCatalog(path: string, encoding: "utf8") {
 
 // The product is translated to Chinese; other locales fall back to English.
 const ZH_RECRUITING: Record<string, string> = {
-  "Match score": "匹配分数",
+  "Best match": "最佳匹配",
   "Stop {name}": "停止 Synthetic agent",
 };
 
@@ -106,9 +106,12 @@ describe("lingui catalogs", () => {
     const source = await catalog!.read("en");
     const labels = [
       "Recruiting workspace",
+      "Candidates",
+      "Role details",
+      "Work",
       "WeKruit home",
       "All roles",
-      "New Role",
+      "New role",
       "Job Brief",
       "Client feedback",
       "Shortlist",
@@ -166,6 +169,26 @@ describe("lingui catalogs", () => {
       "../pages/shell/computer-presentation.tsx",
       "../pages/RecruitingPanel.tsx",
       "../pages/recruiting/CandidateDetailDialog.tsx",
+      "../pages/recruiting/AccountInbox.tsx",
+      "../pages/recruiting/AddToSequenceDialog.tsx",
+      "../pages/recruiting/AnalyticsPeopleDialog.tsx",
+      "../pages/recruiting/AllContacts.tsx",
+      "../pages/recruiting/AssessmentCard.tsx",
+      "../pages/recruiting/CandidateDirectory.tsx",
+      "../pages/recruiting/DetailPanel.tsx",
+      "../pages/recruiting/InterviewCalendar.tsx",
+      "../pages/recruiting/KruitWorkMenu.tsx",
+      "../pages/recruiting/NotesTab.tsx",
+      "../pages/recruiting/ProfileSequenceHistory.tsx",
+      "../pages/recruiting/RecruitingAnalytics.tsx",
+      "../pages/recruiting/RoleDetailsMenu.tsx",
+      "../pages/recruiting/SchedulingPlan.tsx",
+      "../pages/recruiting/SequenceEditor.tsx",
+      "../pages/recruiting/SequenceOverview.tsx",
+      "../pages/recruiting/SequenceRuns.tsx",
+      "../pages/recruiting/SequenceTab.tsx",
+      "../pages/recruiting/ShortlistDirectory.tsx",
+      "../pages/recruiting/TalentInsights.tsx",
       "../pages/recruiting/RecruitingSummary.tsx",
       "../pages/recruiting/RecruitingSupplementaryTab.tsx",
       "../pages/shell/ShellSidebar.tsx",
@@ -226,13 +249,13 @@ describe("lingui catalogs", () => {
     }
   });
 
-  it("compiles match-score and member-stop labels without source-message descriptors", async () => {
+  it("compiles match-sort and member-stop labels without source-message descriptors", async () => {
     const config = getConfig({
       configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
     });
     const [catalog] = await getCatalogs(config);
     const source = await catalog!.read("en");
-    const entries = ["Match score", "Stop {name}"].map((message) => {
+    const entries = ["Best match", "Stop {name}"].map((message) => {
       const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === message);
       expect(entry, message).toBeDefined();
       return entry!;

@@ -87,7 +87,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
   const empty: RecruitingPanelState = {
     tab: "role",
     candidateView: "table",
-    filters: { sort: "score" },
+    filters: { sort: "ranking" },
     pageCount: 1,
     selectedCandidateKey: null,
     detailOpen: false,
@@ -112,11 +112,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
     return {
       tab: value.tab,
       candidateView: value.candidateView,
-      // An automatic fallback sort is not kept, so a list that gains scores sorts by them.
-      filters:
-        value.userSort === true
-          ? { sort: "score", ...filters.data }
-          : { ...filters.data, sort: "score" },
+      filters: { ...filters.data },
       pageCount: value.pageCount,
       selectedCandidateKey: value.selectedCandidateKey,
       detailOpen: value.detailOpen,

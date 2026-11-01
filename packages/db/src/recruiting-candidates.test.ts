@@ -6,6 +6,7 @@ import {
   normalizeRecruitingCandidateRow,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { Client } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -146,6 +147,153 @@ describe("candidate listing and shortlist boundaries", () => {
     expect(statement.sql).not.toContain("matchBackfill");
     expect(statement.sql).toContain("totals LEFT JOIN candidate_page ON true");
   });
+  it("ranks saved Reviewer grades by revision and tier before pagination", async () => {
+    const f = fixture();
+    f.tx.$queryRaw.mockResolvedValueOnce(
+      candidateProjectionRows([
+        {
+          total: 0n,
+          rankAvailable: false,
+          tierAvailable: false,
+          scoreAvailable: false,
+          sourceRows: 0n,
+          candidates: 0n,
+          identifiedCandidates: 0n,
+          unassessed: 0n,
+          assessed: 0n,
+          shortlisted: 0n,
+        },
+      ]),
+    );
+    await recruiting.listRecruitingCandidates(f.prisma, actor, {
+      roleId: "role",
+      sort: "ranking",
+      rankingGroup: "worth_talking",
+      limit: 1,
+    });
+    const query = f.tx.$queryRaw.mock.calls[0]![0] as Prisma.Sql;
+    expect(query.sql).toContain(`e."request"->>'operation' = 'save_grades'`);
+    expect(query.sql).toContain(`reviewer."roleRevisionId" <>`);
+    expect(query.sql).toContain(`WHEN 'Promising' THEN 1000`);
+    expect(query.sql).toContain(`floor(b."rankingValue" / 1000)`);
+    expect(query.sql).toContain(
+      `ORDER BY "matchValue" ASC NULLS LAST, "candidateKey" COLLATE "C" ASC`,
+    );
+    expect(query.sql.indexOf('floor(b."rankingValue" / 1000)')).toBeLessThan(
+      query.sql.indexOf("candidate_page AS"),
+    );
+    expect(query.sql).toContain('starts_with(r."clientNonce"');
+  });
+  it.skipIf(
+    !process.env.VERIFY_DATABASE ||
+      !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):/.test(
+        process.env.DATABASE_URL ?? "",
+      ),
+  )(
+    "executes grouped ranking and pagination on PostgreSQL without mixing versions or missing scores",
+    async () => {
+      const db = new Client({ connectionString: process.env.DATABASE_URL });
+      await db.connect();
+      try {
+        await db.query(`
+          CREATE TEMP TABLE recruiting_roles (id text, "currentRevisionId" text);
+          CREATE TEMP TABLE recruiting_candidates ("roleId" text, "candidateKey" text, shortlisted boolean DEFAULT false, "shortlistedAt" timestamptz, revision int DEFAULT 0, consideration jsonb);
+          CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "roleRevisionId" text, "observedAt" timestamptz, "actionId" text);
+          CREATE TEMP TABLE runs (id text, "clientNonce" text);
+          CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, "runId" text);
+          CREATE TEMP TABLE recruiting_assessments ("roleId" text, "candidateKey" text, version int, "roleRevisionId" text, "createdAt" timestamptz, judgments jsonb);
+          CREATE TEMP TABLE recruiting_candidate_occurrences ("roleId" text, "candidateKey" text, "pageId" text, "rowIndex" int, "matchFields" jsonb, name text, title text, company text, location text, "linkedinUrl" text, "resumeUrl" text, "evidenceUrls" jsonb, issues jsonb DEFAULT '[]');
+          INSERT INTO recruiting_roles VALUES ('role', 'revision');
+          INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-04', null);
+          INSERT INTO external_effects (id,kind,status,request) VALUES ('current', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('old', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('provider', 'recruiting_research', 'completed', '{"operation":"save_search"}');
+        `);
+        const candidates = [
+          ["strong", "current", "Strong", 1],
+          ["promising-a", "current", "Promising", 98],
+          ["promising-b", "current", "Promising", 98],
+          ["partial", "current", "Partial", 99],
+          ["uncertain", "current", "Uncertain", 100],
+          ["outdated", "old", "Strong", 100],
+          ["provider", "provider", "Strong", 7],
+          ["zero", "provider", null, 0],
+          ["missing", "provider", null, null],
+        ] as const;
+        for (const [index, [key, page, tier, score]] of candidates.entries()) {
+          await db.query(
+            'INSERT INTO recruiting_candidates ("roleId", "candidateKey") VALUES ($1, $2)',
+            ["role", key],
+          );
+          await db.query(
+            'INSERT INTO recruiting_candidate_occurrences ("roleId", "candidateKey", "pageId", "rowIndex", "matchFields", name) VALUES ($1, $2, $3, $4, $5, $2)',
+            ["role", key, page, index, JSON.stringify({ match_tier: tier, match_score: score })],
+          );
+        }
+        const f = fixture();
+        const read = async (
+          extra: { rankingGroup?: "worth_talking"; cursor?: string; limit?: number } = {},
+        ) => {
+          f.tx.$queryRaw.mockResolvedValueOnce(
+            candidateProjectionRows([
+              {
+                total: 0n,
+                rankAvailable: false,
+                tierAvailable: false,
+                scoreAvailable: false,
+                sourceRows: 0n,
+                candidates: 0n,
+                identifiedCandidates: 0n,
+                unassessed: 0n,
+                assessed: 0n,
+                shortlisted: 0n,
+              },
+            ]),
+          );
+          await recruiting.listRecruitingCandidates(f.prisma, actor, {
+            roleId: "role",
+            sort: "ranking",
+            limit: 200,
+            ...extra,
+          });
+          const sql = f.tx.$queryRaw.mock.lastCall![0] as Prisma.Sql;
+          return (await db.query(sql.text, sql.values)).rows;
+        };
+        const all = await read();
+        expect(all.map((row) => row.candidateKey)).toEqual(candidates.map(([key]) => key));
+        expect(all.at(-2).providerScore).toBe("0");
+        expect(all.at(-1).providerScore).toBeNull();
+        const worth = await read({ rankingGroup: "worth_talking", limit: 1 });
+        expect(worth.map((row) => row.candidateKey)).toEqual(["promising-a", "promising-b"]);
+        expect(worth[0].total).toBe("2");
+        const scope = createHash("sha256")
+          .update(
+            stableJsonValue({
+              roleId: "role",
+              roleRevisionId: "revision",
+              sort: "ranking",
+              rankingProjection: 2,
+              rankingGroup: "worth_talking",
+              query: "",
+              assessmentState: null,
+              verdict: null,
+              shortlisted: null,
+              actionId: null,
+              sourceEffectId: null,
+            }),
+          )
+          .digest("hex");
+        const cursor = Buffer.from(
+          JSON.stringify({ version: 1, scope, value: "1002", key: "promising-a" }),
+        ).toString("base64url");
+        expect(
+          (await read({ rankingGroup: "worth_talking", cursor, limit: 1 })).map(
+            (row) => row.candidateKey,
+          ),
+        ).toEqual(["promising-b"]);
+      } finally {
+        await db.end(); // TEMP tables disappear with this connection; no shared schema is changed.
+      }
+    },
+  );
   it("backfills legacy NULL match fields owner-scoped, before the read snapshot", async () => {
     const f = fixture();
     const totals = {
@@ -732,7 +880,7 @@ describe("candidate listing and shortlist boundaries", () => {
       if (sort !== "tier") {
         expect(firstQuery.sql).toContain("ELSE returned.value -> 'rank_this_batch_only' END");
         expect(firstQuery.values).toContain("only-page");
-        expect(firstQuery.sql).not.toContain('p."effectId" =');
+        expect(firstQuery.sql).not.toContain('WHERE p."effectId" =');
         expect(f.tx.recruitingCandidatePage.findMany).toHaveBeenCalledExactlyOnceWith({
           where: { roleId: "role" },
           select: { effectId: true },
@@ -892,7 +1040,7 @@ describe("candidate listing and shortlist boundaries", () => {
         );
         expect(multiplePages.sql).toContain("WHEN returned.value ? 'overall_rank'");
         expect(multiplePages.sql).toContain("THEN returned.value -> 'updated_rank'");
-        expect(multiplePages.sql).not.toContain('p."effectId" =');
+        expect(multiplePages.sql).not.toContain('WHERE p."effectId" =');
       }
     },
   );

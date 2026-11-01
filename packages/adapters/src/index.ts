@@ -129,6 +129,7 @@ export {
   agentRunWaitTarget,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
+export * from "./recruiting-global-inbox.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
 export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
 export {
@@ -138,6 +139,7 @@ export {
   projectRecruitingCandidateReport,
 } from "./recruiting-research.js";
 export { recruitingResearchWakeNonce } from "./recruiting-research-poll.js";
+export * from "./recruiting-sequences.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";
 export * from "./run-secret.js";

@@ -4,8 +4,12 @@ import type {
   ListRecruitingContactsOutput,
   RecruitingContact,
   RecruitingContactFilters,
+  RecruitingSavedProfile,
 } from "@rakazo/contracts";
-import { ListRecruitingContactsInput as ListInputSchema } from "@rakazo/contracts";
+import {
+  ListRecruitingContactsInput as ListInputSchema,
+  RecruitingSavedProfileSchema,
+} from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
@@ -365,7 +369,7 @@ export async function listRecruitingContacts(
   const byKey = new Map(detail.map((row) => [row.person_key, row]));
   const rows = order.flatMap((key) => byKey.get(key) ?? []);
   const keys = rows.map((row) => row.person_key);
-  // Only the page's people: their tags and school, each by its owner-scoped index.
+  // Only the page's people: tags and already-saved media, each by its owner-scoped index.
   const [tags, profiles] = keys.length
     ? await Promise.all([
         prisma.$queryRaw<{ person_key: string; tags: string[] }[]>(Prisma.sql`
@@ -374,35 +378,71 @@ export async function listRecruitingContacts(
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})
           GROUP BY 1`),
-        prisma.$queryRaw<{ person_key: string; school: string | null }[]>(Prisma.sql`
-          SELECT "personKey" AS person_key, profile->'education'->0->>'school_name' AS school
+        prisma.$queryRaw<
+          {
+            person_key: string;
+            provider: string;
+            fetched_at: Date;
+            profile: RecruitingSavedProfile;
+          }[]
+        >(Prisma.sql`
+          SELECT "personKey" AS person_key, provider, "fetchedAt" AS fetched_at, profile
           FROM recruiting_saved_profiles
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})`),
       ])
     : [[], []];
   const tagsByKey = new Map(tags.map((row) => [row.person_key, row.tags]));
-  const schoolByKey = new Map(profiles.map((row) => [row.person_key, row.school]));
+  const profilesByKey = new Map(profiles.map((row) => [row.person_key, row]));
   const total = page.length ? Number(page[0]!.total) : 0;
   const iso = (date: Date | null) => (date ? date.toISOString() : null);
   return {
-    items: rows.map((row) => ({
-      personKey: row.person_key,
-      name: row.name,
-      title: row.title,
-      company: row.company,
-      location: row.location,
-      school: schoolByKey.get(row.person_key) ?? null,
-      linkedinUrl: row.linkedin_url,
-      email: row.email,
-      status: row.status,
-      noteKey: row.note_key,
-      roles: roleList(row.roles ?? []),
-      tags: tagsByKey.get(row.person_key) ?? [],
-      addedAt: iso(row.added_at),
-      lastContactedAt: iso(row.last_contacted),
-      lastRepliedAt: iso(row.last_replied),
-    })),
+    items: rows.map((row) => {
+      const saved = profilesByKey.get(row.person_key);
+      const profile = saved?.profile;
+      const parsed =
+        saved &&
+        RecruitingSavedProfileSchema.safeParse({
+          ...profile,
+          personKey: row.person_key,
+          provider: saved.provider,
+          fetchedAt: saved.fetched_at?.toISOString(),
+        });
+      const school = profile?.education[0];
+      const normalize = (name: string | null) => name?.trim().replace(/\s+/g, " ").toLowerCase();
+      const employers =
+        profile?.experience.filter(
+          (job) => row.company && normalize(job.company_name) === normalize(row.company),
+        ) ?? [];
+      // A logo belongs to the displayed organization; conflicting retained assets stay unknown.
+      const unique = (values: (string | null)[]) => {
+        const urls = [...new Set(values.filter((value): value is string => Boolean(value)))];
+        return urls.length === 1 ? urls[0]! : null;
+      };
+      return {
+        personKey: row.person_key,
+        name: row.name,
+        title: row.title,
+        company: row.company,
+        location: row.location,
+        school: school?.school_name ?? null,
+        savedProfile: parsed?.success ? parsed.data : null,
+        profileImageUrl: profile?.profileImageUrl ?? null,
+        companyLogoUrl: unique(employers.map((job) => job.company_logo_url)),
+        companyWebsiteUrl: unique(employers.map((job) => job.company_url)),
+        schoolLogoUrl: school?.school_logo_url ?? null,
+        schoolWebsiteUrl: school?.school_url ?? null,
+        linkedinUrl: row.linkedin_url,
+        email: row.email,
+        status: row.status,
+        noteKey: row.note_key,
+        roles: roleList(row.roles ?? []),
+        tags: tagsByKey.get(row.person_key) ?? [],
+        addedAt: iso(row.added_at),
+        lastContactedAt: iso(row.last_contacted),
+        lastRepliedAt: iso(row.last_replied),
+      };
+    }),
     total,
     nextCursor: offset + page.length < total ? String(offset + page.length) : null,
   };

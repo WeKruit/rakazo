@@ -5,9 +5,10 @@ import { Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
+import { AccountInbox } from "./AccountInbox";
 import { AllContacts } from "./AllContacts";
 import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
@@ -25,6 +26,7 @@ type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 /** One account-scoped server read; changing a role never opens its conversation. */
 export function AccountRecruitingView({
   accountKey,
+  spaceId,
   groups,
   bots,
   groupId,
@@ -34,6 +36,7 @@ export function AccountRecruitingView({
   renderCorrespondence,
 }: {
   accountKey: string;
+  spaceId?: string;
   groups: readonly Group[];
   bots: readonly Bot[];
   groupId?: string;
@@ -50,6 +53,18 @@ export function AccountRecruitingView({
   const role = params.get("role") ?? "all";
   const scopedGroupId = params.has("role") ? undefined : groupId;
   // Every role's people in one list, filtered and paged by the server.
+  const globalInbox = view === "inbox" && !renderCorrespondence;
+  const [mailQuery, setMailQuery] = useState("");
+  const [mailSearch, setMailSearch] = useState("");
+  const [mailUnread, setMailUnread] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setMailSearch(mailQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [mailQuery]);
+  const [indexedMail, setIndexedMail] = useState<{
+    key: string;
+    data: Awaited<ReturnType<typeof rpc.recruiting.globalInbox>>;
+  }>();
   const allContacts = view === "contacts" && role === "all" && !scopedGroupId;
   const [read, setRead] = useState<{ key: string; data: AccountPage }>();
   const [failed, setFailed] = useState(false);
@@ -57,7 +72,13 @@ export function AccountRecruitingView({
   const [loadingMore, setLoadingMore] = useState<string>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
-  const pageKey = JSON.stringify([accountKey, view, role, scopedGroupId]);
+  const pageKey = JSON.stringify([
+    accountKey,
+    view,
+    role,
+    scopedGroupId,
+    globalInbox ? [mailSearch, mailUnread] : null,
+  ]);
   const [pagination, setPagination] = useState<{ key: string; cursor: string }>();
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
   const readKey = JSON.stringify([pageKey, cursor, reload, refreshSignal]);
@@ -69,6 +90,75 @@ export function AccountRecruitingView({
     let cancelled = false;
     setLoading(true);
     setFailed(false);
+    if (globalInbox) {
+      if (!spaceId) {
+        setLoading(false);
+        setFailed(true);
+        return;
+      }
+      void rpc.recruiting
+        .globalInbox({
+          spaceId,
+          ...(role !== "all" ? { roleId: role } : {}),
+          ...(mailSearch ? { query: mailSearch } : {}),
+          unreadOnly: mailUnread,
+          cursor,
+          limit: 30,
+        })
+        .then((data) => {
+          if (cancelled) return;
+          const items: AccountPage["items"] = [];
+          for (const entry of data.items) {
+            let item = items.find((item) => item.roleId === entry.roleId);
+            if (!item) {
+              item = {
+                roleId: entry.roleId,
+                correspondence: {
+                  roleId: entry.roleId,
+                  status: "ready",
+                  checkedAt: data.coverage.checkedAt,
+                  connectionChanged: false,
+                  connections: [],
+                  emails: [],
+                  events: [],
+                  contacts: [],
+                  partial: true,
+                  nextCursor: null,
+                },
+              };
+              items.push(item);
+            }
+            item.correspondence!.emails.push(entry.email);
+            if (entry.person) {
+              item.candidates ??= {
+                items: [],
+                nextCursor: null,
+                total: 0,
+                counts: { shortlisted: 0, replied: 0 },
+                crmStatus: "ok",
+                crmCountsComplete: false,
+              };
+              if (!item.candidates.items.some((person) => person.key === entry.person!.key))
+                item.candidates.items.push(entry.person);
+              item.candidates.total = item.candidates.items.length;
+            }
+          }
+          setIndexedMail({ key: readKey, data });
+          setRead({
+            key: readKey,
+            data: { roles: data.roles, items, nextCursor: data.nextCursor },
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     if (PER_ROLE_VIEWS.has(view) && role === "all" && !scopedGroupId) {
       const abort = new AbortController();
       void (async () => {
@@ -346,6 +436,14 @@ export function AccountRecruitingView({
     tasks: t`Tasks`,
     routines: t`Routines`,
   };
+  const workView = view === "tasks" || view === "routines";
+  const globalChat = groups.find((group) => group.id.startsWith("recruiting-global-"));
+  const candidateView = view === "contacts" || view === "shortlist";
+  const viewLink = (nextView: string) => {
+    const next = new URLSearchParams(params);
+    next.set("view", nextView);
+    return { search: `?${next}` };
+  };
   const Page = renderCorrespondence ? "section" : "main";
   return (
     <Page
@@ -361,7 +459,9 @@ export function AccountRecruitingView({
         >
           <PanelLeftOpen size={18} />
         </Button>
-        <h1 className="flex-1 text-xl font-semibold">{titles[view]}</h1>
+        <h1 className="flex-1 text-xl font-semibold">
+          {candidateView ? <Trans>Candidates</Trans> : titles[view]}
+        </h1>
         {view !== "routines" && !allContacts ? (
           <NativeSelect
             aria-label={t`Role`}
@@ -385,10 +485,135 @@ export function AccountRecruitingView({
           </NativeSelect>
         ) : null}
       </header>
+      {candidateView || workView || role !== "all" || scopedGroupId ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          {candidateView ? (
+            <nav aria-label={t`Candidate views`} className="flex gap-1">
+              <Button
+                size="sm"
+                variant={view === "contacts" ? "secondary" : "ghost"}
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("contacts")}
+                    aria-current={view === "contacts" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Contacts</Trans>
+              </Button>
+              <Button
+                size="sm"
+                variant={view === "shortlist" ? "secondary" : "ghost"}
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("shortlist")}
+                    aria-current={view === "shortlist" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Shortlist</Trans>
+              </Button>
+            </nav>
+          ) : workView ? (
+            <nav aria-label={t`Work`} className="flex gap-1">
+              {globalChat ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  nativeButton={false}
+                  role="link"
+                  render={
+                    <Link to={`/app/g/${encodeURIComponent(globalChat.id)}?view=conversation`} />
+                  }
+                >
+                  <Trans>Chat</Trans>
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant={view === "tasks" ? "secondary" : "ghost"}
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("tasks")}
+                    aria-current={view === "tasks" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Tasks</Trans>
+              </Button>
+              <Button
+                size="sm"
+                variant={view === "routines" ? "secondary" : "ghost"}
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("routines")}
+                    aria-current={view === "routines" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Routines</Trans>
+              </Button>
+            </nav>
+          ) : (
+            <span />
+          )}
+          {role !== "all" || scopedGroupId ? (
+            <nav aria-label={t`Role context`} className="flex gap-1">
+              {!candidateView ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  nativeButton={false}
+                  role="link"
+                  render={<Link to={viewLink("contacts")} />}
+                >
+                  <Trans>Candidates</Trans>
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("brief")}
+                    aria-current={view === "brief" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Job brief</Trans>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                nativeButton={false}
+                role="link"
+                render={
+                  <Link
+                    to={viewLink("feedback")}
+                    aria-current={view === "feedback" ? "page" : undefined}
+                  />
+                }
+              >
+                <Trans>Client feedback</Trans>
+              </Button>
+            </nav>
+          ) : null}
+        </div>
+      ) : null}
       {view === "routines" ? (
         <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} />
       ) : allContacts ? (
-        <AllContacts groups={groups} refreshSignal={refreshSignal} />
+        <AllContacts spaceId={spaceId} groups={groups} refreshSignal={refreshSignal} />
       ) : (
         <>
           {loading ? <TabLoading /> : null}
@@ -402,7 +627,8 @@ export function AccountRecruitingView({
               <Trans>Could not load recruiting records.</Trans>
             </RetryNotice>
           ) : null}
-          {page?.items.length === 0 &&
+          {!globalInbox &&
+          page?.items.length === 0 &&
           !pending.length &&
           !page.unassignedReminders?.items.some((reminder) => reminder.status === "open") ? (
             <p className="text-sm text-muted-foreground">
@@ -496,307 +722,319 @@ export function AccountRecruitingView({
             </section>
           ) : null}
           <div className="space-y-6">
-            {(view === "interview" && !renderCorrespondence ? [] : (page?.items ?? [])).map(
-              (item) => {
-                const info = page?.roles.find((entry) => entry.id === item.roleId);
-                const replies =
-                  item.correspondence?.emails.filter(
-                    (email) => (email.direction ?? email.crm?.direction) === "received",
-                  ) ?? [];
-                const unknownDirections = item.correspondence?.emails.some(
-                  (email) => !(email.direction ?? email.crm?.direction),
-                );
-                const repliesNotChecked = !["ready", "empty"].includes(
-                  item.correspondence?.status ?? "not_checked",
-                );
-                const repliesIncomplete = Boolean(
-                  repliesNotChecked ||
-                    unknownDirections ||
-                    item.correspondence?.partial ||
-                    item.correspondence?.nextCursor,
-                );
-                const repliesUnknown =
-                  !replies.length &&
-                  (repliesNotChecked ||
-                    unknownDirections ||
-                    (item.correspondence?.partial && !item.correspondence.nextCursor));
-                return (
-                  <section
-                    key={item.roleId}
-                    className="space-y-3 rounded-xl border border-border p-4"
-                    aria-label={info?.title}
-                  >
-                    <h2 className="font-semibold">{info?.title}</h2>
-                    {view === "brief" ? (
-                      <dl className="space-y-2">
-                        {item.workspace?.revision.brief?.fields.map((field) => (
-                          <div key={field.key}>
-                            <dt className="text-sm text-muted-foreground">
-                              {
-                                (
-                                  {
-                                    salary_range: t`Salary range`,
-                                    location: t`Location`,
-                                    company_deck: t`Company deck`,
-                                  } as Record<string, string>
-                                )[field.key]
-                              }
-                            </dt>
-                            <dd className="whitespace-pre-wrap text-sm">{field.value ?? "—"}</dd>
-                          </div>
-                        ))}
-                      </dl>
+            {view === "inbox" && !renderCorrespondence ? (
+              <>
+                {indexedMail?.key === readKey ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      <Trans>Saved mail · partial source coverage</Trans>
+                    </span>
+                    {!indexedMail.data.coverage.importsComplete ||
+                    !indexedMail.data.coverage.crmComplete ? (
+                      <span role="status">
+                        <Trans>Saved mail is indexing in the background.</Trans>
+                      </span>
                     ) : null}
-                    {view === "feedback" && !item.feedback?.feedback.length ? (
-                      <p className="text-sm text-muted-foreground">
-                        <Trans>No feedback yet.</Trans>
-                      </p>
-                    ) : null}
-                    {view === "brief" && !item.workspace?.revision.brief?.fields.length ? (
-                      <p className="text-sm text-muted-foreground">
-                        <Trans>No job brief yet.</Trans>
-                      </p>
-                    ) : null}
-                    {view === "tasks" &&
-                    !item.reminders?.items.some((reminder) => reminder.status === "open") ? (
-                      <p className="text-sm text-muted-foreground">
-                        <Trans>No open tasks.</Trans>
-                      </p>
-                    ) : null}
-                    {view === "feedback" ? (
-                      <ul className="space-y-2">
-                        {item.feedback?.feedback.map((feedback) => (
-                          <li key={feedback.id} className="whitespace-pre-wrap text-sm">
-                            {"summary" in feedback.feedback
-                              ? feedback.feedback.summary
-                              : feedback.feedback.intent.quote}
+                  </div>
+                ) : null}
+                {indexedMail?.key === readKey &&
+                !indexedMail.data.items.length &&
+                indexedMail.data.coverage.importsComplete &&
+                indexedMail.data.coverage.crmComplete ? (
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    <Trans>No indexed mail matches this view.</Trans>
+                  </p>
+                ) : null}
+                <AccountInbox
+                  key={pageKey}
+                  roles={page?.roles ?? []}
+                  items={page?.items ?? []}
+                  spaceId={spaceId}
+                  serverThreads={
+                    globalInbox && indexedMail?.key === readKey
+                      ? indexedMail.data.items.map((row) => ({
+                          key: row.key,
+                          person: row.person,
+                          roleId: row.roleId,
+                          emailId: row.email.id,
+                          sourceId: row.email.sourceId,
+                          organizationId: row.email.crm?.organizationId ?? null,
+                          mailbox: row.email.eaccount ?? null,
+                          latestIncomingAt: row.latestIncomingAt,
+                        }))
+                      : undefined
+                  }
+                  serverReadKey={readKey}
+                  query={mailQuery}
+                  onQueryChange={setMailQuery}
+                  onFilterChange={(value) => setMailUnread(value === "unread")}
+                  pending={pending}
+                  loadingMore={loadingMore}
+                  onRetry={() => setReload((value) => value + 1)}
+                  onLoadMore={(roleId, cursor) => void loadMore(roleId, cursor)}
+                  onOpenProfile={(roleId, person) => {
+                    const role = page?.roles.find((entry) => entry.id === roleId);
+                    if (role?.groupId)
+                      navigate(
+                        `/app/g/${encodeURIComponent(role.groupId)}?${new URLSearchParams({ view: "contacts", detail: `contact.${person.crm?.candidateId ?? person.autumn?.candidateKey ?? person.key}` })}`,
+                      );
+                  }}
+                  onOpenRole={(roleId) => {
+                    const role = page?.roles.find((entry) => entry.id === roleId);
+                    if (role?.groupId)
+                      navigate(`/app/g/${encodeURIComponent(role.groupId)}?view=inbox`);
+                  }}
+                />
+              </>
+            ) : null}
+            {((view === "interview" || view === "inbox") && !renderCorrespondence
+              ? []
+              : (page?.items ?? [])
+            ).map((item) => {
+              const info = page?.roles.find((entry) => entry.id === item.roleId);
+              return (
+                <section
+                  key={item.roleId}
+                  className="space-y-3 rounded-xl border border-border p-4"
+                  aria-label={info?.title}
+                >
+                  <h2 className="font-semibold">{info?.title}</h2>
+                  {view === "brief" ? (
+                    <dl className="space-y-2">
+                      {item.workspace?.revision.brief?.fields.map((field) => (
+                        <div key={field.key}>
+                          <dt className="text-sm text-muted-foreground">
+                            {
+                              (
+                                {
+                                  salary_range: t`Salary range`,
+                                  location: t`Location`,
+                                  company_deck: t`Company deck`,
+                                } as Record<string, string>
+                              )[field.key]
+                            }
+                          </dt>
+                          <dd className="whitespace-pre-wrap text-sm">{field.value ?? "—"}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                  {view === "feedback" && !item.feedback?.feedback.length ? (
+                    <p className="text-sm text-muted-foreground">
+                      <Trans>No feedback yet.</Trans>
+                    </p>
+                  ) : null}
+                  {view === "brief" && !item.workspace?.revision.brief?.fields.length ? (
+                    <p className="text-sm text-muted-foreground">
+                      <Trans>No job brief yet.</Trans>
+                    </p>
+                  ) : null}
+                  {view === "tasks" &&
+                  !item.reminders?.items.some((reminder) => reminder.status === "open") ? (
+                    <p className="text-sm text-muted-foreground">
+                      <Trans>No open tasks.</Trans>
+                    </p>
+                  ) : null}
+                  {view === "feedback" ? (
+                    <ul className="space-y-2">
+                      {item.feedback?.feedback.map((feedback) => (
+                        <li key={feedback.id} className="whitespace-pre-wrap text-sm">
+                          {"summary" in feedback.feedback
+                            ? feedback.feedback.summary
+                            : feedback.feedback.intent.quote}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {view === "shortlist" || view === "contacts" ? (
+                    <>
+                      {item.candidates?.crmStatus === "unavailable" ? (
+                        <RetryNotice onRetry={() => setReload((value) => value + 1)}>
+                          <Trans>Could not load recruiting records.</Trans>
+                        </RetryNotice>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{t`${item.candidates?.total ?? 0} people`}</p>
+                      )}
+                      <ul className="divide-y divide-border">
+                        {item.candidates?.items.map((candidate) => (
+                          <li
+                            key={candidate.key}
+                            className="flex flex-wrap justify-between gap-2 py-3 text-sm"
+                          >
+                            <span>
+                              {info?.groupId ? (
+                                <button
+                                  type="button"
+                                  className="block text-start font-semibold underline-offset-2 hover:underline"
+                                  onClick={() =>
+                                    navigate(
+                                      `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.autumn?.candidateKey ?? candidate.key}` })}`,
+                                    )
+                                  }
+                                >
+                                  {candidate.name}
+                                </button>
+                              ) : (
+                                <strong className="block">{candidate.name}</strong>
+                              )}
+                              <span className="text-muted-foreground">{candidate.title}</span>
+                            </span>
+                            <span>{candidate.email}</span>
                           </li>
                         ))}
                       </ul>
-                    ) : null}
-                    {view === "shortlist" || view === "contacts" ? (
-                      <>
-                        {item.candidates?.crmStatus === "unavailable" ? (
-                          <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                            <Trans>Could not load recruiting records.</Trans>
-                          </RetryNotice>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">{t`${item.candidates?.total ?? 0} people`}</p>
-                        )}
-                        <ul className="divide-y divide-border">
-                          {item.candidates?.items.map((candidate) => (
-                            <li
-                              key={candidate.key}
-                              className="flex flex-wrap justify-between gap-2 py-3 text-sm"
-                            >
-                              <span>
-                                {info?.groupId ? (
-                                  <button
-                                    type="button"
-                                    className="block text-start font-semibold underline-offset-2 hover:underline"
-                                    onClick={() =>
-                                      navigate(
-                                        `/app/g/${encodeURIComponent(info.groupId!)}?${new URLSearchParams({ view: "contacts", detail: `contact.${candidate.crm?.candidateId ?? candidate.autumn?.candidateKey ?? candidate.key}` })}`,
-                                      )
-                                    }
-                                  >
-                                    {candidate.name}
-                                  </button>
-                                ) : (
-                                  <strong className="block">{candidate.name}</strong>
-                                )}
-                                <span className="text-muted-foreground">{candidate.title}</span>
-                              </span>
-                              <span>{candidate.email}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : null}
-                    {view === "sequence" ? (
-                      <>
-                        {(item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : []))
-                          .length ? (
-                          (item.campaigns ?? [item.campaign!]).map((campaign) => (
-                            <div key={campaign.campaign?.id} className="space-y-2">
-                              <h3 className="text-sm font-medium">
-                                {campaign.campaign?.name
-                                  ? hideVendorNames(campaign.campaign.name)
-                                  : null}
-                              </h3>
-                              {campaign.status === "unavailable" ? (
-                                <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                                  <Trans>Could not read this campaign.</Trans>
-                                </RetryNotice>
-                              ) : null}
-                              <dl className="flex flex-wrap gap-4 text-sm">
-                                <div>
-                                  <dt className="text-muted-foreground">
-                                    <Trans>Sent</Trans>
-                                  </dt>
-                                  <dd>{campaign.stats?.sent ?? "—"}</dd>
-                                </div>
-                                <div>
-                                  <dt className="text-muted-foreground">
-                                    <Trans>Opened</Trans>
-                                  </dt>
-                                  <dd>{campaign.stats?.opened ?? "—"}</dd>
-                                </div>
-                                <div>
-                                  <dt className="text-muted-foreground">
-                                    <Trans>Replied</Trans>
-                                  </dt>
-                                  <dd>{campaign.stats?.replied ?? "—"}</dd>
-                                </div>
-                              </dl>
-                              <ul className="space-y-2 text-sm">
-                                {campaign.leads.map((lead) => (
-                                  <li key={lead.email}>{lead.email}</li>
-                                ))}
-                              </ul>
-                              {campaign.nextLeadCursor ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={Boolean(loadingMore)}
-                                  onClick={() => void loadMoreLeads(item.roleId, campaign)}
-                                >
-                                  <Trans>Load more</Trans>
-                                </Button>
-                              ) : null}
-                            </div>
-                          ))
-                        ) : item.campaign?.status === "unavailable" ? (
-                          <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                            <Trans>Could not read this campaign.</Trans>
-                          </RetryNotice>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            <Trans>No campaign yet.</Trans>
-                          </p>
-                        )}
-                        {item.correspondence?.contacts.map((contact) => (
-                          <p key={contact.candidateKey} className="text-sm">
-                            {contact.emails.map((email) => email.address).join(", ")}
-                          </p>
-                        ))}
-                      </>
-                    ) : null}
-                    {(view === "sequence" || view === "interview" || view === "inbox") &&
-                    renderCorrespondence
-                      ? renderCorrespondence(item)
-                      : null}
-                    {view === "inbox" && !renderCorrespondence ? (
-                      <>
-                        {!repliesUnknown ? (
-                          <p className="text-sm text-muted-foreground">{t`${repliesIncomplete ? `${replies.length}+` : replies.length} replies`}</p>
-                        ) : null}
-                        {repliesUnknown ? (
-                          <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                            <Trans>Could not load replies.</Trans>
-                          </RetryNotice>
-                        ) : !replies.length ? (
-                          !repliesIncomplete ? (
-                            <p className="text-sm text-muted-foreground">
-                              <Trans>No replies yet.</Trans>
-                            </p>
-                          ) : null
-                        ) : (
-                          <ul className="divide-y divide-border">
-                            {replies.map((email) => (
-                              <li key={email.id} className="space-y-1 py-3 text-sm">
-                                <strong>{email.subject}</strong>
-                                <p>{email.sender}</p>
-                                {email.date ? (
-                                  <time dateTime={email.date}>{formatDate(email.date)}</time>
-                                ) : null}
-                                <p className="whitespace-pre-wrap">{email.body}</p>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </>
-                    ) : null}
-                    {view === "feedback" && item.feedback?.nextCursor ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={Boolean(loadingMore)}
-                        onClick={() => void loadMore(item.roleId, item.feedback!.nextCursor!)}
-                      >
-                        <Trans>Load more</Trans>
-                      </Button>
-                    ) : null}
-                    {(view === "shortlist" || view === "contacts") &&
-                    item.candidates?.nextCursor ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={Boolean(loadingMore)}
-                        onClick={() => void loadMore(item.roleId, item.candidates!.nextCursor!)}
-                      >
-                        <Trans>Load more</Trans>
-                      </Button>
-                    ) : null}
-                    {(view === "inbox" || view === "interview") &&
-                    item.correspondence?.nextCursor ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={Boolean(loadingMore)}
-                        onClick={() => void loadMore(item.roleId, item.correspondence!.nextCursor!)}
-                      >
-                        <Trans>Load more</Trans>
-                      </Button>
-                    ) : null}
-                    {view === "tasks" ? (
-                      <ul className="divide-y divide-border">
-                        {item.reminders?.items
-                          .filter((reminder) => reminder.status === "open")
-                          .map((reminder) => (
-                            <li
-                              key={reminder.id}
-                              className="flex items-center justify-between gap-3 py-3 text-sm"
-                            >
-                              <span>
-                                {reminder.title}
-                                <time
-                                  className="block text-xs text-muted-foreground"
-                                  dateTime={reminder.dueAt}
-                                >
-                                  {formatDate(reminder.dueAt)}
-                                </time>
-                              </span>
+                    </>
+                  ) : null}
+                  {view === "sequence" ? (
+                    <>
+                      {(item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : []))
+                        .length ? (
+                        (item.campaigns ?? [item.campaign!]).map((campaign) => (
+                          <div key={campaign.campaign?.id} className="space-y-2">
+                            <h3 className="text-sm font-medium">
+                              {campaign.campaign?.name
+                                ? hideVendorNames(campaign.campaign.name)
+                                : null}
+                            </h3>
+                            {campaign.status === "unavailable" ? (
+                              <RetryNotice onRetry={() => setReload((value) => value + 1)}>
+                                <Trans>Could not read this campaign.</Trans>
+                              </RetryNotice>
+                            ) : null}
+                            <dl className="flex flex-wrap gap-4 text-sm">
+                              <div>
+                                <dt className="text-muted-foreground">
+                                  <Trans>Sent</Trans>
+                                </dt>
+                                <dd>{campaign.stats?.sent ?? "—"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-muted-foreground">
+                                  <Trans>Opened</Trans>
+                                </dt>
+                                <dd>{campaign.stats?.opened ?? "—"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-muted-foreground">
+                                  <Trans>Replied</Trans>
+                                </dt>
+                                <dd>{campaign.stats?.replied ?? "—"}</dd>
+                              </div>
+                            </dl>
+                            <ul className="space-y-2 text-sm">
+                              {campaign.leads.map((lead) => (
+                                <li key={lead.email}>{lead.email}</li>
+                              ))}
+                            </ul>
+                            {campaign.nextLeadCursor ? (
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() =>
-                                  void rpc.recruiting.reminders
-                                    .update({ id: reminder.id, status: "done" })
-                                    .then(() => {
-                                      setTaskError(false);
-                                      setReload((value) => value + 1);
-                                    })
-                                    .catch(() => setTaskError(true))
-                                }
+                                disabled={Boolean(loadingMore)}
+                                onClick={() => void loadMoreLeads(item.roleId, campaign)}
                               >
-                                <Trans>Done</Trans>
+                                <Trans>Load more</Trans>
                               </Button>
-                            </li>
-                          ))}
-                      </ul>
-                    ) : null}
-                  </section>
-                );
-              },
-            )}
+                            ) : null}
+                          </div>
+                        ))
+                      ) : item.campaign?.status === "unavailable" ? (
+                        <RetryNotice onRetry={() => setReload((value) => value + 1)}>
+                          <Trans>Could not read this campaign.</Trans>
+                        </RetryNotice>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          <Trans>No campaign yet.</Trans>
+                        </p>
+                      )}
+                      {item.correspondence?.contacts.map((contact) => (
+                        <p key={contact.candidateKey} className="text-sm">
+                          {contact.emails.map((email) => email.address).join(", ")}
+                        </p>
+                      ))}
+                    </>
+                  ) : null}
+                  {(view === "sequence" || view === "interview" || view === "inbox") &&
+                  renderCorrespondence
+                    ? renderCorrespondence(item)
+                    : null}
+                  {view === "feedback" && item.feedback?.nextCursor ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(loadingMore)}
+                      onClick={() => void loadMore(item.roleId, item.feedback!.nextCursor!)}
+                    >
+                      <Trans>Load more</Trans>
+                    </Button>
+                  ) : null}
+                  {(view === "shortlist" || view === "contacts") && item.candidates?.nextCursor ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(loadingMore)}
+                      onClick={() => void loadMore(item.roleId, item.candidates!.nextCursor!)}
+                    >
+                      <Trans>Load more</Trans>
+                    </Button>
+                  ) : null}
+                  {(view === "inbox" || view === "interview") && item.correspondence?.nextCursor ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={Boolean(loadingMore)}
+                      onClick={() => void loadMore(item.roleId, item.correspondence!.nextCursor!)}
+                    >
+                      <Trans>Load more</Trans>
+                    </Button>
+                  ) : null}
+                  {view === "tasks" ? (
+                    <ul className="divide-y divide-border">
+                      {item.reminders?.items
+                        .filter((reminder) => reminder.status === "open")
+                        .map((reminder) => (
+                          <li
+                            key={reminder.id}
+                            className="flex items-center justify-between gap-3 py-3 text-sm"
+                          >
+                            <span>
+                              {reminder.title}
+                              <time
+                                className="block text-xs text-muted-foreground"
+                                dateTime={reminder.dueAt}
+                              >
+                                {formatDate(reminder.dueAt)}
+                              </time>
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void rpc.recruiting.reminders
+                                  .update({ id: reminder.id, status: "done" })
+                                  .then(() => {
+                                    setTaskError(false);
+                                    setReload((value) => value + 1);
+                                  })
+                                  .catch(() => setTaskError(true))
+                              }
+                            >
+                              <Trans>Done</Trans>
+                            </Button>
+                          </li>
+                        ))}
+                    </ul>
+                  ) : null}
+                </section>
+              );
+            })}
             {view === "interview" && !renderCorrespondence && pending.length ? (
               // The calendar already shows the roles read so far; only the rest are loading.
               <div aria-busy="true">
                 <TabLoading />
               </div>
             ) : null}
-            {view !== "interview" || renderCorrespondence
+            {(view !== "interview" && view !== "inbox") || renderCorrespondence
               ? pending.map((roleId) => {
                   const title = page?.roles.find((entry) => entry.id === roleId)?.title;
                   return (

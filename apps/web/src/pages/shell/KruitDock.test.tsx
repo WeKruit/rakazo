@@ -112,6 +112,7 @@ it("in a conversation starts minimized and shows only waits from other conversat
     { groupId: "Designer", chatting: true },
   );
   expect(other.host.querySelector('[role="status"]')).toBeNull();
+  expect(other.host.firstElementChild?.className).toContain("bottom-24");
   expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(other.host, "Kruit").click());
   expect(other.onOpen).toHaveBeenCalledWith("Open role");

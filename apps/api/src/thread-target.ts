@@ -552,7 +552,38 @@ export async function threadHead(prisma: PrismaClient, target: ThreadTarget) {
   return { threadId: target.threadId, cursor: latest?.seq ?? -1 };
 }
 
+/** The saved next-message suggestion for the newest reply, so it survives a reload. */
+export async function latestReplySuggestion(
+  prisma: PrismaClient,
+  messages: ReadonlyArray<{ role: string; runId?: string | null; internal?: boolean }>,
+): Promise<{ runId: string; text: string } | null> {
+  const last = messages.findLast((message) => !message.internal);
+  if (last?.role !== "bot" || !last.runId) return null;
+  const runId = last.runId;
+  // Never fails the thread read: no suggestion is the fallback.
+  const event = await Promise.resolve()
+    .then(() =>
+      prisma.event.findFirst({
+        where: { runId, type: "thread.suggestion" },
+        orderBy: { seq: "desc" },
+        select: { payload: true },
+      }),
+    )
+    .catch(() => null);
+  const text = (event?.payload as { text?: unknown } | undefined)?.text;
+  return typeof text === "string" && text ? { runId, text } : null;
+}
+
 export async function threadSnapshot(
+  deps: { prisma: PrismaClient },
+  target: ThreadTarget,
+): Promise<ThreadSnapshot> {
+  const snapshot = await readThreadSnapshot(deps, target);
+  const suggestion = await latestReplySuggestion(deps.prisma, snapshot.messages);
+  return suggestion ? { ...snapshot, suggestion } : snapshot;
+}
+
+async function readThreadSnapshot(
   deps: { prisma: PrismaClient },
   target: ThreadTarget,
 ): Promise<ThreadSnapshot> {

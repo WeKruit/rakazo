@@ -3,7 +3,6 @@
  * reads return; never re-scores, re-ranks or re-judges a candidate.
  */
 import type {
-  ListRecruitingCandidatesOutput,
   RecruitingCorrespondence,
   RecruitingOverviewEvent,
   RecruitingOverviewRole,
@@ -55,11 +54,11 @@ export type OverviewGroup = { id: string; threadId: string };
 export type OverviewReads = {
   /** The conversation's bound role, or null when no role is bound. */
   roleId: (group: OverviewGroup, signal: AbortSignal) => Promise<string | null>;
-  shortlistPage: (
+  /** The role's shortlisted people: how many, and when each was shortlisted. */
+  shortlist: (
     roleId: string,
-    cursor: string | undefined,
     signal: AbortSignal,
-  ) => Promise<ListRecruitingCandidatesOutput>;
+  ) => Promise<{ total: number; dates: (string | null)[] }>;
   candidates: (
     group: OverviewGroup,
     signal: AbortSignal,
@@ -135,20 +134,8 @@ async function readRole(
 ): Promise<RecruitingOverviewRole | null> {
   const roleId = await reads.roleId(group, signal);
   if (!roleId) return null;
-  const shortlist = async () => {
-    const items: ListRecruitingCandidatesOutput["items"] = [];
-    let cursor: string | undefined;
-    let total = 0;
-    do {
-      const page = await reads.shortlistPage(roleId, cursor, signal);
-      items.push(...page.items);
-      total = page.total;
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
-    return { items, total };
-  };
   const [list, candidates, campaign, calendar] = await Promise.all([
-    shortlist(),
+    reads.shortlist(roleId, signal),
     optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
     optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
     optional(external, (budget) => reads.calendar(group, budget), signal, sourceMs),
@@ -161,9 +148,7 @@ async function readRole(
     groupId: group.id,
     roleId,
     shortlisted: list.total,
-    shortlistedDates: list.items
-      .filter((item) => item.shortlisted)
-      .map((item) => item.shortlistedAt),
+    shortlistedDates: list.dates,
     replied: crmReplied(candidates ?? null),
     ...campaignStages(campaign ?? null),
     incomplete: !candidates || !campaign,

@@ -21,6 +21,8 @@ const source = (kind: "calendar" | "instantly") => ({
   revision: 1,
   enabled: true,
   secretId: "secret",
+  endpoint: null,
+  transport: "streamable_http",
   provider: { kind, tools: [] },
   assignments: [{ botId: "main", allowAllTools: true, allowedTools: [] }],
 });

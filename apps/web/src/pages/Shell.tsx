@@ -24,6 +24,7 @@ import type { ComponentProps } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../lib/recruiting-read-view";
+import { rpc } from "../lib/rpc";
 
 const ComputerMaintenanceActions = lazyPanel(() =>
   import("../components/ComputerMaintenanceActions").then((m) => m.ComputerMaintenanceActions),
@@ -84,6 +85,12 @@ const HomeDashboard = lazyPanel(() =>
   ),
 );
 
+const RecruitingAnalytics = lazyPanel(() =>
+  withFeatureMessages(() => import("./recruiting/RecruitingAnalytics")).then(
+    (module) => module.RecruitingAnalytics,
+  ),
+);
+
 const AccountRecruitingView = lazyPanel(() =>
   withFeatureMessages(() => import("./recruiting/AccountRecruitingView")).then(
     (module) => module.AccountRecruitingView,
@@ -111,6 +118,10 @@ export function ShellPage() {
     model.panel !== "create-group" &&
     isAccountRecruitingView(accountParams.get("view")) &&
     (!model.groupId || accountParams.has("role"));
+  const analyticsView =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    accountParams.get("view") === "analytics";
   const roleCorrespondencePage =
     !model.showToolActivity &&
     model.panel !== "create-group" &&
@@ -210,7 +221,9 @@ export function ShellPage() {
     function openLinkedConversation(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const anchor = (event.target as Element | null)?.closest?.(".rk-chat-markdown a[href]");
+      const anchor = (event.target as Element | null)?.closest?.(
+        ".rk-chat-markdown a[href], a[href][data-stacked-conversation]",
+      );
       if (!(anchor instanceof HTMLAnchorElement)) return;
       const target = stackedConversationTarget(anchor.href, window.location.origin);
       if (!target || !groups.some((group) => group.id === target.groupId)) return;
@@ -302,6 +315,7 @@ export function ShellPage() {
     <AccountRecruitingView
       key={JSON.stringify([userId, bootstrapMe?.spaceId])}
       accountKey={JSON.stringify([userId, bootstrapMe?.spaceId])}
+      spaceId={bootstrapMe?.spaceId}
       groupId={model.groupId}
       groups={groups}
       bots={bots}
@@ -387,6 +401,7 @@ export function ShellPage() {
           groupId={model.groupId}
           chatting={
             model.recruitingWorkspaceView === "conversation" ||
+            model.workspaceBrief ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
           start={visibleSidebarWidth}
@@ -470,9 +485,10 @@ export function ShellPage() {
         />
       )}
 
-      {homeView && !accountView ? (
+      {homeView && !accountView && !analyticsView ? (
         <HomeDashboard
           userName={session.data?.user.name}
+          onOpenWork={model.openRecruitingView}
           onGlobalChat={() => {
             const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
             if (main) navigate(`/app/g/${main.id}?view=conversation`);
@@ -498,7 +514,35 @@ export function ShellPage() {
         />
       ) : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
-      {accountView ? (
+      {analyticsView ? (
+        <main className="rk-scroll min-h-0 min-w-0 flex-1 overflow-y-auto bg-background">
+          <div className="mx-auto w-full max-w-[1440px] p-4 md:p-8">
+            <Button variant="ghost" onClick={() => model.openRecruitingView("sequence")}>
+              <Trans>Back to sequences</Trans>
+            </Button>
+            {model.groupId &&
+            !accountParams.has("role") &&
+            !model.currentWorkspaceRead?.workspace?.role.id ? (
+              <p role="status">
+                <Trans>Loading role…</Trans>
+              </p>
+            ) : (
+              <RecruitingAnalytics
+                scopeRoleId={
+                  !accountParams.has("role")
+                    ? model.currentWorkspaceRead?.workspace?.role.id
+                    : undefined
+                }
+                accountKey={JSON.stringify([userId, bootstrapMe?.spaceId])}
+                load={rpc.recruiting.analytics}
+                onOpenRole={(roleId) =>
+                  navigate(`/app?${new URLSearchParams({ view: "sequence", role: roleId })}`)
+                }
+              />
+            )}
+          </div>
+        </main>
+      ) : accountView ? (
         accountPage
       ) : (
         <ShellConversation

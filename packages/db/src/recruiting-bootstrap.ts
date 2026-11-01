@@ -64,6 +64,16 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     // people with one agent run per batch.
     toolsByBot: { outreach: ["web_search_exa"], reviewer: ["agent_run"] },
   },
+  {
+    // Outreach mail ships with the product on the deployment's account; users never add a key.
+    // get_email + list_emails unlock the local campaign, lead and mailbox tools.
+    slug: "instantly",
+    name: "Instantly",
+    description: "Platform outreach email",
+    endpoint: "https://mcp.instantly.ai/mcp",
+    bots: ["main", "outreach", "scheduling"],
+    tools: ["get_email", "list_emails", "reply_to_email"],
+  },
 ];
 
 /** The operator's staff domain: verified mailboxes here see dollar spend for every account. */
@@ -1064,7 +1074,7 @@ export async function ensurePlatformServices(
   options: { sandboxKind?: string } = {},
 ): Promise<void> {
   await ensureReviewer(prisma, actor, options.sandboxKind);
-  for (const slug of ["people-search", "fullenrich"])
+  for (const slug of ["people-search", "fullenrich", "instantly"])
     await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);

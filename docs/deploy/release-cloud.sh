@@ -13,6 +13,14 @@
 #                                   # deploy any commit to the test environment (own App, Volume, Secret
 #                                   # and database; needs RAKAZO_TEST_URL). No unit tests, no gap wait.
 #                                   # Production only accepts a main SHA whose code passed there first.
+#                                   # A test deploy then runs the quick staging journeys (sign-in, pages,
+#                                   # Kruit memory, browser regressions; free, ~8 min); only
+#                                   # a pass marks the commit as passed.
+#                                   # Needs RELEASE_CASES and RAKAZO_EMAIL/RAKAZO_PASSWORD.
+#   RELEASE_TARGET=test release-cloud.sh <SHA> journeys
+#                                   # the full staging journeys on the test app serving SHA (~20 min,
+#                                   # capped searches, a restart mid-search). The one paid test run: once a
+#                                   # day after a batch deploy; it reports and does not gate.
 #   RELEASE_SKIP_TEST_ENV=<short> ... deploy  # production without a test-environment pass (emergency)
 #   RELEASE_TEST_DATABASE_URL=postgresql://…@localhost/scratch  # also run the real-Postgres journeys
 #                                   # (pnpm test:integration) after the unit tests; local scratch DB only
@@ -113,7 +121,7 @@ else
 fi
 SHORT=${SHA:0:8}
 # Keep the whole timestamped run on disk; wrappers often show only the tail.
-case "$MODE" in check|deploy) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
+case "$MODE" in check|deploy|journeys) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
 # Unit tests run in one persistent checkout ($WORK/testtree) so node_modules, the Prisma client
 # and vitest's cache survive between releases; install is a near no-op while the lockfile is unchanged.
 # A commit is tested once: its code (everything outside docs/) matching an already tested commit
@@ -174,6 +182,31 @@ if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 
   && [ "${RELEASE_SKIP_TEST_ENV:-}" != "$SHORT" ] && ! passed_on_test; then
   die "$SHORT has not passed on the test environment; run RELEASE_TARGET=test first (RELEASE_SKIP_TEST_ENV=$SHORT for an emergency)"
 fi
+# The recruiter's real path on the test environment, run on the deployed build. "staging-quick"
+# (sign-in, pages, Kruit memory, browser regressions) gates the deploy; "staging" adds the first question, searches with
+# a countdown, mid-search messages and a server restart mid-search (about 20 minutes and a few
+# dollars of capped searches). Nothing is sent: the test environment has no mail or outreach
+# credentials. $1 is the release folder, $2 the suite.
+staging_journeys() {
+  [ -n "${RELEASE_CASES:-}" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] \
+    || die "staging journeys need RELEASE_CASES and RAKAZO_EMAIL/RAKAZO_PASSWORD; $SHORT is not marked as passed"
+  local out="$WORK/$2-$SHORT"
+  log "$2 journeys for $SHORT"
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
+    node "$1/infra/acceptance/regression.mjs" --suite "$2" --paid --staging \
+      --cases "$RELEASE_CASES" --out "$out" > "$out.log" 2>&1 \
+    || { cat "$out/summary.md" 2>/dev/null || tail -20 "$out.log"
+         die "$2 journeys failed for $SHORT (log: $out.log)"; }
+  log "$2 journeys passed: $(head -1 "$out/summary.md")"
+}
+if [ "$MODE" = journeys ]; then
+  [ "$TARGET" = test ] || die "journeys run only on the test environment (RELEASE_TARGET=test)"
+  [ "$(live_revision)" = "$SHA" ] || die "the test app does not serve $SHORT; deploy it first"
+  J="$WORK/journeys/$SHA"; rm -rf "$J"; mkdir -p "$J"
+  git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$J"
+  staging_journeys "$J" staging
+  log "JOURNEYS OK $SHORT"; exit 0
+fi
 # Staging → production sync: every config key the test app has must exist in production, and no
 # production value may point at the test environment. Prints key names only.
 if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
@@ -203,7 +236,7 @@ log "active runs (30 min): $ACTIVE"
 LEDGER_BEFORE=$(db_query "$LEDGER_SQL") || LEDGER_BEFORE="unknown (db query failed)"
 log "ledger before: $LEDGER_BEFORE"
 [ "$MODE" = check ] && { log "CHECK DONE $SHORT (nothing deployed)"; exit 0; }
-[ "$MODE" = deploy ] || die "mode must be check, test or deploy"
+[ "$MODE" = deploy ] || die "mode must be check, test, journeys or deploy"
 # The cross-role readback needs a private file listing the test copies plus a sign-in; without
 # either it is skipped with a warning so the release itself is not blocked.
 GLOBAL_FIXTURES=${RAKAZO_GLOBAL_FIXTURES:-${RELEASE_REGRESSION_CASES:+$RELEASE_REGRESSION_CASES/global-recruiting.json}}
@@ -309,22 +342,26 @@ fi
 # answered, so nothing is sent). Needs the private JD fixtures in RELEASE_CASES and the test account
 # in RAKAZO_EMAIL/RAKAZO_PASSWORD; a red result rolls the release back. Skipped on a rollback.
 # It pays for a search, grading and contact lookups, so it runs only when this release changes
-# search, grading or contact code (or RELEASE_PAID_CHECKS=1); every other release stays free.
+# search, grading or contact code (or RELEASE_PAID_CHECKS=1), and at most once a day: a pass in
+# the last 24 hours covers later releases. Every other release stays free.
 PAID_PATHS='^packages/(adapters/src/(recruiting-|mcp-connector|contact-)|core/src/recruiting-)|^infra/acceptance/regression\.mjs$'
+PAID_STAMP="$WORK/paid-check-passed"
 paid_change() {
   [ "${RELEASE_PAID_CHECKS:-}" = 1 ] && return 0
   [ "$TARGET" = test ] && return 1
   [ "$LIVE" != unknown ] || return 0
+  [ -z "$(find "$PAID_STAMP" -mmin -1440 2>/dev/null)" ] || return 1
   git -C "$REPO" diff --name-only "$LIVE" "$SHA" -- . 2>/dev/null | grep -v '\.test\.' | grep -qE "$PAID_PATHS"
 }
 if [ "${RELEASE_ROLLBACK:-}" != 1 ] && ! paid_change; then
-  log "contacts check skipped: no search, grading or contact code changed (RELEASE_PAID_CHECKS=1 to run it)"
+  log "contacts check skipped: no search, grading or contact change since the last daily pass (RELEASE_PAID_CHECKS=1 to run it)"
 elif [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
   && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
   RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" \
     node "$DIR/infra/acceptance/regression.mjs" --only contacts --paid --cases "$RELEASE_CASES" \
       --out "$WORK/contacts-$SHORT" > "$WORK/contacts-$SHORT.log" 2>&1 \
     || { tail -8 "$WORK/contacts-$SHORT.log"; rollback "contacts check failed (log: $WORK/contacts-$SHORT.log)"; }
+  touch "$PAID_STAMP"
   log "contacts ok"
 else
   log "contacts check skipped (set RELEASE_CASES and the test account to run it)"
@@ -340,6 +377,7 @@ if [ "$GLOBAL_CHECK" = 1 ]; then
 else
   log "WARN global recruiting check skipped: set RAKAZO_GLOBAL_FIXTURES and a sign-in"
 fi
+[ "$TARGET" = test ] && staging_journeys "$DIR" staging-quick
 for _ in $(seq 1 40); do [ "$(containers)" = 1 ] && break; sleep 3; done
 [ "$(containers)" = 1 ] || die "more than one container after deploy"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" = 200 ] || die "/health not 200"

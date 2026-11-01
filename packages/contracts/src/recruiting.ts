@@ -8,6 +8,13 @@ import {
 export * from "./recruiting-candidate-text.js";
 export * from "./recruiting-employment.js";
 
+import {
+  RecruitingCandidateRankingGroupSchema,
+  RecruitingCandidateRankingSchema,
+} from "./recruiting-candidate-ranking.js";
+
+export * from "./recruiting-candidate-ranking.js";
+
 import { ListRecruitingCandidatesInput } from "./recruiting-candidate-filters.js";
 import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
 
@@ -15,6 +22,7 @@ export * from "./recruiting-candidate-filters.js";
 export * from "./recruiting-identifiers.js";
 
 import * as z from "zod";
+import { ATTACHMENT_MAX_COUNT } from "./attachments.js";
 import { ArtifactJsonStringPathSchema } from "./builtin-tools.js";
 import { Id, IsoDate } from "./ids.js";
 import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
@@ -1385,6 +1393,7 @@ export const RecruitingProfilesToolInputSchema = z.discriminatedUnion("operation
 export type RecruitingProfilesToolInput = z.infer<typeof RecruitingProfilesToolInputSchema>;
 
 export const RecruitingCandidateSchema = z.strictObject({
+  ranking: RecruitingCandidateRankingSchema.optional(),
   latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
   savedProfile: RecruitingSavedProfileSchema.nullable().optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
@@ -1444,7 +1453,8 @@ export const RecruitingRoleCandidatesInputFields = {
   threadId: RecruitingId,
   limit: z.number().int().min(1).max(100).optional(),
   cursor: Text.optional(),
-  sort: z.enum(["score", "rank", "name", "recent"]).optional(),
+  sort: z.enum(["score", "rank", "name", "recent", "ranking"]).optional(),
+  rankingGroup: RecruitingCandidateRankingGroupSchema.optional(),
   query: z.string().max(240).optional(),
   shortlistedOnly: z.boolean().optional(),
 };
@@ -1472,6 +1482,8 @@ export const RecruitingRoleCandidateSchema = z.strictObject({
   autumn: z
     .strictObject({
       candidateKey: RecruitingId,
+      ranking: RecruitingCandidateRankingSchema.optional(),
+      savedProfile: RecruitingSavedProfileSchema.nullable().optional(),
       score: z.number().nullable(),
       rank: z.number().nullable(),
       tier: z.string().nullable(),
@@ -1572,9 +1584,15 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   ListRecruitingCandidatesInput.pick({ query: true, cursor: true, sort: true }).extend({
     operation: z.literal("list"),
     limit: z.number().int().min(1).max(100).optional(),
+    /** A numbered page of `limit` people (default 10), for jumping back and forth. */
+    page: z.number().int().min(1).max(600).optional(),
+    // A role conversation always reads its own role; elsewhere the agent names one.
+    roleId: RecruitingId.optional(),
   }),
-  ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
+  ListRecruitingCandidateSourcesInput.extend({
     operation: z.literal("sources"),
+    // As for list: a role conversation always reads its own role.
+    roleId: RecruitingId.optional(),
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
@@ -1779,6 +1797,11 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       email: z.string(),
       status: z.number().int().nullable(),
       interestStatus: z.number().int().nullable(),
+      name: z.string().nullable().optional(),
+      company: z.string().nullable().optional(),
+      openCount: z.number().int().nonnegative().nullable().optional(),
+      clickCount: z.number().int().nonnegative().nullable().optional(),
+      replyCount: z.number().int().nonnegative().nullable().optional(),
     }),
   ),
 });
@@ -2864,6 +2887,14 @@ export const RecruitingCandidateNoteSchema = z.strictObject({
   roleId: RecruitingId.nullable(),
   candidateKey: z.string(),
   body: z.string(),
+  attachments: z.array(
+    z.strictObject({
+      id: Id,
+      name: z.string(),
+      mimeType: z.string(),
+      size: z.number().int().nonnegative(),
+    }),
+  ),
   createdBy: z.enum(["user", "agent"]),
   authorName: z.string().optional(),
   createdAt: IsoDate,
@@ -2882,11 +2913,13 @@ export const CreateRecruitingCandidateNoteInput = z.strictObject({
   candidateKey: ReminderCandidateKey,
   roleId: RecruitingId.optional(),
   body: NoteBody,
+  artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
 });
 export type CreateRecruitingCandidateNoteInput = z.infer<typeof CreateRecruitingCandidateNoteInput>;
 export const UpdateRecruitingCandidateNoteInput = z.strictObject({
   id: RecruitingId,
   body: NoteBody,
+  artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
 });
 export type UpdateRecruitingCandidateNoteInput = z.infer<typeof UpdateRecruitingCandidateNoteInput>;
 export const DeleteRecruitingCandidateNoteInput = z.strictObject({ id: RecruitingId });

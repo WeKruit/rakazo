@@ -725,6 +725,9 @@ const runEgressWindow = new RateWindow(RUN_EGRESS_PER_MINUTE, 60_000);
 const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
   "Not run: this call would send a saved credential to an outside service. Credentials are never passed in tool arguments; continue without it.";
 
+/** People Kruit lists from a role when the recruiter named no number. */
+const SHOWN_ROLE_PEOPLE = 10;
+
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
   for (const match of text.matchAll(/https?:\/\/[^\s<>"'()，。、]+/g)) {
@@ -1317,6 +1320,23 @@ export function pastedJobTitle(text: string): string | null {
   if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
   if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
+}
+
+/**
+ * A working title for a short role request that is not a full JD: its first line, when the
+ * message has more lines after it and that line reads as a name, not a sentence.
+ */
+export function requestTitle(text: string): string | null {
+  const lines = text
+    .split("\n")
+    .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  // A clock time ("17:20") is part of a name; any other colon or sentence mark is not.
+  const marks = first.replace(/\d[:：]\d/g, "");
+  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(marks))
+    return null;
+  return first;
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
@@ -5855,6 +5875,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         let contactLookupOwed: { target: number; remaining: number } | undefined;
         let askDeclineBounced = false;
+        // A question bounced once as already answered may be asked again: the reply may have been about something else.
+        const knownAskBounced = new Set<string>();
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -5917,6 +5939,62 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
+        // Kruit lists a role's people with the same lines a role team's round uses.
+        const showGlobalRolePeople = async (
+          args: Record<string, unknown>,
+          result: unknown,
+        ): Promise<object | undefined> => {
+          const page = result as {
+            items?: Array<{ candidateKey?: unknown }>;
+            total?: unknown;
+          } | null;
+          const items = page?.items;
+          if (
+            !thread.groupId?.startsWith("recruiting-global-") ||
+            args.operation !== "list" ||
+            typeof args.roleId !== "string" ||
+            // A name or profile lookup finds one person; it is not a list to show.
+            args.query !== undefined ||
+            !items?.length
+          )
+            return undefined;
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: args.roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { title: true, sourceThreadId: true },
+          });
+          if (!role) return undefined;
+          const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
+          const shown = items.slice(0, size);
+          const first =
+            typeof args.page === "number" && args.cursor === undefined
+              ? (args.page - 1) * size + 1
+              : undefined;
+          const total = typeof page?.total === "number" ? page.total : undefined;
+          // Where this page sits, so the recruiter can ask for the next, previous or any page.
+          const range =
+            first !== undefined
+              ? ` · ${first}–${first + shown.length - 1}${total !== undefined ? ` / ${total}` : ""}`
+              : total !== undefined && total > shown.length
+                ? ` · 1–${shown.length} / ${total}`
+                : "";
+          const text = await recruitingRoundListText(deps.prisma, {
+            threadId: role.sourceThreadId,
+            spaceId: run.spaceId,
+            roleId: args.roleId,
+            candidateKeys: shown.flatMap((item) =>
+              typeof item.candidateKey === "string" ? [item.candidateKey] : [],
+            ),
+            knownOnly: true,
+            heading: `${role.title}${range}:`,
+          });
+          if (!text) return undefined;
+          await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+          return {
+            ...(result as object),
+            shownInChat:
+              "These people are already listed in chat as the role team lists them, with their place in the list. Do not list them again; add at most one line, such as that nobody is graded yet. For the next, previous or any other page, call list again with the same roleId and page.",
+          };
+        };
         const showRoundList = async (text: string) => {
           const messageId = roundStream?.messageId;
           if (!messageId) {
@@ -10673,17 +10751,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "recruiting_candidates") {
             try {
               if (!deps.artifacts) throw new IsolationError();
-              return finish(
-                redactConnectorPayload(
-                  await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
-                    { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
-                    args,
-                    context,
-                  ),
-                  runSecrets,
-                ),
+              const result = await executeRecruitingCandidatesTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
+                { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
+                args,
+                context,
               );
+              const shown = await showGlobalRolePeople(args, result);
+              return finish(redactConnectorPayload(shown ?? result, runSecrets));
             } catch (error) {
               return finish(roleError(error));
             }
@@ -12782,7 +12857,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   })
                 )?.name.trim()
               : undefined;
-            const title = named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : NEW_ROLE_TITLE;
+            const title =
+              named && named !== NEW_ROLE_TITLE
+                ? named.slice(0, 120)
+                : (requestTitle(request) ?? NEW_ROLE_TITLE);
             return {
               saving: create(title, [], request),
               note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
@@ -13742,7 +13820,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       question,
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
-                    if (known) return `"${known.key}" → "${known.value}"`;
+                    if (known && !knownAskBounced.has(known.key)) {
+                      knownAskBounced.add(known.key);
+                      return `"${known.key}" → "${known.value}"`;
+                    }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
@@ -14595,6 +14676,58 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // Gray next-message text in the composer. It starts as soon as the reply text is final,
+          // beside the checkpoint and finalize below, so it is ready about when the reply lands.
+          const suggestionPending =
+            deps.replySuggestions &&
+            !scripted &&
+            run.trigger === "user" &&
+            !messagingChannelRun &&
+            !handedOff &&
+            text.trim() &&
+            !blocks.some((block) => block.kind === "ask")
+              ? suggestNextMessage({
+                  runtime: deps.runtime,
+                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+                  earlier: historyMessages
+                    .filter(
+                      (message) =>
+                        message.id !== currentTurnMessage?.id &&
+                        (message.role === "user" || message.role === "bot"),
+                    )
+                    .map((message) => ({
+                      role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                      text: message.blocks
+                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                        .join("\n"),
+                    })),
+                  userText: turnUserText,
+                  replyText: text,
+                  runId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  threadId: thread.id,
+                  onUsage: (event) =>
+                    recordUsage(
+                      deps.prisma,
+                      event,
+                      {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                        parentRunId: runId,
+                        runId,
+                        operationId: `suggestion:${runId}`,
+                        operationKind: "setup",
+                      },
+                      estimateCatalogTokenCostUsd,
+                    ),
+                }).catch((error) => {
+                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+                  return null;
+                })
+              : null;
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -14640,6 +14773,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
+          // only while this reply is the newest message and nothing is running.
+          if (suggestionPending && !completed.continuationRunId) {
+            void suggestionPending
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+              );
+          }
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
@@ -14742,71 +14895,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
-          }
-          // Gray next-message text in the composer, sent after the reply so it never delays it.
-          if (
-            deps.replySuggestions &&
-            !scripted &&
-            run.trigger === "user" &&
-            !messagingChannelRun &&
-            !handedOff &&
-            !completed.continuationRunId &&
-            !recruitingContinued &&
-            text.trim()
-          ) {
-            void suggestNextMessage({
-              runtime: deps.runtime,
-              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-              earlier: historyMessages
-                .filter(
-                  (message) =>
-                    message.id !== currentTurnMessage?.id &&
-                    (message.role === "user" || message.role === "bot"),
-                )
-                .map((message) => ({
-                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                  text: message.blocks
-                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                    .join("\n"),
-                })),
-              userText: turnUserText,
-              replyText: text,
-              runId,
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `suggestion:${runId}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
-                ),
-            })
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.publishTransient({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
-              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (

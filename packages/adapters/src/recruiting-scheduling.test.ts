@@ -142,3 +142,42 @@ describe("explicit scheduling plan dispatch", () => {
       expect(SchedulingTimeZoneSchema.safeParse(zone).success).toBe(false);
   });
 });
+
+it("binds saved requests in review and confirmation while keeping guest booking scope unchanged", () => {
+  const f = fixture();
+  const plan = {
+    ...f.plan,
+    requests: {
+      guests: ["panel@example.test"],
+      notes: "Bring the design doc.\n  Keep this exact wording.",
+    },
+  };
+  expect(schedulingPlanHash(plan)).not.toBe(schedulingPlanHash(f.plan));
+  expect(schedulingPlanReview(plan, "book")).toContain("panel@example.test");
+  expect(schedulingPlanReview(plan, "confirm")).toContain(plan.requests.notes);
+  expect(schedulingBookingArguments(plan)).not.toHaveProperty("guests");
+  expect(() =>
+    assertSchedulingCall(plan, "book", f.route, { ...f.args, guests: plan.requests.guests }),
+  ).toThrow();
+  const route = {
+    connectorId: "mcp",
+    resourceId: plan.mailSourceId,
+    resourceRevision: plan.mailSourceRevision,
+    toolName: "native_instantly_reply_to_email",
+  };
+  const args = {
+    reply_to_uuid: "message",
+    eaccount: "host@example.test",
+    subject: "Confirmed",
+    body: { text: "Your interview is confirmed." },
+  };
+  expect(() => assertSchedulingCall(plan, "confirm", route, args)).toThrow(
+    "preserve the reviewed notes",
+  );
+  expect(() =>
+    assertSchedulingCall(plan, "confirm", route, {
+      ...args,
+      body: { text: `${args.body.text}\n${plan.requests.notes}` },
+    }),
+  ).not.toThrow();
+});

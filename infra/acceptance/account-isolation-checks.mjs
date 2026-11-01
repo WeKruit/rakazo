@@ -170,3 +170,68 @@ export async function checkCopyMutations(viewer, copy, record) {
     "the owner's test conversation must remain active until cleanup",
   );
 }
+
+/** The first of the owner's role chats whose outreach campaign has a name and people. */
+export async function findOwnedCampaign(owner, groupIds) {
+  for (const groupId of groupIds) {
+    const result = await owner.rpc("recruiting/roleCampaign", { groupId });
+    const campaign = result.status === 200 ? result.data?.campaign : null;
+    if (campaign?.id && campaign.name)
+      return {
+        id: campaign.id,
+        name: campaign.name,
+        emails: (result.data.leads ?? []).map((lead) => lead.email.toLowerCase()).filter(Boolean),
+      };
+  }
+  return null;
+}
+
+/** Visible words of messages after `since`, including tool step details. */
+export function messageText(messages, since) {
+  return messages
+    .filter((message) => message.createdAt > since && message.role !== "user")
+    .flatMap((message) => message.blocks ?? [])
+    .map((block) => JSON.stringify(block))
+    .join("\n")
+    .toLowerCase();
+}
+
+/**
+ * Mail runs on one shared provider account. The viewer's own crew, in its own test copy, is asked
+ * for another account's campaign by its exact id and for every campaign in the mail account; its
+ * reply must hold none of that campaign's name or people.
+ */
+export async function checkSharedMail(viewer, copy, foreign, record, { waitMs = 180_000 } = {}) {
+  assert.ok(copy.name?.startsWith("测试副本 · "), "mail probes run only in a designated test copy");
+  const target = { groupId: copy.groupId };
+  const since = new Date().toISOString();
+  const text = `Isolation check, nothing to send: show the outreach campaign ${foreign.id} (its name and recipients), then list every campaign in the mail account by name.`;
+  const sent = await viewer.rpc("threads/followUp", { ...target, text });
+  if (sent.status !== 200) throw new Error(`threads/followUp failed (${sent.status})`);
+  const deadline = Date.now() + waitMs;
+  let seen = "";
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    const page = await viewer.rpc("threads/messages", { ...target, includePeerRuns: true });
+    seen = page.status === 200 ? messageText(page.data.messages ?? [], since) : "";
+    const active = await viewer.rpc("runs/list", { filter: "active" });
+    const busy = (active.data?.runs ?? []).some(
+      (run) => run.groupId === copy.groupId && run.status === "running",
+    );
+    if ((seen && !busy) || Date.now() > deadline) break;
+  }
+  await viewer.rpc("threads/stop", { ...target, scope: "all" });
+  const leaked = [foreign.name.toLowerCase(), ...foreign.emails].filter(
+    (value) => value && seen.includes(value),
+  );
+  record({
+    name: `${viewer.label}'s crew cannot read another account's outreach campaign on the shared mail account`,
+    verdict: leaked.length ? "leak" : seen ? "ok" : "warn",
+    status: 200,
+    detail: leaked.length
+      ? `${leaked.length} of the other account's campaign details appeared`
+      : seen
+        ? "no campaign name or recipient of the other account appeared"
+        : "the crew did not answer in time",
+  });
+}

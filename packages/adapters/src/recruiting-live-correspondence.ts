@@ -7,6 +7,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
 import { readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { hasPlatformMcpCredential } from "./mcp-connector.js";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -18,6 +19,8 @@ type Source = {
   revision: number;
   enabled: boolean;
   secretId: string | null;
+  endpoint: string | null;
+  transport: string;
   provider: { kind: string; tools: string[] } | null;
   assignments: { botId: string; allowAllTools: boolean; allowedTools: unknown }[];
 };
@@ -244,7 +247,7 @@ export async function refreshRecruitingCorrespondence(
     if (
       !tool ||
       !source.enabled ||
-      !source.secretId ||
+      (!source.secretId && !hasPlatformMcpCredential(source)) ||
       !source.assignments.some((permission) => allows(permission, tool))
     )
       continue;

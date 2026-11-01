@@ -76,6 +76,7 @@ msgid "{0} left"
 msgstr ""
 
 #. placeholder {0}: plan.calendar.lengthInMinutes
+#. placeholder {0}: value.lengthInMinutes
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "{0} minutes"
 msgstr ""
@@ -83,11 +84,6 @@ msgstr ""
 #. placeholder {0}: item.candidates?.total ?? 0
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "{0} people"
-msgstr ""
-
-#. placeholder {0}: repliesIncomplete ? `${replies.length}+` : replies.length
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "{0} replies"
 msgstr ""
 
 #. placeholder {0}: sender.name
@@ -103,6 +99,11 @@ msgstr ""
 #. placeholder {0}: observation.rowCount
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "{0} saved source rows"
+msgstr ""
+
+#. placeholder {0}: status.length
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "{0} statuses"
 msgstr ""
 
 #. placeholder {0}: bot.name
@@ -142,6 +143,10 @@ msgstr ""
 msgid "{sizeFact} employees"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "{stepCount} email steps"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "{title}, {label}"
 msgstr "{title}, {label}"
@@ -154,8 +159,16 @@ msgstr ""
 msgid "{undated} without a recorded date"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "{value} minutes"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -206,8 +219,14 @@ msgstr ""
 msgid "Action confirmations"
 msgstr "कार्रवाई की पुष्टि"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Actions"
+msgstr ""
+
 #. placeholder {0}: bot.name
+#. placeholder {0}: campaignName(row.name)
 #: src/pages/BotContextMenu.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Actions for {0}"
 msgstr "{0} के लिए कार्रवाइयां"
 
@@ -286,6 +305,10 @@ msgstr "जुड़ा मॉडल जोड़ें"
 msgid "Add connected models to use them as backups."
 msgstr "बैकअप के रूप में उपयोग करने के लिए जुड़े मॉडल जोड़ें।"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Add contacts"
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Add credential"
 msgstr ""
@@ -348,6 +371,7 @@ msgstr "जोड़ा जा रहा है…"
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -360,6 +384,11 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Advanced..."
+msgstr ""
+
+#. placeholder {0}: plan.requests.guests.join(", ")
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "After a verified booking, prepare separate native guest-addition actions for these requested guests: {0}. Show their exact scope for approval. Do not add them to the initial booking or email reply recipients."
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
@@ -382,6 +411,10 @@ msgstr ""
 msgid "All"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "All activity"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr ""
@@ -398,6 +431,10 @@ msgstr ""
 msgid "All providers"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "All recorded durations"
+msgstr ""
+
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "All roles"
@@ -410,6 +447,7 @@ msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "All time"
 msgstr ""
 
@@ -605,6 +643,10 @@ msgstr ""
 msgid "Assessment unavailable"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Associated roles"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
@@ -693,12 +735,21 @@ msgstr ""
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Back to edit"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Back to inbox"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Back to overview"
 msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
@@ -787,6 +838,10 @@ msgstr ""
 msgid "Browse MCP servers"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Build from scratch"
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "अंतर्निहित"
@@ -818,6 +873,10 @@ msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Calendar records have not been checked yet."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar start date"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -935,6 +994,17 @@ msgstr "Candidate status"
 msgid "Candidate time zone"
 msgstr ""
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Candidate views"
+msgstr ""
+
+#. placeholder {0}: candidate.name
+#. placeholder {1}: candidate.email
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate: {0} · {1} · {candidateZone}"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Candidates"
 msgstr ""
@@ -948,7 +1018,7 @@ msgid "Change password"
 msgstr "पासवर्ड बदलें"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgid "Change the date range or status to review saved records. Empty space does not confirm availability."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
@@ -966,6 +1036,10 @@ msgstr ""
 #: src/pages/shell/message-cards.tsx
 msgid "Chart failed to render: {error}"
 msgstr "चार्ट रेंडर नहीं हो सका: {error}"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Chat"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Chat apps"
@@ -1067,12 +1141,20 @@ msgstr ""
 msgid "Choose a role to see its outreach."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Choose a saved sequence"
+msgstr ""
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Choose day"
 msgstr ""
 
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Choose feedback"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Choose how to prepare a draft for this role. Creating a draft does not add recipients or send email."
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1101,6 +1183,10 @@ msgstr ""
 msgid "Clearing…"
 msgstr "साफ़ किया जा रहा है…"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clicked"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr ""
@@ -1120,6 +1206,30 @@ msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Clock change; see source times"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clone"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clone a sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clone draft"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clone existing sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Clone sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Cloning…"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
@@ -1192,6 +1302,10 @@ msgstr ""
 msgid "Code"
 msgstr "कोड"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Collapse profile"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Comfortable"
 msgstr ""
@@ -1218,6 +1332,7 @@ msgid "Compact"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Company"
 msgstr ""
 
@@ -1345,6 +1460,7 @@ msgstr ""
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Conflicting information"
 msgstr ""
 
@@ -1506,6 +1622,10 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Copied"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Copies email steps and settings into a new draft. Contacts and history stay with the original sequence."
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1753,16 +1873,16 @@ msgstr "MCP सर्वर लोड नहीं हो सके"
 msgid "Could not load model settings"
 msgstr "मॉडल सेटिंग्स लोड नहीं हो सकीं"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not load more sequence contacts. Try again."
+msgstr ""
+
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Could not load recruiting records."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Could not load recruiting. Refresh to try again."
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Could not load replies."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRoutines.tsx
@@ -1853,6 +1973,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not read this sequence."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this sequence. Try refreshing."
 msgstr ""
 
 #: src/pages/shell/message-cards.tsx
@@ -1995,6 +2119,10 @@ msgstr "डिफ़ॉल्ट मेमोरी स्कोप अपडे
 msgid "Could not update this task. Try again."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not verify the cloned draft. Refresh the sequence list before trying again."
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Couldn't load messaging settings"
 msgstr ""
@@ -2005,6 +2133,10 @@ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Couldn't update messaging settings"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Courses"
 msgstr ""
 
 #: src/pages/Board.tsx
@@ -2032,6 +2164,7 @@ msgid "Create space"
 msgstr ""
 
 #: src/components/AskCard.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Created"
 msgstr ""
 
@@ -2124,6 +2257,7 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Current role"
 msgstr ""
 
@@ -2394,8 +2528,20 @@ msgstr "मार्कडाउन के रूप में डाउनल�
 msgid "Draft"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Draft an email sequence from this role's saved brief. Show all steps for review; do not add recipients or send."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Draft in role chat"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -2427,6 +2573,7 @@ msgid "Earlier history"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Edit"
 msgstr ""
 
@@ -2450,6 +2597,7 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Email"
 msgstr "ईमेल"
 
@@ -2464,6 +2612,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email draft editor"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Email draft only. No time is booked."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -2505,6 +2657,10 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Employment"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2567,6 +2723,10 @@ msgid "Event status"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event statuses"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Events without usable start times"
 msgstr ""
 
@@ -2621,9 +2781,21 @@ msgstr ""
 msgid "Executor token"
 msgstr "Executor टोकन"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Exit"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Exit editing this interview?"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Expand"
 msgstr "विस्तृत करें"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Expand profile"
+msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
@@ -2776,6 +2948,10 @@ msgstr "गेटवे आईडी"
 msgid "General"
 msgstr "सामान्य"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Generate from this role"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Get notified when this Bot finishes or needs input"
 msgstr "जब यह बॉट समाप्त हो या इनपुट चाहिए तो सूचित हों"
@@ -2851,6 +3027,10 @@ msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Groups"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Guests and location are requests in the draft. Email recipients stay unchanged. No time is booked."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
@@ -2946,6 +3126,10 @@ msgstr ""
 msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Historical totals · — Not reported"
+msgstr ""
+
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
 msgstr ""
@@ -2958,6 +3142,10 @@ msgstr "घंटा"
 #: src/pages/RoutineSchedule.tsx
 msgid "hours"
 msgstr "घंटे"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Hours"
+msgstr ""
 
 #: src/pages/RoutineSchedule.tsx
 msgid "How often"
@@ -2992,6 +3180,10 @@ msgstr ""
 msgid "Imported list"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "In person"
+msgstr ""
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Inactive"
 msgstr ""
@@ -3008,6 +3200,16 @@ msgstr ""
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Include"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Include these notes verbatim in the draft and any later confirmation:\n"
+"{notes}"
+msgstr ""
+
+#. placeholder {0}: plan.requests.notes
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Include these notes verbatim in the plain-text confirmation draft: {0}"
 msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
@@ -3054,6 +3256,7 @@ msgstr ""
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Interested"
 msgstr ""
 
@@ -3126,6 +3329,10 @@ msgid "JD"
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Job brief"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Job Brief"
 msgstr ""
 
@@ -3135,6 +3342,14 @@ msgstr ""
 
 #: src/pages/GroupPanel.tsx
 msgid "Job description and files"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Job posting"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Job Posting"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
@@ -3162,6 +3377,7 @@ msgstr "भाषा"
 msgid "Language evidence"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Languages"
 msgstr ""
@@ -3171,7 +3387,12 @@ msgid "Last {count} weeks"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Last 30 days"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Last 90 days"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -3329,11 +3550,16 @@ msgstr ""
 #: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Location"
 msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Location not returned"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Location type"
 msgstr ""
 
 #: src/pages/Paywall.tsx
@@ -3466,6 +3692,10 @@ msgstr "MCP सर्वर"
 msgid "Medium"
 msgstr "मध्यम"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Meeting location"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "Members ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
 msgstr "सदस्य ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
@@ -3521,6 +3751,10 @@ msgstr ""
 msgid "Minimal"
 msgstr "न्यूनतम"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Minimum notice"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "मिनट"
@@ -3528,6 +3762,10 @@ msgstr "मिनट"
 #: src/pages/RoutineSchedule.tsx
 msgid "minutes"
 msgstr "मिनट"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Minutes"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Missing"
@@ -3609,6 +3847,10 @@ msgstr "उन्हें अपनी साझा मेमोरी मे�
 msgid "Move to"
 msgstr "यहां ले जाएं"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Multiple options"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -3683,6 +3925,14 @@ msgstr ""
 msgid "New section"
 msgstr "नया सेक्शन"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "New sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "New sequence name"
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "New skill"
 msgstr "नई स्किल"
@@ -3697,6 +3947,7 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Next"
 msgstr ""
 
@@ -3712,13 +3963,17 @@ msgstr ""
 msgid "Next contact campaigns"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Next five days"
+msgstr ""
+
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Next page"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Next week"
+msgid "No activity in this date range."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -3773,6 +4028,10 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No events match these statuses in this date range."
+msgstr ""
+
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "No feedback yet."
 msgstr ""
@@ -3787,6 +4046,10 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No Important records matched this filter."
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No indexed mail matches this view."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -3807,6 +4070,10 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No loaded sequences match your search."
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -3854,6 +4121,14 @@ msgstr ""
 msgid "No providers found."
 msgstr "कोई प्रोवाइडर नहीं मिला।"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "No recorded availability."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "No recorded times match these filters."
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No records matched this search."
 msgstr ""
@@ -3862,7 +4137,6 @@ msgstr ""
 msgid "No recruiter messages were found."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No replies yet."
 msgstr ""
@@ -3913,16 +4187,16 @@ msgstr ""
 msgid "No saved discovery sources"
 msgstr ""
 
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No saved events to show for this week and status."
-msgstr ""
-
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "No saved feedback yet."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "No saved history"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No saved job posting details were returned for this role."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
@@ -3949,6 +4223,10 @@ msgstr "कोई सहेजी गई परिणाम पंक्ति�
 msgid "No saved results"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No saved sequences for this role yet."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No service configured for this role."
 msgstr ""
@@ -3966,7 +4244,6 @@ msgid "No skills yet"
 msgstr "अभी तक कोई स्किल नहीं"
 
 #: src/pages/recruiting/CrmHistory.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored campaign associations were returned for this role."
 msgstr ""
 
@@ -3995,7 +4272,7 @@ msgid "No tickets yet"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
-msgid "No timed events in this week."
+msgid "No timed events in this date range."
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -4075,7 +4352,12 @@ msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/fieldLabels.ts
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Notes"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Notes for the email"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -4085,6 +4367,10 @@ msgstr "कुछ भी नहीं चल रहा"
 #: src/pages/KnowledgeSection.tsx
 msgid "Nothing remembered yet"
 msgstr "अभी तक कुछ याद नहीं किया गया"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Notice unit"
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Notifications"
@@ -4162,6 +4448,10 @@ msgid "One tool per line. Empty means no tools."
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Online"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only loaded candidate records are shown."
 msgstr ""
 
@@ -4171,6 +4461,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only recorded slots after this notice are proposed. Availability is rechecked before booking."
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -4228,6 +4522,7 @@ msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-संगत सर्वर URL"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr ""
 
@@ -4329,6 +4624,7 @@ msgid "Overdue"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Overview"
 msgstr ""
 
@@ -4424,6 +4720,10 @@ msgid "Plan interview"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Plan one booking"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Plan saved. Booking and sending still require approval."
 msgstr ""
 
@@ -4469,6 +4769,11 @@ msgstr ""
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Preferred criteria"
+msgstr ""
+
+#. placeholder {0}: live?.name
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Prepare adding contacts to the saved sequence \"{0}\" in this role. Show the exact recipients and saved emails before any send. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4517,7 +4822,7 @@ msgid "Previous contact campaigns"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Previous week"
+msgid "Previous five days"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -4531,6 +4836,10 @@ msgstr ""
 #: src/pages/Board.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Priority"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Privacy"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -4563,8 +4872,13 @@ msgstr ""
 msgid "Project"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Projects"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Propose times by email"
 msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
@@ -4577,7 +4891,6 @@ msgid "Provider status"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
-#: src/pages/recruiting/SequenceTab.tsx
 msgid "Provider status code"
 msgstr ""
 
@@ -4665,6 +4978,10 @@ msgid "Recents"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Recheck availability before booking. Any later booking, guest addition or sending requires review of the exact participants, selected time, location and message."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Recheck current availability and prepare the exact booking for approval. Do not book or send before approval."
 msgstr ""
 
@@ -4684,8 +5001,16 @@ msgstr "OAuth पुनः कनेक्ट करें"
 msgid "Reconnecting"
 msgstr "पुनः कनेक्ट हो रहा है"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Recorded availability"
+msgstr ""
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Recorded event"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Recorded times"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -4852,6 +5177,7 @@ msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
 msgstr ""
 
@@ -4876,6 +5202,15 @@ msgid "Request"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested guests"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested guests (do not add to email recipients):\n"
+"{guests}"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Requested interviewer email"
 msgstr ""
 
@@ -4883,8 +5218,26 @@ msgstr ""
 msgid "Requested interviewer name"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested interviewer: {interviewerName} · {interviewerEmail} · {interviewerZone}"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested location"
+msgstr ""
+
+#. placeholder {0}: locationMode === "online" ? "Online" : "In person"
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested location ({0}):\n"
+"{location}"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Required"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Requirements"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSummary.tsx
@@ -4916,6 +5269,10 @@ msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Reset all"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Responsibilities"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -4963,6 +5320,10 @@ msgstr "WeKruit Headhunter पर लौटें"
 msgid "rev {0}"
 msgstr "रिवीज़न {0}"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
@@ -4979,8 +5340,16 @@ msgstr ""
 msgid "Review plan"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review proposed times"
+msgstr ""
+
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Review rationale"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Review role brief"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5007,8 +5376,10 @@ msgstr ""
 #. placeholder {5}: plan.candidate.timeZone
 #. placeholder {6}: localTime(plan.calendar.start, plan.interviewer.timeZone)
 #. placeholder {7}: plan.interviewer.timeZone
+#. placeholder {8}: plan.requests?.guests.length ? t`After a verified booking, prepare separate native guest-addition actions for these requested guests: ${plan.requests.guests.join(", ")}. Show their exact scope for approval. Do not add them to the initial booking or email reply recipients.` : ""
+#. placeholder {9}: plan.requests?.notes ? t`Include these notes verbatim in the plain-text confirmation draft: ${plan.requests.notes}` : ""
 #: src/pages/recruiting/SchedulingPlan.tsx
-msgid "Review the saved interview plan for {0} ({1}) with {2} ({3}). Candidate time: {4} ({5}); interviewer time: {6} ({7}). {instruction}"
+msgid "Review the saved interview plan for {0} ({1}) with {2} ({3}). Candidate time: {4} ({5}); interviewer time: {6} ({7}). {8} {9} {instruction}"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -5062,8 +5433,13 @@ msgstr ""
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Role"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Role brief"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5071,8 +5447,20 @@ msgstr ""
 msgid "Role campaigns"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Role contact status"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Role context"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Role definition"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Role details"
 msgstr ""
 
 #. placeholder {0}: unphrasedBriefFields.length
@@ -5104,6 +5492,10 @@ msgstr ""
 #. placeholder {0}: record.feedback.expectedRoleRevision
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Role version {0}"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Roles"
 msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
@@ -5183,6 +5575,10 @@ msgstr "चल रहा है…"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Runs when this bot receives a verified message from this provider."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Salary"
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
@@ -5269,10 +5665,6 @@ msgstr ""
 msgid "Saved emails"
 msgstr ""
 
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Saved events"
-msgstr ""
-
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Saved facts"
 msgstr ""
@@ -5287,6 +5679,14 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saved interview plans"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Saved mail · partial source coverage"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Saved mail is indexing in the background."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -5384,6 +5784,7 @@ msgid "Schedule an interview with {0}. Check availability and prepare the invita
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Schedule interview"
 msgstr ""
 
@@ -5398,6 +5799,10 @@ msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Scheduling interviews"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Scheduling mode"
 msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
@@ -5429,6 +5834,10 @@ msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Search activity"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Search and sorting cover loaded sequences"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -5496,6 +5905,14 @@ msgstr ""
 msgid "Search runs"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Search sequences"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Search sequences…"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Search update {0}"
@@ -5519,10 +5936,6 @@ msgstr ""
 msgid "Searching…"
 msgstr "खोजा जा रहा है…"
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Select a campaign"
-msgstr ""
-
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Select a connected model"
 msgstr "जुड़ा मॉडल चुनें"
@@ -5535,12 +5948,24 @@ msgstr ""
 msgid "Select a contact to read their stored messages."
 msgstr ""
 
-#: src/pages/recruiting/InterviewCalendar.tsx
-msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a saved sequence to view its contacts."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a sequence to view its metrics and contacts."
 msgstr ""
 
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Selected recipient unavailable"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Selected sequence"
 msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
@@ -5614,12 +6039,29 @@ msgstr ""
 msgid "Sequence"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sequence date range"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sequence details"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sequence name"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence steps"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sequence steps and delivery status are not included in these stored campaign associations."
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sequences"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
@@ -5683,6 +6125,10 @@ msgstr "साझा दस्तावेज़"
 msgid "Shared skills"
 msgstr "साझा स्किल्स"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sharing is not reported"
+msgstr ""
+
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/DetailPanel.tsx
@@ -5729,6 +6175,10 @@ msgstr "और दिखाएँ"
 msgid "Show navigation"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Show this role's saved job posting and requirements for review. Do not publish or send it."
+msgstr ""
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Showing available activity; more history may exist."
 msgstr ""
@@ -5754,6 +6204,10 @@ msgstr ""
 #: src/pages/Welcome.tsx
 msgid "Sign up"
 msgstr "साइन अप करें"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Single time"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Site"
@@ -5790,6 +6244,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Some selected times no longer meet minimum notice. Review recorded times."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5871,6 +6329,10 @@ msgstr ""
 msgid "Start {trialDays}-day free trial"
 msgstr ""
 
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start date"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Start recruiting"
 msgstr ""
@@ -5895,6 +6357,7 @@ msgstr "शुरू हो रहा है…"
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
 #: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Status"
 msgstr ""
 
@@ -5920,9 +6383,21 @@ msgstr ""
 msgid "Step {0} · Email draft"
 msgstr ""
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Step 1 · Select times"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Step 2 · Customize invite"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Steps"
 msgstr "चरण"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Steps not reported"
+msgstr ""
 
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Stop considering"
@@ -6051,6 +6526,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "The saved check returned no matching records. It does not confirm the entire account is empty."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "The selected calendar event type supplies the location. Guest additions require a separate review after booking."
 msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
@@ -6206,8 +6685,16 @@ msgstr "टूल स्रोत"
 msgid "Tools"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Total"
+msgstr ""
+
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Treat like a person"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Treat this as a location request in the draft. Verify the selected event type supports it before proposing a booking; do not override its configured location."
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -6258,6 +6745,7 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Unknown"
 msgstr ""
@@ -6353,6 +6841,10 @@ msgstr ""
 msgid "Use this model"
 msgstr "यह मॉडल उपयोग करें"
 
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Use unique guest email addresses, a valid meeting link, and notes up to 1000 characters."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Use your own key"
 msgstr "अपनी कुंजी इस्तेमाल करें"
@@ -6419,6 +6911,11 @@ msgstr ""
 msgid "View {name}"
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "View analytics"
+msgstr ""
+
 #: src/pages/RoutineRunHistory.tsx
 msgid "View chat"
 msgstr "चैट देखें"
@@ -6433,6 +6930,10 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "View role records"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "View sequence"
 msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
@@ -6522,6 +7023,10 @@ msgstr "बॉट कहां चलने चाहिए?"
 msgid "Who are you looking for?"
 msgstr ""
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Work"
+msgstr ""
+
 #: src/pages/SettingsOverlay.tsx
 msgid "Work Metrics"
 msgstr ""
@@ -6564,4 +7069,8 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Your unsaved changes will be lost."
 msgstr ""

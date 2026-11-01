@@ -1,21 +1,16 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
-import { Badge, Button, cn, Input, Skeleton } from "@rakazo/ui-web";
+import { Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
-  Bookmark,
   CalendarDays,
-  Clock,
-  FolderOpen,
   Inbox,
-  ListChecks,
   MessageSquare,
   MoreHorizontal,
   PanelLeft,
   PlusCircle,
   Search,
   Send,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -40,6 +35,7 @@ export type RecruitingWorkspaceView =
   | "sequence"
   | "inbox"
   | "interview"
+  | "analytics"
   | "workflow"
   | "routines"
   | "tasks";
@@ -98,10 +94,22 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   loading = false,
   onPrefetchRole,
   onGlobalChat,
+  viewHref,
+  kruitHref,
+  kruitDisabled,
+  inboxUnread,
+  onAllRoles,
 }: {
   /** The role list has not arrived yet. */
   loading?: boolean;
   onGlobalChat?: () => void;
+  viewHref: (view: RecruitingWorkspaceView) => string;
+  kruitHref: string;
+  kruitDisabled?: boolean;
+  inboxUnread?:
+    | { status: "loading" | "failed" }
+    | { status: "ready"; count: number; partial: boolean };
+  onAllRoles?: () => void;
   /** Hover or focus on a role: start reading its conversation before the click. */
   onPrefetchRole?: (id: string) => void;
   crmContext?: {
@@ -133,6 +141,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
 }) {
   const { t, i18n } = useLingui();
   const [crmRetry, setCrmRetry] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
   type CrmRole = Extract<RecruitingCrmDataOutput, { operation: "roles" }>["items"][number] & {
     selection: CrmBrowseSelection;
     organizationName: string;
@@ -266,16 +275,33 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     .sort(
       (a, b) =>
         Number(creating(b)) - Number(creating(a)) ||
-        Number(waitsOnUser(b)) - Number(waitsOnUser(a)),
-    );
+        Number(waitsOnUser(b)) - Number(waitsOnUser(a)) ||
+        Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    )
+    .slice(0, query.trim() ? undefined : 5);
+  const unlinkedCrmRoles = (currentCrm?.roles ?? []).filter(
+    (role) =>
+      !groups.some(
+        (group) =>
+          group.crmRoleReference?.sourceId === role.selection.serverId &&
+          group.crmRoleReference.organizationId === role.selection.organizationId &&
+          group.crmRoleReference.crmRoleId === role.crmRoleId,
+      ) &&
+      `${role.roleLabel} ${role.clientLabel}`
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase()),
+  );
+  const shownCrmRoles = unlinkedCrmRoles.slice(
+    0,
+    query.trim() ? undefined : Math.max(0, 5 - visibleGroups.length),
+  );
   const titleCounts = new Map<string, number>();
   for (const group of groups) {
     const title = group.name.trim().toLocaleLowerCase();
     titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   }
   const destinations = [
-    { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
-    { view: "contacts", label: t`Contacts`, Icon: Users },
+    { view: "contacts", label: t`Candidates`, Icon: Users },
     { view: "sequence", label: t`Sequence`, Icon: Send },
     { view: "inbox", label: t`Inbox`, Icon: Inbox },
     { view: "interview", label: t`Interview`, Icon: CalendarDays },
@@ -308,64 +334,150 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         </button>
       </div>
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
-        <Button variant="ghost" onClick={onGlobalChat}>
+        <Button
+          variant="ghost"
+          aria-current={
+            !["shortlist", "contacts", "sequence", "inbox", "interview", "analytics"].includes(view)
+              ? "page"
+              : undefined
+          }
+          role="link"
+          render={<a href={kruitHref} />}
+          nativeButton={false}
+          disabled={kruitDisabled}
+          onClick={(event) => {
+            if (
+              event.button === 0 &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.shiftKey &&
+              !event.altKey &&
+              onGlobalChat
+            ) {
+              event.preventDefault();
+              onGlobalChat();
+            }
+          }}
+        >
           <MessageSquare size={18} aria-hidden="true" />
           {RECRUITING_GLOBAL_AGENT_NAME}
-        </Button>
-        <Button variant="ghost" disabled={!canCreateRole} onClick={onNewRole}>
-          <PlusCircle size={18} aria-hidden="true" />
-          <Trans>New Role</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "brief" ? "page" : undefined}
-          onClick={() => onView("brief")}
-        >
-          <FolderOpen size={18} aria-hidden="true" />
-          <Trans>Job Brief</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "feedback" ? "page" : undefined}
-          onClick={() => onView("feedback")}
-        >
-          <Sparkles size={18} aria-hidden="true" />
-          <Trans>Client feedback</Trans>
         </Button>
         {destinations.map(({ view: target, label, Icon }) => (
           <Button
             key={target}
             variant="ghost"
-            aria-current={view === target ? "page" : undefined}
-            onClick={() => onView(target)}
+            aria-current={
+              view === target ||
+              (target === "contacts" && view === "shortlist") ||
+              (target === "sequence" && view === "analytics")
+                ? "page"
+                : undefined
+            }
+            role="link"
+            aria-label={label}
+            aria-description={
+              target === "inbox"
+                ? inboxUnread?.status === "ready"
+                  ? `${inboxUnread.count} ${t`unread threads in saved mail`}${inboxUnread.partial ? ` · ${t`Partial coverage`}` : ""}`
+                  : inboxUnread?.status === "failed"
+                    ? t`Unread status unavailable`
+                    : undefined
+                : undefined
+            }
+            render={<a href={viewHref(target)} />}
+            nativeButton={false}
+            onClick={(event) => {
+              if (
+                event.button === 0 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                onView(target);
+              }
+            }}
           >
             <Icon size={18} aria-hidden="true" />
             {label}
+            {target === "inbox" && inboxUnread?.status === "ready" && inboxUnread.count > 0 ? (
+              <span
+                aria-hidden="true"
+                className="ms-auto text-xs tabular-nums"
+                title={t`Unread threads in saved mail`}
+              >
+                {inboxUnread.count}
+                {inboxUnread.partial ? "+" : ""}
+              </span>
+            ) : target === "inbox" && inboxUnread?.status === "failed" ? (
+              <span
+                aria-hidden="true"
+                className="ms-auto text-muted-foreground"
+                title={t`Unread status unavailable`}
+              >
+                —
+              </span>
+            ) : null}
           </Button>
         ))}
       </nav>
-      <div className="hire-role-heading">
-        <Trans>Role teams</Trans>
+      <div className="hire-role-heading flex items-center justify-between">
+        <Trans>Roles</Trans>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t`Search roles`}
+            aria-expanded={searchOpen || !!query}
+            onClick={() => setSearchOpen((value) => !value)}
+          >
+            <Search size={15} aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t`New role`}
+            disabled={!canCreateRole}
+            onClick={onNewRole}
+          >
+            <PlusCircle size={16} aria-hidden="true" />
+          </Button>
+        </div>
       </div>
-      <div className="relative mx-1 mb-2">
-        <Search
-          className="pointer-events-none absolute start-3 top-2 text-muted-foreground"
-          size={15}
-          aria-hidden="true"
-        />
-        <Input
-          aria-label={t`Search roles`}
-          placeholder={t`Search roles`}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          className="h-8 rounded-lg border-sidebar-border bg-transparent ps-9 text-xs"
-        />
-      </div>
+      {searchOpen || query ? (
+        <div className="relative mx-1 mb-2">
+          <Search
+            className="pointer-events-none absolute start-3 top-2 text-muted-foreground"
+            size={15}
+            aria-hidden="true"
+          />
+          <Input
+            aria-label={t`Search roles`}
+            placeholder={t`Search roles`}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            autoFocus
+            className="h-8 rounded-lg border-sidebar-border bg-transparent ps-9 text-xs"
+          />
+          {query ? (
+            <Button
+              className="absolute end-0 top-0"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={t`Clear role search`}
+              onClick={() => onQueryChange("")}
+            >
+              ×
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
         {loading ? (
           <div role="status" aria-label={t`Loading roles…`} className="space-y-1 px-2.5">
             {[0, 1, 2].map((row) => (
-              <div key={row} className="flex min-h-[39px] items-center gap-3">
+              <div key={row} className="flex min-h-9 items-center gap-3">
                 <Skeleton className="size-2 rounded-full" />
                 <Skeleton className="h-3 flex-1" />
               </div>
@@ -389,16 +501,21 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           </p>
         ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
+          <Button
+            variant="ghost"
+            className="hire-role-button w-full justify-start px-2.5 text-sm font-normal"
+            aria-current={!groupId && !crmSelection ? "page" : undefined}
+            onClick={onAllRoles ?? (() => onView(view))}
+          >
+            <Users size={15} aria-hidden="true" />
+            <Trans>All roles</Trans>
+          </Button>
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
               <Button
                 variant="ghost"
-                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal disabled:opacity-100"
-                aria-current={
-                  group.id === groupId && (view === "results" || creating(group))
-                    ? "page"
-                    : undefined
-                }
+                className="hire-role-button h-auto min-h-9 min-w-0 flex-1 justify-start gap-3 rounded-lg px-2.5 py-1.5 text-start text-sm font-normal disabled:opacity-100"
+                aria-current={group.id === groupId ? "page" : undefined}
                 aria-busy={creating(group) || undefined}
                 disabled={creating(group)}
                 onMouseEnter={() => onPrefetchRole?.(group.id)}
@@ -418,13 +535,29 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
                 }}
               >
-                <span
-                  className={cn(
-                    "size-2 shrink-0 rounded-full bg-link",
-                    creating(group) && "animate-pulse",
-                  )}
-                  aria-hidden="true"
-                />
+                {creating(group) || waitsOnUser(group) ? (
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full bg-warning",
+                      creating(group) && "animate-pulse",
+                    )}
+                    title={
+                      creating(group)
+                        ? t`Creating role…`
+                        : group.attention === "approval"
+                          ? t`Needs confirmation`
+                          : t`Needs input`
+                    }
+                  >
+                    <span className="sr-only">
+                      {creating(group)
+                        ? t`Creating role…`
+                        : group.attention === "approval"
+                          ? t`Needs confirmation`
+                          : t`Needs input`}
+                    </span>
+                  </span>
+                ) : null}
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
@@ -436,23 +569,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   {(titleCounts.get(group.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? (
                     <time
                       dateTime={group.createdAt}
-                      className="block truncate text-xs font-normal text-muted-foreground"
+                      className="ms-1 text-xs font-normal text-muted-foreground"
                     >
                       {new Date(group.createdAt).toLocaleString(i18n.locale, {
                         dateStyle: "medium",
                         timeStyle: "short",
                       })}
                     </time>
-                  ) : null}
-                  {/* Below the name, so a long status never squeezes the role out of view. */}
-                  {waitsOnUser(group) ? (
-                    <Badge variant="secondary" className="mt-1 block w-fit font-normal">
-                      {group.attention === "approval" ? (
-                        <Trans>Needs confirmation</Trans>
-                      ) : (
-                        <Trans>Needs input</Trans>
-                      )}
-                    </Badge>
                   ) : null}
                 </span>
                 {waitsOnUser(group) ? null : group.unread ? (
@@ -477,42 +600,42 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               </Button>
             </div>
           ))}
-          {currentCrm?.roles
-            .filter(
-              (role) =>
-                !groups.some(
-                  (group) =>
-                    group.crmRoleReference?.sourceId === role.selection.serverId &&
-                    group.crmRoleReference.organizationId === role.selection.organizationId &&
-                    group.crmRoleReference.crmRoleId === role.crmRoleId,
-                ) &&
-                `${role.roleLabel} ${role.clientLabel}`
-                  .toLocaleLowerCase()
-                  .includes(query.trim().toLocaleLowerCase()),
-            )
-            .map((role) => (
-              <div key={JSON.stringify(role.selection)} className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
-                  disabled={currentCrm.loading}
-                  aria-current={
-                    crmSelection?.serverId === role.selection.serverId &&
-                    crmSelection.organizationId === role.selection.organizationId &&
-                    crmSelection.crmRoleId === role.crmRoleId
-                      ? "page"
-                      : undefined
-                  }
-                  onClick={() => onOpenCrmRole?.(role.selection)}
-                >
-                  <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate" dir="auto">
-                    {role.roleLabel} · {role.clientLabel}
-                  </span>
-                </Button>
-              </div>
-            ))}
+          {shownCrmRoles.map((role) => (
+            <div key={JSON.stringify(role.selection)} className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                className="hire-role-button h-auto min-h-9 min-w-0 flex-1 justify-start gap-3 rounded-lg px-2.5 py-1.5 text-start text-sm font-normal"
+                disabled={currentCrm?.loading}
+                aria-current={
+                  crmSelection?.serverId === role.selection.serverId &&
+                  crmSelection.organizationId === role.selection.organizationId &&
+                  crmSelection.crmRoleId === role.crmRoleId
+                    ? "page"
+                    : undefined
+                }
+                onClick={() => onOpenCrmRole?.(role.selection)}
+              >
+                <span className="min-w-0 flex-1 truncate" dir="auto">
+                  {role.roleLabel} · {role.clientLabel}
+                </span>
+              </Button>
+            </div>
+          ))}
         </nav>
+        {query && !visibleGroups.length && !shownCrmRoles.length && !loading ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            <Trans>No roles found</Trans>
+          </p>
+        ) : null}
+        {groups.length + unlinkedCrmRoles.length > 5 ? (
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-sm text-muted-foreground"
+            onClick={() => onView("home")}
+          >
+            <Trans>View all roles</Trans>
+          </Button>
+        ) : null}
         {currentSequences.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">
             <Button
@@ -589,24 +712,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               : null}
           </div>
         ) : null}
-      </div>
-      <div className="hire-sidebar-bottom">
-        <Button
-          variant="ghost"
-          aria-current={view === "routines" ? "page" : undefined}
-          onClick={() => onView("routines")}
-        >
-          <Clock size={17} aria-hidden="true" />
-          <Trans>Routines</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "tasks" ? "page" : undefined}
-          onClick={() => onView("tasks")}
-        >
-          <ListChecks size={17} aria-hidden="true" />
-          <Trans>Tasks</Trans>
-        </Button>
       </div>
     </div>
   );

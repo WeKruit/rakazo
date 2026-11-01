@@ -20,6 +20,7 @@ import { guardRecruitingTurnEnd } from "../../adapters/src/turn-end-guard.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { createDb, Prisma as PrismaSql } from "./client.js";
 import * as recruiting from "./index.js";
+import { chatReplyToAsk } from "./events.js";
 import { IsolationError } from "./scope.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -367,7 +368,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const f = await assessmentFixture("Group notes fixture");
     await prisma.thread.update({
       where: { id: f.thread.id },
-      data: { activeRecruitingRoleId: f.role.id },
+      data: { activeRecruitingRoleId: f.role.role.id },
     });
     const other = await prisma.chatGroup.create({
       data: { spaceId, userId, name: "Other room", members: { create: { botId } } },
@@ -2100,7 +2101,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       expect(human.blocks).toEqual([
         { kind: "text", text: kind === "choice" ? "Personal code" : rawAnswer },
       ]);
-      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : rawAnswer}`;
+      const resumedPrompt = `${originalTask.prompt}\n\n${question.block.text}\nAnswer: ${kind === "choice" ? "Selected choice choice-2: Personal code" : kind === "composer" ? chatReplyToAsk(rawAnswer) : rawAnswer}`;
       expect((await prisma.task.findUniqueOrThrow({ where: { id: f.run.taskId } })).prompt).toBe(
         resumedPrompt,
       );
@@ -6711,6 +6712,81 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ["linkedin:/in/graded-c", 60],
       ["linkedin:/in/graded-b", 40],
     ]);
+  });
+
+  it("keeps ranking provider scores in the visible result domain and recognizes Reviewer batch provenance", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const row = (key: string, score: number, tier: Prisma.InputJsonValue) => ({
+      ...canonicalCandidateRow(`Ranking ${key}`, `https://www.linkedin.com/in/ranking-${key}`),
+      match_score: score,
+      match_tier: tier,
+    });
+    await recordCandidatePage(f, prepared, "ranking-old", [row("a", 90.5, { value: "Strong" })], {
+      observedAt: new Date("2026-10-17T00:00:00Z"),
+      cursor: "ranking-old",
+    });
+    const latest = await recordCandidatePage(
+      f,
+      prepared,
+      "ranking-latest",
+      [row("b", 60, "Partial")],
+      {
+        observedAt: new Date("2026-10-18T00:00:00Z"),
+        cursor: "ranking-latest",
+      },
+    );
+    const list = () =>
+      recruiting.listRecruitingCandidates(prisma, actor, {
+        roleId: f.role.role.id,
+        sort: "ranking",
+      });
+    const provider = await list();
+    expect(
+      provider.items.map((item) => [
+        item.candidateKey,
+        item.match?.score,
+        item.ranking?.score,
+        item.ranking?.group,
+      ]),
+    ).toEqual([
+      ["linkedin:/in/ranking-b", 60, 60, "unreviewed"],
+      ["linkedin:/in/ranking-a", null, null, "unscored"],
+    ]);
+    expect(provider.items[0]?.ranking?.sourceEffectId).toBe(latest.input.effectId);
+    expect(provider.items[1]?.ranking?.sourceEffectId).toBeNull();
+    // These are legitimate provider-backed Reviewer results from a server-created grading run.
+    await prisma.run.update({
+      where: { id: f.run.id },
+      data: {
+        clientNonce: `${recruiting.RECRUITING_GRADE_NONCE_PREFIX}${f.thread.id}:ranking-batch`,
+      },
+    });
+    const reviewer = await list();
+    expect(
+      reviewer.items.map((item) => [
+        item.ranking?.source,
+        item.ranking?.state,
+        item.ranking?.grade,
+        item.ranking?.group,
+      ]),
+    ).toEqual([
+      ["reviewer", "current", "Strong", "strong_match"],
+      ["reviewer", "current", "Partial", "partial"],
+    ]);
+    expect(reviewer.items.map((item) => item.ranking?.score)).toEqual([91, 60]);
+    const first = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "ranking",
+      limit: 1,
+    });
+    expect(first.nextCursor).not.toBeNull();
+    const second = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      sort: "ranking",
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items[0]?.candidateKey).toBe("linkedin:/in/ranking-b");
   });
 
   it("shows a result answered on 0–10 on the 0–100 scale", async () => {

@@ -61,6 +61,7 @@ import {
   pastedJobTitle,
   REPORT_IN_FINAL_REPLY,
   REVISIONED_RESEARCH_OPERATIONS,
+  requestTitle,
   resumeBriefForRun,
   STEERING_ACK,
   savedCandidateKeyForm,
@@ -5793,6 +5794,19 @@ describe("native recruiting assessment effect delivery", () => {
     expect(short.endsWith("候选人需要三项都具备吗？")).toBe(true);
     expect(shortQuestion("short?")).toBe("short?");
     expect(shortQuestion("x".repeat(300))).toHaveLength(240);
+  });
+
+  it("titles a short role request from its first line only when it reads as a name", () => {
+    expect(requestTitle("测试固定 · 验证岗位 8\n职位：前端工程师（React），北京")).toBe(
+      "测试固定 · 验证岗位 8",
+    );
+    expect(requestTitle("**Founding Engineer**\nSF, 5+ years")).toBe("Founding Engineer");
+    expect(requestTitle("测试固定 · 仓库主管 11-01T17:20\n地点：Dallas，现场办公。")).toBe(
+      "测试固定 · 仓库主管 11-01T17:20",
+    );
+    expect(requestTitle("new grads from USC, CS")).toBeNull();
+    expect(requestTitle("Hi there.\nI need a designer")).toBeNull();
+    expect(requestTitle("帮我找人：\n前端")).toBeNull();
   });
 
   it("titles a pasted JD from its first line and ignores short messages", () => {

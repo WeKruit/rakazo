@@ -3,10 +3,12 @@ import type { Actor, MessageBlock } from "@rakazo/contracts";
 import { callClientNonce } from "@rakazo/core";
 import type * as MessageQuoteModule from "@rakazo/core/message-quote";
 import type { PrismaClient } from "@rakazo/db";
+import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ThreadTarget } from "./thread-target.js";
 import {
   cancelSupersededQueuedRuns,
+  latestReplySuggestion,
   reactToThreadMessage,
   sendThreadMessage,
   stoppedNotice,
@@ -1835,7 +1837,7 @@ describe("sendThreadMessage", () => {
       expect(tx.task.updateMany).toHaveBeenCalledWith({
         where: { runs: { some: { id: "run-waiting" } } },
         data: {
-          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
         },
       });
       expect(tx.message.create).toHaveBeenCalledWith({
@@ -1844,7 +1846,7 @@ describe("sendThreadMessage", () => {
       expect(tx.task.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {
-            prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+            prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
           },
         }),
       );
@@ -2142,7 +2144,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: `Which city should I use?\nAnswer: ${rawAnswer}`,
+          prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk(rawAnswer)}`,
         },
       }),
     );
@@ -3093,7 +3095,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-routine" } } },
       data: {
-        prompt: "Which city should I use?\nAnswer: Paris",
+        prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk("Paris")}`,
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
@@ -3215,7 +3217,7 @@ describe("sendThreadMessage", () => {
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-webhook" } } },
       data: {
-        prompt: "Which city should I use?\nAnswer: Paris",
+        prompt: `Which city should I use?\nAnswer: ${chatReplyToAsk("Paris")}`,
       },
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
@@ -5164,5 +5166,36 @@ describe("send path round trips", () => {
     expect(deps.jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ payload: expect.objectContaining({ runId: "run-1" }) }),
     );
+  });
+});
+
+describe("latestReplySuggestion", () => {
+  function prismaWith(payload: unknown) {
+    const findFirst = vi.fn(async () => (payload === undefined ? null : { payload }));
+    return { prisma: { event: { findFirst } } as unknown as PrismaClient, findFirst };
+  }
+
+  it("returns the saved suggestion for the newest reply", async () => {
+    const { prisma, findFirst } = prismaWith({ text: "下一步做什么？" });
+    const result = await latestReplySuggestion(prisma, [
+      { role: "user", runId: null },
+      { role: "bot", runId: "run-2" },
+      { role: "user", runId: null, internal: true },
+    ]);
+    expect(result).toEqual({ runId: "run-2", text: "下一步做什么？" });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { runId: "run-2", type: "thread.suggestion" } }),
+    );
+  });
+
+  it("returns nothing once the person has written again", async () => {
+    const { prisma, findFirst } = prismaWith({ text: "x" });
+    expect(
+      await latestReplySuggestion(prisma, [
+        { role: "bot", runId: "run-1" },
+        { role: "user", runId: null },
+      ]),
+    ).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });

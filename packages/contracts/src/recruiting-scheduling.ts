@@ -43,6 +43,18 @@ export const RecruitingSchedulingPlanInputSchema = z.strictObject({
   candidate: Participant.extend({ candidateKey: Id }),
   interviewer: Participant,
   calendar: RecruitingSchedulingSlotSchema,
+  requests: z
+    .strictObject({
+      guests: z
+        .array(z.email())
+        .max(20)
+        .refine(
+          (values) => new Set(values.map((value) => value.toLowerCase())).size === values.length,
+          "Guest emails must be unique",
+        ),
+      notes: z.string().max(1000),
+    })
+    .optional(),
 });
 export type RecruitingSchedulingPlanInput = z.infer<typeof RecruitingSchedulingPlanInputSchema>;
 export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchema.extend({

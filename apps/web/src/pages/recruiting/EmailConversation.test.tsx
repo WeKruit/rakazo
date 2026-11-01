@@ -291,3 +291,79 @@ it("does not infer a shared conversation when mailbox provenance is unknown", as
   const { view } = await mount(<EmailConversation items={[first, second]} onSelect={vi.fn()} />);
   expect(view.querySelector("select")?.options).toHaveLength(2);
 });
+
+it("reads only the incoming timestamp when a thread is visible and preserves explicit unread until another open", async () => {
+  const callbacks: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        callbacks.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const mark = vi.fn().mockResolvedValue(undefined);
+  const received = {
+    ...current,
+    sourceId: "source",
+    threadId: "thread",
+    organizationId: "org",
+    eaccount: "mailbox",
+    campaignId: null,
+  };
+  const sent = {
+    ...previous,
+    sourceId: "source",
+    threadId: "thread",
+    organizationId: "org",
+    eaccount: "mailbox",
+    campaignId: null,
+    date: "2026-10-25T00:00:00Z",
+  };
+  const controls = { ready: true, pending: false, failed: false, unread: () => false, mark };
+  const { view, render } = await mount(
+    <EmailConversation
+      items={[received, sent]}
+      selectedId={received.id}
+      onSelect={vi.fn()}
+      readState={controls}
+    />,
+  );
+  expect(mark).not.toHaveBeenCalled();
+  await act(async () => callbacks[0]!([{ isIntersecting: true }]));
+  expect(mark).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sourceId: "source",
+      threadId: "thread",
+      organizationId: "org",
+      mailbox: "mailbox",
+    }),
+    received.date,
+    false,
+  );
+  await act(async () => button(view, "Mark unread").click());
+  expect(mark).toHaveBeenLastCalledWith(expect.anything(), received.date, true);
+  await render(
+    <EmailConversation
+      items={[received, sent]}
+      selectedId={received.id}
+      onSelect={vi.fn()}
+      readState={{ ...controls, unread: () => true }}
+    />,
+  );
+  await act(async () => callbacks[0]!([{ isIntersecting: true }]));
+  expect(mark).toHaveBeenCalledTimes(2);
+  const incoming = { ...received, id: "new-incoming", date: "2026-10-26T00:00:00Z" };
+  await render(
+    <EmailConversation
+      items={[incoming, received, sent]}
+      selectedId={incoming.id}
+      onSelect={vi.fn()}
+      readState={controls}
+    />,
+  );
+  await act(async () => callbacks.at(-1)!([{ isIntersecting: true }]));
+  expect(mark).toHaveBeenLastCalledWith(expect.anything(), incoming.date, false);
+});

@@ -1,8 +1,12 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidateNote } from "@rakazo/contracts";
+import { ATTACHMENT_MAX_BYTES, ATTACHMENT_MAX_COUNT } from "@rakazo/contracts";
+import { inferAttachmentMimeType } from "@rakazo/core";
 import { Button, Textarea } from "@rakazo/ui-web";
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { decodeArtifactBase64, downloadArtifactBytes } from "../../lib/artifact-open";
+import { readFileAsBase64 } from "../../lib/pending-attachments";
 import { rpc } from "../../lib/rpc";
 import { relativeTime } from "./activity";
 import { RetryNotice } from "./RetryNotice";
@@ -26,22 +30,48 @@ function NoteForm({
   submitLabel,
   onSave,
   onCancel,
+  conversation,
 }: {
   initial?: string;
   submitLabel: string;
-  onSave: (body: string) => Promise<boolean>;
+  onSave: (body: string, artifactIds?: string[]) => Promise<boolean>;
+  conversation?: { groupId: string } | { botId: string };
   onCancel?: () => void;
 }) {
   const { t } = useLingui();
   const [body, setBody] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [files, setFiles] = useState<{ file: File; nonce: string }[]>([]);
+  const [uploadFailed, setUploadFailed] = useState(false);
   const ready = Boolean(body.trim());
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!ready || saving) return;
     setSaving(true);
     try {
-      if ((await onSave(body.trim())) && !onCancel) setBody("");
+      setUploadFailed(false);
+      const artifactIds = conversation
+        ? await Promise.all(
+            files.map(async ({ file, nonce }) => {
+              const mimeType = inferAttachmentMimeType(file.name, file.type);
+              if (!mimeType) throw new Error("Unsupported attachment");
+              const artifact = await rpc.artifacts.create({
+                ...conversation,
+                name: file.name,
+                mimeType,
+                contentBase64: await readFileAsBase64(file),
+                clientNonce: nonce,
+              });
+              return artifact.id;
+            }),
+          )
+        : [];
+      if ((await onSave(body.trim(), artifactIds.length ? artifactIds : undefined)) && !onCancel) {
+        setBody("");
+        setFiles([]);
+      }
+    } catch {
+      setUploadFailed(true);
     } finally {
       setSaving(false);
     }
@@ -57,6 +87,72 @@ function NoteForm({
         autoFocus={Boolean(onCancel)}
         onChange={(event) => setBody(event.target.value)}
       />
+      {conversation ? (
+        <div className="space-y-2">
+          <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-xs focus-within:outline-2 focus-within:outline-ring">
+            <Trans>Add attachment</Trans>
+            <input
+              type="file"
+              multiple
+              disabled={saving}
+              className="sr-only"
+              aria-label={t`Add attachment`}
+              onChange={(event) => {
+                const picked = Array.from(event.target.files ?? []);
+                if (
+                  files.length + picked.length > ATTACHMENT_MAX_COUNT ||
+                  picked.some(
+                    (file) =>
+                      file.size > ATTACHMENT_MAX_BYTES ||
+                      !inferAttachmentMimeType(file.name, file.type),
+                  )
+                ) {
+                  setUploadFailed(true);
+                  event.target.value = "";
+                  return;
+                }
+                setUploadFailed(false);
+                setFiles((current) => [
+                  ...current,
+                  ...picked.map((file) => ({ file, nonce: crypto.randomUUID() })),
+                ]);
+                event.target.value = "";
+              }}
+            />
+          </label>
+          {files.length ? (
+            <ul className="space-y-1">
+              {files.map(({ file, nonce }) => (
+                <li key={nonce} className="flex min-w-0 items-center justify-between gap-2 text-xs">
+                  <span className="truncate" title={file.name}>
+                    {file.name}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={saving}
+                    aria-label={t`Remove ${file.name}`}
+                    onClick={() =>
+                      setFiles((current) => current.filter((entry) => entry.nonce !== nonce))
+                    }
+                  >
+                    <Trans>Remove</Trans>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      {uploadFailed ? (
+        <p role="alert" className="text-xs text-destructive">
+          <Trans>
+            Could not attach files. Use a supported file up to 10 MB, with at most 4 attachments,
+            and retry.
+          </Trans>
+        </p>
+      ) : null}
       <div className="flex justify-end gap-2">
         {onCancel ? (
           <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
@@ -79,10 +175,12 @@ export function NotesTab({
   roleId,
   candidateKeys,
   createKey,
+  conversation,
 }: {
   roleId: string;
   candidateKeys: string[];
   createKey: string;
+  conversation?: { groupId: string } | { botId: string };
 }) {
   const { t, i18n } = useLingui();
   const locale = i18n?.locale || "en";
@@ -115,7 +213,17 @@ export function NotesTab({
     <section aria-label={t`Notes`} className="space-y-4 text-sm">
       <NoteForm
         submitLabel={t`Add note`}
-        onSave={(body) => run(() => api.create({ candidateKey: createKey, roleId, body }))}
+        conversation={conversation}
+        onSave={(body, artifactIds) =>
+          run(() =>
+            api.create({
+              candidateKey: createKey,
+              roleId,
+              body,
+              ...(artifactIds ? { artifactIds } : {}),
+            }),
+          )
+        }
       />
       {saveFailed ? (
         <TabNotice alert>
@@ -156,6 +264,37 @@ export function NotesTab({
                   </time>
                 </p>
                 <p className="mt-1 whitespace-pre-wrap break-words">{note.body}</p>
+                {note.attachments.length ? (
+                  <ul className="mt-2 space-y-1">
+                    {note.attachments.map((artifact) => (
+                      <li key={artifact.id}>
+                        <Button
+                          size="sm"
+                          variant="link"
+                          className="max-w-full justify-start truncate"
+                          onClick={() =>
+                            void (async () => {
+                              try {
+                                const saved = await rpc.artifacts.getById({
+                                  artifactId: artifact.id,
+                                });
+                                downloadArtifactBytes(
+                                  saved.name,
+                                  saved.mimeType,
+                                  decodeArtifactBase64(saved.contentBase64),
+                                );
+                              } catch {
+                                setSaveFailed(true);
+                              }
+                            })()
+                          }
+                        >
+                          {artifact.name}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className="mt-1 flex gap-1">
                   <Button size="sm" variant="ghost" onClick={() => setEditing(note.id)}>
                     <Trans>Edit</Trans>

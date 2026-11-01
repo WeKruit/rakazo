@@ -8,6 +8,7 @@ import type {
   ListRecruitingCandidatesOutput,
   ReadRecruitingSourceInput,
   RecruitingAssessmentSourceRef,
+  RecruitingCandidateRanking,
   RecruitingCandidateSource,
   RecruitingCorrespondence,
   RecruitingCrmDataInput,
@@ -22,6 +23,7 @@ import type {
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
 import {
+  inboxMessageKey,
   RecruitingCorrespondenceSchema,
   RecruitingCrmCampaignLeadsReadSchema,
   RecruitingCrmCampaignsReadSchema,
@@ -63,6 +65,7 @@ import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "
 import * as recruiting from "@rakazo/db";
 import {
   IsolationError,
+  projectRecruitingInboxMessages,
   RecruitingConflictError,
   RecruitingSourceValidationError,
 } from "@rakazo/db";
@@ -553,8 +556,8 @@ export async function getRecruitingRoleCampaign(
       threadId: target.threadId,
     });
     if (!workspace) return none;
-    const selectedNative =
-      workspace.crmTarget?.bindingEffectId === null && selection.serverId && selection.campaignId
+    let selectedNative =
+      selection.serverId && selection.campaignId
         ? await deps.prisma.externalEffect.findUnique({
             where: {
               idempotencyKey: `instantly-role-campaign:${selection.serverId}:${workspace.role.id}`,
@@ -562,6 +565,18 @@ export async function getRecruitingRoleCampaign(
             select: { spaceId: true, status: true, result: true },
           })
         : null;
+    if (
+      selection.serverId &&
+      selection.campaignId &&
+      correspondenceRecord(selectedNative?.result)?.campaignId !== selection.campaignId
+    ) {
+      selectedNative = await deps.prisma.externalEffect.findUnique({
+        where: {
+          idempotencyKey: `instantly-role-campaign:${selection.serverId}:${workspace.role.id}:campaign:${selection.campaignId}`,
+        },
+        select: { spaceId: true, status: true, result: true },
+      });
+    }
     const nativeSelected =
       selectedNative?.spaceId === actor.spaceId &&
       selectedNative.status === "completed" &&
@@ -846,7 +861,12 @@ export async function getRecruitingRoleCampaign(
       campaign: {
         id: campaignId,
         name: typeof campaign.name === "string" ? campaign.name : campaignName,
-        eaccount,
+        eaccount:
+          Array.isArray(campaign.email_list) &&
+          campaign.email_list.length === 1 &&
+          typeof campaign.email_list[0] === "string"
+            ? campaign.email_list[0]
+            : eaccount,
         status: integer(campaign.status),
         stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
         observedDetails: campaignObservedDetails(campaign),
@@ -860,6 +880,14 @@ export async function getRecruitingRoleCampaign(
             email: lead.email,
             status: integer(lead.status),
             interestStatus: integer(lead.lt_interest_status),
+            name:
+              [lead.first_name, lead.last_name]
+                .filter((value) => typeof value === "string" && value.trim())
+                .join(" ") || null,
+            company: typeof lead.company_name === "string" ? lead.company_name : null,
+            openCount: count(lead.email_open_count),
+            clickCount: count(lead.email_click_count),
+            replyCount: count(lead.email_reply_count),
           },
         ];
       }),
@@ -1213,11 +1241,19 @@ export async function getRecruitingCorrespondence(
   view: "inbox" | "interview" | "contacts",
   productIdentity?: { endpoint: string; connected: boolean },
   oauth?: Pick<McpOAuthBroker, "statusFor">,
-  page: { limit?: number; cursor?: string } = {},
+  page: {
+    limit?: number;
+    cursor?: string;
+    savedReceipts?: {
+      before?: { at: string; id: string };
+      onNext: (cursor: { at: string; id: string } | null) => void;
+    };
+  } = {},
   crmReads?: Omit<RecruitingCrmReadDeps, "prisma">,
   timer?: PhaseTimer,
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
+    const savedReplay = Boolean(page.savedReceipts);
     if (
       page.cursor !== undefined &&
       (!/^\d+$/.test(page.cursor) ||
@@ -1367,7 +1403,7 @@ export async function getRecruitingCorrespondence(
         );
       timer?.mark("mailRefreshMs");
       let assertNativeCurrent: (() => Promise<void>) | null = null;
-      if (workspace && view === "inbox") {
+      if (workspace && view === "inbox" && !page.savedReceipts) {
         const native = await nativeRecruitingCorrespondence(prisma, actor, target.threadId, {
           roleId: workspace.role.id,
           crmEndpoint: productIdentity?.endpoint,
@@ -1506,12 +1542,13 @@ export async function getRecruitingCorrespondence(
         output.partial ||= outcomes.partial;
       }
       timer?.mark("mailOutcomesMs");
-      const imported = workspace
-        ? await recruiting.readRecruitingImportedCorrespondence(prisma, actor, {
-            threadId: target.threadId,
-            roleId: workspace.role.id,
-          })
-        : null;
+      const imported =
+        workspace && !page.savedReceipts
+          ? await recruiting.readRecruitingImportedCorrespondence(prisma, actor, {
+              threadId: target.threadId,
+              roleId: workspace.role.id,
+            })
+          : null;
       if (imported) {
         output.history = imported.history;
         const contacts = new Map(
@@ -1557,15 +1594,10 @@ export async function getRecruitingCorrespondence(
           output.status = "ready";
       }
       // One provider message can arrive through live campaign mail and its CRM projection.
-      // Only exact campaign or mailbox provenance identifies the same message across sources.
+      // Exact source/organization and provider identity are required; no guessed source aliases.
       const uniqueMail = new Map<string, RecruitingCorrespondence["emails"][number]>();
       for (const email of output.emails) {
-        const identity = email.campaignId
-          ? ["campaign", email.campaignId, email.providerMessageId]
-          : email.eaccount
-            ? ["mailbox", email.eaccount.toLowerCase(), email.providerMessageId]
-            : ["source", email.id];
-        const key = JSON.stringify(identity);
+        const key = inboxMessageKey(email);
         const saved = uniqueMail.get(key);
         if (!saved) uniqueMail.set(key, email);
         else {
@@ -1606,6 +1638,10 @@ export async function getRecruitingCorrespondence(
           : view === "interview"
             ? output.events
             : output.emails;
+      if (page.savedReceipts && view === "inbox") {
+        output.nextCursor = null;
+        return output;
+      }
       output.nextCursor = rows.length > end ? String(end) : null;
       output.partial ||= output.nextCursor !== null;
       if (view === "contacts") output.contacts = output.contacts.slice(start, end);
@@ -1660,6 +1696,7 @@ export async function getRecruitingCorrespondence(
       },
       status: { in: ["completed", "failed"] },
     };
+    const savedReadLimit = page.savedReceipts ? 20 : 200;
     const retained = await prisma.externalEffect.findMany({
       where: {
         ...scope,
@@ -1679,9 +1716,24 @@ export async function getRecruitingCorrespondence(
             },
           ]),
         ),
+        ...(page.savedReceipts?.before
+          ? {
+              AND: [
+                {
+                  OR: [
+                    { updatedAt: { lt: new Date(page.savedReceipts.before.at) } },
+                    {
+                      updatedAt: new Date(page.savedReceipts.before.at),
+                      id: { lt: page.savedReceipts.before.id },
+                    },
+                  ],
+                },
+              ],
+            }
+          : {}),
       },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: 201,
+      take: savedReadLimit + 1,
       select: {
         id: true,
         request: true,
@@ -1690,8 +1742,14 @@ export async function getRecruitingCorrespondence(
         run: { select: { id: true, botId: true, sourceMessageId: true } },
       },
     });
-    // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
-    output.partial = retained.length > 200;
+    const lastRetained = retained[savedReadLimit - 1];
+    page.savedReceipts?.onNext(
+      retained.length > savedReadLimit && lastRetained
+        ? { at: lastRetained.updatedAt.toISOString(), id: lastRetained.id }
+        : null,
+    );
+    // ponytail: display reads retain 200 receipts; background replay uses 20-receipt keyset batches. The saved payload size is the batch's memory ceiling.
+    output.partial = retained.length > savedReadLimit;
     const seen = new Set<string>();
     const crmMemberships = new Map<
       string,
@@ -1714,7 +1772,7 @@ export async function getRecruitingCorrespondence(
       if (connection && (!connection.checkIssue || checkedAt > connection.checkIssue.checkedAt))
         connection.checkIssue = { status, checkedAt };
     };
-    const reads = retained.slice(0, 200).flatMap((effect) => {
+    const reads = retained.slice(0, savedReadLimit).flatMap((effect) => {
       const call = correspondenceCall(effect.request);
       const source = sourceRows.find(
         (source) => source.id === call?.route.resourceId && source.enabled,
@@ -2148,6 +2206,7 @@ export async function getRecruitingCorrespondence(
               ? { eaccount: row.eaccount }
               : {}),
             savedRead,
+            ...(savedReplay ? { observedAt: effect.updatedAt.toISOString() } : {}),
             sender: row.from_address,
             recipients: row.to_address === null ? [] : [row.to_address],
             subject: row.subject ?? "",
@@ -2542,6 +2601,7 @@ export async function getRecruitingCorrespondence(
             sourceId: source.id,
             providerMessageId: row.id,
             savedRead,
+            ...(savedReplay ? { observedAt: effect.updatedAt.toISOString() } : {}),
             ...(typeof threadId === "string" ? { providerThreadId: threadId } : {}),
             sender: row.sender ?? null,
             recipients: row.toRecipients ?? [],
@@ -4122,7 +4182,8 @@ type RoleCandidatesInput = {
   threadId: string;
   limit?: number | undefined;
   cursor?: string | undefined;
-  sort?: "score" | "rank" | "name" | "recent" | undefined;
+  sort?: "score" | "rank" | "name" | "recent" | "ranking" | undefined;
+  rankingGroup?: RecruitingCandidateRanking["group"] | undefined;
   query?: string | undefined;
   shortlistedOnly?: boolean | undefined;
   shortlistedSince?: string | undefined;
@@ -4138,11 +4199,18 @@ type RoleCandidatesCrmRow = Extract<
 export type RoleCandidatesSources = {
   autumn(cursor: string | undefined, limit: number): Promise<RoleCandidatesAutumnPage>;
   autumnLinkedinUrls(): Promise<string[]>;
-  crm(target: RecruitingCrmTarget): Promise<
+  /**
+   * One CRM page from `offset`. `total` is the CRM's own count; a read without it returned every
+   * remaining row.
+   */
+  crm(
+    target: RecruitingCrmTarget,
+    offset: number,
+    query: string | undefined,
+  ): Promise<
     | {
         status: "ok";
         rows: RoleCandidatesCrmRow[];
-        /** The CRM's own count when only its first page was read. */
         total?: number;
       }
     | { status: "unavailable" }
@@ -4158,27 +4226,33 @@ export function linkedinIdentity(url: string | null | undefined): string | null 
 }
 
 const roleCandidatesCursor = {
-  read(raw: string | undefined, scope: string): { a?: string; o?: number } {
+  /** `a`: Autumn cursor. `o`: CRM offset of the page being shown, `k`: its CRM-only rows shown. */
+  read(raw: string | undefined, scope: string): { a?: string; o?: number; k?: number } {
     if (raw === undefined) return {};
     try {
       const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+      const count = (field: unknown) =>
+        field === undefined || (Number.isSafeInteger(field) && (field as number) >= 0);
       if (
         value?.s === scope &&
         (value.a === undefined || (typeof value.a === "string" && value.a)) &&
-        (value.o === undefined || (Number.isSafeInteger(value.o) && value.o >= 0)) &&
-        (value.a === undefined) !== (value.o === undefined)
+        count(value.o) &&
+        count(value.k) &&
+        (value.a === undefined) !== (value.o === undefined) &&
+        (value.k === undefined || value.o !== undefined)
       )
-        return value.a === undefined ? { o: value.o } : { a: value.a };
+        return value.a === undefined ? { o: value.o, k: value.k ?? 0 } : { a: value.a };
     } catch {}
     throw new RecruitingConflictError();
   },
-  write: (scope: string, position: { a: string } | { o: number }) =>
+  write: (scope: string, position: { a: string } | { o: number; k: number }) =>
     Buffer.from(JSON.stringify({ s: scope, ...position })).toString("base64url"),
 };
 
 /**
  * Merges one page of Autumn results with the role's CRM contacts. Pages Autumn first (its own
- * cursor/sort), then the CRM-only contacts by offset; the cursor carries whichever position is live.
+ * cursor/sort), then the CRM-only contacts one CRM page at a time; the cursor carries whichever
+ * position is live. A request never reads more than one CRM page.
  */
 export async function mergeRoleCandidates(
   input: RoleCandidatesInput,
@@ -4187,17 +4261,20 @@ export async function mergeRoleCandidates(
   const limit = input.limit ?? 25;
   const scope = JSON.stringify([
     input.threadId,
-    input.sort ?? "score",
+    input.sort ?? "ranking",
     input.query ?? "",
     input.shortlistedOnly === true,
+    input.rankingGroup ?? null,
     ...(input.shortlistedSince ? [input.shortlistedSince] : []),
   ]);
   const position = roleCandidatesCursor.read(input.cursor, scope);
   const autumnPhase = position.o === undefined;
+  const crmOffset = position.o ?? 0;
+  const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
   // ponytail: the CRM phase still reads one Autumn row for totals, counts and the CRM binding.
   const autumn = await sources.autumn(position.a, autumnPhase ? limit : 1);
   const crm = autumn.crmTarget
-    ? await sources.crm(autumn.crmTarget.target)
+    ? await sources.crm(autumn.crmTarget.target, crmOffset, needle || undefined)
     : ({ status: "not_bound" } as const);
   // One slot per person: LinkedIn identity first, then lowercased email. Autumn rows have no email.
   type Slot = { autumn: boolean; crm: RoleCandidatesCrmRow | null };
@@ -4223,16 +4300,16 @@ export async function mergeRoleCandidates(
       for (const key of keys) if (!owners.has(key)) owners.set(key, slot);
     }
   }
-  const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
-  const visibleCrmOnly = input.shortlistedOnly
-    ? []
-    : crmOnly.filter(
-        (row) =>
-          !needle ||
-          [row.name, row.email, row.title].some((text) =>
-            text?.replace(/\s+/g, " ").toLowerCase().includes(needle),
-          ),
-      );
+  const visibleCrmOnly =
+    input.shortlistedOnly || (input.rankingGroup !== undefined && input.rankingGroup !== "unscored")
+      ? []
+      : crmOnly.filter(
+          (row) =>
+            !needle ||
+            [row.name, row.email, row.title].some((text) =>
+              text?.replace(/\s+/g, " ").toLowerCase().includes(needle),
+            ),
+        );
   if (input.sort === "name")
     visibleCrmOnly.sort(
       (left, right) =>
@@ -4274,6 +4351,8 @@ export async function mergeRoleCandidates(
         linkedinUrl: candidate.linkedinUrl ?? contact?.linkedinUrl ?? null,
         autumn: {
           candidateKey: candidate.candidateKey,
+          ranking: candidate.ranking,
+          savedProfile: candidate.savedProfile ?? null,
           score: candidate.match?.score ?? null,
           rank: candidate.match?.rank ?? null,
           tier: candidate.match?.tier ?? null,
@@ -4298,8 +4377,8 @@ export async function mergeRoleCandidates(
   if (autumnPhase && autumn.nextCursor)
     nextCursor = roleCandidatesCursor.write(scope, { a: autumn.nextCursor });
   else {
-    const offset = position.o ?? 0;
-    const page = visibleCrmOnly.slice(offset, offset + limit - items.length);
+    const shown = position.k ?? 0;
+    const page = visibleCrmOnly.slice(shown, shown + limit - items.length);
     for (const row of page)
       items.push({
         key: `crm:${row.candidateId}`,
@@ -4313,23 +4392,28 @@ export async function mergeRoleCandidates(
         shortlisted: false,
         shortlistedAt: null,
       });
-    if (
-      offset + page.length < visibleCrmOnly.length ||
-      (crm.status === "ok" && crm.total !== undefined && crm.rows.length < crm.total)
+    if (shown + page.length < visibleCrmOnly.length)
+      nextCursor = roleCandidatesCursor.write(scope, { o: crmOffset, k: shown + page.length });
+    else if (
+      crm.status === "ok" &&
+      crm.total !== undefined &&
+      crm.rows.length &&
+      crmOffset + crm.rows.length < crm.total
     )
-      nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
+      nextCursor = roleCandidatesCursor.write(scope, { o: crmOffset + crm.rows.length, k: 0 });
   }
   return {
     items,
     nextCursor,
-    // A first-page CRM read counts its unread people as CRM-only, so the total can include a few
-    // people also listed by Autumn.
+    // A CRM with more than one page is counted by its own total, the same on every page, so it can
+    // include a few people also listed by Autumn. A CRM read in one page is deduped exactly.
     total:
       autumn.total +
-      visibleCrmOnly.length +
-      (crm.status === "ok" && crm.total !== undefined && !needle
-        ? Math.max(0, crm.total - crm.rows.length)
-        : 0),
+      (crm.status === "ok" &&
+      crm.total !== undefined &&
+      (crmOffset > 0 || crm.rows.length < crm.total)
+        ? crm.total
+        : visibleCrmOnly.length),
     counts: {
       ...outreach,
       shortlisted: input.shortlistedSince ? autumn.total : autumn.counts.shortlisted,
@@ -4386,8 +4470,7 @@ export async function getRecruitingRoleCandidates(
   target: ThreadTarget,
   input: RoleCandidatesInput,
   /**
-   * `summary` is for lists that show names only: it reads the CRM's first page (the total is the
-   * CRM's own count) and skips match reports. Later pages use the full read.
+   * `summary` is for lists that show names only: it skips match reports.
    */
   options: { summary?: boolean; timer?: PhaseTimer } = {},
 ): Promise<RecruitingRoleCandidatesOutput> {
@@ -4411,7 +4494,7 @@ export async function getRecruitingRoleCandidates(
       crmStatus: "not_bound",
       crmCountsComplete: false,
     };
-  const sort = input.sort ?? "score";
+  const sort = input.sort ?? "ranking";
   return mergeRoleCandidates(input, {
     autumn: (cursor, limit) =>
       timed(
@@ -4425,6 +4508,7 @@ export async function getRecruitingRoleCandidates(
             sort,
             ...(cursor ? { cursor } : {}),
             ...(input.query ? { query: input.query } : {}),
+            ...(input.rankingGroup ? { rankingGroup: input.rankingGroup } : {}),
             ...(input.shortlistedOnly ? { shortlisted: true } : {}),
             ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
           },
@@ -4438,32 +4522,30 @@ export async function getRecruitingRoleCandidates(
           recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
         ),
       ),
-    crm: (binding) => timed("candidatesCrmMs", readCrm(binding)),
+    crm: (binding, offset, query) => timed("candidatesCrmMs", readCrm(binding, offset, query)),
   });
   async function readCrm(
     binding: RecruitingCrmTarget,
+    offset: number,
+    query: string | undefined,
   ): Promise<Awaited<ReturnType<RoleCandidatesSources["crm"]>>> {
     const rows: RoleCandidatesCrmRow[] = [];
     let total: number | undefined;
     try {
-      // Read the role's people live from the CRM, so replies and status are current. Each page
-      // is a fully authorized read; pages after the first load a few at a time.
-      const page = await getRecruitingCrmData(
-        deps,
-        actor,
-        target,
-        {
-          operation: "candidates",
-          serverId: binding.mcpServerId,
-          serverRevision: binding.serverRevision,
-          organizationId: binding.organizationId,
-          crmRoleId: binding.crmRoleId,
-          limit: CRM_PAGE,
-        },
-        options.summary ? {} : { allPages: true },
-      );
+      // Read the role's people live from the CRM, so replies and status are current. One fully
+      // authorized page per request; the CRM's own count stands in for the rest.
+      const page = await getRecruitingCrmData(deps, actor, target, {
+        operation: "candidates",
+        serverId: binding.mcpServerId,
+        serverRevision: binding.serverRevision,
+        organizationId: binding.organizationId,
+        crmRoleId: binding.crmRoleId,
+        limit: CRM_PAGE,
+        ...(offset ? { offset } : {}),
+        ...(query ? { query } : {}),
+      });
       if (page.operation !== "candidates") throw new IsolationError();
-      if (options.summary && page.nextOffset !== null) total = page.total;
+      total = page.total;
       const seen = new Set<string>();
       for (const item of page.items) {
         if (seen.has(item.candidateId)) continue;
@@ -4557,3 +4639,125 @@ export const recordRecruitingProfileView = (
   actor: Actor,
   input: Parameters<typeof recruiting.recordRecruitingProfileView>[2],
 ) => authenticated(() => recruiting.recordRecruitingProfileView(prisma, actor, input));
+
+/** Replay retained native receipts in the existing background loop; never invoke a connector. */
+export async function indexSavedRecruitingInbox(
+  prisma: PrismaClient,
+  actor: Actor,
+  resolveTarget: (threadId: string) => Promise<ThreadTarget>,
+  authorize: () => Promise<void>,
+  signal?: AbortSignal,
+  crmEndpoint?: string,
+) {
+  const scope = { userId: actor.userId, spaceId: actor.spaceId };
+  const saved = await prisma.recruitingInboxIndexProgress.findUnique({
+    where: { userId_spaceId: scope },
+    select: { nativeCursor: true },
+  });
+  const state = saved?.nativeCursor as {
+    roleId: string;
+    done?: boolean;
+    before?: { at: string; id: string };
+  } | null;
+  const roles = await prisma.$queryRaw<
+    { id: string; sourceThreadId: string }[]
+  >`SELECT r.id,r."sourceThreadId" FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId" WHERE r."userId"=${actor.userId} AND r."spaceId"=${actor.spaceId} AND r."archivedAt" IS NULL AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id AND (${state?.roleId ?? null}::text IS NULL OR r.id>=${state?.roleId ?? null}) AND NOT EXISTS(SELECT 1 FROM chat_groups g WHERE g.id=t."groupId" AND g."archivedAt" IS NOT NULL) ORDER BY r.id`;
+
+  for (const role of roles) {
+    if (state?.roleId === role.id && state.done) continue;
+    // Normalize native captured send/read records once per role, rather than once per mail page.
+    const nativeTarget = await resolveTarget(role.sourceThreadId);
+    const native = await nativeRecruitingCorrespondence(prisma, actor, nativeTarget.threadId, {
+      roleId: role.id,
+      crmEndpoint,
+    });
+    const newest = new Map<
+      string,
+      NonNullable<(typeof native.items)[number]["email"]> & { observedAt: string }
+    >();
+    for (const item of native.items)
+      if (
+        item.email &&
+        (!newest.has(item.email.id) || item.checkedAt > newest.get(item.email.id)!.observedAt)
+      )
+        newest.set(item.email.id, { ...item.email, observedAt: item.checkedAt });
+    const observations = new Map<string, RecruitingCorrespondence["emails"]>();
+    for (const { observedAt, ...email } of newest.values())
+      observations.set(observedAt, [...(observations.get(observedAt) ?? []), email]);
+    for (const [observedAt, emails] of observations)
+      for (let offset = 0; offset < emails.length; offset += 200)
+        await projectRecruitingInboxMessages(
+          prisma,
+          actor,
+          {
+            roleId: role.id,
+            emails: emails.slice(offset, offset + 200),
+            observedAt: new Date(observedAt),
+          },
+          async () => {
+            await authorize();
+            await native.assertCurrent?.();
+          },
+        );
+
+    let before = state?.roleId === role.id ? state.before : undefined;
+    let moreReceipts = true;
+    while (moreReceipts && !signal?.aborted) {
+      const target = await resolveTarget(role.sourceThreadId);
+      let next: { at: string; id: string } | null = null;
+      const mail = await getRecruitingCorrespondence(
+        prisma,
+        actor,
+        target,
+        "inbox",
+        crmEndpoint ? { endpoint: crmEndpoint, connected: false } : undefined,
+        undefined,
+        {
+          limit: 200,
+          savedReceipts: {
+            before,
+            onNext: (value) => {
+              next = value;
+            },
+          },
+        },
+      );
+      const byObservation = new Map<string, RecruitingCorrespondence["emails"]>();
+      for (const email of mail.emails) {
+        if (!email.observedAt)
+          throw new Error("Saved mail is missing its receipt observation time");
+        const group = byObservation.get(email.observedAt) ?? [];
+        group.push(email);
+        byObservation.set(email.observedAt, group);
+      }
+      for (const [observedAt, emails] of byObservation)
+        for (let offset = 0; offset < emails.length; offset += 200)
+          await projectRecruitingInboxMessages(
+            prisma,
+            actor,
+            {
+              roleId: role.id,
+              emails: emails.slice(offset, offset + 200),
+              observedAt: new Date(observedAt),
+            },
+            authorize,
+          );
+      before = next ?? undefined;
+      moreReceipts = next !== null;
+      await authorize();
+      await prisma.recruitingInboxIndexProgress.update({
+        where: { userId_spaceId: scope },
+        data: {
+          nativeCursor: {
+            roleId: role.id,
+            ...(before ? { before } : {}),
+            ...(!moreReceipts ? { done: true } : {}),
+          },
+        },
+      });
+    }
+    if (signal?.aborted) return;
+  }
+  await authorize();
+  await prisma.$executeRaw`UPDATE recruiting_inbox_index_progress SET native_cursor=NULL WHERE user_id=${actor.userId} AND space_id=${actor.spaceId}`;
+}

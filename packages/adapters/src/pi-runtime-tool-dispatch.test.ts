@@ -646,6 +646,14 @@ describe("Pi connector tool dispatch", () => {
     const prepared = ask.prepareArguments!({ question: "Where?", options: [long, "Onsite"] });
     expect(prepared.options).toEqual([`${long.slice(0, 79).trimEnd()}…`, "Onsite"]);
     expect((prepared.options as string[])[0]!.length).toBeLessThanOrEqual(80);
+    // A multi-select question stays multi-select.
+    expect(
+      ask.prepareArguments!({
+        question: "Which cities?",
+        options: ["上海", "北京"],
+        multiple: true,
+      }),
+    ).toMatchObject({ multiple: true });
   });
 
   it("injects durable steering at Pi's next safe turn boundary", async () => {

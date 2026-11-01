@@ -7,7 +7,9 @@
 //   3. does the same in reverse with B's ids;
 //   4. checks B sees no CRM organization, mailbox or deployment settings it was not given, and
 //      that money and every account's spend show only to verified operator-domain staff;
-//   5. checks every listing refuses a request with no session.
+//   5. checks every listing refuses a request with no session;
+//   6. on the shared mail account, asks B's own crew (in B's test copy) for one of A's outreach
+//      campaigns by id and fails if its name or recipients come back. Skip with --no-mail.
 // Customer resources are read-only. Mutation probes use disposable native test copies only.
 //
 // Usage:
@@ -24,7 +26,12 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { checkCopyMutations, withIsolationTestCopies } from "./account-isolation-checks.mjs";
+import {
+  checkCopyMutations,
+  checkSharedMail,
+  findOwnedCampaign,
+  withIsolationTestCopies,
+} from "./account-isolation-checks.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -641,6 +648,16 @@ if (ok(crew)) b.ownGroupId = crew.data.groupId;
 const ensured = await a.rpc("groups/list");
 a.ownGroupId = ok(ensured) ? ensured.data.find((group) => !group.archivedAt)?.id : undefined;
 
+const groupsA = ok(ensured) ? ensured.data.filter((group) => !group.archivedAt) : [];
+const campaignA = args.includes("--no-mail")
+  ? null
+  : await findOwnedCampaign(
+      a,
+      groupsA.slice(0, 20).map((group) => group.id),
+    );
+if (!campaignA && !args.includes("--no-mail"))
+  report.unexercised.push({ name: "shared mail account", detail: "A has no outreach campaign" });
+
 // The endpoint under test is allowed to fail: only these disposable copies can be changed.
 // A failed check still archives both copies before the script exits.
 await withIsolationTestCopies([a, b], async ([copyA, copyB]) => {
@@ -671,6 +688,7 @@ await withIsolationTestCopies([a, b], async ([copyA, copyB]) => {
     }
     await checkCopyMutations(viewer, copy, record);
   }
+  if (campaignA) await checkSharedMail(b, copyB, campaignA, record);
 });
 
 const collectedA = await collect(a, meA, GROUPS);

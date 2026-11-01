@@ -1,4 +1,8 @@
-import type { RecruitingCandidate, RecruitingRoleCandidate } from "@rakazo/contracts";
+import type {
+  RecruitingCandidate,
+  RecruitingRoleCandidate,
+  RecruitingSavedProfile,
+} from "@rakazo/contracts";
 import {
   createContext,
   useCallback,
@@ -15,6 +19,12 @@ import type { RecruitingTabProps } from "./shared";
 /** The person a detail view shows, as the opening row already displayed it. */
 export type RecruitingDetailPerson = {
   candidateId: string;
+  savedProfile?: RecruitingSavedProfile | null;
+  searchCandidateKey?: string;
+  profileImageUrl?: string | null;
+  companyLogoUrl?: string | null;
+  companyWebsiteUrl?: string | null;
+  roles?: readonly { id: string; title: string; shortlisted?: boolean }[];
   name: string;
   email?: string | null;
   phone?: string | null;
@@ -34,12 +44,15 @@ export type RecruitingDetailView =
   | "interview"
   | "activity"
   | "tasks"
-  | "notes";
+  | "notes"
+  | "sequences"
+  | "roles";
 
 export type RecruitingDetailTarget = {
   view: RecruitingDetailView;
+  collection?: { label: string; index: number; total: number };
   person: RecruitingDetailPerson;
-  role: Pick<RecruitingTabProps, "roleId" | "spaceId" | "conversation">;
+  role: Pick<RecruitingTabProps, "roleId" | "spaceId" | "conversation"> | null;
   /** The person's Autumn search result, when they have one. */
   candidate?: RecruitingCandidate;
   /** Definitions from the opening role; only used when the source revision matches exactly. */
@@ -78,6 +91,8 @@ export function pendingDetailTarget(
     "activity",
     "tasks",
     "notes",
+    "sequences",
+    "roles",
   ];
   const view = views.find((view) => pending === `${view}.${target.person.candidateId}`);
   return view ? { ...target, view } : undefined;
