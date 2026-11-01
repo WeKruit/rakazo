@@ -679,6 +679,66 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
   );
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
+/** Every campaign this mail connection's roles are bound to. */
+export async function ownedInstantlyCampaigns(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+): Promise<string[]> {
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId,
+      kind: "instantly_role_campaign",
+      status: "completed",
+      request: { path: ["serverId"], equals: serverId },
+    },
+    select: { result: true },
+  });
+  const ids = effects.map(({ result }) => (result as Partial<RoleBinding> | null)?.campaignId);
+  return [...new Set(ids.filter((id): id is string => typeof id === "string"))].sort();
+}
+
+const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause))?$/i;
+
+/**
+ * The shared account's REST boundary: only this connection's own campaigns (and one it creates in
+ * this call) can be read or changed, and nothing searches or deduplicates across the account.
+ */
+export function ownedInstantlyRest(rest: InstantlyRest, owned: ReadonlySet<string>): InstantlyRest {
+  const mine = new Set(owned);
+  const refuse = () => {
+    throw new IsolationError("That campaign does not belong to this account");
+  };
+  const own = (id: unknown) => {
+    if (typeof id !== "string" || !mine.has(id)) refuse();
+  };
+  return async (method, path, body) => {
+    const [route, query = ""] = path.split("?");
+    const fields = (body ?? {}) as Record<string, unknown>;
+    if (route === "/campaigns" && method === "GET") return { items: [] };
+    if (route === "/campaigns" && method === "POST") {
+      const created = await rest(method, path, body);
+      if (typeof created.id === "string") mine.add(created.id);
+      return created;
+    }
+    const campaign = CAMPAIGN_PATH.exec(route!);
+    if (campaign) own(campaign[1]);
+    else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
+    else if (route === "/leads/list") own(fields.campaign);
+    else if (route === "/leads/add") {
+      own(fields.campaign_id);
+      if (fields.skip_if_in_workspace) refuse();
+    } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
+    else if (
+      !route!.startsWith("/accounts") &&
+      !route!.startsWith("/emails") &&
+      !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)
+    )
+      refuse();
+    return rest(method, path, body);
+  };
+}
+
 export async function readRoleCampaignBinding(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
@@ -2116,12 +2176,17 @@ async function roleDraft(
 
 export async function runInstantlyWrite(
   prisma: PrismaClient,
-  rest: InstantlyRest,
+  accountRest: InstantlyRest,
   context: AdapterContext,
   serverId: string,
   toolName: string,
   args: unknown,
+  /** Set on the shared account: the campaigns this connection owns. */
+  owned?: ReadonlySet<string>,
 ): Promise<unknown> {
+  if (owned && toolName === "native_instantly_create_campaign")
+    throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  const rest = owned ? ownedInstantlyRest(accountRest, owned) : accountRest;
   switch (toolName) {
     case "native_instantly_get_role_draft":
       return roleDraft(prisma, rest, context, serverId, ReadRoleDraftInput.parse(args));

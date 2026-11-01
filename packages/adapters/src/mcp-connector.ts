@@ -49,6 +49,7 @@ import {
   instantlyRest,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
+  ownedInstantlyCampaigns,
   readRoleCampaignBinding,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
@@ -693,6 +694,21 @@ export function hasPlatformMcpCredential(
   return Boolean(credential?.key || credential?.keyless);
 }
 
+/**
+ * True when this Instantly connection runs on the deployment's shared account, so every campaign,
+ * lead and email must be proven to belong to the caller before it is read or changed.
+ */
+export function sharedInstantlyAccount(
+  server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
+): boolean {
+  return (
+    server.endpoint === INSTANTLY_MCP && Boolean(platformMcpCredential(server)?.replacesSecret)
+  );
+}
+
+/** Remote tools a shared-account connection may call; each one is campaign-scoped below. */
+const SHARED_INSTANTLY_REMOTE = ["get_email", "list_emails", "reply_to_email"];
+
 export async function loadMcpCredentialRecord(
   prisma: PrismaClient,
   secrets: SecretStore,
@@ -904,8 +920,10 @@ export class McpConnector implements ConnectorProvider {
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
               (tool) =>
-                assignment.allowAllTools ||
-                (assignment.allowedTools as unknown[]).includes(tool.name),
+                (assignment.allowAllTools ||
+                  (assignment.allowedTools as unknown[]).includes(tool.name)) &&
+                (!sharedInstantlyAccount(assignment.server) ||
+                  SHARED_INSTANTLY_REMOTE.includes(tool.name)),
             )
             .map((tool) => ({
               name: `mcp__${assignment.server.slug}__${tool.name}`,
@@ -1081,6 +1099,13 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
+      if (
+        sharedInstantlyAccount(assignment.server) &&
+        !SHARED_INSTANTLY_REMOTE.includes(call.route.toolName)
+      )
+        throw new IsolationError(
+          "This mail tool would reach other accounts' mail; use the role's campaign tools",
+        );
       if (this.refusedConnection(assignment.server, context)) {
         yield {
           type: "error",
@@ -1522,6 +1547,11 @@ export class McpConnector implements ConnectorProvider {
         credential.server.id,
         call.route!.toolName,
         call.args,
+        sharedInstantlyAccount(credential.server)
+          ? new Set(
+              await ownedInstantlyCampaigns(this.prisma, context.spaceId, credential.server.id),
+            )
+          : undefined,
       );
       if (call.route!.toolName === "native_instantly_get_email") await assertScope();
       if (emailScope && call.route!.toolName === "native_instantly_get_email") {
@@ -1703,8 +1733,28 @@ export class McpConnector implements ConnectorProvider {
     return target;
   }
 
-  /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
+  /**
+   * The campaigns a mail operation may touch. On the shared account an operation outside a role
+   * still stays inside this connection's own campaigns, never the whole account.
+   */
   private async instantlyCampaignScope(
+    context: AdapterContext,
+    serverId: string,
+  ): Promise<{ campaignIds: string[]; workspaceKey: string } | null> {
+    const scope = await this.roleCampaignScope(context, serverId);
+    if (scope) return scope;
+    const server = await this.prisma.mcpServer.findFirst({
+      where: { id: serverId, userId: context.userId, spaceId: context.spaceId },
+      select: { secretId: true, transport: true, endpoint: true },
+    });
+    if (!server || !sharedInstantlyAccount(server)) return null;
+    const campaignIds = await ownedInstantlyCampaigns(this.prisma, context.spaceId, serverId);
+    if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
+    return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
+  }
+
+  /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
+  private async roleCampaignScope(
     context: AdapterContext,
     serverId: string,
   ): Promise<{ campaignIds: string[]; workspaceKey: string } | null> {

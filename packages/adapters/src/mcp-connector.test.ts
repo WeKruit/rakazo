@@ -18,6 +18,7 @@ import {
   McpConnector,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
+  sharedInstantlyAccount,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
@@ -3480,6 +3481,7 @@ describe("deployment Instantly credentials", () => {
     expect(findFirst).not.toHaveBeenCalled();
     expect(load).not.toHaveBeenCalled();
     expect(hasPlatformMcpCredential(server)).toBe(true);
+    expect(sharedInstantlyAccount(server)).toBe(true);
   });
 
   it("keeps the user's own key when the deployment has no account", async () => {
@@ -3494,6 +3496,7 @@ describe("deployment Instantly credentials", () => {
     );
     expect(JSON.parse(result.plaintext!)).toEqual({ secret: "own-key" });
     expect(hasPlatformMcpCredential({ ...server, secretId: null })).toBe(false);
+    expect(sharedInstantlyAccount(server)).toBe(false);
   });
 });
 
