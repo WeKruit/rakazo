@@ -319,6 +319,7 @@ export function ShellPanelContent({
           ) : null}
           {panel === "recruiting" && activeSnapshot?.threadId ? (
             <RecruitingPanel
+              onAskChat={(text) => openRoleChat(text)}
               workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
               threadId={activeSnapshot.threadId}

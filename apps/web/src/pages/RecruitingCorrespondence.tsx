@@ -33,6 +33,7 @@ import { SchedulingPlanForm, SchedulingPlanHistory } from "./recruiting/Scheduli
 import { sequenceLine, useSequenceLabels, useSequenceStats } from "./recruiting/SequenceStats";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
 import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
+import { useInboxReadState } from "./recruiting/useInboxReadState";
 
 export type RecruitingSequenceSaveInput = {
   sourceArtifactId: string;
@@ -631,6 +632,18 @@ function SavedCorrespondenceView({
   const threadKey =
     selectedThread && threads.has(selectedThread) ? selectedThread : threads.keys().next().value;
   const threadEmails = campaignEmails.filter((email) => threadOf(email) === threadKey);
+  const inboxReadState = useInboxReadState(
+    workspace?.role.spaceId,
+    (data?.emails ?? []).map((email) => ({
+      ...email,
+      threadId: email.providerThreadId,
+      organizationId: email.crm?.organizationId ?? null,
+      crmRoleId: email.crm?.crmRoleId,
+      direction: email.direction ?? email.crm?.direction ?? null,
+      partial: email.snippet,
+      candidateId: email.crm?.candidateId,
+    })),
+  );
   const selected = threadEmails.find((email) => email.id === selectedId) ?? threadEmails[0];
   // Cached mail stays readable; only a current authorized read can create a plan or chat context.
   const parsed = useMemo(
@@ -1009,6 +1022,7 @@ function SavedCorrespondenceView({
               {threadEmails.length ||
               (data.emails.length && !data.partial && !data.nextCursor && mailFilter === "all") ? (
                 <EmailConversation
+                  readState={inboxReadState}
                   artifactTarget={artifactTarget}
                   candidateName={selectedPerson?.name}
                   candidateTitle={selectedPerson?.title}
@@ -1029,7 +1043,7 @@ function SavedCorrespondenceView({
                   items={threadEmails.map((email) => ({
                     ...email,
                     threadId: email.providerThreadId,
-                    organizationId: email.crm?.organizationId,
+                    organizationId: email.crm?.organizationId ?? null,
                     crmRoleId: email.crm?.crmRoleId,
                     direction: email.direction ?? email.crm?.direction ?? null,
                     partial: email.snippet,
@@ -1074,6 +1088,7 @@ function SavedCorrespondenceView({
                       }
                       onReview={onReviewSchedulingPlan}
                       onCheck={onConversation}
+                      onProposeTimes={onConversation}
                       onClose={() => setPlanningKey(undefined)}
                     />
                   ) : null}

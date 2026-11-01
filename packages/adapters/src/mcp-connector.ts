@@ -1492,6 +1492,7 @@ export class McpConnector implements ConnectorProvider {
       ].includes(call.route!.toolName);
       const rest = instantlyRest(safeFetch, credential.key, context.signal);
       const assertScope = async () => {
+        await context.reauthorize?.();
         if (scopedEmailOperation)
           await this.assertInstantlyScope(context, credential.server.id, emailScope);
         const current = await this.authorizeInstantlyRest(call, context, redactions);
@@ -1502,7 +1503,7 @@ export class McpConnector implements ConnectorProvider {
       const result = await runInstantlyWrite(
         this.prisma,
         async (method, path, body) => {
-          if (scopedEmailOperation && method !== "GET") {
+          if (method !== "GET") {
             await assertScope();
             if (call.route!.toolName === "native_instantly_reply_to_email")
               await this.assertSchedulingConfirmationDispatch(call, context);

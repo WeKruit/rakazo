@@ -92,6 +92,8 @@ export const INSTANTLY_MCP_ENDPOINT = "https://mcp.instantly.ai/mcp";
 /** Instantly writes that never send: draft campaigns, enrolling leads into draft/paused campaigns, interest, pause. */
 const INSTANTLY_NATIVE_INTERNAL_WRITES = new Set([
   "native_instantly_create_campaign",
+  "native_instantly_create_role_draft",
+  "native_instantly_update_role_draft",
   "native_instantly_ensure_role_campaign",
   "native_instantly_add_leads",
   "native_instantly_add_shortlist_leads",

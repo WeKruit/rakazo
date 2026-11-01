@@ -28,6 +28,7 @@ import {
   weekStart,
 } from "./dashboard";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
+import { RecruitingAnalytics } from "./RecruitingAnalytics";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
@@ -577,6 +578,7 @@ export function HomeDashboard({
 }) {
   const { t } = useLingui();
   const overview = useOverview(groups, readCache, readCacheScope, refreshSignal);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [selection, setSelection] = useState<{ scope: string | undefined; id: string | null }>({
     scope: readCacheScope,
     id: null,
@@ -604,6 +606,20 @@ export function HomeDashboard({
       return group ? [[role.roleId, group] as const] : [];
     }),
   );
+  if (analyticsOpen)
+    return (
+      <div className="rk-scroll min-h-0 flex-1 overflow-y-auto bg-background">
+        <div className="mx-auto w-full max-w-5xl p-4 md:p-8">
+          <Button variant="ghost" onClick={() => setAnalyticsOpen(false)}>
+            <Trans>Back to overview</Trans>
+          </Button>
+          <RecruitingAnalytics
+            accountKey={readCacheScope ?? "current"}
+            load={rpc.recruiting.analytics}
+          />
+        </div>
+      </div>
+    );
   return (
     <div className="rk-scroll min-h-0 flex-1 overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
@@ -627,7 +643,10 @@ export function HomeDashboard({
           <h1 className="text-2xl font-semibold tracking-tight" dir="auto">
             {name ? <Trans>Hello, {name}</Trans> : <Trans>Hello</Trans>}
           </h1>
-          <div className="ms-auto w-full min-w-0 sm:w-64">
+          <Button variant="outline" className="ms-auto" onClick={() => setAnalyticsOpen(true)}>
+            <Trans>View analytics</Trans>
+          </Button>
+          <div className="w-full min-w-0 sm:w-64">
             <NativeSelect
               aria-label={t`Project`}
               className="w-full"

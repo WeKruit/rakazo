@@ -50,7 +50,8 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
   );
   const crmData = crmPages.data;
   const autumnItems = autumn?.items;
-  const sortByScore = autumn?.sortByScore ?? true;
+  // Saved results already carry the role-wide server order, established before pagination.
+  const sortByScore = false;
   // The email lookup is a new function on every parent render; its answers are what matter.
   const emails = (autumnItems ?? []).map((candidate) => autumn?.email?.(candidate) ?? null);
   const emailKey = emails.join("\n");

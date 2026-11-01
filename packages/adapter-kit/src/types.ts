@@ -22,6 +22,8 @@ export interface AdapterContext {
   screenLeaseId?: string;
   /** When releasing a screen after cancel, also stop orphaned browser work on that screen. */
   cancelRunWork?: boolean;
+  /** Trusted in-process authorization fence before external mutations; never RPC/provider input. */
+  reauthorize?: () => Promise<void>;
   signal: AbortSignal;
   /** Connected external accounts available to this run, including their owning connector. */
   connectedConnections?: ConnectedConnector[];

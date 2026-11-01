@@ -8,6 +8,7 @@ import type {
   ListRecruitingCandidatesOutput,
   ReadRecruitingSourceInput,
   RecruitingAssessmentSourceRef,
+  RecruitingCandidateRanking,
   RecruitingCandidateSource,
   RecruitingCorrespondence,
   RecruitingCrmDataInput,
@@ -4122,7 +4123,8 @@ type RoleCandidatesInput = {
   threadId: string;
   limit?: number | undefined;
   cursor?: string | undefined;
-  sort?: "score" | "rank" | "name" | "recent" | undefined;
+  sort?: "score" | "rank" | "name" | "recent" | "ranking" | undefined;
+  rankingGroup?: RecruitingCandidateRanking["group"] | undefined;
   query?: string | undefined;
   shortlistedOnly?: boolean | undefined;
   shortlistedSince?: string | undefined;
@@ -4187,9 +4189,10 @@ export async function mergeRoleCandidates(
   const limit = input.limit ?? 25;
   const scope = JSON.stringify([
     input.threadId,
-    input.sort ?? "score",
+    input.sort ?? "ranking",
     input.query ?? "",
     input.shortlistedOnly === true,
+    input.rankingGroup ?? null,
     ...(input.shortlistedSince ? [input.shortlistedSince] : []),
   ]);
   const position = roleCandidatesCursor.read(input.cursor, scope);
@@ -4224,15 +4227,16 @@ export async function mergeRoleCandidates(
     }
   }
   const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
-  const visibleCrmOnly = input.shortlistedOnly
-    ? []
-    : crmOnly.filter(
-        (row) =>
-          !needle ||
-          [row.name, row.email, row.title].some((text) =>
-            text?.replace(/\s+/g, " ").toLowerCase().includes(needle),
-          ),
-      );
+  const visibleCrmOnly =
+    input.shortlistedOnly || (input.rankingGroup !== undefined && input.rankingGroup !== "unscored")
+      ? []
+      : crmOnly.filter(
+          (row) =>
+            !needle ||
+            [row.name, row.email, row.title].some((text) =>
+              text?.replace(/\s+/g, " ").toLowerCase().includes(needle),
+            ),
+        );
   if (input.sort === "name")
     visibleCrmOnly.sort(
       (left, right) =>
@@ -4274,6 +4278,7 @@ export async function mergeRoleCandidates(
         linkedinUrl: candidate.linkedinUrl ?? contact?.linkedinUrl ?? null,
         autumn: {
           candidateKey: candidate.candidateKey,
+          ranking: candidate.ranking,
           score: candidate.match?.score ?? null,
           rank: candidate.match?.rank ?? null,
           tier: candidate.match?.tier ?? null,
@@ -4411,7 +4416,7 @@ export async function getRecruitingRoleCandidates(
       crmStatus: "not_bound",
       crmCountsComplete: false,
     };
-  const sort = input.sort ?? "score";
+  const sort = input.sort ?? "ranking";
   return mergeRoleCandidates(input, {
     autumn: (cursor, limit) =>
       timed(
@@ -4425,6 +4430,7 @@ export async function getRecruitingRoleCandidates(
             sort,
             ...(cursor ? { cursor } : {}),
             ...(input.query ? { query: input.query } : {}),
+            ...(input.rankingGroup ? { rankingGroup: input.rankingGroup } : {}),
             ...(input.shortlistedOnly ? { shortlisted: true } : {}),
             ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
           },

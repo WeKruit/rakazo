@@ -182,6 +182,10 @@ import {
   RecruitingAccountViewOutputSchema,
 } from "./recruiting-account.js";
 import {
+  RecruitingAnalyticsInputSchema,
+  RecruitingAnalyticsOutputSchema,
+} from "./recruiting-analytics.js";
+import {
   ListRecruitingContactsInput,
   ListRecruitingContactsOutput,
   RecruitingContactFacetsOutput,
@@ -189,10 +193,19 @@ import {
 } from "./recruiting-contacts.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import {
+  ListRecruitingInboxInputSchema,
+  MarkRecruitingInboxInputSchema,
+  RecruitingInboxReadStateSchema,
+} from "./recruiting-inbox.js";
+import {
   RecruitingSchedulingPlanInputSchema,
   RecruitingSchedulingPlanSchema,
   RecruitingSchedulingSlotSchema,
 } from "./recruiting-scheduling.js";
+import {
+  RecruitingSequenceInputSchema,
+  RecruitingSequenceOutputSchema,
+} from "./recruiting-sequences.js";
 import {
   RoutineHistorySchema,
   RoutineRunCursorSchema,
@@ -763,6 +776,16 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    inboxReadState: oc
+      .input(ListRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(RecruitingInboxReadStateSchema),
+    markInboxThread: oc
+      .input(MarkRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(z.object({ ok: z.literal(true) })),
+    analytics: oc.input(RecruitingAnalyticsInputSchema).output(RecruitingAnalyticsOutputSchema),
+    sequenceDraft: oc
+      .input(threadTarget.safeExtend({ command: RecruitingSequenceInputSchema }))
+      .output(RecruitingSequenceOutputSchema),
     accountView: oc
       .input(RecruitingAccountViewInputSchema)
       .output(RecruitingAccountViewOutputSchema),

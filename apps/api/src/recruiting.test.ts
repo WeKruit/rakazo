@@ -7750,7 +7750,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
     expect(db.listRecruitingCandidates).toHaveBeenCalledWith(prisma, actor, {
       roleId: "role",
       limit: 25,
-      sort: "score",
+      sort: "ranking",
       query: "a",
       shortlisted: true,
     });

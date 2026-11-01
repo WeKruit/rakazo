@@ -367,7 +367,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const f = await assessmentFixture("Group notes fixture");
     await prisma.thread.update({
       where: { id: f.thread.id },
-      data: { activeRecruitingRoleId: f.role.id },
+      data: { activeRecruitingRoleId: f.role.role.id },
     });
     const other = await prisma.chatGroup.create({
       data: { spaceId, userId, name: "Other room", members: { create: { botId } } },

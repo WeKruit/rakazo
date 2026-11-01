@@ -78,6 +78,7 @@ import {
   enqueueTakeoverContinuation,
   ensureComputerWorkspaceLayout,
   estimateCatalogTokenCostUsd,
+  executeRecruitingSequence,
   expireComputerControl,
   fillRecruitingRoleProfiles,
   forgetBotSecret,
@@ -240,17 +241,20 @@ import {
   issueMessagingLinkCode,
   listBoards,
   listRecruitingContacts,
+  listRecruitingInbox,
   listRoutinesDto,
   listSpaceBackupModels,
   listTicketComments,
   lockOwnedGroup,
   mapRoutine,
+  markRecruitingInbox,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   openVerifiedRecruitingCrmWorkspace,
   Prisma,
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
+  readRecruitingAnalytics,
   recordClosedAskAnswer,
   recordDesktopActivity,
   recruitingContactFacets,
@@ -3971,6 +3975,50 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      inboxReadState: authed.recruiting.inboxReadState.handler(async ({ context, input }) => {
+        if (
+          input.spaceId !== context.actor.spaceId ||
+          (context.stillAuthorized && !(await context.stillAuthorized()))
+        )
+          throw new ORPCError("NOT_FOUND");
+        const result = await listRecruitingInbox(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
+      }),
+      markInboxThread: authed.recruiting.markInboxThread.handler(async ({ context, input }) => {
+        if (
+          input.spaceId !== context.actor.spaceId ||
+          (context.stillAuthorized && !(await context.stillAuthorized()))
+        )
+          throw new ORPCError("NOT_FOUND");
+        await markRecruitingInbox(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return { ok: true as const };
+      }),
+      analytics: authed.recruiting.analytics.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const result = await readRecruitingAnalytics(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
+      }),
+      sequenceDraft: authed.recruiting.sequenceDraft.handler(async ({ context, input }) =>
+        executeRecruitingSequence(
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            stillAuthorized: async () => !context.stillAuthorized || context.stillAuthorized(),
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input.command,
+        ),
+      ),
       accountView: authed.recruiting.accountView.handler(async ({ context, input }) =>
         readRecruitingAccountView(
           {

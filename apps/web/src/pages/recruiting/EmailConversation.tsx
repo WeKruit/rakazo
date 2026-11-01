@@ -1,4 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { inboxThreadKey } from "@rakazo/contracts";
 import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ChevronDown, Mail, Reply, UserRound } from "lucide-react";
 import { Fragment, useEffect, useId, useRef } from "react";
@@ -8,11 +9,14 @@ import type { RecruitingInboxEmail } from "./InboxTab";
 import { ProfileImage } from "./ProfileImage";
 import { initials } from "./profile";
 import { formatDate } from "./shared";
+import type { InboxReadControls } from "./useInboxReadState";
+import { emailThreadIdentity, incomingThreadEvidence } from "./useInboxReadState";
 
 /** Exact saved messages; candidateId is present on the existing role-wide mail projection. */
 export type EmailConversationItem = RecruitingInboxEmail["email"] & { candidateId?: string };
 
 export type EmailConversationProps = {
+  readState?: InboxReadControls;
   artifactTarget?: ArtifactTarget;
   /** Caller owns the source read, message order, and any real thread scope. */
   items: readonly EmailConversationItem[];
@@ -127,6 +131,7 @@ function MessageHeading({ email }: { email: EmailConversationItem }) {
  * unrelated subjects into a thread, or claim delivery/read status beyond the saved direction.
  */
 export function EmailConversation({
+  readState,
   artifactTarget,
   items,
   candidateId,
@@ -142,6 +147,8 @@ export function EmailConversation({
   const headingId = useId();
   const openedFromHistory = useRef<string | null>(null);
   const selectedArticle = useRef<HTMLElement>(null);
+  const root = useRef<HTMLElement>(null);
+  const opened = useRef<string | null>(null);
   const messages = candidateId
     ? items.filter((email) => email.candidateId === undefined || email.candidateId === candidateId)
     : items;
@@ -168,6 +175,50 @@ export function EmailConversation({
     hasThreads && selected
       ? messages.filter((email) => groupKey(email) === groupKey(selected))
       : messages;
+  const selectedIdentity = selected ? emailThreadIdentity(selected) : null;
+  const selectedEvidence = selectedIdentity
+    ? incomingThreadEvidence(visibleMessages).find(
+        (thread) => inboxThreadKey(thread) === inboxThreadKey(selectedIdentity),
+      )
+    : undefined;
+  const observed = selectedEvidence?.latestIncomingAt;
+  const openKey =
+    selectedEvidence && observed
+      ? JSON.stringify([inboxThreadKey(selectedEvidence), observed])
+      : null;
+  useEffect(() => {
+    if (
+      !root.current ||
+      !selectedEvidence ||
+      !observed ||
+      !readState?.ready ||
+      !openKey ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
+    let visible = false;
+    const readVisible = () => {
+      if (document.visibilityState !== "visible") {
+        opened.current = null;
+        return;
+      }
+      if (!visible || opened.current === openKey) return;
+      opened.current = openKey;
+      void readState.mark(selectedEvidence, observed, false);
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? false;
+      if (!visible) opened.current = null;
+      readVisible();
+    });
+    document.addEventListener("visibilitychange", readVisible);
+    observer.observe(root.current);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", readVisible);
+      opened.current = null;
+    };
+  }, [openKey, readState?.ready, readState?.mark]);
   useEffect(() => {
     if (openedFromHistory.current !== selected?.id) return;
     openedFromHistory.current = null;
@@ -175,6 +226,7 @@ export function EmailConversation({
   }, [selected?.id]);
   return (
     <section
+      ref={root}
       aria-labelledby={headingId}
       data-testid="email-conversation"
       className="min-w-0 rounded-xl border bg-card"
@@ -197,6 +249,34 @@ export function EmailConversation({
             ) : null}
           </div>
         </div>
+        {readState && selected && selectedEvidence && observed ? (
+          <div className="flex items-center gap-2">
+            {readState.unread(selected) === true ? (
+              <Badge>
+                <Trans>Unread</Trans>
+              </Badge>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!readState.ready || readState.pending}
+              onClick={() =>
+                void readState.mark(selectedEvidence, observed, readState.unread(selected) !== true)
+              }
+            >
+              {readState.unread(selected) === true ? (
+                <Trans>Mark read</Trans>
+              ) : (
+                <Trans>Mark unread</Trans>
+              )}
+            </Button>
+          </div>
+        ) : null}
+        {readState?.failed ? (
+          <span role="alert" className="text-xs text-muted-foreground">
+            <Trans>Could not save read status.</Trans>
+          </span>
+        ) : null}
         {onOpenProfile || (onDraftReply && selected) ? (
           <div className="flex flex-wrap gap-2">
             {onOpenProfile ? (

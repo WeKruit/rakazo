@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -42,6 +43,12 @@ const CampaignSetup = {
     .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
+const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
+const UpdateRoleDraftInput = RoleDraftInput.extend({ campaign_id: Uuid });
+const ReadRoleDraftInput = z.strictObject({
+  role_id: z.string().min(1).max(100),
+  campaign_id: Uuid.optional(),
+});
 const Lead = z.strictObject({
   email: Email,
   first_name: z.string().max(200).optional(),
@@ -157,6 +164,24 @@ const tool = (name: string, schema: z.ZodType, readOnly: boolean, description: s
   description: `${LOCAL} ${description}`,
 });
 export const nativeInstantlyWrites = [
+  tool(
+    "get_role_draft",
+    ReadRoleDraftInput,
+    true,
+    "Reads the exact role-bound campaign and connected sending mailboxes; never sends.",
+  ),
+  tool(
+    "create_role_draft",
+    RoleDraftInput,
+    false,
+    "Creates a zero-recipient draft for a role without a bound campaign. Never sends or adopts a campaign by name.",
+  ),
+  tool(
+    "update_role_draft",
+    UpdateRoleDraftInput,
+    false,
+    "Edits only the exact role-bound draft. Refuses active, paused, completed or unsupported sequences. Never sends.",
+  ),
   tool(
     "create_campaign",
     CreateCampaignInput,
@@ -1729,6 +1754,102 @@ async function leadEmails(rest: InstantlyRest, campaignId: string) {
   );
 }
 
+function draftDelivery(campaign: Record<string, unknown>) {
+  const schedules = (
+    campaign.campaign_schedule as { schedules?: Record<string, unknown>[] } | undefined
+  )?.schedules;
+  const schedule = schedules?.length === 1 ? schedules[0] : undefined;
+  const timezone = typeof schedule?.timezone === "string" ? schedule.timezone : null;
+  const hours = timezone
+    ? ((["weekdays_9_to_5", "any_time"] as const).find(
+        (hours) =>
+          isDeepStrictEqual(
+            schedule?.timing,
+            campaignSchedule(hours, timezone).schedules[0]!.timing,
+          ) &&
+          isDeepStrictEqual(schedule?.days, campaignSchedule(hours, timezone).schedules[0]!.days),
+      ) ?? null)
+    : null;
+  return { timezone, hours };
+}
+
+function editableDraft(campaign: Record<string, unknown>) {
+  const list = campaign.sequences;
+  if (list == null || (Array.isArray(list) && list.length === 0)) return true;
+  if (!Array.isArray(list) || list.length !== 1 || isTemplated(campaign)) return false;
+  const steps = (list[0] as { steps?: unknown })?.steps;
+  return (
+    Array.isArray(steps) &&
+    steps.every(
+      (step) =>
+        step?.type === "email" &&
+        step.delay_unit === "days" &&
+        Number.isInteger(step.delay) &&
+        step.delay >= 0 &&
+        step.delay <= 366 &&
+        Array.isArray(step.variants) &&
+        step.variants.length === 1 &&
+        typeof step.variants[0]?.subject === "string" &&
+        typeof step.variants[0]?.body === "string" &&
+        // Only the plain paragraphs this writer can reproduce are editable; preserve rich drafts.
+        bodyHtml(htmlToPlainText(step.variants[0].body)) === step.variants[0].body,
+    )
+  );
+}
+
+async function roleDraft(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  args: z.output<typeof ReadRoleDraftInput>,
+) {
+  const role = await requireRole(prisma, context, args.role_id);
+  const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
+  if (args.campaign_id && args.campaign_id !== existing?.binding.campaignId)
+    throw new IsolationError();
+  const campaign = existing ? await rest("GET", `/campaigns/${existing.binding.campaignId}`) : null;
+  const accounts = await rest("GET", "/accounts?limit=100");
+  const mailboxes = (Array.isArray(accounts.items) ? accounts.items : []).flatMap((item) =>
+    typeof item?.email === "string" ? [item.email as string] : [],
+  );
+  if (!campaign) return { roleId: role.id, roleTitle: role.title, mailboxes, campaign: null };
+  const { timezone, hours } = draftDelivery(campaign);
+  const raw = Array.isArray(campaign.sequences) ? campaign.sequences : [];
+  const steps = editableDraft(campaign)
+    ? (
+        (raw[0]?.steps ?? []) as { variants: { subject: string; body: string }[]; delay: number }[]
+      ).map((step) => ({
+        subject: step.variants[0]!.subject,
+        body: htmlToPlainText(step.variants[0]!.body),
+        delay_days: step.delay as number,
+      }))
+    : [];
+  return {
+    roleId: role.id,
+    roleTitle: role.title,
+    mailboxes,
+    campaign: {
+      id: existing!.binding.campaignId,
+      name: String(campaign.name ?? role.title),
+      status: campaign.status,
+      editable:
+        campaign.status === DRAFT &&
+        editableDraft(campaign) &&
+        hours !== null &&
+        Array.isArray(campaign.email_list) &&
+        campaign.email_list.length === 1,
+      eaccount:
+        Array.isArray(campaign.email_list) && campaign.email_list.length === 1
+          ? campaign.email_list[0]
+          : null,
+      steps,
+      timezone,
+      send_hours: hours,
+    },
+  };
+}
+
 export async function runInstantlyWrite(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -1738,6 +1859,48 @@ export async function runInstantlyWrite(
   args: unknown,
 ): Promise<unknown> {
   switch (toolName) {
+    case "native_instantly_get_role_draft":
+      return roleDraft(prisma, rest, context, serverId, ReadRoleDraftInput.parse(args));
+    case "native_instantly_create_role_draft": {
+      const input = RoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      if (await readBinding(prisma, context, bindingKey(serverId, role.id)))
+        throw new Error("This role already has a campaign; reopen it before editing");
+      if (!context.runId) throw new Error("Start a role conversation before creating a draft");
+      const campaign = await createCampaign(rest, input);
+      if (typeof campaign.id !== "string") throw new Error("No campaign id returned");
+      await recordBinding(prisma, context, bindingKey(serverId, role.id), role.id, serverId, {
+        campaignId: campaign.id,
+        campaignName: input.name,
+        eaccount: input.eaccount,
+        leads: {},
+        created: true,
+      });
+      if (input.steps) await requireSavedEmail(rest, campaign.id);
+      return roleDraft(prisma, rest, context, serverId, {
+        role_id: role.id,
+        campaign_id: campaign.id,
+      });
+    }
+    case "native_instantly_update_role_draft": {
+      const input = UpdateRoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
+      if (existing?.binding.campaignId !== input.campaign_id) throw new IsolationError();
+      const campaign = await rest("GET", `/campaigns/${input.campaign_id}`);
+      if (campaign.status !== DRAFT) throw new Error("Only a draft can be edited here");
+      if (
+        !editableDraft(campaign) ||
+        draftDelivery(campaign).hours === null ||
+        !Array.isArray(campaign.email_list) ||
+        campaign.email_list.length !== 1
+      )
+        throw new Error("This sequence needs to be edited in its existing mail workspace");
+      await requireOwnMailbox(rest, input.eaccount);
+      await rest("PATCH", `/campaigns/${input.campaign_id}`, campaignBody(input.name, input));
+      if (input.steps) await requireSavedEmail(rest, input.campaign_id);
+      return roleDraft(prisma, rest, context, serverId, input);
+    }
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
       const campaign = await createCampaign(rest, input);

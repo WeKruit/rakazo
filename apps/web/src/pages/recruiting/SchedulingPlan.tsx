@@ -5,13 +5,20 @@ import type {
   RecruitingSchedulingPlanInput,
 } from "@rakazo/contracts";
 import { RecruitingSchedulingPlanInputSchema, SchedulingTimeZoneSchema } from "@rakazo/contracts";
-import { Button, Input, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
+import { Button, Input, NativeSelect, NativeSelectOption, Textarea } from "@rakazo/ui-web";
 import { useEffect, useId, useRef, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { statusText, useKeyedRead } from "./shared";
 
-export type SchedulingPlanHandoff = { plan: RecruitingSchedulingPlan; text: string };
-export type SchedulingCandidate = { candidateKey: string; name: string; email: string };
+export type SchedulingPlanHandoff = {
+  plan: RecruitingSchedulingPlan;
+  text: string;
+};
+export type SchedulingCandidate = {
+  candidateKey: string;
+  name: string;
+  email: string;
+};
 
 function localTime(start: string, zone: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -176,6 +183,7 @@ export function SchedulingPlanForm({
   candidate: knownCandidate,
   onReview,
   onCheck,
+  onProposeTimes,
   onClose,
 }: {
   originalEmail: RecruitingCorrespondenceReference;
@@ -183,6 +191,7 @@ export function SchedulingPlanForm({
   candidate?: SchedulingCandidate;
   onReview?: (handoff: SchedulingPlanHandoff) => void;
   onCheck: (text: string) => void;
+  onProposeTimes?: (text: string) => void;
   onClose: () => void;
 }) {
   const { t } = useLingui();
@@ -194,6 +203,11 @@ export function SchedulingPlanForm({
   const [interviewerName, setInterviewerName] = useState("");
   const [interviewerEmail, setInterviewerEmail] = useState("");
   const [slotKey, setSlotKey] = useState("");
+  const [proposing, setProposing] = useState(false);
+  const [proposalKeys, setProposalKeys] = useState<string[]>([]);
+  const [guests, setGuests] = useState("");
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -228,7 +242,13 @@ export function SchedulingPlanForm({
   );
   const choices = (candidates.data?.items ?? []).flatMap((person) =>
     person.autumn && person.name && person.email
-      ? [{ candidateKey: person.autumn.candidateKey, name: person.name, email: person.email }]
+      ? [
+          {
+            candidateKey: person.autumn.candidateKey,
+            name: person.name,
+            email: person.email,
+          },
+        ]
       : [],
   );
   const candidate =
@@ -257,9 +277,47 @@ export function SchedulingPlanForm({
     expectedRoleRevision: roleRevision,
     originalEmail,
     candidate: candidate && { ...candidate, timeZone: candidateZone },
-    interviewer: { name: interviewerName, email: interviewerEmail, timeZone: interviewerZone },
+    interviewer: {
+      name: interviewerName,
+      email: interviewerEmail,
+      timeZone: interviewerZone,
+    },
     calendar,
   });
+  const proposedSlots = slots.filter((value) => proposalKeys.includes(JSON.stringify(value)));
+  const proposalValid =
+    candidate &&
+    zonesValid &&
+    interviewerName.trim() &&
+    interviewerEmail.trim() &&
+    RecruitingSchedulingPlanInputSchema.shape.interviewer.safeParse({
+      name: interviewerName,
+      email: interviewerEmail,
+      timeZone: interviewerZone,
+    }).success &&
+    proposedSlots.length > 0;
+  const proposalText = proposalValid
+    ? [
+        t`Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings.`,
+        t`Candidate: ${candidate.name} · ${candidate.email} · ${candidateZone}`,
+        t`Requested interviewer: ${interviewerName} · ${interviewerEmail} · ${interviewerZone}`,
+        ...proposedSlots.map(
+          (value, index) =>
+            `${index + 1}. ${value.start} – ${value.end} (${value.lengthInMinutes} min)\n${localTime(value.start, candidateZone)} – ${localTime(value.end, candidateZone)} · ${candidateZone}\n${localTime(value.start, interviewerZone)} – ${localTime(value.end, interviewerZone)} · ${interviewerZone}`,
+        ),
+        ...(guests ? [t`Requested guests (do not add to email recipients):\n${guests}`] : []),
+        ...(location
+          ? [
+              t`Requested location:\n${location}`,
+              t`Treat this as a location request in the draft. Verify the selected event type supports it before proposing a booking; do not override its configured location.`,
+            ]
+          : []),
+        ...(notes
+          ? [t`Include these notes verbatim in the draft and any later confirmation:\n${notes}`]
+          : []),
+        t`Recheck availability before booking. Any later booking, guest addition or sending requires review of the exact participants, selected time, location and message.`,
+      ].join("\n\n")
+    : "";
   async function save() {
     if (!input.success || !proof || saving.current || read.failed) return;
     saving.current = true;
@@ -325,6 +383,19 @@ export function SchedulingPlanForm({
             </p>
           ) : null}
           <fieldset disabled={reviewing || pending} className="space-y-3">
+            {onProposeTimes ? (
+              <label className="block text-sm" htmlFor={`${formId}-action`}>
+                <Trans>Scheduling action</Trans>
+                <NativeSelect
+                  id={`${formId}-action`}
+                  value={proposing ? "proposal" : "booking"}
+                  onChange={(event) => setProposing(event.target.value === "proposal")}
+                >
+                  <NativeSelectOption value="booking">{t`Plan one booking`}</NativeSelectOption>
+                  <NativeSelectOption value="proposal">{t`Propose times by email`}</NativeSelectOption>
+                </NativeSelect>
+              </label>
+            ) : null}
             {knownCandidate ? (
               <p>
                 {knownCandidate.name} · {knownCandidate.email}
@@ -410,12 +481,23 @@ export function SchedulingPlanForm({
                   className="flex items-start gap-2 rounded-lg border p-3 text-sm"
                 >
                   <input
-                    type="radio"
-                    name="scheduling-slot"
+                    type={proposing ? "checkbox" : "radio"}
+                    name={`${formId}-scheduling-slot`}
                     value={JSON.stringify(value)}
-                    checked={slotKey === JSON.stringify(value)}
+                    checked={
+                      proposing
+                        ? proposalKeys.includes(JSON.stringify(value))
+                        : slotKey === JSON.stringify(value)
+                    }
                     disabled={!zonesValid}
-                    onChange={() => setSlotKey(JSON.stringify(value))}
+                    onChange={() => {
+                      const key = JSON.stringify(value);
+                      if (proposing) {
+                        setProposalKeys((keys) =>
+                          keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key],
+                        );
+                      } else setSlotKey(key);
+                    }}
                   />
                   <span>
                     {zonesValid ? (
@@ -441,6 +523,49 @@ export function SchedulingPlanForm({
                 </label>
               ))}
             </fieldset>
+            {proposing ? (
+              <>
+                <label className="block text-sm" htmlFor={`${formId}-guests`}>
+                  <Trans>Requested guests</Trans>
+                  <Input
+                    id={`${formId}-guests`}
+                    name="requested-guests"
+                    autoComplete="off"
+                    aria-label={t`Requested guests`}
+                    value={guests}
+                    onChange={(event) => setGuests(event.target.value)}
+                  />
+                </label>
+                <label className="block text-sm" htmlFor={`${formId}-location`}>
+                  <Trans>Requested location</Trans>
+                  <Input
+                    id={`${formId}-location`}
+                    name="requested-location"
+                    autoComplete="off"
+                    aria-label={t`Requested location`}
+                    value={location}
+                    onChange={(event) => setLocation(event.target.value)}
+                  />
+                </label>
+                <label className="block text-sm" htmlFor={`${formId}-notes`}>
+                  <Trans>Notes for the email</Trans>
+                  <Textarea
+                    id={`${formId}-notes`}
+                    name="proposal-notes"
+                    autoComplete="off"
+                    aria-label={t`Notes for the email`}
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                  />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  <Trans>
+                    Guests and location are requests in the draft. Email recipients stay unchanged.
+                    No time is booked.
+                  </Trans>
+                </p>
+              </>
+            ) : null}
           </fieldset>
           {read.data?.partial ? (
             <p className="text-xs text-muted-foreground">
@@ -470,7 +595,62 @@ export function SchedulingPlanForm({
               Availability is rechecked before booking.
             </Trans>
           </p>
-          {reviewing && input.success ? (
+          {proposing ? (
+            reviewing && proposalValid ? (
+              <div className="space-y-3 border-t pt-3">
+                <h4 className="font-medium">
+                  <Trans>Review proposed times</Trans>
+                </h4>
+                <p className="break-words text-sm">
+                  {candidate?.name} · {candidate?.email}
+                </p>
+                <p className="break-words text-sm">
+                  {interviewerName} · {interviewerEmail}
+                </p>
+                <ul className="space-y-2 text-sm">
+                  {proposedSlots.map((value) => (
+                    <li key={JSON.stringify(value)} className="break-words">
+                      <p>
+                        {localTime(value.start, candidateZone)} –{" "}
+                        {localTime(value.end, candidateZone)} · {candidateZone}
+                      </p>
+                      <p>
+                        {localTime(value.start, interviewerZone)} –{" "}
+                        {localTime(value.end, interviewerZone)} · {interviewerZone}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                {guests ? (
+                  <p className="whitespace-pre-wrap break-words text-sm">
+                    <Trans>Requested guests</Trans> · {guests}
+                  </p>
+                ) : null}
+                {location ? (
+                  <p className="whitespace-pre-wrap break-words text-sm">
+                    <Trans>Requested location</Trans> · {location}
+                  </p>
+                ) : null}
+                {notes ? <p className="whitespace-pre-wrap break-words text-sm">{notes}</p> : null}
+                <p className="text-sm">
+                  <Trans>Email draft only. No time is booked.</Trans>
+                </p>
+                <Button variant="outline" onClick={() => setReviewing(false)}>
+                  <Trans>Edit</Trans>
+                </Button>
+                <Button onClick={() => onProposeTimes?.(proposalText)}>
+                  <Trans>Draft in role chat</Trans>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                disabled={!proposalValid || read.failed || !proof}
+                onClick={() => setReviewing(true)}
+              >
+                <Trans>Review proposed times</Trans>
+              </Button>
+            )
+          ) : reviewing && input.success ? (
             <div className="space-y-3 border-t pt-3">
               <h4 className="font-medium">
                 <Trans>Review plan</Trans>

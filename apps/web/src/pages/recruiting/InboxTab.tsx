@@ -24,6 +24,7 @@ import {
   useCrmPages,
   useRoleCrm,
 } from "./shared";
+import { useInboxReadState } from "./useInboxReadState";
 
 type MailPage = Extract<RecruitingCrmDataOutput, { operation: "mail" }>;
 type RoleMailPage = Extract<RecruitingCrmDataOutput, { operation: "roleMail" }>;
@@ -47,7 +48,7 @@ export type RecruitingInboxEmail = Omit<CrmReplyDraftContext, "threadId" | "emai
     /** The provider email thread, distinct from the native chat thread. */
     threadId?: string | null;
     sourceId?: string;
-    organizationId?: string;
+    organizationId?: string | null;
     crmRoleId?: string;
     providerMessageId?: string;
     campaignId?: string | null;
@@ -247,6 +248,10 @@ export function InboxTab({
     : mail.data && mail.data.candidateId === personId
       ? mailItems(mail.data, ready?.crmRoleId)
       : [];
+  const inboxReadState = useInboxReadState(props.spaceId, [
+    ...items,
+    ...(roleMail.data?.supported ? roleMailItems(roleMail.data) : []),
+  ]);
   const selected = items.find((item) => item.id === emailId) ?? items[0];
   const selectedPerson = roleWide ? findPerson(selected?.candidateId) : person;
   const selectedCandidateId = roleWide ? selected?.candidateId : personId;
@@ -396,6 +401,14 @@ export function InboxTab({
                         <span className="min-w-0 flex-1 space-y-2">
                           <span className="flex flex-wrap items-start justify-between gap-1.5">
                             <strong className="break-words">{name}</strong>
+                            {roleItems.some(
+                              (email) =>
+                                email.candidateId === id && inboxReadState.unread(email) === true,
+                            ) ? (
+                              <Badge>
+                                <Trans>Unread</Trans>
+                              </Badge>
+                            ) : null}
                             {contact?.outreachStatus ? (
                               <Badge
                                 variant="outline"
@@ -518,6 +531,7 @@ export function InboxTab({
             ) : null}
             {selected ? (
               <EmailConversation
+                readState={inboxReadState}
                 key={selectedCandidateId}
                 items={conversationItems}
                 candidateId={selectedCandidateId}

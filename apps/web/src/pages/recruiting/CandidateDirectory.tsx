@@ -7,6 +7,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { preloadCandidateDetail } from "../shell/preload-detail";
 import { CandidateWindow } from "./CandidateWindow";
 import { CompanyLogo } from "./CompanyLogo";
+import { LinkedInIcon } from "./LinkedInIcon";
 import { PersonAvatar } from "./ProfileImage";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections, withSavedProfile } from "./profile";
@@ -55,6 +56,7 @@ function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevisio
   const host = (name: string | null | undefined) =>
     name ? hosts.get(organizationKey(name)) : undefined;
   return {
+    ranking: row.autumn?.ranking,
     company,
     companyHost: host(company),
     assets,
@@ -163,13 +165,37 @@ const Education = memo(function Education({
 const Fit = memo(function Fit({
   sections,
   compact = false,
+  ranking,
 }: {
+  ranking?: DirectoryProfile["ranking"];
   sections: DirectoryProfile["sections"];
   compact?: boolean;
 }) {
   const { t } = useLingui();
-  const score = sections.fit?.score;
-  const tier = sections.fit?.tier;
+  const score = ranking
+    ? ranking.state === "outdated" || ranking.score === null
+      ? null
+      : { label: t`Saved match score`, value: ranking.score.toLocaleString() }
+    : sections.fit?.score;
+  const groupLabel =
+    ranking?.group === "strong_match"
+      ? t`Strong Match`
+      : ranking?.group === "worth_talking"
+        ? t`Worth Talking`
+        : ranking?.group === "partial"
+          ? t`Partial`
+          : ranking?.group === "uncertain"
+            ? t`Uncertain`
+            : ranking?.group === "outdated"
+              ? t`Outdated review`
+              : ranking?.group === "unreviewed"
+                ? t`Unreviewed`
+                : ranking?.group === "unscored"
+                  ? t`Unscored`
+                  : null;
+  const tier = groupLabel
+    ? { label: ranking?.grade ?? groupLabel, value: groupLabel }
+    : sections.fit?.tier;
   const criteria = sections.requirements.slice(0, 2);
   if (!score && !tier && !criteria.length) return <span className="text-muted-foreground">—</span>;
   return (
@@ -287,7 +313,7 @@ export function CandidateDirectory({
   const showEducation = profiles.some((profile) => profile.school);
   // Fit is the research provider's own assessment; people from the quick search have none yet.
   const showFit = profiles.some(
-    (profile) => profile.sections.fit || profile.sections.requirements.length,
+    (profile) => profile.ranking || profile.sections.fit || profile.sections.requirements.length,
   );
   const sourceLink = (profile: DirectoryProfile, name: string) =>
     profile.profileUrl ? (
@@ -299,7 +325,11 @@ export function CandidateDirectory({
         className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
       >
         <Trans>Profile</Trans>
-        <ExternalLink size={11} aria-hidden />
+        {/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\//i.test(profile.profileUrl) ? (
+          <LinkedInIcon className="size-3" />
+        ) : (
+          <ExternalLink size={11} aria-hidden />
+        )}
       </a>
     ) : null;
   const nameButton = (row: RoleCandidate, index: number) => (
@@ -418,7 +448,7 @@ export function CandidateDirectory({
                 </td>
                 {showFit ? (
                   <td className="px-3 py-2">
-                    <Fit sections={profile.sections} compact />
+                    <Fit ranking={profile.ranking} sections={profile.sections} compact />
                   </td>
                 ) : null}
                 {renderActions ? (
@@ -489,7 +519,7 @@ export function CandidateDirectory({
                 ) : null}
                 {showFit ? (
                   <div className="mt-4 flex-1 border-t border-border pt-3">
-                    <Fit sections={profile.sections} />
+                    <Fit ranking={profile.ranking} sections={profile.sections} />
                   </div>
                 ) : null}
                 <div className="mt-3">

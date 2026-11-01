@@ -1,11 +1,12 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { RecruitingRoleCampaign } from "@rakazo/contracts";
+import type { RecruitingRoleCampaign, RecruitingSequenceInput } from "@rakazo/contracts";
 import { hideVendorNames } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
+import { SequenceEditor } from "./SequenceEditor";
 import { SequenceOverview } from "./SequenceOverview";
 import type { RecruitingTabProps } from "./shared";
 import {
@@ -117,10 +118,25 @@ export function RoleCampaignCard(props: CampaignScope) {
 }
 
 /** Stored outreach state for the role: campaigns and per-candidate status. */
-export function SequenceTab(props: RecruitingTabProps) {
+export function SequenceTab(props: RecruitingTabProps & { onAskChat?: (message: string) => void }) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
+  const groupId =
+    props.conversation && "groupId" in props.conversation ? props.conversation.groupId : undefined;
+  const botId =
+    props.conversation && "botId" in props.conversation ? props.conversation.botId : undefined;
+  const executeDraft = useCallback(
+    (command: RecruitingSequenceInput) => {
+      if (!groupId && !botId) return Promise.reject(new Error("No role conversation"));
+      return rpc.recruiting.sequenceDraft({
+        ...(groupId ? { groupId } : { botId: botId! }),
+        command,
+      });
+    },
+    [groupId, botId],
+  );
+
   const instantly = useInstantlyStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
@@ -179,6 +195,17 @@ export function SequenceTab(props: RecruitingTabProps) {
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
       <CrmGate crm={crm} />
+      {props.conversation && roleCampaign.data?.serverId ? (
+        <div className="mb-6">
+          <SequenceEditor
+            roleId={props.roleId}
+            serverId={roleCampaign.data.serverId}
+            execute={executeDraft}
+            onAskAgent={props.onAskChat}
+          />
+        </div>
+      ) : null}
+
       {campaigns.data?.items.length ? (
         <label className="mb-4 block text-sm">
           <span className="mb-1 block">

@@ -11,7 +11,11 @@ const save = vi.hoisted(() => vi.fn());
 const candidates = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
   rpc: {
-    recruiting: { schedulingPlans: list, saveSchedulingPlan: save, roleCandidates: candidates },
+    recruiting: {
+      schedulingPlans: list,
+      saveSchedulingPlan: save,
+      roleCandidates: candidates,
+    },
   },
 }));
 vi.mock("@lingui/react/macro", () => ({
@@ -34,7 +38,11 @@ const originalEmail = {
   providerThreadId: "provider-thread",
   campaignId: null,
   eaccount: "recruiter@example.test",
-  savedRead: { messageId: "read-message", linkedRunId: "read-run", effectId: "read-effect" },
+  savedRead: {
+    messageId: "read-message",
+    linkedRunId: "read-run",
+    effectId: "read-effect",
+  },
   sender: "candidate@example.test",
   subject: "Original interview reply",
   date: "2026-10-23T10:00:00Z",
@@ -57,6 +65,7 @@ const slot = {
 };
 const review = vi.fn();
 const check = vi.fn();
+const propose = vi.fn();
 let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
@@ -93,15 +102,19 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-async function render(proof = true) {
+async function render(proof = true, proposal = false) {
   await act(async () =>
     root.render(
       <SchedulingPlanForm
-        originalEmail={{ ...originalEmail, savedRead: proof ? originalEmail.savedRead : null }}
+        originalEmail={{
+          ...originalEmail,
+          savedRead: proof ? originalEmail.savedRead : null,
+        }}
         roleRevision={2}
         candidate={person}
         onReview={review}
         onCheck={check}
+        onProposeTimes={proposal ? propose : undefined}
         onClose={() => {}}
       />,
     ),
@@ -201,7 +214,11 @@ it("keeps failed attempts distinct from successful bookings and filters other ro
     threadId: "thread-1",
     roleId: "role-1",
     candidate: { ...person, timeZone: "America/New_York" },
-    interviewer: { name: "Recruiter", email: "recruiter@example.test", timeZone: "Europe/London" },
+    interviewer: {
+      name: "Recruiter",
+      email: "recruiter@example.test",
+      timeZone: "Europe/London",
+    },
     calendar: slot,
     id: "plan",
     originalEmail,
@@ -280,7 +297,11 @@ it("reuses the account snapshot for native plan review without another backend r
     expectedRoleRevision: 2,
     originalEmail,
     candidate: { ...person, timeZone: "America/New_York" },
-    interviewer: { name: "Recruiter", email: "recruiter@example.test", timeZone: "Europe/London" },
+    interviewer: {
+      name: "Recruiter",
+      email: "recruiter@example.test",
+      timeZone: "Europe/London",
+    },
     calendar: slot,
     createdAt: "2026-10-23T12:00:00Z",
     roleTitle: "Engineering",
@@ -313,4 +334,61 @@ it("reuses the account snapshot for native plan review without another backend r
     plan,
     text: expect.stringContaining("Do not rebook or resend"),
   });
+});
+
+it("reviews multiple proposed times with exact notes without saving or booking", async () => {
+  await render(true, true);
+  await complete();
+  const action = host.querySelector<HTMLSelectElement>('select[id$="-action"]')!;
+  await act(async () => {
+    action.value = "proposal";
+    action.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(button("Review proposed times").disabled).toBe(true);
+  for (const checkbox of host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+    await act(async () => checkbox.click());
+  }
+  await fill("Requested guests", "Panelist <panel@example.test>");
+  await fill("Requested location", "Room 3 / video link after review");
+  const notes = "Bring the design doc.\n  Keep this indentation & exact wording.";
+  const textarea = host.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Notes for the email"]',
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      textarea,
+      notes,
+    );
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => button("Review proposed times").click());
+  expect(host.textContent).toContain(notes);
+  expect(host.textContent).toContain("Email draft only. No time is booked.");
+  expect(save).not.toHaveBeenCalled();
+  expect(propose).not.toHaveBeenCalled();
+  await act(async () => button("Draft in role chat").click());
+  expect(propose).toHaveBeenCalledTimes(1);
+  const text = propose.mock.calls[0]![0];
+  for (const value of [
+    slot.start,
+    slot.end,
+    "2026-11-01T06:30:00Z",
+    "2026-11-01T07:00:00Z",
+    "America/New_York",
+    "Europe/London",
+    "GMT-04:00",
+    "GMT-05:00",
+    "Panelist <panel@example.test>",
+    "Room 3 / video link after review",
+    notes,
+  ]) {
+    expect(text).toContain(value);
+  }
+  expect(text).toContain("preserve its exact reply recipients");
+  expect(text).toContain("do not add to email recipients");
+  expect(text).toContain("Do not send, book or create calendar events");
+  expect(text).toContain("not confirmed bookings");
+  expect(text).toContain("do not override its configured location");
+  expect(save).not.toHaveBeenCalled();
+  expect(review).not.toHaveBeenCalled();
 });
