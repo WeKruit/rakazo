@@ -836,7 +836,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 5;
+export const EVENT_FORMAT_VERSION = 6;
 
 export const ProductEventSchema = z
   .object({

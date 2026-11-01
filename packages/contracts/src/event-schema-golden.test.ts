@@ -21,6 +21,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
   // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
   5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
+  // 6: role_link block (a card that opens a role's conversation).
+  6: "0d539930c42fe6f2197e44f76e0abb1a3a6081d2a9fec2fc59fb850aa91390ef",
 };
 
 const OLD_ROWS: unknown[] = [
