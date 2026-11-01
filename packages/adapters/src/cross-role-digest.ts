@@ -97,7 +97,7 @@ export async function loadCrossRoleDigest(
       : undefined;
     const head = [
       role?.title || group.name,
-      role ? `roleId ${role.id}` : "no role record yet",
+      role ? `roleId ${role.id}` : `groupId ${group.id}, no saved role yet`,
       role ? `stage ${role.playbookStage}` : undefined,
       role ? `${role._count.candidates} people saved` : undefined,
       `last activity ${ago(group.updatedAt, now)}`,

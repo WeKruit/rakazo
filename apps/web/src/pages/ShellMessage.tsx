@@ -783,7 +783,7 @@ function RoleLinkCard({ groupId, title }: { groupId: string; title: string }) {
         <span className="min-w-0 truncate text-[15px] font-medium text-foreground" dir="auto">
           {title}
         </span>
-        <Button size="sm" onClick={() => navigate(`/app/g/${groupId}?view=conversation`)}>
+        <Button size="sm" onClick={() => navigate(`/app/g/${groupId}?view=brief`)}>
           <Trans>Open role</Trans>
         </Button>
       </div>

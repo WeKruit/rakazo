@@ -830,7 +830,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_group_memory",
     description:
-      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
+      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. When the recruiter asks you to remember something about this role or project only, save it here; something meant for every role, or a standing preference, goes to their account-wide memory instead (user scope; recruiting_feedback target preference). Tell them in a few words which one you saved it to. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1540,14 +1540,28 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "delegate_to_role",
     description:
-      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles and the request in the recruiter's own words with any context they gave. The team works in the background in the role's conversation, with its usual approval cards there, and its result comes back here as a new message for you to relay. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles (or the groupId from the role summary for a team with no saved role yet), optionally a teammate to give it to directly, and a brief that quotes the recruiter's own words. The team works in the background in the role's conversation, with its usual approval cards there. Its result comes back here as a new message for you to relay, and so does word that it is waiting on the recruiter's card or could not finish: tell the recruiter and point them to that role's card. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
     inputSchema: {
       type: "object",
       properties: {
         role_id: { type: "string", description: "Role id from recruiting_candidates roles." },
-        message: { type: "string", description: "The request, in the recruiter's words." },
+        group_id: {
+          type: "string",
+          description:
+            "The role conversation's groupId from the role summary, for a role team with no saved role yet. Use instead of role_id.",
+        },
+        teammate: {
+          type: "string",
+          description:
+            "Optional teammate on that role team to give the work to directly (for example Sourcer or Scheduling). Leave out to give it to the team's lead.",
+        },
+        message: {
+          type: "string",
+          description:
+            "The brief: Goal; Done when (a check the result can be held to); Context (the recruiter's own words and anything the team cannot see); Don't (limits, such as no sends without the recruiter's card). End with: ask in this conversation if blocked.",
+        },
       },
-      required: ["role_id", "message"],
+      required: ["message"],
     },
   },
   {

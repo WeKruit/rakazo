@@ -334,6 +334,7 @@ import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.j
 import {
   loadBotMessageContext,
   messageBot,
+  reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
@@ -5200,6 +5201,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((error) => getLogger().error("group handoff report", error));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (error) => getLogger().error("delegated team failure report", error),
+              );
           }
           if (run.trigger === "bot_message") {
             await returnBotMessageOutcome(
@@ -11860,29 +11866,77 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "delegate_to_role") {
-            const role = await deps.prisma.recruitingRole.findFirst({
-              where: {
-                id: String(args.role_id ?? ""),
-                spaceId: run.spaceId,
-                userId: run.userId,
-                archivedAt: null,
-              },
-              select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
-            });
-            if (!role?.sourceThread.groupId)
+            // A saved role by roleId, or a role conversation not saved yet by its groupId.
+            const role = args.role_id
+              ? await deps.prisma.recruitingRole.findFirst({
+                  where: {
+                    id: String(args.role_id),
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    archivedAt: null,
+                  },
+                  select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
+                })
+              : null;
+            const group = role?.sourceThread.groupId
+              ? null
+              : args.group_id && !String(args.group_id).startsWith("recruiting-global-")
+                ? await deps.prisma.chatGroup.findFirst({
+                    where: {
+                      id: String(args.group_id),
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      archivedAt: null,
+                    },
+                    select: { id: true, name: true, thread: { select: { id: true } } },
+                  })
+                : null;
+            const target = role?.sourceThread.groupId
+              ? {
+                  groupId: role.sourceThread.groupId,
+                  threadId: role.sourceThread.id,
+                  title: role.title ?? "",
+                }
+              : group?.thread
+                ? { groupId: group.id, threadId: group.thread.id, title: group.name }
+                : null;
+            if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId. Read recruiting_candidates operation roles and pass its id.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
               });
+            // Work can go straight to a named teammate of that role team; otherwise to its lead.
+            const teammateName = String(args.teammate ?? "")
+              .trim()
+              .toLowerCase();
+            let recipient = bot.id;
+            if (teammateName) {
+              const members = await deps.prisma.chatGroupMember.findMany({
+                where: { groupId: target.groupId },
+                select: { bot: { select: { id: true, name: true, archivedAt: true } } },
+              });
+              const match = members.find(
+                (member) =>
+                  !member.bot.archivedAt && member.bot.name.toLowerCase() === teammateName,
+              );
+              if (!match)
+                return finish({
+                  error: `No teammate named ${String(args.teammate)} on that role team. Teammates: ${members
+                    .filter((member) => !member.bot.archivedAt)
+                    .map((member) => member.bot.name)
+                    .join(", ")}.`,
+                });
+              recipient = match.bot.id;
+            }
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },
               { id: bot.id, name: bot.name },
               {
-                bot_id: bot.id,
-                thread_id: role.sourceThread.id,
+                bot_id: recipient,
+                thread_id: target.threadId,
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${role.title} team`,
+                target_label: `${target.title} team`,
                 message: redactSecrets(String(args.message ?? ""), runSecrets),
                 intent: "request",
                 deliveryKey: effectKey,
@@ -11890,7 +11944,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             if (!sent.ok) return finish({ error: sent.error });
             await publishMessage(deps, run, "bot", [
-              { kind: "role_link", groupId: role.sourceThread.groupId, title: role.title ?? "" },
+              { kind: "role_link", groupId: target.groupId, title: target.title },
             ]);
             return finish({
               ok: true,
@@ -13902,6 +13956,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
+              // Delegated work waiting on the recruiter tells the delegating conversation now.
+              if (thread.groupId)
+                void reportDelegatedTeamBlocked(deps, run, {
+                  kind: "waiting",
+                  text: safeText,
+                }).catch((error) => getLogger().error("delegated team wait report", error));
               // A recruiter message that arrived while this turn was finishing answers the card.
               const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
                 spaceId: run.spaceId,
@@ -14761,6 +14821,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               status: "failed",
               error: message,
             }).catch((reportError) => getLogger().error("group handoff report", reportError));
+            // A teammate's failure on delegated work reaches the conversation that asked for it.
+            if (run.trigger !== "bot_message")
+              await reportDelegatedTeamBlocked(deps, run, { kind: "failed", text: message }).catch(
+                (reportError) => getLogger().error("delegated team failure report", reportError),
+              );
           }
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {

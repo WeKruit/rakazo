@@ -72,7 +72,7 @@ describe("loadCrossRoleDigest", () => {
     expect(digest).toContain(
       'Recent: Recruiter: "new grads, USC preferred" / Sourcer: "Is USC required?"',
     );
-    expect(digest).toContain("- Data Scientist · no role record yet · last activity 5 min ago");
+    expect(digest).toContain("- Data Scientist · groupId g2, no saved role yet · last activity 5 min ago");
     expect(prisma.chatGroup.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ spaceId: "s", userId: "u", archivedAt: null }),
