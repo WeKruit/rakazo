@@ -41,19 +41,3 @@ it("keeps the server deadline across a remount and ticks to expiry", () => {
     vi.unstubAllGlobals();
   }
 });
-
-it("shows no countdown while a fresh wait has most of its day left", () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
-  const container = document.createElement("div");
-  const root = createRoot(container);
-  try {
-    act(() => root.render(<AskDeadline expiresAt="2026-10-31T12:00:00.000Z" />));
-    expect(container.textContent).toBe("");
-  } finally {
-    act(() => root.unmount());
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  }
-});

@@ -15,12 +15,6 @@ export function stuckWorkExpiresAt(status: string, updatedAt: string | undefined
   return Number.isFinite(at) ? new Date(at + STUCK_WORK_EXPIRE_AFTER_MS).toISOString() : null;
 }
 
-/** A waiting card shows its expiry only once the wait is old enough to be called out,
- *  so a fresh question does not open with a 24-hour countdown. */
-export function stuckWorkDeadlineShown(expiresAt: string, now: number): boolean {
-  return Date.parse(expiresAt) - now <= STUCK_WORK_EXPIRE_AFTER_MS - STUCK_WORK_NOTIFY_AFTER_MS;
-}
-
 /** Marker on a thread.meta event so a reminder is sent once per waiting episode. */
 export const STUCK_WORK_NOTICE = "stuck";
 
