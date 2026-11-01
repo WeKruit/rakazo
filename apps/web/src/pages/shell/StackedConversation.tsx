@@ -1,9 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
-import { answerableAskMessageIds } from "@rakazo/core";
+import { answerableAskMessageIds, userVisibleMessages } from "@rakazo/core";
 import { Button, Textarea } from "@rakazo/ui-web";
 import { ArrowLeft, Maximize2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -61,7 +61,12 @@ export function StackedConversation({
     };
   }, [load]);
 
-  const lastId = snapshot?.messages.at(-1)?.id;
+  // Same filter as the full conversation: internal continuations and peer chatter stay hidden.
+  const messages = useMemo(
+    () => userVisibleMessages(snapshot?.messages ?? []),
+    [snapshot?.messages],
+  );
+  const lastId = messages.at(-1)?.id;
   useEffect(() => {
     const box = scroller.current;
     if (box) box.scrollTop = box.scrollHeight;
@@ -122,7 +127,7 @@ export function StackedConversation({
             <Trans>Loading…</Trans>
           </p>
         ) : null}
-        {snapshot?.messages.map((message) => (
+        {messages.map((message) => (
           <MessageView
             key={message.id}
             artifactTarget={{ groupId }}
