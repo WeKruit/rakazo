@@ -453,6 +453,7 @@ msgid "Awaiting feedback"
 msgstr "等待反馈"
 
 #: src/components/computer/FilesApp.tsx
+#: src/pages/shell/KruitDock.tsx
 msgid "Back"
 msgstr "返回"
 
@@ -2372,6 +2373,10 @@ msgstr "在完整窗口中打开"
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open navigation"
 msgstr "打开导航"
+
+#: src/pages/ShellMessage.tsx
+msgid "Open role"
+msgstr "打开岗位"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Open role chat"

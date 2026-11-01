@@ -159,6 +159,11 @@ export function selectedAskActionLabel(
   return resolveAskChoice(answer, actions)?.label ?? answer;
 }
 
+/** One answer for a multi-select card: every picked option, then anything typed. */
+export function multiSelectAskAnswer(picked: readonly string[], typed: string): string {
+  return [...picked, typed.trim()].filter(Boolean).join("; ");
+}
+
 export function resolveAskChoice(
   answer: string,
   actions?: readonly { id: string; label: string }[],

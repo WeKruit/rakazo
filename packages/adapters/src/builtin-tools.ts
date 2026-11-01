@@ -90,6 +90,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "handoff_to_bot",
   "message_bot",
   "delegate_to_role",
+  "start_role",
 ]);
 
 const scheduleCreateProperties = {
@@ -380,7 +381,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "ask_user",
     description:
-      "Ask the user a question, then wait. Read supplied facts and saved answers first; present the actual proposal and ask only the unresolved decision in ordinary business language. Questions, field labels and options must be understandable without internal gate, task, artifact, shard or test identifiers; resolve those internally. Supply options for two to four concise choices (a custom-answer input is also shown, so offer real decisions without an extra custom-input option; put the choice you recommend first and give your pick with its reason in one sentence of the question), or requestedSchema for a standard MCP form with multiple primitive fields, enums and multi-select arrays. Do not collect secrets or approvals in a form; use their native tools.",
+      "Ask the user a question, then wait. Read supplied facts and saved answers first; present the actual proposal and ask only the unresolved decision in ordinary business language. Questions, field labels and options must be understandable without internal gate, task, artifact, shard or test identifiers; resolve those internally. Supply options for two to four concise choices (a custom-answer input is also shown, so offer real decisions without an extra custom-input option; put the choice you recommend first and give your pick with its reason in one sentence of the question; set multiple:true when several options can apply together, so the person can tick more than one), or requestedSchema for a standard MCP form with multiple primitive fields, enums and multi-select arrays. Do not collect secrets or approvals in a form; use their native tools.",
     inputSchema: AskUserInputJsonSchema,
   },
   {
@@ -829,7 +830,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_group_memory",
     description:
-      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
+      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. When the recruiter asks you to remember something about this role or project only, save it here; something meant for every role, or a standing preference, goes to their account-wide memory instead (user scope; recruiting_feedback target preference). Tell them in a few words which one you saved it to. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1539,14 +1540,47 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "delegate_to_role",
     description:
-      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles and the request in the recruiter's own words with any context they gave. The team works in the background in the role's conversation, with its usual approval cards there, and its result comes back here as a new message for you to relay. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles (or the groupId from the role summary for a team with no saved role yet), optionally a teammate to give it to directly, and a brief that quotes the recruiter's own words. The team works in the background in the role's conversation, with its usual approval cards there. Its result comes back here as a new message for you to relay, and so does word that it is waiting on the recruiter's card or could not finish: tell the recruiter and point them to that role's card. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
     inputSchema: {
       type: "object",
       properties: {
         role_id: { type: "string", description: "Role id from recruiting_candidates roles." },
-        message: { type: "string", description: "The request, in the recruiter's words." },
+        group_id: {
+          type: "string",
+          description:
+            "The role conversation's groupId from the role summary, for a role team with no saved role yet. Use instead of role_id.",
+        },
+        teammate: {
+          type: "string",
+          description:
+            "Optional teammate on that role team to give the work to directly (for example Sourcer or Scheduling). Leave out to give it to the team's lead.",
+        },
+        message: {
+          type: "string",
+          description:
+            "The brief: Goal; Done when (a check the result can be held to); Context (the recruiter's own words and anything the team cannot see); Don't (limits, such as no sends without the recruiter's card). End with: ask in this conversation if blocked.",
+        },
       },
-      required: ["role_id", "message"],
+      required: ["message"],
+    },
+  },
+  {
+    name: "start_role",
+    description:
+      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's requirements, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet (check recruiting_candidates operation roles first). Pass a short title and everything the recruiter said about the role, in their own words (JD text, must-haves, preferences and what is only preferred). The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: 'Short role title, e.g. "Agent Engineer (new grad)".',
+        },
+        message: {
+          type: "string",
+          description: "The recruiter's requirements and JD, in their own words.",
+        },
+      },
+      required: ["title", "message"],
     },
   },
   {

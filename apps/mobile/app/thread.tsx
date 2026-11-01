@@ -56,6 +56,7 @@ import {
   userVisibleMessages,
   withLiveStreamingProgress,
   workStageKind,
+  writesChinese,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -739,6 +740,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   };
   const workSession = workTracker.current.tracker.session;
   const liveWorkSession = workSession?.endedAt ? null : workSession;
+  const threadMessages = snap?.messages;
+  const recruiterWritesChinese = useMemo(
+    () => writesChinese(threadMessages ?? []),
+    [threadMessages],
+  );
   const stageKind = useCallback(
     (stageBotId: string) =>
       workStageKind(
@@ -2410,6 +2416,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
@@ -2442,11 +2449,17 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           stageKind={stageKind}
           onOpenStage={openWorkStage}
           onCancelStage={(id) => void cancelWorkStage(id)}
+          chinese={recruiterWritesChinese}
         />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
-      <WorkingIndicator session={workSession} stageKind={stageKind} onOpenStage={openWorkStage} />
+      <WorkingIndicator
+        session={workSession}
+        stageKind={stageKind}
+        onOpenStage={openWorkStage}
+        chinese={recruiterWritesChinese}
+      />
     ) : null;
 
   const loadEarlierControl =
@@ -3426,6 +3439,7 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const colorScheme = useResolvedAppearance();
   const tokens = mobileTokens();
+  const router = useRouter();
   const { t } = useI18n();
   const artifactTarget: MobileArtifactTarget = groupId ? { groupId } : { botId };
   const cardBotId = message.botId ?? botId;
@@ -3621,8 +3635,42 @@ const MessageBubble = memo(function MessageBubble({
   }
   const special = message.blocks.find(
     (block) =>
-      block.kind === "subagent" || block.kind === "child_bot" || block.kind === "cloud_agent",
+      block.kind === "subagent" ||
+      block.kind === "child_bot" ||
+      block.kind === "cloud_agent" ||
+      block.kind === "role_link",
   );
+  if (special?.kind === "role_link") {
+    return (
+      <Pressable
+        {...actionProps}
+        accessibilityRole="link"
+        onPress={() =>
+          router.push({
+            pathname: "/group-thread",
+            params: { groupId: special.groupId, name: special.title },
+          })
+        }
+        style={{
+          width: "90%",
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: tokens.border,
+          backgroundColor: tokens.card,
+          paddingHorizontal: 16,
+          paddingVertical: 14,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <Text style={{ color: tokens.foreground, fontSize: 15, fontWeight: "600", flexShrink: 1 }}>
+          {special.title}
+        </Text>
+        <Text style={{ color: tokens.primary, fontSize: 15 }}>{t("Open role")}</Text>
+      </Pressable>
+    );
+  }
   if (special?.kind === "subagent") {
     const running = special.status === "running";
     const failed = special.status === "failed";
@@ -3840,6 +3888,7 @@ const MessageBubble = memo(function MessageBubble({
             <AskActions
               actions={askBlock.actions}
               allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
+              multiple={Boolean(askBlock.multiple) && !isApprovalAskBlock(askBlock)}
               accessibilityActions={actionProps.accessibilityActions}
               onAccessibilityAction={actionProps.onAccessibilityAction}
               onAnswer={(answer) => onAnswer(message, answer)}

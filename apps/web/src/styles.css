@@ -330,8 +330,12 @@ body,
 }
 [data-product-view="recruiting"] .hire-assistant-identity {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
+}
+[data-product-view="recruiting"] .hire-assistant-identity > svg {
+  flex-shrink: 0;
 }
 [data-product-view="recruiting"] .hire-live-criteria {
   padding-bottom: 15px;

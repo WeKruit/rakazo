@@ -20,6 +20,7 @@ import type { ComputerReleaseReason, RecruitingAccountViewOutput } from "@rakazo
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../lib/recruiting-read-view";
 
@@ -115,6 +116,8 @@ export function ShellPage() {
     !accountParams.has("role") &&
     ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
   const { t } = useLingui();
+  // Where the recruiter was before opening a waiting card from the corner.
+  const [dockReturn, setDockReturn] = useState<string | null>(null);
   const {
     navigate,
     session,
@@ -357,12 +360,28 @@ export function ShellPage() {
         <KruitDock
           groups={groups}
           groupId={model.groupId}
-          chatting={model.recruitingWorkspaceView === "conversation"}
+          chatting={
+            model.recruitingWorkspaceView === "conversation" ||
+            (model.roleChatWorkspace && !model.roleChatHidden)
+          }
           onOpen={(id) => {
+            const view = model.recruitingWorkspaceView;
+            setDockReturn(`${window.location.pathname}${window.location.search}`);
             setPanel(null);
             setMobileSidebarOpen(false);
-            navigate(`/app/g/${encodeURIComponent(id)}?view=conversation`);
+            // From a role workspace the other role opens in the same workspace, its card in the chat beside it.
+            navigate(
+              `/app/g/${encodeURIComponent(id)}?view=${model.roleChatWorkspace ? view : "conversation"}`,
+            );
           }}
+          onBack={
+            dockReturn
+              ? () => {
+                  setDockReturn(null);
+                  navigate(dockReturn);
+                }
+              : undefined
+          }
         />
       )}
 
