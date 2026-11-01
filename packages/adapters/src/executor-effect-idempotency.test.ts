@@ -5490,6 +5490,40 @@ describe("native recruiting assessment effect delivery", () => {
     );
   });
 
+  it("posts a progress line while the pasted JD's role is still saving", async () => {
+    const f = fixture("pasted-jd-async");
+    let release: (() => void) | undefined;
+    const original = vi.mocked(executeRecruitingRoleTool).getMockImplementation();
+    vi.mocked(executeRecruitingRoleTool).mockImplementationOnce((async (
+      ...args: Parameters<typeof executeRecruitingRoleTool>
+    ) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return original!(...args);
+    }) as never);
+    const text = `Job title: Simulation Scientist\n\n${"Build simulation for robots. ".repeat(20)}`;
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "pasted-jd-async",
+        blocks: [{ kind: "text", text }],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    f.setCalls([
+      { name: "message_user", args: { message: "Reading the role." }, executionId: "progress-1" },
+    ]);
+    const running = f.run();
+    await vi.waitFor(() => expect(f.results).toHaveLength(1));
+    expect(release).toBeDefined();
+    release!();
+    await running;
+  });
+
   it("saves an attached JD as the role before the model's first step", async () => {
     const f = fixture("attached-jd-role");
     vi.mocked(executeRecruitingRoleTool).mockClear();

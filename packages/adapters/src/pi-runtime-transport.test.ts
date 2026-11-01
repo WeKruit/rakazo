@@ -13,6 +13,7 @@ import {
   reliableModelStream,
   reliableStreamOptions,
   resolveRuntimeModel,
+  sharedPromptCacheKey,
 } from "./pi-runtime.js";
 import {
   CODEX_STREAM_HEADERS_TIMEOUT_MS,
@@ -40,6 +41,27 @@ const residencyFor = async (options: ModelsSimpleStreamOptions, headers: Provide
 describe("Pi runtime transport", () => {
   beforeEach(() => vi.stubEnv("MODEL_STREAM_MAX_RETRIES", undefined));
   afterEach(() => vi.unstubAllEnvs());
+
+  it("shares the prompt cache key across chats with the same bot and tools", async () => {
+    const tools = [{ type: "function", name: "ask_user" }];
+    const keyFor = async (threadId: string, payload: Record<string, unknown>) =>
+      reliableStreamOptions(codexModel, {
+        sessionId: conversationSessionId(threadId, "bot-1"),
+      }).onPayload?.(payload, codexModel);
+    const first = (await keyFor("thread-1", { prompt_cache_key: "thread-1", tools })) as {
+      prompt_cache_key: string;
+    };
+    const second = (await keyFor("thread-2", { prompt_cache_key: "thread-2", tools })) as {
+      prompt_cache_key: string;
+    };
+    expect(first.prompt_cache_key).toMatch(/^rk:bot-1:[0-9a-f]{16}$/);
+    expect(second.prompt_cache_key).toBe(first.prompt_cache_key);
+    expect(sharedPromptCacheKey(conversationSessionId("thread-1", "bot-1"))?.([])).not.toBe(
+      first.prompt_cache_key,
+    );
+    const untouched = { messages: [] };
+    expect(await keyFor("thread-1", untouched)).toBe(untouched);
+  });
 
   it.each(["0", "3", "5"])("uses the configured retry limit %s", (value) => {
     vi.stubEnv("MODEL_STREAM_MAX_RETRIES", value);
@@ -112,6 +134,7 @@ describe("Pi runtime transport", () => {
         ...streamDefaults,
         sessionId: "thread-1:bot-1",
         transport: "auto",
+        onPayload: expect.any(Function),
         headers: {
           "x-opencode-session": "thread-1:bot-1",
           "x-opencode-client": "rakazo",
