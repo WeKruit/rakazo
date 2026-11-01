@@ -220,7 +220,7 @@ describe("native saved artifact reading", () => {
     expect(pathed).not.toHaveProperty("jsonPath");
     extract.mockRejectedValueOnce(new Error("/private/path secret-value"));
     const failed = await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id });
-    expect(failed).toHaveProperty("error", "PDF text could not be read or verified.");
+    expect(failed).toHaveProperty("error", "Document text could not be read or verified.");
     expect(failed).not.toHaveProperty("text");
     expect(JSON.stringify(failed)).not.toContain("secret-value");
   });

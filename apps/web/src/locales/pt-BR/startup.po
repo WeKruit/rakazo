@@ -31,21 +31,6 @@ msgstr ""
 msgid "{0, plural, one {# person with email} other {# people with email}}"
 msgstr ""
 
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
-msgstr "{0} (máx. anexos {ATTACHMENT_MAX_COUNT})"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (over 10 MiB)"
-msgstr "{0} (acima de 10 MiB)"
-
-#. placeholder {0}: file.name
-#: src/pages/shell/useShellMessages.ts
-msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
-msgstr ""
-
 #. placeholder {0}: archivedRouteGroup.name
 #: src/pages/shell/ShellConversation.tsx
 msgid "{0} is archived."
@@ -1979,6 +1964,10 @@ msgstr ""
 msgid "Max"
 msgstr "Máximo"
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Max {ATTACHMENT_MAX_COUNT} files"
+msgstr "Máx. de {ATTACHMENT_MAX_COUNT} arquivos"
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "MCP endpoint"
 msgstr ""
@@ -2437,6 +2426,10 @@ msgstr "Outreach drafts"
 msgid "Outreach status"
 msgstr ""
 
+#: src/pages/shell/useShellMessages.ts
+msgid "Over {maxMegabytes} MB"
+msgstr "Mais de {maxMegabytes} MB"
+
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Overall direction"
 msgstr ""
@@ -2720,7 +2713,9 @@ msgid "Reminder"
 msgstr ""
 
 #. placeholder {0}: attachment.file.name
+#. placeholder {0}: item.name
 #: src/pages/shell/Composer.tsx
+#: src/pages/shell/skipped-attachments.tsx
 msgid "Remove {0}"
 msgstr "Remover {0}"
 
@@ -2985,6 +2980,10 @@ msgstr ""
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Save"
 msgstr "Salvar"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Save as CSV"
+msgstr "Salve como CSV"
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
@@ -3315,11 +3314,6 @@ msgstr "Ignorar ou implantar chave"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Skipped"
 msgstr ""
-
-#. placeholder {0}: skipped.join(", ")
-#: src/pages/shell/useShellMessages.ts
-msgid "Skipped {0}"
-msgstr "{0} ignorado"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
@@ -3741,6 +3735,10 @@ msgstr ""
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Unsupported file type: {0}"
 msgstr "Tipo de arquivo não suportado: {0}"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Unsupported format"
+msgstr "Formato não compatível"
 
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx

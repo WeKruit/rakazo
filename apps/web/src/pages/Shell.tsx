@@ -5,7 +5,6 @@ const ShellPanelContent = lazyPanel(() =>
   withFeatureMessages(() => import("./shell/ShellPanelContent")).then((m) => m.ShellPanelContent),
 );
 
-import { ATTACHMENT_ACCEPT } from "./shell/Composer";
 import { ShellConversation } from "./shell/ShellConversation";
 
 const ShellOverlays = lazyPanel(() => import("./shell/ShellOverlays").then((m) => m.ShellOverlays));
@@ -130,6 +129,7 @@ export function ShellPage() {
     sendError,
     attachmentNotice,
     setAttachmentNotice,
+    removeSkippedAttachment,
     panel,
     recruitingRefresh,
     recruitingReadCache,
@@ -200,7 +200,7 @@ export function ShellPage() {
       initialDescription={newRoleDescription}
       attachments={showToolActivity ? undefined : newRoleAttachments}
       attachmentNotice={attachmentNotice}
-      attachmentAccept={ATTACHMENT_ACCEPT}
+      onRemoveSkippedAttachment={removeSkippedAttachment}
       onAttachmentPick={
         showToolActivity ? undefined : (files) => onAttachmentPick(files, newRoleAttachmentKey)
       }
@@ -210,7 +210,7 @@ export function ShellPage() {
       }}
       onCancel={() => {
         for (const attachment of newRoleAttachments) removeAttachment(attachment);
-        setAttachmentNotice(null);
+        setAttachmentNotice([]);
         setPanel(null);
         setNewRoleSourceId(null);
         setNewRoleDescription("");

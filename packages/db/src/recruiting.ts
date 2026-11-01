@@ -125,7 +125,7 @@ import {
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
-import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/node/document-text";
 import { getLogger } from "@rakazo/logging";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -4231,7 +4231,7 @@ async function validateReadSources(
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
         throw new RecruitingSourceCheckError(source.id, 'locator must be "text" for a file.');
       const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
-      const pdf = artifact.mimeType === "application/pdf";
+      const pdf = isExtractedDocumentMimeType(artifact.mimeType);
       const jsonPath =
         selection?.kind === "artifact_json_string"
           ? selection.path
@@ -4245,7 +4245,7 @@ async function validateReadSources(
         );
       if (pdf && !pdfTexts.has(artifact.hash)) {
         try {
-          pdfTexts.set(artifact.hash, await extractPdfText(bytes));
+          pdfTexts.set(artifact.hash, await extractDocumentText(bytes, artifact.mimeType));
         } catch {
           throw new IsolationError();
         }
