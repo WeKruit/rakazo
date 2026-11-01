@@ -43,11 +43,14 @@ it.each([false, true])(
       act(() =>
         root.render(<AskCard block={block} canAnswer expiresAt={expiresAt} onAnswer={vi.fn()} />),
       );
+      // A fresh wait shows no countdown; it appears once the wait has sat for 4h.
+      expect(container.querySelector("time")).toBeNull();
+      act(() => vi.advanceTimersByTime(4 * 60 * 60_000));
       expect(container.querySelector("time")?.dateTime).toBe(expiresAt);
-      expect(container.textContent).toContain("Expires in 24h 0m");
+      expect(container.textContent).toContain("Expires in 20h 0m");
       act(() => vi.advanceTimersByTime(60_000));
-      expect(container.textContent).toContain("Expires in 23h 59m");
-      act(() => vi.advanceTimersByTime(24 * 60 * 60_000));
+      expect(container.textContent).toContain("Expires in 19h 59m");
+      act(() => vi.advanceTimersByTime(20 * 60 * 60_000));
       expect(container.querySelector("time")?.textContent).toBe("Expired");
       act(() =>
         root.render(

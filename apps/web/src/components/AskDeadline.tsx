@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import { formatWorkDuration } from "@rakazo/core";
+import { formatWorkDuration, stuckWorkDeadlineShown } from "@rakazo/core";
 import { useEffect, useState } from "react";
 
 /** The server's waiting episode supplies the deadline; a reconnect never resets it. */
@@ -10,6 +10,7 @@ export function AskDeadline({ expiresAt }: { expiresAt: string }) {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+  if (!stuckWorkDeadlineShown(expiresAt, now)) return null;
   const remaining = Math.max(0, Date.parse(expiresAt) - now);
   const time = formatWorkDuration(Math.ceil(remaining / 60_000) * 60_000);
   return (
