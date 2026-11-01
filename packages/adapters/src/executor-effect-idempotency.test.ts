@@ -8,11 +8,7 @@ import type {
   MemorySnapshot,
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
-import type {
-  MessageBlock,
-  RecruitingFeedbackInput,
-  RecruitingSourceRef,
-} from "@rakazo/contracts";
+import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
 import {
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -41,10 +37,7 @@ import {
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ArtifactReadModule from "./artifact-read.js";
-import {
-  artifactReadFromTool,
-  INTERNAL_ARTIFACT_ERROR,
-} from "./artifact-read.js";
+import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
@@ -147,9 +140,7 @@ function promptContext(request: {
   ].join("\n\n");
 }
 
-const checkpointWorkspace = vi.hoisted(() =>
-  vi.fn(async () => "home-revision"),
-);
+const checkpointWorkspace = vi.hoisted(() => vi.fn(async () => "home-revision"));
 vi.mock("./computer-workspace.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerWorkspaceModule>()),
   checkpointRunComputerWorkspace: checkpointWorkspace,
@@ -158,18 +149,12 @@ beforeEach(() => checkpointWorkspace.mockClear());
 
 vi.mock("./artifact-read.js", async (importOriginal) => {
   const actual = await importOriginal<typeof ArtifactReadModule>();
-  return {
-    ...actual,
-    artifactReadFromTool: vi.fn(actual.artifactReadFromTool),
-  };
+  return { ...actual, artifactReadFromTool: vi.fn(actual.artifactReadFromTool) };
 });
 
 vi.mock("./bot-secrets.js", async (importOriginal) => {
   const actual = await importOriginal<typeof BotSecretsModule>();
-  return {
-    ...actual,
-    shellCommandEnvironment: vi.fn(actual.shellCommandEnvironment),
-  };
+  return { ...actual, shellCommandEnvironment: vi.fn(actual.shellCommandEnvironment) };
 });
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
@@ -244,9 +229,7 @@ function fixture(
   };
   const memoryCommit = vi.fn(async () => ({ path: "MEMORY.md", revision: 1 }));
   const memoryRead = vi.fn(
-    async (_request: { scope: "bot" | "user" }): Promise<MemorySnapshot> => ({
-      documents: [],
-    }),
+    async (_request: { scope: "bot" | "user" }): Promise<MemorySnapshot> => ({ documents: [] }),
   );
   const semanticSave = vi.fn<SemanticMemoryProvider["save"]>(async () => ({
     ok: true,
@@ -257,20 +240,13 @@ function fixture(
       id: "test-memory",
       contractVersion: "1",
       adapterVersion: "1",
-      capabilities: {
-        recall: true,
-        save: true,
-        purgeHistory: true,
-        sharedScope: true,
-      },
+      capabilities: { recall: true, save: true, purgeHistory: true, sharedScope: true },
     }),
     recall: async () => ({ ok: true, value: [] }),
     save: semanticSave,
     purgeHistory: async () => ({ ok: true, value: undefined }),
   };
-  const memoryProviderResolve = vi.fn<MemoryProviderResolver["resolve"]>(
-    async () => null,
-  );
+  const memoryProviderResolve = vi.fn<MemoryProviderResolver["resolve"]>(async () => null);
   const disabledBuiltinTools: string[] = [];
   const artifacts = {
     describe: () => ({ capabilities: { stream: false } }),
@@ -283,20 +259,13 @@ function fixture(
       async ({
         where,
       }: {
-        where?: {
-          id?: string;
-          spaceId?: string;
-          runId?: string;
-          status?: string;
-          kind?: string;
-        };
+        where?: { id?: string; spaceId?: string; runId?: string; status?: string; kind?: string };
       } = {}) =>
         effects.filter((effect) => {
           if (where?.status && effect.status !== where.status) return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
-          if (where?.runId && effect.runId && effect.runId !== where.runId)
-            return false;
+          if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
           return true;
         }),
@@ -304,9 +273,7 @@ function fixture(
     findUnique: vi.fn(
       async ({ where }: { where: { id?: string; idempotencyKey?: string } }) =>
         effects.find((effect) =>
-          where.id
-            ? effect.id === where.id
-            : effect.idempotencyKey === where.idempotencyKey,
+          where.id ? effect.id === where.id : effect.idempotencyKey === where.idempotencyKey,
         ) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
@@ -314,28 +281,11 @@ function fixture(
       effects.push(effect);
       return { ...effect };
     }),
-    update: vi.fn(
-      async ({
-        where,
-        data,
-      }: {
-        where: { id: string };
-        data: Partial<Effect>;
-      }) => {
-        Object.assign(
-          effects.find((effect) => effect.id === where.id)!,
-          data,
-        );
-      },
-    ),
+    update: vi.fn(async ({ where, data }: { where: { id: string }; data: Partial<Effect> }) => {
+      Object.assign(effects.find((effect) => effect.id === where.id)!, data);
+    }),
     updateMany: vi.fn(
-      async ({
-        where,
-        data,
-      }: {
-        where: { id: string; status: string };
-        data: Partial<Effect>;
-      }) => {
+      async ({ where, data }: { where: { id: string; status: string }; data: Partial<Effect> }) => {
         const effect = effects.find(
           (effect) => effect.id === where.id && effect.status === where.status,
         );
@@ -349,18 +299,10 @@ function fixture(
   const prisma = {
     $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
     // Durable mid-turn and early-final messages go through one transaction on these rows.
-    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
-      work(prisma),
-    ),
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
     event: {
-      findMany: vi.fn(
-        async () =>
-          [] as Array<{ seq: number; type: string; payload: unknown }>,
-      ),
-      create: vi.fn(async ({ data }: { data: object }) => ({
-        ...data,
-        seq: 1,
-      })),
+      findMany: vi.fn(async () => [] as Array<{ seq: number; type: string; payload: unknown }>),
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
     },
     run: {
       findMany: vi.fn(async () => []),
@@ -407,26 +349,18 @@ function fixture(
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
     },
     message: {
-      findMany: vi.fn(
-        async ({ select }: { select?: Record<string, boolean> } = {}) =>
-          select?.id && select.seq && Object.keys(select).length === 2
-            ? sourceMessages
-            : [],
+      findMany: vi.fn(async ({ select }: { select?: Record<string, boolean> } = {}) =>
+        select?.id && select.seq && Object.keys(select).length === 2 ? sourceMessages : [],
       ),
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
-      create: vi.fn(
-        async ({ data }: { data: { role: string; blocks: unknown } }) => {
-          published.push({ role: data.role, blocks: data.blocks });
-          return { id: `message-${published.length}`, ...data };
-        },
-      ),
+      create: vi.fn(async ({ data }: { data: { role: string; blocks: unknown } }) => {
+        published.push({ role: data.role, blocks: data.blocks });
+        return { id: `message-${published.length}`, ...data };
+      }),
     },
     task: {
-      findUniqueOrThrow: vi.fn(async () => ({
-        id: run.taskId,
-        prompt: "Update shared state",
-      })),
+      findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Update shared state" })),
     },
     connection: { findMany: vi.fn(async () => []) },
     spaceModelPreference: { findFirst: vi.fn(async () => null) },
@@ -468,27 +402,19 @@ function fixture(
         },
       ),
     },
-    actionApprovalRule: {
-      findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []),
-    },
-    actionAutoReviewPreference: {
-      findUnique: vi.fn(async () => ({ enabled: false })),
-    },
+    actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
+    actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
     artifact: {
       findFirst: vi.fn(),
-      findMany: vi.fn(
-        async (): Promise<Array<{ id: string; name: string }>> => [],
-      ),
+      findMany: vi.fn(async (): Promise<Array<{ id: string; name: string }>> => []),
     },
   };
   const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
     run.status = "waiting_input";
     return true;
   });
-  const finalizeRun = vi.fn<ThreadEvents["finalizeRun"]>(async () => ({
-    continuationRunId: null,
-  }));
+  const finalizeRun = vi.fn<ThreadEvents["finalizeRun"]>(async () => ({ continuationRunId: null }));
   const claimSteering = vi.fn<ThreadEvents["claimSteering"]>(async () => []);
   let calls: ToolCall[] = [];
   const runtimeRun = vi.fn(async function* (
@@ -496,20 +422,14 @@ function fixture(
     _context?: Partial<AdapterContext>,
   ): AsyncGenerator<AgentRuntimeEvent> {
     for (const call of calls) {
-      const result = await request.executeTool!(
-        call.name,
-        call.args,
-        call.executionId,
-      );
+      const result = await request.executeTool!(call.name, call.args, call.executionId);
       results.push(result);
     }
     yield { type: "done" as const, text: "Done" };
   });
   const connector = {
     discoverTools: vi.fn<ConnectorProvider["discoverTools"]>(async () => []),
-    resolveCall: vi.fn<NonNullable<ConnectorProvider["resolveCall"]>>(
-      async () => undefined,
-    ),
+    resolveCall: vi.fn<NonNullable<ConnectorProvider["resolveCall"]>>(async () => undefined),
     execute: vi.fn<ConnectorProvider["execute"]>(async function* () {}),
   };
   const web = {
@@ -529,10 +449,7 @@ function fixture(
     contextStrategy: options.contextStrategy,
     web,
     prisma,
-    runtime: {
-      describe: () => ({ capabilities: { scripted: false } }),
-      run: runtimeRun,
-    },
+    runtime: { describe: () => ({ capabilities: { scripted: false } }), run: runtimeRun },
     connector,
     sandbox,
     memory: {
@@ -641,17 +558,14 @@ describe("native Cal.com booking approvals", () => {
             server: {
               id: route.resourceId,
               revision: route.resourceRevision,
-              endpoint:
-                "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+              endpoint: "https://mcp.cal.com/mcp?toolsets=bookings,availability",
             },
           })),
         },
       });
       const entries = catalogEntries([tool]);
       f.connector.discoverTools.mockResolvedValue(
-        mode === "direct"
-          ? [tool]
-          : lazyCatalogTools("connectors", "mcp", "MCP", entries),
+        mode === "direct" ? [tool] : lazyCatalogTools("connectors", "mcp", "MCP", entries),
       );
       if (mode === "catalog")
         f.connector.resolveCall.mockImplementation(async (call) =>
@@ -667,8 +581,7 @@ describe("native Cal.com booking approvals", () => {
       };
       const call = (args: Record<string, unknown>, executionId: string) => ({
         name: mode === "direct" ? tool.name : "connectors_execute_tool",
-        args:
-          mode === "direct" ? args : { id: entries[0]!.id, arguments: args },
+        args: mode === "direct" ? args : { id: entries[0]!.id, arguments: args },
         executionId,
       });
       f.setCalls([call(original, "initial")]);
@@ -697,15 +610,9 @@ describe("native Cal.com booking approvals", () => {
       expect(f.effects).toHaveLength(1);
       const request = structuredClone(f.effects[0]!.request);
       f.effects[0]!.status = "approved";
-      f.setCalls([
-        call({ ...original, start: "2026-10-24T15:00:00Z" }, "approved"),
-      ]);
+      f.setCalls([call({ ...original, start: "2026-10-24T15:00:00Z" }, "approved")]);
       await f.run();
-      if (
-        ["create_booking", "reschedule_booking", "cancel_booking"].includes(
-          operation,
-        )
-      ) {
+      if (["create_booking", "reschedule_booking", "cancel_booking"].includes(operation)) {
         expect(f.connector.execute).not.toHaveBeenCalled();
         expect(f.effects[0]).toMatchObject({ status: "approved", request });
         expect(f.results).toContainEqual(
@@ -781,18 +688,12 @@ describe("simulated scheduling approval chain", () => {
         data:
           call.route?.toolName === "create_booking"
             ? { uid: "synthetic-booking", status: "accepted", ...call.args }
-            : {
-                messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}`,
-              },
+            : { messageId: `synthetic-mail-${f.connector.execute.mock.calls.length}` },
       };
     });
     const recipient = "candidate@example.test";
     const timeZone = "America/New_York";
-    const slots = [
-      "2026-10-26T14:00:00Z",
-      "2026-10-26T15:00:00Z",
-      "2026-10-27T14:00:00Z",
-    ];
+    const slots = ["2026-10-26T14:00:00Z", "2026-10-26T15:00:00Z", "2026-10-27T14:00:00Z"];
     // The runtime receives this synthetic selection; no inference/ingestion is claimed.
     const selected = slots[1]!;
     const stages = [
@@ -823,13 +724,7 @@ describe("simulated scheduling approval chain", () => {
     ];
     for (const [index, stage] of stages.entries()) {
       const exactArgs = structuredClone(stage.args);
-      f.setCalls([
-        {
-          name: stage.tool.name,
-          args: exactArgs,
-          executionId: `stage-${index}`,
-        },
-      ]);
+      f.setCalls([{ name: stage.tool.name, args: exactArgs, executionId: `stage-${index}` }]);
       await f.run();
       // Earlier completed grants do not authorize the next outbound action.
       expect(f.connector.execute).toHaveBeenCalledTimes(index);
@@ -847,8 +742,7 @@ describe("simulated scheduling approval chain", () => {
       const frozenRequest = structuredClone(effect.request);
       expect(JSON.stringify(frozenRequest)).toContain(recipient);
       expect(JSON.stringify(frozenRequest)).toContain(timeZone);
-      if (index === 1)
-        expect(JSON.stringify(frozenRequest)).toContain(selected);
+      if (index === 1) expect(JSON.stringify(frozenRequest)).toContain(selected);
       // Simulate the persisted human decision, matching this file's native Cal fixtures.
       effect.status = "approved";
       const changed =
@@ -858,25 +752,12 @@ describe("simulated scheduling approval chain", () => {
               start: slots[2],
               attendee: { email: "other@example.test", timeZone: "UTC" },
             }
-          : {
-              ...exactArgs,
-              to: "other@example.test",
-              body: "Changed after approval",
-            };
-      f.setCalls([
-        {
-          name: stage.tool.name,
-          args: changed,
-          executionId: `approved-${index}`,
-        },
-      ]);
+          : { ...exactArgs, to: "other@example.test", body: "Changed after approval" };
+      f.setCalls([{ name: stage.tool.name, args: changed, executionId: `approved-${index}` }]);
       await f.run();
       if (index === 1) {
         expect(f.connector.execute).toHaveBeenCalledTimes(1);
-        expect(effect).toMatchObject({
-          status: "approved",
-          request: frozenRequest,
-        });
+        expect(effect).toMatchObject({ status: "approved", request: frozenRequest });
         expect(f.results).toContainEqual(
           expect.objectContaining({ code: "CALENDAR_PREFLIGHT_UNAVAILABLE" }),
         );
@@ -892,29 +773,16 @@ describe("simulated scheduling approval chain", () => {
         expect.objectContaining({ route: stage.tool.route, args: exactArgs }),
         expect.anything(),
       );
-      expect(effect).toMatchObject({
-        status: "completed",
-        request: frozenRequest,
-      });
+      expect(effect).toMatchObject({ status: "completed", request: frozenRequest });
       expect(effect.result).toBeDefined();
-      f.setCalls([
-        {
-          name: stage.tool.name,
-          args: exactArgs,
-          executionId: `retry-${index}`,
-        },
-      ]);
+      f.setCalls([{ name: stage.tool.name, args: exactArgs, executionId: `retry-${index}` }]);
       await f.run();
       expect(f.connector.execute).toHaveBeenCalledTimes(index + 1);
       expect(f.effects).toHaveLength(index + 1);
     }
-    expect(f.effects.every((effect) => effect.status === "completed")).toBe(
-      true,
-    );
+    expect(f.effects.every((effect) => effect.status === "completed")).toBe(true);
     expect(
-      f.connector.execute.mock.calls.filter(
-        ([call]) => call.route?.toolName === "create_booking",
-      ),
+      f.connector.execute.mock.calls.filter(([call]) => call.route?.toolName === "create_booking"),
     ).toHaveLength(1);
   });
 });
@@ -945,9 +813,7 @@ describe("model outage on a recruiting turn", () => {
     expect(f.finalizeRun).not.toHaveBeenCalled();
     expect(f.runData.status).toBe("queued");
     expect(f.prisma.attempt.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ status: "failed" }),
-      }),
+      expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }),
     );
     expect(f.executorDeps.jobs.enqueue).toHaveBeenCalled();
 
@@ -970,261 +836,194 @@ describe("worker shutdown recovery", () => {
     "reclaimed",
     "lease-abort",
     "runtime-error-then-shutdown",
-  ] as const)(
-    "keeps the native recovery boundary for %s",
-    async (interruption) => {
-      const shutdown = new AbortController();
-      const f = fixture(`run-${interruption}`, [], {
-        shutdownSignal: shutdown.signal,
-      });
-      const taskId = f.runData.taskId;
-      const args = {
-        path: "MEMORY.md",
-        content: "Preserved note",
-        expectedRevision: 0,
-      };
-      f.effects.push({
-        id: "uncertain-write",
-        spaceId: f.runData.spaceId,
-        runId: f.runData.id,
-        kind: "remember",
-        idempotencyKey: toolEffectIdempotencyKey(
-          f.runData.id,
-          "remember",
-          args,
-        ),
-        status: "uncertain",
-        request: args,
-        result: { uncertain: true },
-      });
-      const before = structuredClone(f.effects);
-      let failRenewal = false;
-      f.prisma.run.updateMany.mockImplementation(async ({ where, data }) => {
-        if (
-          (failRenewal && !data.status) ||
-          (typeof where.status === "string" &&
-            where.status !== f.runData.status) ||
-          (typeof where.status === "object" &&
-            where.status.in &&
-            !where.status.in.includes(f.runData.status)) ||
-          (where.leaseOwner !== undefined &&
-            where.leaseOwner !== f.runData.leaseOwner) ||
-          (where.leaseFence !== undefined &&
-            where.leaseFence !== f.runData.leaseFence) ||
-          (where.checkpoint === null && f.runData.checkpoint !== null) ||
-          (typeof where.checkpoint === "object" &&
-            where.checkpoint?.in &&
-            !where.checkpoint.in.includes(f.runData.checkpoint))
-        )
-          return { count: 0 };
-        Object.assign(f.runData, data);
-        return { count: 1 };
-      });
-      const createEvent = vi.fn(
-        async ({ data }: { data: Record<string, unknown> }) => ({
-          ...data,
-          seq: 1,
-        }),
-      );
-      const lease = {
-        computerId: "computer-1",
-        botId: "bot-1",
-        runId: f.runData.id,
-        fence: 1,
-      };
-      vi.mocked(acquireComputerExecutionLease).mockResolvedValueOnce(lease);
-      Object.assign(f.sandbox, { listFiles: vi.fn(async () => []) });
-      const leaseUpdate = vi.fn(async () => ({ count: 1 }));
-      Object.assign(f.prisma, {
-        $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
-          work(f.prisma),
-        ),
-        computerExecutionLease: { updateMany: leaseUpdate },
-      });
-      Object.assign(f.prisma.thread, {
-        update: vi.fn(async () => ({ nextEventSeq: 2 })),
-      });
-      Object.assign(f.prisma.event, { create: createEvent });
-      f.finalizeRun.mockImplementation(async (input) => {
-        if (
-          f.runData.status !== "running" ||
-          f.runData.leaseOwner !== input.leaseOwner ||
-          f.runData.leaseFence !== input.leaseFence
-        )
-          return false;
-        f.runData.status = input.outcome;
-        return { continuationRunId: null };
-      });
-      let entered!: () => void;
-      const entering = new Promise<void>((resolve) => {
-        entered = resolve;
-      });
-      let drain!: () => void;
-      const draining = new Promise<void>((resolve) => {
-        drain = resolve;
-      });
-      f.runtimeRun.mockImplementationOnce(async function* (request, context) {
-        await request.executeTool!(
-          "list_files",
-          {},
-          "touch-computer-before-interruption",
-        );
-        yield { type: "progress", text: "Working" };
-        try {
-          if (interruption === "runtime-error-then-shutdown") {
-            entered();
-            throw new Error("Original runtime failure");
-          }
-          if (interruption === "cancelled") f.runData.status = "cancelled";
-          if (interruption === "reclaimed") {
-            f.runData.leaseOwner = "newer-worker";
-            f.runData.leaseFence += 1;
-          }
-          if (interruption === "lease-abort") {
-            failRenewal = true;
-            await vi.advanceTimersByTimeAsync(60_000);
-            expect(context!.signal!.aborted).toBe(true);
-          }
-          shutdown.abort();
-          expect(context!.signal!.reason === shutdown.signal.reason).toBe(
-            interruption !== "lease-abort",
-          );
-          entered();
-          context!.signal!.throwIfAborted();
-        } finally {
-          if (interruption === "runtime-error-then-shutdown") shutdown.abort();
-          await draining;
-        }
-      });
-      if (interruption === "lease-abort") vi.useFakeTimers();
+  ] as const)("keeps the native recovery boundary for %s", async (interruption) => {
+    const shutdown = new AbortController();
+    const f = fixture(`run-${interruption}`, [], { shutdownSignal: shutdown.signal });
+    const taskId = f.runData.taskId;
+    const args = { path: "MEMORY.md", content: "Preserved note", expectedRevision: 0 };
+    f.effects.push({
+      id: "uncertain-write",
+      spaceId: f.runData.spaceId,
+      runId: f.runData.id,
+      kind: "remember",
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "remember", args),
+      status: "uncertain",
+      request: args,
+      result: { uncertain: true },
+    });
+    const before = structuredClone(f.effects);
+    let failRenewal = false;
+    f.prisma.run.updateMany.mockImplementation(async ({ where, data }) => {
+      if (
+        (failRenewal && !data.status) ||
+        (typeof where.status === "string" && where.status !== f.runData.status) ||
+        (typeof where.status === "object" &&
+          where.status.in &&
+          !where.status.in.includes(f.runData.status)) ||
+        (where.leaseOwner !== undefined && where.leaseOwner !== f.runData.leaseOwner) ||
+        (where.leaseFence !== undefined && where.leaseFence !== f.runData.leaseFence) ||
+        (where.checkpoint === null && f.runData.checkpoint !== null) ||
+        (typeof where.checkpoint === "object" &&
+          where.checkpoint?.in &&
+          !where.checkpoint.in.includes(f.runData.checkpoint))
+      )
+        return { count: 0 };
+      Object.assign(f.runData, data);
+      return { count: 1 };
+    });
+    const createEvent = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      seq: 1,
+    }));
+    const lease = { computerId: "computer-1", botId: "bot-1", runId: f.runData.id, fence: 1 };
+    vi.mocked(acquireComputerExecutionLease).mockResolvedValueOnce(lease);
+    Object.assign(f.sandbox, { listFiles: vi.fn(async () => []) });
+    const leaseUpdate = vi.fn(async () => ({ count: 1 }));
+    Object.assign(f.prisma, {
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(f.prisma)),
+      computerExecutionLease: { updateMany: leaseUpdate },
+    });
+    Object.assign(f.prisma.thread, { update: vi.fn(async () => ({ nextEventSeq: 2 })) });
+    Object.assign(f.prisma.event, { create: createEvent });
+    f.finalizeRun.mockImplementation(async (input) => {
+      if (
+        f.runData.status !== "running" ||
+        f.runData.leaseOwner !== input.leaseOwner ||
+        f.runData.leaseFence !== input.leaseFence
+      )
+        return false;
+      f.runData.status = input.outcome;
+      return { continuationRunId: null };
+    });
+    let entered!: () => void;
+    const entering = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let drain!: () => void;
+    const draining = new Promise<void>((resolve) => {
+      drain = resolve;
+    });
+    f.runtimeRun.mockImplementationOnce(async function* (request, context) {
+      await request.executeTool!("list_files", {}, "touch-computer-before-interruption");
+      yield { type: "progress", text: "Working" };
       try {
-        const working = f.executor.continueRun(f.runData.id, "worker-1");
-        await entering;
-        expect(f.finalizeRun).not.toHaveBeenCalled();
-        expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
-          expect.objectContaining({ name: "run.continue" }),
+        if (interruption === "runtime-error-then-shutdown") {
+          entered();
+          throw new Error("Original runtime failure");
+        }
+        if (interruption === "cancelled") f.runData.status = "cancelled";
+        if (interruption === "reclaimed") {
+          f.runData.leaseOwner = "newer-worker";
+          f.runData.leaseFence += 1;
+        }
+        if (interruption === "lease-abort") {
+          failRenewal = true;
+          await vi.advanceTimersByTimeAsync(60_000);
+          expect(context!.signal!.aborted).toBe(true);
+        }
+        shutdown.abort();
+        expect(context!.signal!.reason === shutdown.signal.reason).toBe(
+          interruption !== "lease-abort",
         );
-        expect(leaseUpdate).not.toHaveBeenCalledWith(
-          expect.objectContaining({ where: lease }),
-        );
-        drain();
-        await working;
+        entered();
+        context!.signal!.throwIfAborted();
       } finally {
-        vi.useRealTimers();
+        if (interruption === "runtime-error-then-shutdown") shutdown.abort();
+        await draining;
       }
-      expect(f.effects).toEqual(before);
-      expect(f.runData.taskId).toBe(taskId);
-      expect(leaseUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ where: lease }),
-      );
-      if (interruption !== "shutdown") {
-        expect(f.runData.status).toBe(
-          interruption === "cancelled"
-            ? "cancelled"
-            : interruption === "reclaimed"
-              ? "running"
-              : "failed",
-        );
-        expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
-          expect.objectContaining({ name: "run.continue" }),
-        );
-        expect(createEvent).not.toHaveBeenCalled();
-        return;
-      }
-      expect(f.runData).toMatchObject({
-        status: "queued",
-        leaseOwner: null,
-        leaseExpiresAt: null,
-      });
+    });
+    if (interruption === "lease-abort") vi.useFakeTimers();
+    try {
+      const working = f.executor.continueRun(f.runData.id, "worker-1");
+      await entering;
       expect(f.finalizeRun).not.toHaveBeenCalled();
-      expect(createEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ type: "run.requeued" }),
-        }),
+      expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "run.continue" }),
       );
-      expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: "run.continue",
-          payload: { runId: f.runData.id },
-        }),
+      expect(leaseUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ where: lease }));
+      drain();
+      await working;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(f.effects).toEqual(before);
+    expect(f.runData.taskId).toBe(taskId);
+    expect(leaseUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: lease }));
+    if (interruption !== "shutdown") {
+      expect(f.runData.status).toBe(
+        interruption === "cancelled"
+          ? "cancelled"
+          : interruption === "reclaimed"
+            ? "running"
+            : "failed",
       );
-      expect(f.prisma.attempt.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: "interrupted", finishedAt: expect.any(Date) },
-        }),
+      expect(f.executorDeps.jobs.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "run.continue" }),
       );
-      f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
-      // Durable audit of the first attempt: a paid research call whose output was stored.
-      const researchDigest = createHash("sha256")
-        .update("research-1")
-        .digest("hex")
-        .slice(0, 12);
-      // Other scoped reads share this mock; only the audit query sees the first attempt's events.
-      const auditEvents = [
-        {
-          seq: 1,
-          type: "agent.tool.called",
-          payload: {
-            name: "recruiting_research",
-            executionId: "research-1",
-            argsSummary: "query=senior backend engineer",
-          },
+      expect(createEvent).not.toHaveBeenCalled();
+      return;
+    }
+    expect(f.runData).toMatchObject({ status: "queued", leaseOwner: null, leaseExpiresAt: null });
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    expect(createEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: "run.requeued" }) }),
+    );
+    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "run.continue", payload: { runId: f.runData.id } }),
+    );
+    expect(f.prisma.attempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "interrupted", finishedAt: expect.any(Date) } }),
+    );
+    f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
+    // Durable audit of the first attempt: a paid research call whose output was stored.
+    const researchDigest = createHash("sha256").update("research-1").digest("hex").slice(0, 12);
+    // Other scoped reads share this mock; only the audit query sees the first attempt's events.
+    const auditEvents = [
+      {
+        seq: 1,
+        type: "agent.tool.called",
+        payload: {
+          name: "recruiting_research",
+          executionId: "research-1",
+          argsSummary: "query=senior backend engineer",
         },
-        {
-          seq: 2,
-          type: "agent.tool.completed",
-          payload: {
-            name: "recruiting_research",
-            executionId: "research-1",
-            outcome: "succeeded",
-          },
-        },
-        {
-          seq: 3,
-          type: "thread.message.created",
-          payload: {
-            role: "bot",
-            blocks: [{ kind: "text", text: "Found 12 profiles so far." }],
-          },
-        },
-      ];
-      f.prisma.event.findMany.mockImplementation(
-        async (query?: { where?: { type?: { in?: string[] } } }) =>
-          query?.where?.type?.in?.includes("agent.tool.completed")
-            ? auditEvents
-            : [],
-      );
-      f.prisma.artifact.findMany.mockResolvedValueOnce([
-        {
-          id: "art-research",
-          name: `recruiting_research-${researchDigest}.txt`,
-        },
-      ]);
-      await createRunExecutor({
-        ...f.executorDeps,
-        shutdownSignal: new AbortController().signal,
-      }).continueRun(f.runData.id, "worker-2");
-      expect(f.runData).toMatchObject({
-        status: "completed",
-        taskId,
-        leaseFence: 2,
-      });
-      expect(f.runtimeRun).toHaveBeenCalledTimes(2);
-      const firstTurn =
-        f.runtimeRun.mock.calls[0]![0].history.at(-1)?.content ?? "";
-      const resumedTurn =
-        f.runtimeRun.mock.calls[1]![0].history.at(-1)?.content ?? "";
-      expect(firstTurn).not.toContain("interrupted and resumed");
-      expect(resumedTurn).toContain("This run was interrupted and resumed.");
-      expect(resumedTurn).toContain(
-        "- recruiting_research(query=senior backend engineer) completed; full output saved as artifact art-research (artifact_read)",
-      );
-      expect(resumedTurn).toContain("- Found 12 profiles so far.");
-      expect(f.results).toEqual([{ uncertain: true }]);
-      expect(f.memoryCommit).not.toHaveBeenCalled();
-      expect(f.effects).toEqual(before);
-    },
-  );
+      },
+      {
+        seq: 2,
+        type: "agent.tool.completed",
+        payload: { name: "recruiting_research", executionId: "research-1", outcome: "succeeded" },
+      },
+      {
+        seq: 3,
+        type: "thread.message.created",
+        payload: { role: "bot", blocks: [{ kind: "text", text: "Found 12 profiles so far." }] },
+      },
+    ];
+    f.prisma.event.findMany.mockImplementation(
+      async (query?: { where?: { type?: { in?: string[] } } }) =>
+        query?.where?.type?.in?.includes("agent.tool.completed") ? auditEvents : [],
+    );
+    f.prisma.artifact.findMany.mockResolvedValueOnce([
+      { id: "art-research", name: `recruiting_research-${researchDigest}.txt` },
+    ]);
+    await createRunExecutor({
+      ...f.executorDeps,
+      shutdownSignal: new AbortController().signal,
+    }).continueRun(f.runData.id, "worker-2");
+    expect(f.runData).toMatchObject({ status: "completed", taskId, leaseFence: 2 });
+    expect(f.runtimeRun).toHaveBeenCalledTimes(2);
+    const firstTurn = f.runtimeRun.mock.calls[0]![0].history.at(-1)?.content ?? "";
+    const resumedTurn = f.runtimeRun.mock.calls[1]![0].history.at(-1)?.content ?? "";
+    expect(firstTurn).not.toContain("interrupted and resumed");
+    expect(resumedTurn).toContain("This run was interrupted and resumed.");
+    expect(resumedTurn).toContain(
+      "- recruiting_research(query=senior backend engineer) completed; full output saved as artifact art-research (artifact_read)",
+    );
+    expect(resumedTurn).toContain("- Found 12 profiles so far.");
+    expect(f.results).toEqual([{ uncertain: true }]);
+    expect(f.memoryCommit).not.toHaveBeenCalled();
+    expect(f.effects).toEqual(before);
+  });
 });
 
 describe("questions after the person moved on", () => {
@@ -1232,18 +1031,13 @@ describe("questions after the person moved on", () => {
     const f = fixture("ask-after-newer-message");
     Object.assign(f.runData, { createdAt: new Date(0) });
     const findFirst = vi.mocked(f.prisma.message.findFirst);
-    findFirst.mockImplementation((async (query?: {
-      where?: { OR?: unknown };
-    }) =>
+    findFirst.mockImplementation((async (query?: { where?: { OR?: unknown } }) =>
       query?.where?.OR
         ? { blocks: [{ kind: "text", text: "找 100 个类似的人" }] }
         : null) as unknown as typeof findFirst);
     await f.executor.continueRun(f.runData.id, "worker-1");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    const answer = await request.beforeAsk?.(
-      "What would you like to do next?",
-      undefined,
-    );
+    const answer = await request.beforeAsk?.("What would you like to do next?", undefined);
     expect(answer).toEqual({
       instead: expect.stringContaining("找 100 个类似的人"),
     });
@@ -1265,28 +1059,16 @@ describe("newer request after the round", () => {
       result: { ok: true },
     });
     const findFirst = vi.mocked(f.prisma.message.findFirst);
-    findFirst.mockImplementation((async (query?: {
-      where?: { OR?: unknown };
-    }) =>
+    findFirst.mockImplementation((async (query?: { where?: { OR?: unknown } }) =>
       query?.where?.OR
         ? { blocks: [{ kind: "text", text: "找 100 个类似的人" }] }
         : null) as unknown as typeof findFirst);
     f.setCalls([
-      {
-        name: "handoff_to_bot",
-        args: { bot: "Sourcer", request: "scale" },
-        executionId: "h",
-      },
-      {
-        name: "message_user",
-        args: { message: "Round recorded." },
-        executionId: "m",
-      },
+      { name: "handoff_to_bot", args: { bot: "Sourcer", request: "scale" }, executionId: "h" },
+      { name: "message_user", args: { message: "Round recorded." }, executionId: "m" },
     ]);
     await f.run();
-    expect(f.results[0]).toEqual({
-      error: newerRequestElsewhere("找 100 个类似的人"),
-    });
+    expect(f.results[0]).toEqual({ error: newerRequestElsewhere("找 100 个类似的人") });
     // Its report goes in the final reply only, so the person sees it once.
     expect(f.results[1]).toEqual({ error: REPORT_IN_FINAL_REPLY });
   });
@@ -1313,27 +1095,15 @@ describe("stage report while the person's newest message is being answered", () 
         },
       ],
     };
-    Object.assign(f.runData, {
-      trigger: "follow_up",
-      sourceMessageId: report.id,
-    });
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
     f.prisma.message.findMany.mockResolvedValue([report]);
     const findFirst = vi.mocked(f.prisma.message.findFirst);
-    findFirst.mockImplementation((async (query?: {
-      select?: { sourceRuns?: unknown };
-    }) =>
+    findFirst.mockImplementation((async (query?: { select?: { sourceRuns?: unknown } }) =>
       query?.select?.sourceRuns
-        ? {
-            blocks: [{ kind: "text", text: "发一下" }],
-            sourceRuns: [{ id: "answering-run" }],
-          }
+        ? { blocks: [{ kind: "text", text: "发一下" }], sourceRuns: [{ id: "answering-run" }] }
         : null) as unknown as typeof findFirst);
     f.setCalls([
-      {
-        name: "handoff_to_bot",
-        args: { bot: "Outreach", request: "send" },
-        executionId: "h",
-      },
+      { name: "handoff_to_bot", args: { bot: "Outreach", request: "send" }, executionId: "h" },
     ]);
     await f.run();
     expect(f.results[0]).toEqual({ error: newerRequestElsewhere("发一下") });
@@ -1344,81 +1114,54 @@ describe("computer that will not start", () => {
   it("fails the turn with the reset-the-computer notice instead of the provider error", async () => {
     const f = fixture("computer-start-failed");
     f.setCalls([
-      {
-        name: "write_file",
-        args: { path: "notes.txt", content: "x" },
-        executionId: "w",
-      },
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
     ]);
     // Two earlier starts already failed; the third ends the turn instead of queueing it again.
     Object.assign(f.prisma.attempt, { count: vi.fn(async () => 2) });
-    vi.mocked(provisionComputer).mockRejectedValueOnce(
-      new Error("provider exploded"),
-    );
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: "failed",
-        error: COMPUTER_START_FAILED,
-      }),
+      expect.objectContaining({ outcome: "failed", error: COMPUTER_START_FAILED }),
     );
   });
 
   it("ends the turn when its chat is gone instead of retrying it forever", async () => {
     const f = fixture("setup-resource-gone");
     f.setCalls([
-      {
-        name: "write_file",
-        args: { path: "notes.txt", content: "x" },
-        executionId: "w",
-      },
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
     ]);
     vi.mocked(provisionComputer).mockRejectedValueOnce(new IsolationError());
     Object.assign(f.prisma.thread, {
       findFirst: vi.fn(async () => ({ group: { archivedAt: new Date() } })),
     });
     await f.executor.continueRun(f.runData.id, "worker-1");
-    expect(f.finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "failed" }),
-    );
+    expect(f.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   });
 
   it("retries a setup lookup that fails while its chat is still open", async () => {
     const f = fixture("setup-lookup-live-chat");
     f.setCalls([
-      {
-        name: "write_file",
-        args: { path: "notes.txt", content: "x" },
-        executionId: "w",
-      },
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
     ]);
     Object.assign(f.prisma.attempt, { count: vi.fn(async () => 0) });
     vi.mocked(provisionComputer).mockRejectedValueOnce(new IsolationError());
-    Object.assign(f.prisma.thread, {
-      findFirst: vi.fn(async () => ({ group: null })),
-    });
-    await expect(
-      f.executor.continueRun(f.runData.id, "worker-1"),
-    ).rejects.toThrow("Run setup failed; retrying");
+    Object.assign(f.prisma.thread, { findFirst: vi.fn(async () => ({ group: null })) });
+    await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+      "Run setup failed; retrying",
+    );
     expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 
   it("retries an early failed start instead of ending the turn", async () => {
     const f = fixture("computer-start-retry");
     f.setCalls([
-      {
-        name: "write_file",
-        args: { path: "notes.txt", content: "x" },
-        executionId: "w",
-      },
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
     ]);
     Object.assign(f.prisma.attempt, { count: vi.fn(async () => 0) });
-    vi.mocked(provisionComputer).mockRejectedValueOnce(
-      new Error("provider exploded"),
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
+    await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+      "Run setup failed; retrying",
     );
-    await expect(
-      f.executor.continueRun(f.runData.id, "worker-1"),
-    ).rejects.toThrow("Run setup failed; retrying");
     expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 });
@@ -1427,37 +1170,22 @@ describe("native computer contention effect replay", () => {
   it("requeues before claiming an approved file effect and replays earlier completed work once", async () => {
     const f = fixture("busy-effect-replay");
     const write = { path: "notes.txt", content: "Saved once" };
-    const memory = {
-      path: "MEMORY.md",
-      content: "Durable note",
-      expectedRevision: 0,
-    };
+    const memory = { path: "MEMORY.md", content: "Durable note", expectedRevision: 0 };
     f.effects.push({
       id: "approved-write",
       runId: f.runData.id,
       spaceId: f.runData.spaceId,
       kind: "write_file",
-      idempotencyKey: toolEffectIdempotencyKey(
-        f.runData.id,
-        "write_file",
-        write,
-      ),
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "write_file", write),
       status: "approved",
       request: write,
     });
     Object.assign(f.prisma, {
-      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
-        work(f.prisma),
-      ),
+      $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(f.prisma)),
     });
-    Object.assign(f.prisma.thread, {
-      update: vi.fn(async () => ({ nextEventSeq: 2 })),
-    });
+    Object.assign(f.prisma.thread, { update: vi.fn(async () => ({ nextEventSeq: 2 })) });
     Object.assign(f.prisma.event, {
-      create: vi.fn(async ({ data }: { data: object }) => ({
-        ...data,
-        seq: 1,
-      })),
+      create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
     });
     f.prisma.run.updateMany.mockImplementation(async ({ where, data }) => {
       if (
@@ -1465,10 +1193,8 @@ describe("native computer contention effect replay", () => {
         (typeof where.checkpoint === "object" &&
           where.checkpoint?.in &&
           !where.checkpoint.in.includes(f.runData.checkpoint)) ||
-        (where.leaseOwner !== undefined &&
-          where.leaseOwner !== f.runData.leaseOwner) ||
-        (where.leaseFence !== undefined &&
-          where.leaseFence !== f.runData.leaseFence)
+        (where.leaseOwner !== undefined && where.leaseOwner !== f.runData.leaseOwner) ||
+        (where.leaseFence !== undefined && where.leaseFence !== f.runData.leaseFence)
       )
         return { count: 0 };
       Object.assign(f.runData, data);
@@ -1480,21 +1206,13 @@ describe("native computer contention effect replay", () => {
       runId: f.runData.id,
       spaceId: f.runData.spaceId,
       kind: "remember",
-      idempotencyKey: toolEffectIdempotencyKey(
-        f.runData.id,
-        "remember",
-        memory,
-      ),
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "remember", memory),
       status: "completed",
       request: memory,
       result: { ok: true, path: "MEMORY.md", revision: 1 },
     });
-    f.setCalls([
-      { name: "write_file", args: write, executionId: "first-attempt" },
-    ]);
-    vi.mocked(acquireComputerExecutionLease).mockRejectedValueOnce(
-      new ComputerBusyError(),
-    );
+    f.setCalls([{ name: "write_file", args: write, executionId: "first-attempt" }]);
+    vi.mocked(acquireComputerExecutionLease).mockRejectedValueOnce(new ComputerBusyError());
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.runData.status).toBe("queued");
     expect(f.effects[0]?.status).toBe("approved");
@@ -1510,14 +1228,10 @@ describe("native computer contention effect replay", () => {
     ]);
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.effects).toHaveLength(2);
-    expect(f.effects.every((effect) => effect.status === "completed")).toBe(
-      true,
-    );
+    expect(f.effects.every((effect) => effect.status === "completed")).toBe(true);
     expect(f.sandbox.writeFile).toHaveBeenCalledOnce();
     expect(f.memoryCommit).not.toHaveBeenCalled();
-    expect(f.finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "completed" }),
-    );
+    expect(f.finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ outcome: "completed" }));
   });
 });
 
@@ -1601,10 +1315,7 @@ describe("explicit artifact workspace writes", () => {
     expect(f.prisma.artifact.findFirst).toHaveBeenCalledWith({
       where: { id: original.id, spaceId: "space-1", userId: "user-1" },
     });
-    expect(f.artifacts.get).toHaveBeenCalledWith(
-      original.storageKey,
-      expect.anything(),
-    );
+    expect(f.artifacts.get).toHaveBeenCalledWith(original.storageKey, expect.anything());
     expect(f.sandbox.writeFile).toHaveBeenCalledWith(
       expect.anything(),
       { path: `attachments/${original.id}.zip`, content: bytes },
@@ -1656,9 +1367,7 @@ describe("explicit artifact workspace writes", () => {
     async (name, provenance) => {
       const f = fixture(`private-context-${name}-${provenance}`);
       const contextBytes = Buffer.from(
-        JSON.stringify({
-          memory: { documents: [{ includedContent: "private marker" }] },
-        }),
+        JSON.stringify({ memory: { documents: [{ includedContent: "private marker" }] } }),
       );
       const context = {
         ...original,
@@ -1680,13 +1389,7 @@ describe("explicit artifact workspace writes", () => {
               sql.includes(`action."${provenance}Hash" = internal.hash`);
         return matches ? [{ id: context.id }] : [];
       });
-      f.setCalls([
-        {
-          name,
-          args: { artifactId: context.id },
-          executionId: "private-context",
-        },
-      ]);
+      f.setCalls([{ name, args: { artifactId: context.id }, executionId: "private-context" }]);
       await f.run();
       expect(f.results[0]).toEqual({ error: INTERNAL_ARTIFACT_ERROR });
       expect(f.prisma.artifact.findFirst).toHaveBeenCalledWith({
@@ -1701,11 +1404,7 @@ describe("explicit artifact workspace writes", () => {
   it("waits for native approval before reading or writing an artifact", async () => {
     const f = fixture("approved-original-write");
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      {
-        effect: "require_approval",
-        matchKind: "tool",
-        matchValue: "write_file",
-      },
+      { effect: "require_approval", matchKind: "tool", matchValue: "write_file" },
     ]);
     f.prisma.artifact.findFirst.mockResolvedValue(original);
     f.artifacts.get.mockResolvedValue(bytes);
@@ -1731,11 +1430,7 @@ describe("explicit artifact workspace writes", () => {
     expect(checkpointWorkspace).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    {},
-    { artifactId: "artifact-version-1", content: "replacement" },
-    { artifactId: "" },
-  ])(
+  it.each([{}, { artifactId: "artifact-version-1", content: "replacement" }, { artifactId: "" }])(
     "rejects missing or ambiguous write sources before effects: %j",
     async (args) => {
       const f = fixture("invalid-original-write");
@@ -1749,29 +1444,17 @@ describe("explicit artifact workspace writes", () => {
     },
   );
 
-  it.each(["unavailable", "corrupt"])(
-    "does not write an %s original",
-    async (failure) => {
-      const f = fixture(`invalid-artifact-${failure}`);
-      f.prisma.artifact.findFirst.mockResolvedValue(
-        failure === "unavailable" ? null : original,
-      );
-      f.artifacts.get.mockResolvedValue(new Uint8Array([9, 8, 7]));
-      f.setCalls([
-        {
-          name: "write_file",
-          args: { artifactId: original.id },
-          executionId: "copy-1",
-        },
-      ]);
-      await f.run();
-      expect(f.results[0]).toMatchObject({ error: expect.any(String) });
-      if (failure === "unavailable")
-        expect(f.artifacts.get).not.toHaveBeenCalled();
-      expect(f.sandbox.writeFile).not.toHaveBeenCalled();
-      expect(checkpointWorkspace).not.toHaveBeenCalled();
-    },
-  );
+  it.each(["unavailable", "corrupt"])("does not write an %s original", async (failure) => {
+    const f = fixture(`invalid-artifact-${failure}`);
+    f.prisma.artifact.findFirst.mockResolvedValue(failure === "unavailable" ? null : original);
+    f.artifacts.get.mockResolvedValue(new Uint8Array([9, 8, 7]));
+    f.setCalls([{ name: "write_file", args: { artifactId: original.id }, executionId: "copy-1" }]);
+    await f.run();
+    expect(f.results[0]).toMatchObject({ error: expect.any(String) });
+    if (failure === "unavailable") expect(f.artifacts.get).not.toHaveBeenCalled();
+    expect(f.sandbox.writeFile).not.toHaveBeenCalled();
+    expect(checkpointWorkspace).not.toHaveBeenCalled();
+  });
 });
 
 describe("tool audit ordering", () => {
@@ -1842,8 +1525,7 @@ describe("tool audit ordering", () => {
       });
       await f.run();
       const finalized = f.finalizeRun.mock.calls.at(-1)?.[0];
-      const savedBlocks =
-        finalized?.outcome === "completed" ? finalized.blocks : undefined;
+      const savedBlocks = finalized?.outcome === "completed" ? finalized.blocks : undefined;
       expect(savedBlocks).toEqual(
         expect.arrayContaining([
           {
@@ -1880,12 +1562,7 @@ describe("tool audit ordering", () => {
           result: { content: [{ type: "text", text: "ok" }] },
         }),
       );
-      yield {
-        type: "tool" as const,
-        name: "web_search",
-        args: { query: "fixture" },
-        executionId,
-      };
+      yield { type: "tool" as const, name: "web_search", args: { query: "fixture" }, executionId };
       await completed;
       yield { type: "done" as const, text: "Done." };
     });
@@ -1894,14 +1571,10 @@ describe("tool audit ordering", () => {
 
     const audits = vi
       .mocked(f.executorDeps.events.append)
-      .mock.calls.map(
-        ([event]) =>
-          event as { type: string; payload: { executionId?: string } },
-      )
+      .mock.calls.map(([event]) => event as { type: string; payload: { executionId?: string } })
       .filter(
         (event) =>
-          (event.type === "agent.tool.called" ||
-            event.type === "agent.tool.completed") &&
+          (event.type === "agent.tool.called" || event.type === "agent.tool.completed") &&
           event.payload.executionId === executionId,
       )
       .map((event) => event.type);
@@ -1921,18 +1594,9 @@ describe("recruiter-facing provider names", () => {
     f.runtimeRun.mockImplementation(async function* (request) {
       yield { type: "text" as const, text: "我先看看 Aut" };
       yield { type: "text" as const, text: "umn 的结果。" };
-      const args = {
-        message: "Autumn 还在找人，见 https://files.autumn.ai/x.csv",
-      };
-      yield {
-        type: "tool" as const,
-        name: "message_user",
-        args,
-        executionId: "vendor-call",
-      };
-      f.results.push(
-        await request.executeTool!("message_user", args, "vendor-call"),
-      );
+      const args = { message: "Autumn 还在找人，见 https://files.autumn.ai/x.csv" };
+      yield { type: "tool" as const, name: "message_user", args, executionId: "vendor-call" };
+      f.results.push(await request.executeTool!("message_user", args, "vendor-call"));
       yield { type: "text" as const, text: final };
       yield { type: "done" as const, text: final };
     });
@@ -1960,9 +1624,7 @@ describe("recruiter-facing provider names", () => {
 
     await f.run();
 
-    expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain(
-      "Autumn returned results.",
-    );
+    expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("Autumn returned results.");
   });
 });
 
@@ -1974,28 +1636,19 @@ describe("durable mid-turn narration", () => {
       const f = fixture(`narration-${toolName}`, [secret]);
       const narration = `Send this exact text once:\n\n> ${"完整内容 🔎 ".repeat(80)}${secret}\n> Complete suffix 🌿`;
       const expected = narration.replace(secret, "[redacted]");
-      const messages: Array<{ blocks: MessageBlock[]; clientNonce?: string }> =
-        [];
+      const messages: Array<{ blocks: MessageBlock[]; clientNonce?: string }> = [];
       const tx = {
         run: f.prisma.run,
-        thread: {
-          update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })),
-        },
+        thread: { update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })) },
         message: {
-          create: vi.fn(
-            async ({ data }: { data: (typeof messages)[number] }) => {
-              messages.push(data);
-              return { id: `message-${messages.length}`, ...data };
-            },
-          ),
+          create: vi.fn(async ({ data }: { data: (typeof messages)[number] }) => {
+            messages.push(data);
+            return { id: `message-${messages.length}`, ...data };
+          }),
         },
         event: {
           create: vi.fn(
-            async ({
-              data,
-            }: {
-              data: { type: string; payload: { blocks: MessageBlock[] } };
-            }) => ({
+            async ({ data }: { data: { type: string; payload: { blocks: MessageBlock[] } } }) => ({
               id: "event-1",
               ...data,
             }),
@@ -2003,13 +1656,10 @@ describe("durable mid-turn narration", () => {
         },
       };
       tx.message.create.mockRejectedValueOnce(
-        Object.assign(new Error("write conflict or a deadlock"), {
-          code: "P2034",
-        }),
+        Object.assign(new Error("write conflict or a deadlock"), { code: "P2034" }),
       );
-      const transaction = vi.fn(
-        async (callback: (transaction: typeof tx) => Promise<unknown>) =>
-          callback(tx),
+      const transaction = vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+        callback(tx),
       );
       Object.assign(f.prisma, {
         $transaction: transaction,
@@ -2020,41 +1670,24 @@ describe("durable mid-turn narration", () => {
           toolName === "message_user"
             ? { message: "Checking saved results." }
             : { query: "fixture" };
-        yield {
-          type: "tool" as const,
-          name: toolName,
-          args,
-          executionId: "narration-call",
-        };
-        f.results.push(
-          await request.executeTool!(toolName, args, "narration-call"),
-        );
+        yield { type: "tool" as const, name: toolName, args, executionId: "narration-call" };
+        f.results.push(await request.executeTool!(toolName, args, "narration-call"));
         yield { type: "done" as const, text: narration };
       });
 
       await f.run();
 
-      const expectedBlocks: MessageBlock[][] = [
-        [{ kind: "text", text: expected }],
-      ];
+      const expectedBlocks: MessageBlock[][] = [[{ kind: "text", text: expected }]];
       if (toolName === "message_user")
-        expectedBlocks.push([
-          { kind: "text", text: "Checking saved results." },
-        ]);
+        expectedBlocks.push([{ kind: "text", text: "Checking saved results." }]);
       expect(messages.map((message) => message.blocks)).toEqual(expectedBlocks);
       expect(transaction).toHaveBeenCalledTimes(expectedBlocks.length + 1);
-      expect(tx.message.create).toHaveBeenCalledTimes(
-        expectedBlocks.length + 1,
-      );
-      expect(f.executorDeps.events.notify).toHaveBeenCalledTimes(
-        expectedBlocks.length,
-      );
+      expect(tx.message.create).toHaveBeenCalledTimes(expectedBlocks.length + 1);
+      expect(f.executorDeps.events.notify).toHaveBeenCalledTimes(expectedBlocks.length);
       expect(f.runtimeRun).toHaveBeenCalledOnce();
-      expect(
-        messages.every((message) =>
-          message.clientNonce?.startsWith("user-progress:"),
-        ),
-      ).toBe(true);
+      expect(messages.every((message) => message.clientNonce?.startsWith("user-progress:"))).toBe(
+        true,
+      );
       expect(tx.event.create.mock.calls.map(([{ data }]) => data)).toEqual(
         expectedBlocks.map((blocks) =>
           expect.objectContaining({
@@ -2068,36 +1701,25 @@ describe("durable mid-turn narration", () => {
       );
       expect(JSON.stringify(messages)).not.toContain(secret);
       expect(JSON.stringify(tx.event.create.mock.calls)).not.toContain(secret);
-      if (toolName === "message_user")
-        expect(f.results).toEqual([{ ok: true }]);
+      if (toolName === "message_user") expect(f.results).toEqual([{ ok: true }]);
       else expect(f.web.search).toHaveBeenCalledOnce();
     },
   );
 });
 
-function roleReceipt(
-  f: ReturnType<typeof fixture>,
-  result: RecruitingRoleToolResult,
-) {
+function roleReceipt(f: ReturnType<typeof fixture>, result: RecruitingRoleToolResult) {
   return async (
     _db: Parameters<typeof executeRecruitingRoleTool>[0],
     trusted: Parameters<typeof executeRecruitingRoleTool>[1],
   ) => {
-    const effect = f.effects.find(
-      (item) => item.id === trusted.mutation?.effectId,
-    );
-    if (effect?.status === "executing")
-      Object.assign(effect, { status: "completed", result });
+    const effect = f.effects.find((item) => item.id === trusted.mutation?.effectId);
+    if (effect?.status === "executing") Object.assign(effect, { status: "completed", result });
     return result;
   };
 }
 
 describe("connector transport effect uncertainty", () => {
-  function configure(
-    f: ReturnType<typeof fixture>,
-    path: string,
-    readOnly?: boolean,
-  ) {
+  function configure(f: ReturnType<typeof fixture>, path: string, readOnly?: boolean) {
     const tool: ConnectorTool = {
       name: "mcp__synthetic__get_item",
       description: "Read-like name does not declare the effect",
@@ -2112,14 +1734,10 @@ describe("connector transport effect uncertainty", () => {
     };
     const entries = catalogEntries([tool]);
     f.connector.discoverTools.mockResolvedValue(
-      path === "direct"
-        ? [tool]
-        : lazyCatalogTools("connectors", "mcp", "MCP", entries),
+      path === "direct" ? [tool] : lazyCatalogTools("connectors", "mcp", "MCP", entries),
     );
     f.connector.resolveCall.mockImplementation(async (call) =>
-      call.route?.toolName === CATALOG_EXECUTE
-        ? resolveCatalogCall(call, entries)
-        : undefined,
+      call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
     );
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
       { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
@@ -2128,10 +1746,7 @@ describe("connector transport effect uncertainty", () => {
     f.setCalls([
       {
         name: path === "direct" ? tool.name : "connectors_execute_tool",
-        args:
-          path === "direct"
-            ? args
-            : { id: "server-1:get_item", arguments: args },
+        args: path === "direct" ? args : { id: "server-1:get_item", arguments: args },
         executionId: "transport-call",
       },
     ]);
@@ -2149,20 +1764,13 @@ describe("connector transport effect uncertainty", () => {
       configure(f, path, readOnly);
       f.connector.execute.mockImplementation(async function* () {
         expect(f.effects[0]?.status).toBe("executing");
-        yield {
-          type: "error",
-          message: "response timed out",
-          outcome: "uncertain",
-        };
+        yield { type: "error", message: "response timed out", outcome: "uncertain" };
       });
 
       await f.run();
 
       expect(f.effects).toHaveLength(1);
-      expect(f.effects[0]).toMatchObject({
-        status: "uncertain",
-        result: { uncertain: true },
-      });
+      expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
       const saved = f.effects[0]!.result;
       expect(f.results).toEqual([saved]);
       await f.run();
@@ -2186,49 +1794,32 @@ describe("connector transport effect uncertainty", () => {
     const update = f.prisma.externalEffect.updateMany.getMockImplementation()!;
     f.prisma.externalEffect.updateMany.mockImplementation(async (input) => {
       if (input.data.status === "uncertain") {
-        Object.assign(f.effects[0]!, {
-          status: "completed",
-          result: completed,
-        });
+        Object.assign(f.effects[0]!, { status: "completed", result: completed });
         return { count: 0 };
       }
       return update(input);
     });
     f.connector.execute.mockImplementation(async function* () {
-      yield {
-        type: "error",
-        message: "response timed out",
-        outcome: "uncertain",
-      };
+      yield { type: "error", message: "response timed out", outcome: "uncertain" };
     });
     await f.run();
     expect(f.results).toEqual([completed]);
-    expect(f.effects[0]).toMatchObject({
-      status: "completed",
-      result: completed,
-    });
+    expect(f.effects[0]).toMatchObject({ status: "completed", result: completed });
   });
 
-  it.each(["direct", "catalog"])(
-    "keeps explicitly read-only %s errors ordinary",
-    async (path) => {
-      const f = fixture();
-      configure(f, path, true);
-      f.connector.execute.mockImplementation(async function* () {
-        yield {
-          type: "error",
-          message: "response timed out",
-          outcome: "uncertain",
-        };
-      });
-      await f.run();
-      expect(f.results).toEqual([{ error: "response timed out" }]);
-      expect(f.effects[0]).toMatchObject({
-        status: "completed",
-        result: { error: "response timed out" },
-      });
-    },
-  );
+  it.each(["direct", "catalog"])("keeps explicitly read-only %s errors ordinary", async (path) => {
+    const f = fixture();
+    configure(f, path, true);
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "error", message: "response timed out", outcome: "uncertain" };
+    });
+    await f.run();
+    expect(f.results).toEqual([{ error: "response timed out" }]);
+    expect(f.effects[0]).toMatchObject({
+      status: "completed",
+      result: { error: "response timed out" },
+    });
+  });
 
   it.each([
     ["direct", false, true],
@@ -2243,74 +1834,45 @@ describe("connector transport effect uncertainty", () => {
       f.connector.execute.mockImplementation(async function* () {
         yield { type: "result", data: { ok: true } };
       });
-      f.runtimeRun.mockImplementation(async function* (
-        request: AgentRunRequest,
-      ) {
+      f.runtimeRun.mockImplementation(async function* (request: AgentRunRequest) {
         const call = { name: "connector_call", executionId: "transport-call" };
         f.results.push(
           await request.executeTool!(
-            path === "direct"
-              ? "mcp__synthetic__get_item"
-              : "connectors_execute_tool",
+            path === "direct" ? "mcp__synthetic__get_item" : "connectors_execute_tool",
             path === "direct"
               ? { id: "item-1", readOnly: true }
-              : {
-                  id: "server-1:get_item",
-                  arguments: { id: "item-1", readOnly: true },
-                },
+              : { id: "server-1:get_item", arguments: { id: "item-1", readOnly: true } },
             call.executionId,
           ),
         );
         // The completion audit waits for the called audit, which the tool event appends.
         const completed = Promise.resolve(
-          request.onToolCompleted?.({
-            ...call,
-            durationMs: 1,
-            result: { ok: true },
-          }),
+          request.onToolCompleted?.({ ...call, durationMs: 1, result: { ok: true } }),
         );
-        yield {
-          type: "tool" as const,
-          name: call.name,
-          args: {},
-          executionId: call.executionId,
-        };
+        yield { type: "tool" as const, name: call.name, args: {}, executionId: call.executionId };
         await completed;
         yield { type: "done" as const, text: "Done" };
       });
       await f.run();
-      const append = f.executorDeps.events.append as unknown as ReturnType<
-        typeof vi.fn
-      >;
+      const append = f.executorDeps.events.append as unknown as ReturnType<typeof vi.fn>;
       const audit = append.mock.calls
-        .map(
-          ([event]) =>
-            event as { type: string; payload: Record<string, unknown> },
-        )
+        .map(([event]) => event as { type: string; payload: Record<string, unknown> })
         .find((event) => event.type === "agent.tool.completed");
       expect(audit?.payload.outcome).toBe("succeeded");
       expect(audit?.payload.wrote).toBe(wrote ? true : undefined);
     },
   );
 
-  it.each(["direct", "catalog"])(
-    "keeps pre-dispatch %s errors ordinary",
-    async (path) => {
-      const f = fixture();
-      configure(f, path, false);
-      f.connector.execute.mockImplementation(async function* () {
-        yield {
-          type: "error",
-          message: "MCP tool is not assigned to this bot",
-        };
-      });
-      await f.run();
-      expect(f.results).toEqual([
-        { error: "MCP tool is not assigned to this bot" },
-      ]);
-      expect(f.effects[0]!.status).toBe("completed");
-    },
-  );
+  it.each(["direct", "catalog"])("keeps pre-dispatch %s errors ordinary", async (path) => {
+    const f = fixture();
+    configure(f, path, false);
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "error", message: "MCP tool is not assigned to this bot" };
+    });
+    await f.run();
+    expect(f.results).toEqual([{ error: "MCP tool is not assigned to this bot" }]);
+    expect(f.effects[0]!.status).toBe("completed");
+  });
 
   it.each(["direct", "catalog"])(
     "completes a preclaimed %s effect when MCP authorization lookup rejects before dispatch",
@@ -2323,19 +1885,13 @@ describe("connector transport effect uncertainty", () => {
       const connector = new McpConnector(
         {
           botMcpServer: {
-            findFirst: vi
-              .fn()
-              .mockRejectedValue(
-                new Error("lookup failed: Bearer fixture-token"),
-              ),
+            findFirst: vi.fn().mockRejectedValue(new Error("lookup failed: Bearer fixture-token")),
           },
         } as never,
         {} as never,
         { network: { fetch, resolveHostname: async () => [] } },
       );
-      f.connector.execute.mockImplementation((call, context) =>
-        connector.execute(call, context),
-      );
+      f.connector.execute.mockImplementation((call, context) => connector.execute(call, context));
       try {
         await f.run();
         expect(f.effects).toHaveLength(1);
@@ -2361,10 +1917,7 @@ describe("connector transport effect uncertainty", () => {
     async (path) => {
       const f = fixture();
       configure(f, path, false);
-      const data = {
-        isError: true,
-        content: [{ type: "text", text: "provider rejected" }],
-      };
+      const data = { isError: true, content: [{ type: "text", text: "provider rejected" }] };
       f.connector.execute.mockImplementation(async function* () {
         yield { type: "result", data };
       });
@@ -2381,11 +1934,7 @@ describe("mutating tool effect idempotency keys", () => {
     f.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "team preference",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "team preference", expectedRevision: 0 },
         executionId: "call_0",
       },
       {
@@ -2409,9 +1958,7 @@ describe("mutating tool effect idempotency keys", () => {
         title: "follow up with design",
       }),
     ]);
-    expect(f.effects.every((effect) => effect.status === "completed")).toBe(
-      true,
-    );
+    expect(f.effects.every((effect) => effect.status === "completed")).toBe(true);
     expect(f.results[0]).toEqual({ ok: true, path: "MEMORY.md", revision: 1 });
     expect(f.results[1]).toEqual(
       expect.objectContaining({
@@ -2425,11 +1972,7 @@ describe("mutating tool effect idempotency keys", () => {
     first.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "first bot note",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "first bot note", expectedRevision: 0 },
         executionId: "call_0",
       },
     ]);
@@ -2441,11 +1984,7 @@ describe("mutating tool effect idempotency keys", () => {
     second.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "second bot note",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "second bot note", expectedRevision: 0 },
         executionId: "call_0",
       },
     ]);
@@ -2464,11 +2003,7 @@ describe("mutating tool effect idempotency keys", () => {
         expectedRevision: 0,
       }),
     ]);
-    expect(second.results[0]).toEqual({
-      ok: true,
-      path: "MEMORY.md",
-      revision: 1,
-    });
+    expect(second.results[0]).toEqual({ ok: true, path: "MEMORY.md", revision: 1 });
   });
 
   it("replays a true retry of the same effect without re-executing", async () => {
@@ -2476,11 +2011,7 @@ describe("mutating tool effect idempotency keys", () => {
     f.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "durable fact",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "durable fact", expectedRevision: 0 },
         executionId: "call_0",
       },
     ]);
@@ -2491,11 +2022,7 @@ describe("mutating tool effect idempotency keys", () => {
     f.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "durable fact",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "durable fact", expectedRevision: 0 },
         executionId: "call_0",
       },
     ]);
@@ -2518,11 +2045,7 @@ describe("mutating tool effect idempotency keys", () => {
     f.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "durable fact",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "durable fact", expectedRevision: 0 },
         executionId: "toolu_abc",
       },
     ]);
@@ -2533,11 +2056,7 @@ describe("mutating tool effect idempotency keys", () => {
     f.setCalls([
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "durable fact",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "durable fact", expectedRevision: 0 },
         executionId: "toolu_xyz",
       },
     ]);
@@ -2565,11 +2084,7 @@ describe("mutating tool effect idempotency keys", () => {
       },
       {
         name: "remember",
-        args: {
-          path: "MEMORY.md",
-          content: "second fact",
-          expectedRevision: 0,
-        },
+        args: { path: "MEMORY.md", content: "second fact", expectedRevision: 0 },
         executionId: "call_0",
       },
     ]);
@@ -2679,11 +2194,7 @@ describe("mutating tool effect idempotency keys", () => {
   });
 
   it("executes two identical-args mutating calls in one live run", async () => {
-    const args = {
-      path: "MEMORY.md",
-      content: "same fact",
-      expectedRevision: 0,
-    };
+    const args = { path: "MEMORY.md", content: "same fact", expectedRevision: 0 };
     const f = fixture("run-live-repeat");
     f.setCalls([
       { name: "remember", args, executionId: "call_a" },
@@ -2743,11 +2254,7 @@ describe("mutating tool effect idempotency keys", () => {
 describe("native recruiting validation feedback", () => {
   it.each([
     ["recruiting_role", "create", ["preferences", "intent"]],
-    [
-      "recruiting_research",
-      "save_results",
-      ["expectedRoleRevision", "providerTaskId"],
-    ],
+    ["recruiting_research", "save_results", ["expectedRoleRevision", "providerTaskId"]],
   ] as const)(
     "returns actionable schema fields for %s without dispatch",
     async (name, operation, fields) => {
@@ -2836,10 +2343,7 @@ describe("native recruiting role effect delivery", () => {
   const adopted: LoadedRecruitingRunContext = {
     workspace,
     text: `<recruiting_role>\n${JSON.stringify(workspace)}\n</recruiting_role>`,
-    contextArtifact: {
-      artifactId: "context-artifact-1",
-      sha256: "a".repeat(64),
-    },
+    contextArtifact: { artifactId: "context-artifact-1", sha256: "a".repeat(64) },
     manifest: {
       version: 1,
       roleId: workspace.role.id,
@@ -2887,22 +2391,15 @@ describe("native recruiting role effect delivery", () => {
     vi.mocked(executeRecruitingRoleTool)
       .mockRejectedValueOnce(new RecruitingSourceValidationError("jd", "text"))
       .mockImplementationOnce(async (prisma, trusted, input) => {
-        expect(
-          JSON.stringify((input as { criteria: unknown }).criteria),
-        ).not.toContain('"quote"');
+        expect(JSON.stringify((input as { criteria: unknown }).criteria)).not.toContain('"quote"');
         return roleReceipt(f, receipt)(prisma, trusted);
       });
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "source-repeat" },
-    ]);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "source-repeat" }]);
     await f.run();
     expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
     expect(f.results).toEqual([delivered]);
-    expect(f.effects.map((effect) => effect.status)).toEqual([
-      "completed",
-      "completed",
-    ]);
+    expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
   });
 
   // 2026-10-27: "找 50 个" sent while the round's turn still ran; the brief update quoted the
@@ -2912,9 +2409,7 @@ describe("native recruiting role effect delivery", () => {
     vi.mocked(f.prisma.message.findFirst).mockResolvedValue({
       blocks: [{ kind: "text", text: "这 10 个方向可以，找 50 个类似的人" }],
     } as never);
-    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(
-      new IsolationError(),
-    );
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(new IsolationError());
     f.setCalls([
       {
         name: "recruiting_role",
@@ -2928,9 +2423,7 @@ describe("native recruiting role effect delivery", () => {
       },
     ]);
     await f.run();
-    expect(
-      vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2],
-    ).toMatchObject({
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
     });
   });
@@ -2940,9 +2433,7 @@ describe("native recruiting role effect delivery", () => {
     const f = fixture("feedback-quote-repair");
     vi.mocked(executeRecruitingFeedback)
       .mockReset()
-      .mockRejectedValueOnce(
-        new RecruitingIntentQuoteError("Greater Los Angeles first"),
-      )
+      .mockRejectedValueOnce(new RecruitingIntentQuoteError("Greater Los Angeles first"))
       .mockResolvedValue({ status: "rejected", reason: "noop" } as never);
     f.setCalls([
       {
@@ -2976,9 +2467,7 @@ describe("native recruiting role effect delivery", () => {
           ? new RecruitingSourceValidationError("jd", "text")
           : new IsolationError("Private source details");
       vi.mocked(executeRecruitingRoleTool).mockRejectedValue(failure);
-      f.setCalls([
-        { name: "recruiting_role", args, executionId: `source-${kind}` },
-      ]);
+      f.setCalls([{ name: "recruiting_role", args, executionId: `source-${kind}` }]);
       await f.run();
       const result = {
         error:
@@ -3003,46 +2492,37 @@ describe("native recruiting role effect delivery", () => {
   it("claims the native effect before creating a role and persists its receipt before context delivery", async () => {
     const f = fixture("run-role");
     f.runData.sourceMessageId = "human-message";
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      async (prisma, trusted, input) => {
-        expect(prisma).toBe(f.prisma);
-        expect(trusted).toEqual({
-          actor: {
-            spaceId: "space-1",
-            userId: "user-1",
-            email: "",
-            isDeploymentOwner: false,
-          },
-          runId: "run-role",
-          sourceMessageId: "human-message",
-          mutation: {
-            threadId: "thread-1",
-            botId: "bot-1",
-            leaseOwner: "worker-1",
-            leaseFence: f.runData.leaseFence,
-            effectId: f.effects[0]!.id,
-            effectRequest: args,
-          },
-        });
-        expect(input).toEqual(args);
-        expect(f.effects).toEqual([
-          expect.objectContaining({
-            kind: "recruiting_role",
-            status: expect.stringMatching(/executing|completed/),
-            request: args,
-          }),
-        ]);
-        return roleReceipt(f, receipt)(prisma, trusted);
-      },
-    );
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(async (prisma, trusted, input) => {
+      expect(prisma).toBe(f.prisma);
+      expect(trusted).toEqual({
+        actor: { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false },
+        runId: "run-role",
+        sourceMessageId: "human-message",
+        mutation: {
+          threadId: "thread-1",
+          botId: "bot-1",
+          leaseOwner: "worker-1",
+          leaseFence: f.runData.leaseFence,
+          effectId: f.effects[0]!.id,
+          effectRequest: args,
+        },
+      });
+      expect(input).toEqual(args);
+      expect(f.effects).toEqual([
+        expect.objectContaining({
+          kind: "recruiting_role",
+          status: expect.stringMatching(/executing|completed/),
+          request: args,
+        }),
+      ]);
+      return roleReceipt(f, receipt)(prisma, trusted);
+    });
     vi.mocked(loadRecruitingRunContext).mockImplementation(
       async (deps, run, memory, context, options) => {
         expect(deps.artifacts).toBe(f.artifacts);
         expect(run).toBe(f.runData);
         expect(memory).toEqual({ documents: [] });
-        expect(context).toEqual(
-          expect.objectContaining({ runId: "run-role", userId: "user-1" }),
-        );
+        expect(context).toEqual(expect.objectContaining({ runId: "run-role", userId: "user-1" }));
         expect(options).toEqual(
           expect.objectContaining({
             reason: "role_tool",
@@ -3070,9 +2550,7 @@ describe("native recruiting role effect delivery", () => {
 
     // A completed replay can refresh context, but must preserve the same domain receipt.
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-after-restart" },
-    ]);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-restart" }]);
     await f.run();
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
@@ -3084,52 +2562,36 @@ describe("native recruiting role effect delivery", () => {
   it("revalidates an atomically completed role receipt after its commit acknowledgement is lost", async () => {
     const f = fixture("run-role-ack-loss");
     let commits = 0;
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      async (db, trusted) => {
-        const effect = f.effects.find(
-          (item) => item.id === trusted.mutation?.effectId,
-        )!;
-        if (effect.status !== "completed") {
-          commits++;
-          await roleReceipt(f, receipt)(db, trusted);
-          throw new Error("role commit acknowledgement lost");
-        }
-        return receipt;
-      },
-    );
-    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "role-before-ack-loss" },
-    ]);
-    await f.run("role commit acknowledgement lost");
-    expect(f.effects[0]).toMatchObject({
-      status: "completed",
-      result: receipt,
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(async (db, trusted) => {
+      const effect = f.effects.find((item) => item.id === trusted.mutation?.effectId)!;
+      if (effect.status !== "completed") {
+        commits++;
+        await roleReceipt(f, receipt)(db, trusted);
+        throw new Error("role commit acknowledgement lost");
+      }
+      return receipt;
     });
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "role-before-ack-loss" }]);
+    await f.run("role commit acknowledgement lost");
+    expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
     await f.run();
     expect(commits).toBe(1);
     expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
     expect(f.results).toEqual([delivered]);
     expect(f.effects[0]?.result).toEqual(receipt);
-    vi.mocked(executeRecruitingRoleTool).mockRejectedValueOnce(
-      new IsolationError(),
-    );
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValueOnce(new IsolationError());
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
         "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).",
     });
-    expect(f.effects[0]).toMatchObject({
-      status: "completed",
-      result: receipt,
-    });
+    expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
 
   it("rebuilds context from a completed base receipt after materialization fails without creating again", async () => {
     const f = fixture("run-role-recovery");
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      roleReceipt(f, receipt),
-    );
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     vi.mocked(loadRecruitingRunContext)
       .mockImplementationOnce(async () => {
         expect(f.effects[0]).toEqual(
@@ -3138,19 +2600,13 @@ describe("native recruiting role effect delivery", () => {
         throw new Error("context materialization interrupted");
       })
       .mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-before-crash" },
-    ]);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-before-crash" }]);
 
     await f.run("context materialization interrupted");
 
     expect(f.results).toEqual([]);
-    expect(f.effects[0]).toEqual(
-      expect.objectContaining({ status: "completed", result: receipt }),
-    );
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-after-crash" },
-    ]);
+    expect(f.effects[0]).toEqual(expect.objectContaining({ status: "completed", result: receipt }));
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-crash" }]);
 
     await f.run();
 
@@ -3158,9 +2614,7 @@ describe("native recruiting role effect delivery", () => {
     expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
     expect(f.effects).toHaveLength(1);
     expect(f.results).toEqual([delivered]);
-    expect(f.effects[0]).toEqual(
-      expect.objectContaining({ status: "completed", result: receipt }),
-    );
+    expect(f.effects[0]).toEqual(expect.objectContaining({ status: "completed", result: receipt }));
   });
 
   it.each(["fresh", "completed replay"])(
@@ -3168,17 +2622,10 @@ describe("native recruiting role effect delivery", () => {
     async (mode) => {
       const f = fixture(`run-verified-role-answer-${mode}`);
       f.runData.sourceMessageId = "vague-trigger";
-      f.sourceMessages.push(
-        { id: "vague-trigger", seq: 1 },
-        { id: "native-role-answer", seq: 2 },
-      );
+      f.sourceMessages.push({ id: "vague-trigger", seq: 1 }, { id: "native-role-answer", seq: 2 });
       const answerSource: RecruitingSourceRef = {
         ...source,
-        anchor: {
-          kind: "message",
-          messageId: "native-role-answer",
-          locator: "text",
-        },
+        anchor: { kind: "message", messageId: "native-role-answer", locator: "text" },
       };
       const answerReceipt = { ...receipt, source: answerSource };
       const followupFeedback = {
@@ -3203,20 +2650,14 @@ describe("native recruiting role effect delivery", () => {
         source: null,
         changed: false,
       });
-      vi.mocked(executeRecruitingRoleTool).mockImplementationOnce(
-        roleReceipt(f, answerReceipt),
-      );
+      vi.mocked(executeRecruitingRoleTool).mockImplementationOnce(roleReceipt(f, answerReceipt));
       if (mode !== "fresh") {
         f.effects.push({
           id: "verified-role-effect",
           spaceId: "space-1",
           runId: f.runData.id,
           kind: "recruiting_role",
-          idempotencyKey: toolEffectIdempotencyKey(
-            f.runData.id,
-            "recruiting_role",
-            args,
-          ),
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
           status: "completed",
           request: args,
           result: { ...delivered, source: answerSource },
@@ -3225,11 +2666,7 @@ describe("native recruiting role effect delivery", () => {
       vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
       f.setCalls([
         { name: "recruiting_role", args, executionId: "role-answer-create" },
-        {
-          name: "recruiting_role",
-          args: { operation: "read" },
-          executionId: "role-answer-read",
-        },
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "role-answer-read" },
         {
           name: "recruiting_feedback",
           args: followupFeedback,
@@ -3240,26 +2677,18 @@ describe("native recruiting role effect delivery", () => {
       await f.run();
 
       expect(
-        vi
-          .mocked(loadRecruitingRunContext)
-          .mock.calls.map((call) => call[4].sourceMessageId),
+        vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].sourceMessageId),
       ).toEqual(["native-role-answer", "native-role-answer"]);
       expect(
-        vi
-          .mocked(loadRecruitingRunContext)
-          .mock.calls.map((call) => call[4].trustedWorkspace),
+        vi.mocked(loadRecruitingRunContext).mock.calls.map((call) => call[4].trustedWorkspace),
       ).toEqual([undefined, workspace]);
       const roleCalls = vi.mocked(executeRecruitingRoleTool).mock.calls;
-      expect(roleCalls.map((call) => call[2])).toEqual([
-        args,
-        { operation: "read" },
-      ]);
-      if (mode === "fresh")
-        expect(roleCalls[0]![1].sourceMessageId).toBe("vague-trigger");
+      expect(roleCalls.map((call) => call[2])).toEqual([args, { operation: "read" }]);
+      if (mode === "fresh") expect(roleCalls[0]![1].sourceMessageId).toBe("vague-trigger");
       expect(roleCalls.at(-1)![1].sourceMessageId).toBe("native-role-answer");
-      expect(
-        vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId,
-      ).toBe("native-role-answer");
+      expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+        "native-role-answer",
+      );
       expect(f.results[0]).toEqual({ ...delivered, source: answerSource });
       expect(f.memoryCommit).not.toHaveBeenCalled();
     },
@@ -3268,10 +2697,7 @@ describe("native recruiting role effect delivery", () => {
   it("keeps newer human steering as the source when replaying an older completed role receipt", async () => {
     const f = fixture("run-role-source-no-regression");
     f.runData.sourceMessageId = "vague-trigger";
-    f.sourceMessages.push(
-      { id: "human-answer-1", seq: 2 },
-      { id: "human-answer-2", seq: 3 },
-    );
+    f.sourceMessages.push({ id: "human-answer-1", seq: 2 }, { id: "human-answer-2", seq: 3 });
     const earlierSource: RecruitingSourceRef = {
       ...source,
       anchor: { kind: "message", messageId: "human-answer-1", locator: "text" },
@@ -3285,11 +2711,7 @@ describe("native recruiting role effect delivery", () => {
       spaceId: "space-1",
       runId: f.runData.id,
       kind: "recruiting_role",
-      idempotencyKey: toolEffectIdempotencyKey(
-        f.runData.id,
-        "recruiting_role",
-        args,
-      ),
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
       status: "completed",
       request: args,
       result: { ...delivered, source: earlierSource },
@@ -3308,10 +2730,7 @@ describe("native recruiting role effect delivery", () => {
       roleId: workspace.role.id,
       expectedRoleRevision: 1,
       summary: "Keep the newer role criteria",
-      intent: {
-        basis: "direct" as const,
-        quote: "Keep the newer role criteria",
-      },
+      intent: { basis: "direct" as const, quote: "Keep the newer role criteria" },
       sourceRefs: [],
     } satisfies RecruitingFeedbackInput;
     vi.mocked(executeRecruitingFeedback).mockReset().mockResolvedValue({
@@ -3327,19 +2746,9 @@ describe("native recruiting role effect delivery", () => {
     );
     f.runtimeRun.mockImplementation(async function* (request) {
       await request.claimSteering!([]);
+      f.results.push(await request.executeTool!("recruiting_role", args, "older-role-replay"));
       f.results.push(
-        await request.executeTool!(
-          "recruiting_role",
-          args,
-          "older-role-replay",
-        ),
-      );
-      f.results.push(
-        await request.executeTool!(
-          "recruiting_feedback",
-          followupFeedback,
-          "newer-feedback",
-        ),
+        await request.executeTool!("recruiting_feedback", followupFeedback, "newer-feedback"),
       );
       yield { type: "done" as const, text: "Done" };
     });
@@ -3347,9 +2756,9 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
-    expect(
-      vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId,
-    ).toBe("human-answer-2");
+    expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+      "human-answer-2",
+    );
     expect(f.prisma.message.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ threadId: f.runData.threadId }),
@@ -3361,15 +2770,10 @@ describe("native recruiting role effect delivery", () => {
       f.runData,
       { documents: [] },
       expect.anything(),
-      expect.objectContaining({
-        reason: "role_tool",
-        sourceMessageId: "human-answer-2",
-      }),
+      expect.objectContaining({ reason: "role_tool", sourceMessageId: "human-answer-2" }),
     );
     expect(f.results[0]).toEqual({ ...delivered, source: earlierSource });
-    expect(
-      f.effects.filter((effect) => effect.kind === "recruiting_role"),
-    ).toHaveLength(1);
+    expect(f.effects.filter((effect) => effect.kind === "recruiting_role")).toHaveLength(1);
     expect(f.memoryCommit).not.toHaveBeenCalled();
   });
 
@@ -3381,35 +2785,21 @@ describe("native recruiting role effect delivery", () => {
       spaceId: "space-1",
       runId: f.runData.id,
       kind: "recruiting_role",
-      idempotencyKey: toolEffectIdempotencyKey(
-        f.runData.id,
-        "recruiting_role",
-        args,
-      ),
+      idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
       status: "completed",
       request: args,
       result: delivered,
     });
-    vi.mocked(loadRecruitingRunContext)
-      .mockResolvedValueOnce(adopted)
-      .mockResolvedValue(undefined);
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      roleReceipt(f, receipt),
-    );
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-after-role-cleared" },
-    ]);
+    vi.mocked(loadRecruitingRunContext).mockResolvedValueOnce(adopted).mockResolvedValue(undefined);
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-after-role-cleared" }]);
 
     await f.run();
 
     expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
     expect(loadRecruitingRunContext).toHaveBeenCalledTimes(2);
-    expect(promptContext(f.runtimeRun.mock.calls[0]![0])).toContain(
-      adopted.text,
-    );
-    expect(
-      vi.mocked(loadRecruitingRunContext).mock.calls[1]![4].trustedWorkspace,
-    ).toBeUndefined();
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])).toContain(adopted.text);
+    expect(vi.mocked(loadRecruitingRunContext).mock.calls[1]![4].trustedWorkspace).toBeUndefined();
     expect(f.results[0]).toEqual(
       expect.objectContaining({
         roleContext: expect.stringContaining("No recruiting role is selected"),
@@ -3421,22 +2811,16 @@ describe("native recruiting role effect delivery", () => {
 
   it("delivers context from the completed base receipt when another worker wins the effect claim", async () => {
     const f = fixture("run-role-claim-race");
-    f.prisma.externalEffect.updateMany.mockImplementationOnce(
-      async ({ where, data }) => {
-        expect(where.status).toBe("intended");
-        expect(data.status).toBe("executing");
-        const effect = f.effects.find((item) => item.id === where.id)!;
-        Object.assign(effect, { status: "completed", result: receipt });
-        return { count: 0 };
-      },
-    );
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      roleReceipt(f, receipt),
-    );
+    f.prisma.externalEffect.updateMany.mockImplementationOnce(async ({ where, data }) => {
+      expect(where.status).toBe("intended");
+      expect(data.status).toBe("executing");
+      const effect = f.effects.find((item) => item.id === where.id)!;
+      Object.assign(effect, { status: "completed", result: receipt });
+      return { count: 0 };
+    });
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-lost-claim" },
-    ]);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-lost-claim" }]);
 
     await f.run();
 
@@ -3444,9 +2828,7 @@ describe("native recruiting role effect delivery", () => {
     expect(f.results).toEqual([delivered]);
     expect(loadRecruitingRunContext).toHaveBeenCalledOnce();
     expect(f.effects).toHaveLength(1);
-    expect(f.effects[0]).toEqual(
-      expect.objectContaining({ status: "completed", result: receipt }),
-    );
+    expect(f.effects[0]).toEqual(expect.objectContaining({ status: "completed", result: receipt }));
   });
 
   it("injects the bound role and structured memory text exactly once into runtime instructions", async () => {
@@ -3455,9 +2837,7 @@ describe("native recruiting role effect delivery", () => {
     const fact = "Durable preference for supplied candidate material";
     f.memoryRead.mockImplementation(async ({ scope }) => ({
       documents:
-        scope === "bot"
-          ? [{ id: "memory-1", path: "MEMORY.md", content: fact, revision: 1 }]
-          : [],
+        scope === "bot" ? [{ id: "memory-1", path: "MEMORY.md", content: fact, revision: 1 }] : [],
     }));
     let fullContext = "";
     vi.mocked(loadRecruitingRunContext).mockImplementation(
@@ -3485,9 +2865,7 @@ describe("native recruiting role effect delivery", () => {
     const request = f.runtimeRun.mock.calls[0]![0];
     expect(promptContext(request)?.split(fullContext)).toHaveLength(2);
     expect(promptContext(request)?.split(fact)).toHaveLength(2);
-    expect(promptContext(request)).toContain(
-      "Must personally implement geometry calculations",
-    );
+    expect(promptContext(request)).toContain("Must personally implement geometry calculations");
     expect(request.instructions).not.toContain("[object Object]");
   });
 
@@ -3502,29 +2880,19 @@ describe("native recruiting role effect delivery", () => {
           spaceId: "space-1",
           runId: f.runData.id,
           kind: "recruiting_role",
-          idempotencyKey: toolEffectIdempotencyKey(
-            f.runData.id,
-            "recruiting_role",
-            args,
-          ),
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_role", args),
           status: "completed",
           request: args,
           result: delivered,
         });
       }
       vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-      vi.mocked(executeRecruitingRoleTool).mockImplementation(
-        roleReceipt(f, receipt),
-      );
-      f.setCalls([
-        { name: "recruiting_role", args, executionId: "unchanged-role" },
-      ]);
+      vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
+      f.setCalls([{ name: "recruiting_role", args, executionId: "unchanged-role" }]);
 
       await f.run();
 
-      expect(
-        promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text),
-      ).toHaveLength(2);
+      expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
       expect(f.results).toEqual([
         {
           ...receipt,
@@ -3533,9 +2901,7 @@ describe("native recruiting role effect delivery", () => {
         },
       ]);
       expect(f.effects).toHaveLength(1);
-      expect(f.effects[0]?.result).toEqual(
-        mode === "fresh" ? receipt : delivered,
-      );
+      expect(f.effects[0]?.result).toEqual(mode === "fresh" ? receipt : delivered);
     },
   );
 
@@ -3547,29 +2913,13 @@ describe("native recruiting role effect delivery", () => {
       const changed = {
         ...adopted,
         text: `${adopted.text}\n\nUpdated ${kind} context`,
-        contextArtifact: {
-          artifactId: `updated-${kind}`,
-          sha256: "b".repeat(64),
-        },
+        contextArtifact: { artifactId: `updated-${kind}`, sha256: "b".repeat(64) },
       };
-      vi.mocked(loadRecruitingRunContext)
-        .mockResolvedValueOnce(adopted)
-        .mockResolvedValue(changed);
-      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({
-        ...receipt,
-        changed: false,
-      });
+      vi.mocked(loadRecruitingRunContext).mockResolvedValueOnce(adopted).mockResolvedValue(changed);
+      vi.mocked(executeRecruitingRoleTool).mockResolvedValue({ ...receipt, changed: false });
       f.setCalls([
-        {
-          name: "recruiting_role",
-          args: { operation: "read" },
-          executionId: "changed-role",
-        },
-        {
-          name: "recruiting_role",
-          args: { operation: "read" },
-          executionId: "same-changed-role",
-        },
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "changed-role" },
+        { name: "recruiting_role", args: { operation: "read" }, executionId: "same-changed-role" },
       ]);
 
       await f.run();
@@ -3590,35 +2940,23 @@ describe("native recruiting role effect delivery", () => {
     const f = fixture("run-role-secret", [secret]);
     const rawReceipt = {
       ...receipt,
-      workspace: {
-        ...workspace,
-        role: { ...workspace.role, title: `Role ${secret}` },
-      },
+      workspace: { ...workspace, role: { ...workspace.role, title: `Role ${secret}` } },
       source: { ...source, quote: `Human quote ${secret}` },
     };
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      roleReceipt(f, rawReceipt),
-    );
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, rawReceipt));
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    f.setCalls([
-      { name: "recruiting_role", args, executionId: "call-secret-role" },
-    ]);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "call-secret-role" }]);
 
     await f.run();
 
     const redacted = {
       ...delivered,
-      workspace: {
-        ...workspace,
-        role: { ...workspace.role, title: "Role [redacted]" },
-      },
+      workspace: { ...workspace, role: { ...workspace.role, title: "Role [redacted]" } },
       source: { ...source, quote: "Human quote [redacted]" },
     };
     expect(f.results).toEqual([redacted]);
     expect(f.effects[0]?.result).toEqual(rawReceipt);
-    expect(JSON.stringify(f.results)).not.toContain(
-      JSON.stringify(secret).slice(1, -1),
-    );
+    expect(JSON.stringify(f.results)).not.toContain(JSON.stringify(secret).slice(1, -1));
   });
 
   it("adopts steering context once on the latest human item while preserving original history text", async () => {
@@ -3634,9 +2972,7 @@ describe("native recruiting role effect delivery", () => {
         id: "steering-2",
         messageId: "human-latest",
         text: "Keep the geometry criterion",
-        blocks: [
-          { kind: "text" as const, text: "Keep the geometry criterion" },
-        ],
+        blocks: [{ kind: "text" as const, text: "Keep the geometry criterion" }],
       },
       {
         id: "steering-3",
@@ -3667,9 +3003,7 @@ describe("native recruiting role effect delivery", () => {
         }),
         expect.objectContaining({
           messageId: "human-latest",
-          text: expect.stringContaining(
-            `${steering[1]!.text}\n\n${adopted.text}`,
-          ),
+          text: expect.stringContaining(`${steering[1]!.text}\n\n${adopted.text}`),
           historyText: steering[1]!.text,
         }),
         expect.objectContaining({
@@ -3736,20 +3070,12 @@ describe("native recruiting role effect delivery", () => {
     };
     f.claimSteering.mockResolvedValue([peer]);
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    vi.mocked(executeRecruitingRoleTool).mockImplementation(
-      roleReceipt(f, receipt),
-    );
-    let claimed: Awaited<
-      ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>
-    > = [];
+    vi.mocked(executeRecruitingRoleTool).mockImplementation(roleReceipt(f, receipt));
+    let claimed: Awaited<ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>> = [];
     f.runtimeRun.mockImplementation(async function* (request) {
       claimed = await request.claimSteering!([]);
       f.results.push(
-        await request.executeTool!(
-          "recruiting_role",
-          args,
-          "call-after-peer-steering",
-        ),
+        await request.executeTool!("recruiting_role", args, "call-after-peer-steering"),
       );
       yield { type: "done" as const, text: "Done" };
     });
@@ -3787,21 +3113,14 @@ describe("native recruiting role effect delivery", () => {
         historyText: peer.text,
       }),
     ]);
-    expect(
-      promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text),
-    ).toHaveLength(2);
-    expect(f.results).toEqual([
-      { ...delivered, roleContext: unchangedContextNotice },
-    ]);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
+    expect(f.results).toEqual([{ ...delivered, roleContext: unchangedContextNotice }]);
   });
 
   it("delivers changed steering context before explicitly restoring and clearing the initial context", async () => {
     const f = fixture("run-steering-context-transitions");
     f.thread.activeRecruitingRoleId = workspace.role.id;
-    const changed = {
-      ...adopted,
-      text: `${adopted.text}\n\nUpdated durable preference`,
-    };
+    const changed = { ...adopted, text: `${adopted.text}\n\nUpdated durable preference` };
     const steering = [
       "Apply the new preference",
       "Use the original preference",
@@ -3823,23 +3142,17 @@ describe("native recruiting role effect delivery", () => {
       .mockResolvedValueOnce(adopted)
       .mockResolvedValueOnce(changed)
       .mockResolvedValueOnce(adopted);
-    const claimed: Awaited<
-      ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>
-    > = [];
+    const claimed: Awaited<ReturnType<NonNullable<AgentRunRequest["claimSteering"]>>> = [];
     f.runtimeRun.mockImplementation(async function* (request) {
       for (let index = 0; index < steering.length; index++) {
-        claimed.push(
-          ...(await request.claimSteering!(claimed.map((item) => item.id))),
-        );
+        claimed.push(...(await request.claimSteering!(claimed.map((item) => item.id))));
       }
       yield { type: "done" as const, text: "Done" };
     });
 
     await f.run();
 
-    expect(
-      promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text),
-    ).toHaveLength(2);
+    expect(promptContext(f.runtimeRun.mock.calls[0]![0])?.split(adopted.text)).toHaveLength(2);
     expect(claimed[0]?.text).toContain(changed.text);
     expect(claimed[1]?.text).toContain(unchangedContextNotice);
     expect(claimed[1]?.text).not.toContain(adopted.text);
@@ -3852,9 +3165,7 @@ describe("native recruiting role effect delivery", () => {
         images: undefined,
       });
       expect(item.text).toContain(steering[index]!.text);
-      expect(item.text).toContain(
-        `"messageId":"${steering[index]!.messageId}"`,
-      );
+      expect(item.text).toContain(`"messageId":"${steering[index]!.messageId}"`);
     }
   });
 });
@@ -3866,10 +3177,7 @@ describe("native recruiting feedback effect dispatch", () => {
     scope: "bot" as const,
     path: "MEMORY.md",
     expectedRevision: 0,
-    intent: {
-      basis: "direct" as const,
-      quote: "Remember to show the complete prompt",
-    },
+    intent: { basis: "direct" as const, quote: "Remember to show the complete prompt" },
     sourceRefs: [],
     content: "Show the complete prompt",
   } satisfies RecruitingFeedbackInput;
@@ -3891,11 +3199,7 @@ describe("native recruiting feedback effect dispatch", () => {
       scope: feedback.scope,
       path: feedback.path,
       revision: 1,
-      anchor: {
-        start: 0,
-        end: feedback.content.length,
-        quote: feedback.content,
-      },
+      anchor: { start: 0, end: feedback.content.length, quote: feedback.content },
     },
   };
 
@@ -3916,17 +3220,13 @@ describe("native recruiting feedback effect dispatch", () => {
     };
     for (const semanticMemoryEnabled of [false, true]) {
       expect(
-        selectBuiltinToolsForRun({ ...options, semanticMemoryEnabled }).map(
-          (tool) => tool.name,
-        ),
+        selectBuiltinToolsForRun({ ...options, semanticMemoryEnabled }).map((tool) => tool.name),
       ).toContain("recruiting_feedback");
     }
     expect(
-      selectBuiltinToolsForRun({
-        ...options,
-        trigger: "messaging",
-        messagingChannelRun: true,
-      }).map((tool) => tool.name),
+      selectBuiltinToolsForRun({ ...options, trigger: "messaging", messagingChannelRun: true }).map(
+        (tool) => tool.name,
+      ),
     ).not.toContain("recruiting_feedback");
   });
 
@@ -3938,19 +3238,12 @@ describe("native recruiting feedback effect dispatch", () => {
         expect(deps.prisma).toBe(f.prisma);
         expect(deps.memory.commit).toBe(f.memoryCommit);
         expect(trusted).toEqual({
-          actor: {
-            spaceId: "space-1",
-            userId: "user-1",
-            email: "",
-            isDeploymentOwner: false,
-          },
+          actor: { spaceId: "space-1", userId: "user-1", email: "", isDeploymentOwner: false },
           runId: "run-feedback",
           sourceMessageId: "human-feedback",
         });
         expect(untrusted).toEqual(feedback);
-        expect(context).toEqual(
-          expect.objectContaining({ runId: "run-feedback", botId: "bot-1" }),
-        );
+        expect(context).toEqual(expect.objectContaining({ runId: "run-feedback", botId: "bot-1" }));
         expect(f.effects).toEqual([
           expect.objectContaining({
             kind: "recruiting_feedback",
@@ -3962,28 +3255,18 @@ describe("native recruiting feedback effect dispatch", () => {
       },
     );
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: feedback,
-        executionId: "feedback-before-restart",
-      },
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-before-restart" },
     ]);
 
     await f.run();
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: feedback,
-        executionId: "feedback-after-restart",
-      },
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-after-restart" },
     ]);
     await f.run();
 
     expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
     expect(f.results).toEqual([saved, saved]);
-    expect(f.effects).toEqual([
-      expect.objectContaining({ status: "completed", result: saved }),
-    ]);
+    expect(f.effects).toEqual([expect.objectContaining({ status: "completed", result: saved })]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(loadRecruitingRunContext).not.toHaveBeenCalled();
   });
@@ -3999,11 +3282,7 @@ describe("native recruiting feedback effect dispatch", () => {
       );
       const answerSource: RecruitingSourceRef = {
         ...source,
-        anchor: {
-          kind: "message",
-          messageId: "native-feedback-answer",
-          locator: "text",
-        },
+        anchor: { kind: "message", messageId: "native-feedback-answer", locator: "text" },
       };
       const answerReceipt = { ...saved, source: answerSource };
       vi.mocked(executeRecruitingFeedback).mockResolvedValue(answerReceipt);
@@ -4019,22 +3298,14 @@ describe("native recruiting feedback effect dispatch", () => {
           spaceId: "space-1",
           runId: f.runData.id,
           kind: "recruiting_feedback",
-          idempotencyKey: toolEffectIdempotencyKey(
-            f.runData.id,
-            "recruiting_feedback",
-            feedback,
-          ),
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", feedback),
           status: "completed",
           request: feedback,
           result: answerReceipt,
         });
       }
       f.setCalls([
-        {
-          name: "recruiting_feedback",
-          args: feedback,
-          executionId: "verified-answer-feedback",
-        },
+        { name: "recruiting_feedback", args: feedback, executionId: "verified-answer-feedback" },
         {
           name: "recruiting_role",
           args: { operation: "read" },
@@ -4044,31 +3315,23 @@ describe("native recruiting feedback effect dispatch", () => {
 
       await f.run();
 
-      expect(executeRecruitingFeedback).toHaveBeenCalledTimes(
-        mode === "fresh" ? 1 : 0,
-      );
+      expect(executeRecruitingFeedback).toHaveBeenCalledTimes(mode === "fresh" ? 1 : 0);
       if (mode === "fresh")
-        expect(
-          vi.mocked(executeRecruitingFeedback).mock.calls[0]![1]
-            .sourceMessageId,
-        ).toBe("vague-trigger");
-      expect(
-        vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId,
-      ).toBe("native-feedback-answer");
+        expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]![1].sourceMessageId).toBe(
+          "vague-trigger",
+        );
+      expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId).toBe(
+        "native-feedback-answer",
+      );
       expect(loadRecruitingRunContext).toHaveBeenCalledWith(
         expect.anything(),
         f.runData,
         { documents: [] },
         expect.anything(),
-        expect.objectContaining({
-          reason: "role_tool",
-          sourceMessageId: "native-feedback-answer",
-        }),
+        expect.objectContaining({ reason: "role_tool", sourceMessageId: "native-feedback-answer" }),
       );
       expect(f.results[0]).toEqual(answerReceipt);
-      expect(
-        f.effects.filter((effect) => effect.kind === "recruiting_feedback"),
-      ).toEqual([
+      expect(f.effects.filter((effect) => effect.kind === "recruiting_feedback")).toEqual([
         expect.objectContaining({ status: "completed", result: answerReceipt }),
       ]);
       expect(f.memoryCommit).not.toHaveBeenCalled();
@@ -4077,16 +3340,8 @@ describe("native recruiting feedback effect dispatch", () => {
   );
 
   it.each([
-    {
-      receiptOrder: "older",
-      receiptSeq: 2,
-      expectedSourceId: "human-answer-2",
-    },
-    {
-      receiptOrder: "newer",
-      receiptSeq: 4,
-      expectedSourceId: "human-answer-1",
-    },
+    { receiptOrder: "older", receiptSeq: 2, expectedSourceId: "human-answer-2" },
+    { receiptOrder: "newer", receiptSeq: 4, expectedSourceId: "human-answer-1" },
   ])(
     "keeps the later source when replaying an $receiptOrder completed feedback receipt after steering",
     async ({ receiptSeq, expectedSourceId }) => {
@@ -4098,11 +3353,7 @@ describe("native recruiting feedback effect dispatch", () => {
       );
       const receiptSource: RecruitingSourceRef = {
         ...source,
-        anchor: {
-          kind: "message",
-          messageId: "human-answer-1",
-          locator: "text",
-        },
+        anchor: { kind: "message", messageId: "human-answer-1", locator: "text" },
       };
       const replayedReceipt = { ...saved, source: receiptSource };
       f.effects.push({
@@ -4110,11 +3361,7 @@ describe("native recruiting feedback effect dispatch", () => {
         spaceId: "space-1",
         runId: f.runData.id,
         kind: "recruiting_feedback",
-        idempotencyKey: toolEffectIdempotencyKey(
-          f.runData.id,
-          "recruiting_feedback",
-          feedback,
-        ),
+        idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", feedback),
         status: "completed",
         request: feedback,
         result: replayedReceipt,
@@ -4136,18 +3383,10 @@ describe("native recruiting feedback effect dispatch", () => {
       f.runtimeRun.mockImplementation(async function* (request) {
         await request.claimSteering!([]);
         f.results.push(
-          await request.executeTool!(
-            "recruiting_feedback",
-            feedback,
-            "older-feedback-replay",
-          ),
+          await request.executeTool!("recruiting_feedback", feedback, "older-feedback-replay"),
         );
         f.results.push(
-          await request.executeTool!(
-            "recruiting_role",
-            { operation: "read" },
-            "newer-role-read",
-          ),
+          await request.executeTool!("recruiting_role", { operation: "read" }, "newer-role-read"),
         );
         yield { type: "done" as const, text: "Done" };
       });
@@ -4155,9 +3394,9 @@ describe("native recruiting feedback effect dispatch", () => {
       await f.run();
 
       expect(executeRecruitingFeedback).not.toHaveBeenCalled();
-      expect(
-        vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId,
-      ).toBe(expectedSourceId);
+      expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]![1].sourceMessageId).toBe(
+        expectedSourceId,
+      );
       expect(f.prisma.message.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ threadId: f.runData.threadId }),
@@ -4169,15 +3408,10 @@ describe("native recruiting feedback effect dispatch", () => {
         f.runData,
         { documents: [] },
         expect.anything(),
-        expect.objectContaining({
-          reason: "role_tool",
-          sourceMessageId: expectedSourceId,
-        }),
+        expect.objectContaining({ reason: "role_tool", sourceMessageId: expectedSourceId }),
       );
       expect(f.results[0]).toEqual(replayedReceipt);
-      expect(
-        f.effects.filter((effect) => effect.kind === "recruiting_feedback"),
-      ).toHaveLength(1);
+      expect(f.effects.filter((effect) => effect.kind === "recruiting_feedback")).toHaveLength(1);
       expect(f.memoryCommit).not.toHaveBeenCalled();
       expect(f.semanticSave).not.toHaveBeenCalled();
     },
@@ -4210,11 +3444,7 @@ describe("native recruiting feedback effect dispatch", () => {
           spaceId: "space-1",
           runId: f.runData.id,
           kind: "recruiting_feedback",
-          idempotencyKey: toolEffectIdempotencyKey(
-            f.runData.id,
-            "recruiting_feedback",
-            decision,
-          ),
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, "recruiting_feedback", decision),
           status: "executing",
           request: decision,
         });
@@ -4225,20 +3455,14 @@ describe("native recruiting feedback effect dispatch", () => {
             leaseOwner: "worker-1",
             threadId: f.runData.threadId,
           });
-          const effect = f.effects.find(
-            (item) => item.id === options?.mutation?.effectId,
-          )!;
+          const effect = f.effects.find((item) => item.id === options?.mutation?.effectId)!;
           expect(effect.status).toBe("executing");
           Object.assign(effect, { status: "completed", result: receipt });
           return receipt;
         },
       );
       f.setCalls([
-        {
-          name: "recruiting_feedback",
-          args: decision,
-          executionId: "candidate-decision",
-        },
+        { name: "recruiting_feedback", args: decision, executionId: "candidate-decision" },
       ]);
       await f.run();
       await f.run();
@@ -4248,9 +3472,7 @@ describe("native recruiting feedback effect dispatch", () => {
         expect.objectContaining({ status: "completed", result: receipt }),
       ]);
       expect(f.prisma.externalEffect.updateMany).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ result: receipt }),
-        }),
+        expect.objectContaining({ data: expect.objectContaining({ result: receipt }) }),
       );
     },
   );
@@ -4265,20 +3487,14 @@ describe("native recruiting feedback effect dispatch", () => {
         roleId: "internal-role",
         expectedRoleRevision: 1,
         candidateKeys: ["internal-candidate"],
-        candidateRevisions: [
-          { candidateKey: "internal-candidate", expectedRevision: 0 },
-        ],
+        candidateRevisions: [{ candidateKey: "internal-candidate", expectedRevision: 0 }],
         summary: "Pause consideration",
         intent: { basis: "direct", quote: "Hold Avery" },
         sourceRefs: [],
       } satisfies RecruitingFeedbackInput;
       const originalRequest = JSON.stringify(decision);
       f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-        {
-          effect: "require_approval",
-          matchKind: "tool",
-          matchValue: "recruiting_feedback",
-        },
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
       ]);
       vi.mocked(prepareNativeRecruitingCandidateDecision).mockReset();
       if (mode === "stale")
@@ -4292,16 +3508,10 @@ describe("native recruiting feedback effect dispatch", () => {
           operation: "hold",
         });
       f.setCalls([
-        {
-          name: "recruiting_feedback",
-          args: decision,
-          executionId: "decision-approval",
-        },
+        { name: "recruiting_feedback", args: decision, executionId: "decision-approval" },
       ]);
       await f.run();
-      expect(
-        prepareNativeRecruitingCandidateDecision,
-      ).toHaveBeenCalledExactlyOnceWith(
+      expect(prepareNativeRecruitingCandidateDecision).toHaveBeenCalledExactlyOnceWith(
         f.prisma,
         expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
         expect.objectContaining({
@@ -4316,16 +3526,13 @@ describe("native recruiting feedback effect dispatch", () => {
       expect(executeRecruitingFeedback).not.toHaveBeenCalled();
       if (mode === "stale") {
         expect(f.pauseRunForInput).not.toHaveBeenCalled();
-        expect(f.results).toEqual([
-          expect.objectContaining({ code: "CONFLICT" }),
-        ]);
+        expect(f.results).toEqual([expect.objectContaining({ code: "CONFLICT" })]);
       } else {
         const block = f.pauseRunForInput.mock.calls[0]![0].blocks.at(-1)!;
         expect(block).toMatchObject({
           kind: "ask",
           text: "Review consideration change",
-          detail:
-            "Candidates: Example Avery\nRole: Engineer\n\nPause consideration",
+          detail: "Candidates: Example Avery\nRole: Engineer\n\nPause consideration",
         });
         expect(JSON.stringify(block)).not.toContain("internal-");
       }
@@ -4337,11 +3544,7 @@ describe("native recruiting feedback effect dispatch", () => {
     async (operation) => {
       const f = fixture(`run-inferred-consideration-${operation}`);
       f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-        {
-          effect: "require_approval",
-          matchKind: "tool",
-          matchValue: "recruiting_feedback",
-        },
+        { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
       ]);
       const input = {
         target: "candidate",
@@ -4349,19 +3552,13 @@ describe("native recruiting feedback effect dispatch", () => {
         roleId: "internal-role",
         expectedRoleRevision: 1,
         candidateKeys: ["internal-candidate"],
-        candidateRevisions: [
-          { candidateKey: "internal-candidate", expectedRevision: 0 },
-        ],
+        candidateRevisions: [{ candidateKey: "internal-candidate", expectedRevision: 0 }],
         summary: "Ambiguous feedback",
         intent: { basis: "inferred", quote: "Review Avery" },
         sourceRefs: [],
       } satisfies RecruitingFeedbackInput;
       f.setCalls([
-        {
-          name: "recruiting_feedback",
-          args: input,
-          executionId: "inferred-consideration",
-        },
+        { name: "recruiting_feedback", args: input, executionId: "inferred-consideration" },
       ]);
       await f.run();
       expect(f.results).toEqual([{ status: "needs_clarification" }]);
@@ -4374,10 +3571,7 @@ describe("native recruiting feedback effect dispatch", () => {
 
   it("returns inferred feedback for clarification without claiming a memory save", async () => {
     const f = fixture("run-inferred-feedback");
-    const inferred = {
-      ...feedback,
-      intent: { ...feedback.intent, basis: "inferred" as const },
-    };
+    const inferred = { ...feedback, intent: { ...feedback.intent, basis: "inferred" as const } };
     const result = {
       status: "needs_clarification" as const,
       feedback: inferred,
@@ -4385,13 +3579,7 @@ describe("native recruiting feedback effect dispatch", () => {
       workspace: null,
     };
     vi.mocked(executeRecruitingFeedback).mockResolvedValue(result);
-    f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: inferred,
-        executionId: "feedback-inferred",
-      },
-    ]);
+    f.setCalls([{ name: "recruiting_feedback", args: inferred, executionId: "feedback-inferred" }]);
 
     await f.run();
 
@@ -4408,11 +3596,7 @@ describe("native recruiting feedback effect dispatch", () => {
       new Error("native commit acknowledgement lost"),
     );
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: feedback,
-        executionId: "feedback-unknown-commit",
-      },
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-unknown-commit" },
     ]);
 
     await f.run("native commit acknowledgement lost");
@@ -4450,11 +3634,7 @@ describe("native recruiting feedback effect dispatch", () => {
     };
     vi.mocked(executeRecruitingFeedback).mockResolvedValue(result);
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: proposal,
-        executionId: "role-feedback-proposal",
-      },
+      { name: "recruiting_feedback", args: proposal, executionId: "role-feedback-proposal" },
     ]);
 
     await f.run();
@@ -4493,11 +3673,7 @@ describe("native recruiting feedback effect dispatch", () => {
       };
       vi.mocked(executeRecruitingFeedback).mockImplementation(async () => {
         expect(f.effects).toEqual([
-          expect.objectContaining({
-            kind: name,
-            status: "executing",
-            request: args,
-          }),
+          expect.objectContaining({ kind: name, status: "executing", request: args }),
         ]);
         return result;
       });
@@ -4510,27 +3686,15 @@ describe("native recruiting feedback effect dispatch", () => {
           prisma: f.prisma,
           memory: expect.objectContaining({ commit: f.memoryCommit }),
         }),
-        expect.objectContaining({
-          runId: f.runData.id,
-          sourceMessageId: "human-feedback",
-        }),
+        expect.objectContaining({ runId: f.runData.id, sourceMessageId: "human-feedback" }),
         proposal,
         expect.objectContaining({ botId: "bot-1" }),
-        {
-          expectedMemory: {
-            scope,
-            path: "MEMORY.md",
-            expectedRevision: 7,
-            content: body,
-          },
-        },
+        { expectedMemory: { scope, path: "MEMORY.md", expectedRevision: 7, content: body } },
       );
       expect(f.results).toEqual([result]);
       expect(f.memoryCommit).not.toHaveBeenCalled();
       expect(f.semanticSave).not.toHaveBeenCalled();
-      f.setCalls([
-        { name, args, executionId: "feedback-native-after-restart" },
-      ]);
+      f.setCalls([{ name, args, executionId: "feedback-native-after-restart" }]);
       await f.run();
       expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
       expect(f.results).toEqual([result, result]);
@@ -4598,13 +3762,8 @@ describe("native recruiting feedback effect dispatch", () => {
       await f.run();
 
       expect(f.results).toEqual([{ error: expect.any(String) }]);
-      expect(
-        JSON.parse((f.results[0] as { error: string }).error),
-      ).toContainEqual(
-        expect.objectContaining({
-          code: "unrecognized_keys",
-          keys: ["content"],
-        }),
+      expect(JSON.parse((f.results[0] as { error: string }).error)).toContainEqual(
+        expect.objectContaining({ code: "unrecognized_keys", keys: ["content"] }),
       );
       expect(f.effects).toEqual([]);
       expect(f.pauseRunForInput).not.toHaveBeenCalled();
@@ -4639,9 +3798,7 @@ describe("native recruiting feedback effect dispatch", () => {
 
       await f.run();
 
-      expect(f.results).toEqual([
-        expect.objectContaining({ error: expect.any(String) }),
-      ]);
+      expect(f.results).toEqual([expect.objectContaining({ error: expect.any(String) })]);
       expect(f.memoryCommit).not.toHaveBeenCalled();
       expect(f.semanticSave).not.toHaveBeenCalled();
       expect(executeRecruitingFeedback).not.toHaveBeenCalled();
@@ -4658,18 +3815,12 @@ describe("native recruiting feedback effect dispatch", () => {
         defaultScope: scope,
       });
       f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-        {
-          effect: "always_allow",
-          matchKind: "tool",
-          matchValue: "save_memory",
-        },
+        { effect: "always_allow", matchKind: "tool", matchValue: "save_memory" },
       ]);
       f.setCalls([
         {
           name: "save_memory",
-          args: {
-            content: "The current task is waiting for a source response.",
-          },
+          args: { content: "The current task is waiting for a source response." },
           executionId: "role-semantic-note",
         },
       ]);
@@ -4687,9 +3838,7 @@ describe("native recruiting feedback effect dispatch", () => {
           expect.objectContaining({ botId: "bot-1", runId: f.runData.id }),
         );
       } else {
-        expect(f.results).toEqual([
-          expect.objectContaining({ error: expect.any(String) }),
-        ]);
+        expect(f.results).toEqual([expect.objectContaining({ error: expect.any(String) })]);
         expect(f.semanticSave).not.toHaveBeenCalled();
       }
       expect(f.memoryCommit).not.toHaveBeenCalled();
@@ -4712,12 +3861,7 @@ describe("native recruiting feedback effect dispatch", () => {
       }
       vi.mocked(executeRecruitingRoleTool).mockImplementation(async () => {
         f.thread.activeRecruitingRoleId = "role-1";
-        return {
-          status: "saved",
-          workspace: null,
-          source: null,
-          changed: true,
-        };
+        return { status: "saved", workspace: null, source: null, changed: true };
       });
       f.setCalls([
         {
@@ -4743,9 +3887,7 @@ describe("native recruiting feedback effect dispatch", () => {
       await f.run();
 
       expect(f.thread.activeRecruitingRoleId).toBe("role-1");
-      expect(f.results[1]).toEqual(
-        expect.objectContaining({ error: expect.any(String) }),
-      );
+      expect(f.results[1]).toEqual(expect.objectContaining({ error: expect.any(String) }));
       expect(f.memoryCommit).not.toHaveBeenCalled();
       expect(f.semanticSave).not.toHaveBeenCalled();
     },
@@ -4759,11 +3901,7 @@ describe("native recruiting feedback effect dispatch", () => {
       defaultScope: "isolated",
     });
     const proposal = { ...feedback, expectedRevision: 3 };
-    const result = {
-      ...saved,
-      feedback: proposal,
-      document: { ...saved.document, revision: 4 },
-    };
+    const result = { ...saved, feedback: proposal, document: { ...saved.document, revision: 4 } };
     const body = `Existing durable fact\n\n${feedback.content}`;
     const args = { content: body, recruitingFeedback: proposal };
     vi.mocked(executeRecruitingFeedback).mockImplementation(async () => {
@@ -4776,9 +3914,7 @@ describe("native recruiting feedback effect dispatch", () => {
       ]);
       return result;
     });
-    f.setCalls([
-      { name: "save_memory", args, executionId: "semantic-feedback" },
-    ]);
+    f.setCalls([{ name: "save_memory", args, executionId: "semantic-feedback" }]);
 
     await f.run();
 
@@ -4787,14 +3923,7 @@ describe("native recruiting feedback effect dispatch", () => {
       expect.objectContaining({ runId: f.runData.id }),
       proposal,
       expect.objectContaining({ botId: "bot-1" }),
-      {
-        expectedMemory: {
-          scope: "bot",
-          path: "MEMORY.md",
-          expectedRevision: 3,
-          content: body,
-        },
-      },
+      { expectedMemory: { scope: "bot", path: "MEMORY.md", expectedRevision: 3, content: body } },
     );
     expect(f.results).toEqual([result]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
@@ -4834,22 +3963,11 @@ describe("native recruiting feedback effect dispatch", () => {
     const f = fixture("run-feedback-approval");
     const shared = { ...feedback, scope: "user" as const };
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      {
-        effect: "require_approval",
-        matchKind: "tool",
-        matchValue: "save_shared_memory",
-      },
+      { effect: "require_approval", matchKind: "tool", matchValue: "save_shared_memory" },
     ]);
-    vi.mocked(executeRecruitingFeedback).mockResolvedValue({
-      ...saved,
-      feedback: shared,
-    });
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue({ ...saved, feedback: shared });
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: shared,
-        executionId: "shared-feedback-approval",
-      },
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-approval" },
     ]);
 
     await f.run();
@@ -4858,11 +3976,7 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(executeRecruitingFeedback).not.toHaveBeenCalled();
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual([
-      expect.objectContaining({
-        kind: "recruiting_feedback",
-        status: "intended",
-        request: shared,
-      }),
+      expect.objectContaining({ kind: "recruiting_feedback", status: "intended", request: shared }),
     ]);
   });
 
@@ -4870,18 +3984,10 @@ describe("native recruiting feedback effect dispatch", () => {
     const f = fixture("run-feedback-connector-approval");
     const shared = { ...feedback, scope: "user" as const };
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      {
-        effect: "require_approval",
-        matchKind: "connector",
-        matchValue: "save",
-      },
+      { effect: "require_approval", matchKind: "connector", matchValue: "save" },
     ]);
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: shared,
-        executionId: "shared-feedback-connector",
-      },
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-connector" },
     ]);
     await f.run();
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
@@ -4891,20 +3997,12 @@ describe("native recruiting feedback effect dispatch", () => {
   it("retains feedback's own approval requirement when native bot memory is always allowed", async () => {
     const f = fixture("run-feedback-own-approval");
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-      {
-        effect: "require_approval",
-        matchKind: "tool",
-        matchValue: "recruiting_feedback",
-      },
+      { effect: "require_approval", matchKind: "tool", matchValue: "recruiting_feedback" },
       { effect: "always_allow", matchKind: "tool", matchValue: "remember" },
     ]);
     vi.mocked(executeRecruitingFeedback).mockResolvedValue(saved);
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: feedback,
-        executionId: "feedback-own-approval",
-      },
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-own-approval" },
     ]);
 
     await f.run();
@@ -4925,23 +4023,14 @@ describe("native recruiting feedback effect dispatch", () => {
     const f = fixture("run-feedback-disabled-shared");
     f.disabledBuiltinTools.push("save_shared_memory");
     const shared = { ...feedback, scope: "user" as const };
-    vi.mocked(executeRecruitingFeedback).mockResolvedValue({
-      ...saved,
-      feedback: shared,
-    });
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue({ ...saved, feedback: shared });
     f.setCalls([
-      {
-        name: "recruiting_feedback",
-        args: shared,
-        executionId: "shared-feedback-disabled",
-      },
+      { name: "recruiting_feedback", args: shared, executionId: "shared-feedback-disabled" },
     ]);
 
     await f.run();
 
-    expect(f.results).toEqual([
-      { error: "This tool is disabled for this bot." },
-    ]);
+    expect(f.results).toEqual([{ error: "This tool is disabled for this bot." }]);
     expect(executeRecruitingFeedback).not.toHaveBeenCalled();
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.semanticSave).not.toHaveBeenCalled();
@@ -5057,9 +4146,7 @@ describe("native recruiting research executor integration", () => {
         Object.assign(effect, { status: "completed", result: saved });
         return saved;
       });
-    f.setCalls([
-      { name: "recruiting_research", args: input, executionId: "save-page" },
-    ]);
+    f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
     await f.run();
     await f.run();
     expect(f.results).toEqual([saved, saved]);
@@ -5079,32 +4166,20 @@ describe("native recruiting research executor integration", () => {
         providerTaskId: "native-task",
         cursor: null,
       };
-      const saved = {
-        status: "saved",
-        sourceEffectId: "native-read",
-        candidateRows: [],
-      };
-      const failure = new Prisma.PrismaClientKnownRequestError(
-        "Local save transaction ended",
-        {
-          code: "P2028",
-          clientVersion: "test",
-        },
-      );
+      const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
+      const failure = new Prisma.PrismaClientKnownRequestError("Local save transaction ended", {
+        code: "P2028",
+        clientVersion: "test",
+      });
       vi.mocked(saveNativeRecruitingCandidateResults)
         .mockReset()
         .mockImplementation(async (_deps, trusted) => {
-          const effect = f.effects.find(
-            (item) => item.id === trusted.effectId,
-          )!;
+          const effect = f.effects.find((item) => item.id === trusted.effectId)!;
           expect(effect.status).toBe("executing");
-          if (committed)
-            Object.assign(effect, { status: "completed", result: saved });
+          if (committed) Object.assign(effect, { status: "completed", result: saved });
           throw failure;
         });
-      f.setCalls([
-        { name: "recruiting_research", args: input, executionId: "save-page" },
-      ]);
+      f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
 
       await f.run();
       await f.run();
@@ -5112,14 +4187,11 @@ describe("native recruiting research executor integration", () => {
       const result = committed
         ? saved
         : {
-            error:
-              "Candidate results could not be saved. Previously saved results are unchanged.",
+            error: "Candidate results could not be saved. Previously saved results are unchanged.",
           };
       expect(f.results).toEqual([result, result]);
       expect(JSON.stringify(f.results)).not.toContain(failure.message);
-      expect(f.effects).toEqual([
-        expect.objectContaining({ status: "completed", result }),
-      ]);
+      expect(f.effects).toEqual([expect.objectContaining({ status: "completed", result })]);
       expect(saveNativeRecruitingCandidateResults).toHaveBeenCalledOnce();
       expect(f.connector.execute).not.toHaveBeenCalled();
     },
@@ -5132,20 +4204,15 @@ describe("native recruiting research executor integration", () => {
       vi.mocked(saveNativeRecruitingCandidateResults)
         .mockReset()
         .mockImplementation(async () => {
-          f.prisma.externalEffect.updateMany.mockResolvedValueOnce({
-            count: 0,
-          });
+          f.prisma.externalEffect.updateMany.mockResolvedValueOnce({ count: 0 });
           if (outcome === "read-failed")
             f.prisma.externalEffect.findUnique.mockRejectedValueOnce(
               new Error("Save outcome read failed"),
             );
-          throw new Prisma.PrismaClientKnownRequestError(
-            "Local save transaction ended",
-            {
-              code: "P2028",
-              clientVersion: "test",
-            },
-          );
+          throw new Prisma.PrismaClientKnownRequestError("Local save transaction ended", {
+            code: "P2028",
+            clientVersion: "test",
+          });
         });
       f.setCalls([
         {
@@ -5160,15 +4227,11 @@ describe("native recruiting research executor integration", () => {
         },
       ]);
 
-      await f.run(
-        outcome === "read-failed" ? "Save outcome read failed" : undefined,
-      );
+      await f.run(outcome === "read-failed" ? "Save outcome read failed" : undefined);
 
       expect(f.effects[0]?.status).toBe("executing");
       if (outcome === "unsettled")
-        expect(f.results).toEqual([
-          { error: expect.any(String), uncertain: true },
-        ]);
+        expect(f.results).toEqual([{ error: expect.any(String), uncertain: true }]);
       else expect(f.results).toEqual([]);
       expect(f.connector.execute).not.toHaveBeenCalled();
     },
@@ -5183,11 +4246,7 @@ describe("native recruiting research executor integration", () => {
       providerTaskId: "native-task",
       cursor: null,
     };
-    const saved = {
-      status: "saved",
-      sourceEffectId: "native-read",
-      candidateRows: [],
-    };
+    const saved = { status: "saved", sourceEffectId: "native-read", candidateRows: [] };
     vi.mocked(saveNativeRecruitingCandidateResults)
       .mockReset()
       .mockRejectedValueOnce(new Error("Candidate save interrupted"))
@@ -5196,9 +4255,7 @@ describe("native recruiting research executor integration", () => {
         Object.assign(effect, { status: "completed", result: saved });
         return saved;
       });
-    f.setCalls([
-      { name: "recruiting_research", args: input, executionId: "save-page" },
-    ]);
+    f.setCalls([{ name: "recruiting_research", args: input, executionId: "save-page" }]);
     await f.run("Candidate save interrupted");
     expect(f.effects[0]?.status).toBe("executing");
     await f.run();
@@ -5214,69 +4271,51 @@ describe("native recruiting research executor integration", () => {
     ["catalog", "always_allow"],
     ["direct", "require_approval"],
     ["catalog", "require_approval"],
-  ] as const)(
-    "keeps native %s research on its own %s policy and effect",
-    async (path, policy) => {
-      const actual = await vi.importActual<typeof RecruitingToolsModule>(
-        "./recruiting-tools.js",
-      );
-      vi.mocked(admitRecruitingResearchCall).mockImplementation(
-        actual.admitRecruitingResearchCall,
-      );
-      const f = fixture(`native-research-${path}-${policy}`);
-      const entries = catalogEntries([tool]);
-      const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
-      const execute = wrappers.find(
-        (entry) => entry.route?.toolName === CATALOG_EXECUTE,
-      )!;
-      f.connector.discoverTools.mockResolvedValue(
-        path === "direct" ? [tool] : wrappers,
-      );
-      f.connector.resolveCall.mockImplementation(async (call) =>
-        call.route?.toolName === CATALOG_EXECUTE
-          ? resolveCatalogCall(call, entries)
-          : undefined,
-      );
-      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
-        { effect: policy, matchKind: "tool", matchValue: tool.name },
-      ]);
-      f.setCalls([
-        {
-          name: path === "direct" ? tool.name : execute.name,
-          args:
-            path === "direct"
-              ? providerArgs
-              : { id: entries[0]!.id, arguments: providerArgs },
-          executionId: "native-research",
-        },
-      ]);
+  ] as const)("keeps native %s research on its own %s policy and effect", async (path, policy) => {
+    const actual = await vi.importActual<typeof RecruitingToolsModule>("./recruiting-tools.js");
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(actual.admitRecruitingResearchCall);
+    const f = fixture(`native-research-${path}-${policy}`);
+    const entries = catalogEntries([tool]);
+    const wrappers = lazyCatalogTools("connectors", "mcp", "MCP", entries);
+    const execute = wrappers.find((entry) => entry.route?.toolName === CATALOG_EXECUTE)!;
+    f.connector.discoverTools.mockResolvedValue(path === "direct" ? [tool] : wrappers);
+    f.connector.resolveCall.mockImplementation(async (call) =>
+      call.route?.toolName === CATALOG_EXECUTE ? resolveCatalogCall(call, entries) : undefined,
+    );
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: policy, matchKind: "tool", matchValue: tool.name },
+    ]);
+    f.setCalls([
+      {
+        name: path === "direct" ? tool.name : execute.name,
+        args: path === "direct" ? providerArgs : { id: entries[0]!.id, arguments: providerArgs },
+        executionId: "native-research",
+      },
+    ]);
 
+    await f.run();
+    expect(f.effects).toHaveLength(1);
+    if (policy === "require_approval") {
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects[0]?.status).toBe("intended");
+    } else {
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(f.connector.execute.mock.calls[0]![0]).toMatchObject({
+        route,
+        args: providerArgs,
+      });
+      expect(f.effects[0]?.status).toBe("completed");
       await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
       expect(f.effects).toHaveLength(1);
-      if (policy === "require_approval") {
-        expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-        expect(f.connector.execute).not.toHaveBeenCalled();
-        expect(f.effects[0]?.status).toBe("intended");
-      } else {
-        expect(f.pauseRunForInput).not.toHaveBeenCalled();
-        expect(f.connector.execute).toHaveBeenCalledOnce();
-        expect(f.connector.execute.mock.calls[0]![0]).toMatchObject({
-          route,
-          args: providerArgs,
-        });
-        expect(f.effects[0]?.status).toBe("completed");
-        await f.run();
-        expect(f.connector.execute).toHaveBeenCalledOnce();
-        expect(f.effects).toHaveLength(1);
-      }
-    },
-  );
+    }
+  });
 
   it("recovers status completion from the saved raw read result after interrupted snapshot mapping", async () => {
     const f = fixture("run-research-status-recovery");
-    f.prisma.actionAutoReviewPreference.findUnique.mockResolvedValue({
-      enabled: true,
-    });
+    f.prisma.actionAutoReviewPreference.findUnique.mockResolvedValue({ enabled: true });
     const readRoute = { ...route, toolName: "get_task" };
     const readArgs = { task_id: "provider-task", wait_seconds: 0 };
     const readTool: ConnectorTool = {
@@ -5286,27 +4325,15 @@ describe("native recruiting research executor integration", () => {
       readOnly: true,
       inputSchema: {
         type: "object",
-        properties: {
-          task_id: { type: "string" },
-          wait_seconds: { type: "integer" },
-        },
+        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
         required: ["task_id", "wait_seconds"],
         additionalProperties: false,
       },
     };
     const rawRead = {
-      content: [
-        {
-          type: "text",
-          text: '{"task_id":"provider-task","status":"completed"}',
-        },
-      ],
+      content: [{ type: "text", text: '{"task_id":"provider-task","status":"completed"}' }],
     };
-    const readCompleted = {
-      ...completed,
-      observation: { done: true },
-      providerResult: rawRead,
-    };
+    const readCompleted = { ...completed, observation: { done: true }, providerResult: rawRead };
     f.connector.discoverTools.mockResolvedValue([readTool]);
     f.connector.resolveCall.mockImplementation(async (call) =>
       call.route?.toolName === CATALOG_EXECUTE
@@ -5319,19 +4346,15 @@ describe("native recruiting research executor integration", () => {
       taskId: task.id,
       operation: "status",
     } as never);
-    vi.mocked(admitRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, call) => {
-        expect(call).toEqual(
-          expect.objectContaining({ route: readRoute, args: readArgs }),
-        );
-        return {
-          kind: "read",
-          operation: "status",
-          saved: { task: { ...task, providerTaskId: "provider-task" }, action },
-          call,
-        } as never;
-      },
-    );
+    vi.mocked(admitRecruitingResearchCall).mockImplementation(async (_deps, _trusted, call) => {
+      expect(call).toEqual(expect.objectContaining({ route: readRoute, args: readArgs }));
+      return {
+        kind: "read",
+        operation: "status",
+        saved: { task: { ...task, providerTaskId: "provider-task" }, action },
+        call,
+      } as never;
+    });
     f.connector.execute.mockImplementation(async function* () {
       expect(f.effects[0]!.status).toBe("executing");
       yield { type: "result", data: rawRead };
@@ -5439,10 +4462,7 @@ describe("native recruiting research executor integration", () => {
       readOnly: true,
       inputSchema: {
         type: "object",
-        properties: {
-          task_id: { type: "string" },
-          wait_seconds: { type: "integer" },
-        },
+        properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
         required: ["task_id", "wait_seconds"],
       },
     };
@@ -5464,11 +4484,7 @@ describe("native recruiting research executor integration", () => {
           leaseFence: f.runData.leaseFence,
         });
         expect(f.effects).toEqual([
-          expect.objectContaining({
-            id: effect.id,
-            status: "intended",
-            request: effect.request,
-          }),
+          expect.objectContaining({ id: effect.id, status: "intended", request: effect.request }),
         ]);
         expect(effect.request).toEqual(
           boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
@@ -5478,9 +4494,7 @@ describe("native recruiting research executor integration", () => {
         throw new IsolationError();
       },
     );
-    f.setCalls([
-      { name: readTool.name, args, executionId: "read-with-missing-binding" },
-    ]);
+    f.setCalls([{ name: readTool.name, args, executionId: "read-with-missing-binding" }]);
 
     await f.run("Resource not found");
 
@@ -5503,10 +4517,7 @@ describe("native recruiting research executor integration", () => {
         readOnly: true,
         inputSchema: {
           type: "object",
-          properties: {
-            task_id: { type: "string" },
-            wait_seconds: { type: "integer" },
-          },
+          properties: { task_id: { type: "string" }, wait_seconds: { type: "integer" } },
           required: ["task_id", "wait_seconds"],
         },
       };
@@ -5516,10 +4527,7 @@ describe("native recruiting research executor integration", () => {
           ({
             kind: "read",
             operation: "status",
-            saved: {
-              task: { ...task, providerTaskId: "provider-task" },
-              action,
-            },
+            saved: { task: { ...task, providerTaskId: "provider-task" }, action },
             call,
           }) as never,
       );
@@ -5529,17 +4537,9 @@ describe("native recruiting research executor integration", () => {
           spaceId: "space-1",
           runId: f.runData.id,
           kind: readTool.name,
-          idempotencyKey: toolEffectIdempotencyKey(
-            f.runData.id,
-            readTool.name,
-            args,
-          ),
+          idempotencyKey: toolEffectIdempotencyKey(f.runData.id, readTool.name, args),
           status: "approved",
-          request: boundDirectApprovalRequest(
-            readRoute,
-            args,
-            "__rakazoCatalogTool",
-          ),
+          request: boundDirectApprovalRequest(readRoute, args, "__rakazoCatalogTool"),
         });
       }
       vi.mocked(claimRecruitingResearchReadEffect).mockImplementation(
@@ -5555,9 +4555,7 @@ describe("native recruiting research executor integration", () => {
           throw new IsolationError();
         },
       );
-      f.setCalls([
-        { name: readTool.name, args, executionId: "read-after-lease-loss" },
-      ]);
+      f.setCalls([{ name: readTool.name, args, executionId: "read-after-lease-loss" }]);
 
       await f.run("Resource not found");
 
@@ -5572,11 +4570,7 @@ describe("native recruiting research executor integration", () => {
 
   it("does not change completed research domain state after an unknown read transport failure", async () => {
     const f = fixture("run-research-read-transport");
-    const completedTask = {
-      ...task,
-      providerTaskId: "provider-task",
-      state: "completed",
-    };
+    const completedTask = { ...task, providerTaskId: "provider-task", state: "completed" };
     const acceptedAction = { ...action, deliveryState: "accepted" };
     const readTool: ConnectorTool = {
       ...tool,
@@ -5594,18 +4588,12 @@ describe("native recruiting research executor integration", () => {
           call,
         }) as never,
     );
-    vi.mocked(claimRecruitingResearchReadEffect).mockImplementationOnce(
-      async () => {
-        f.effects[0]!.status = "executing";
-        return true;
-      },
-    );
+    vi.mocked(claimRecruitingResearchReadEffect).mockImplementationOnce(async () => {
+      f.effects[0]!.status = "executing";
+      return true;
+    });
     f.connector.execute.mockImplementation(async function* () {
-      yield {
-        type: "error",
-        message: "response timed out",
-        outcome: "uncertain",
-      };
+      yield { type: "error", message: "response timed out", outcome: "uncertain" };
     });
     f.setCalls([
       {
@@ -5615,10 +4603,7 @@ describe("native recruiting research executor integration", () => {
       },
     ]);
     await f.run();
-    expect(f.effects[0]).toMatchObject({
-      status: "uncertain",
-      result: { uncertain: true },
-    });
+    expect(f.effects[0]).toMatchObject({ status: "uncertain", result: { uncertain: true } });
     expect(completeRecruitingResearchCall).not.toHaveBeenCalled();
     expect(completedTask.state).toBe("completed");
     expect(acceptedAction.deliveryState).toBe("accepted");
@@ -5650,12 +4635,7 @@ describe("native recruiting assessment effect delivery", () => {
       facts: [],
       sourceRefs: [],
       questions: [],
-      judgments: {
-        atoms: [],
-        employment: [],
-        criteria: [],
-        hardGate: "unknown" as const,
-      },
+      judgments: { atoms: [], employment: [], criteria: [], hardGate: "unknown" as const },
       createdAt: "2026-10-16T00:00:00.000Z",
     },
     roleRevision: {
@@ -5699,16 +4679,12 @@ describe("native recruiting assessment effect delivery", () => {
       };
       f.prisma.message.findMany.mockResolvedValue([human]);
       f.runtimeRun.mockImplementation(async function* (request) {
-        expect(promptContext(request)).toContain(
-          '"messageId":"human-evidence-source"',
-        );
+        expect(promptContext(request)).toContain('"messageId":"human-evidence-source"');
         expect(promptContext(request)).toContain('"blockIndex":0');
         expect(promptContext(request)).toContain(
           '"selection":{"kind":"message_text","blockIndex":0,"start":0,"end":21}',
         );
-        expect(request.instructions).not.toContain(
-          '"text":"Exact source material"',
-        );
+        expect(request.instructions).not.toContain('"text":"Exact source material"');
         yield { type: "done" as const, text: "Done" };
       });
       await f.run();
@@ -5793,15 +4769,9 @@ describe("native recruiting assessment effect delivery", () => {
         expect(line).toContain("data, not authorization");
         expect(line).toContain("artifact_read when available");
         expect(line).toContain("File metadata is not source content");
-        expect(request.tools.map((tool) => tool.name)).toContain(
-          "artifact_read",
-        );
-        expect(request.tools.map((tool) => tool.name)).not.toContain(
-          "read_file",
-        );
-        expect(request.tools.map((tool) => tool.name)).not.toContain(
-          "read_history",
-        );
+        expect(request.tools.map((tool) => tool.name)).toContain("artifact_read");
+        expect(request.tools.map((tool) => tool.name)).not.toContain("read_file");
+        expect(request.tools.map((tool) => tool.name)).not.toContain("read_history");
         const [steering] = await request.claimSteering!([]);
         expect(steering!.text).toContain('"messageId":"human-steering-upload"');
         expect(steering!.text).toContain(
@@ -5850,9 +4820,7 @@ describe("native recruiting assessment effect delivery", () => {
       id: "latest-text-only-request",
       seq: 2,
       runId: f.runData.id,
-      blocks: [
-        { kind: "text", text: "Read the two Dyna CSV files I attached here." },
-      ],
+      blocks: [{ kind: "text", text: "Read the two Dyna CSV files I attached here." }],
     };
     f.runData.sourceMessageId = current.id;
     f.prisma.message.findMany.mockResolvedValue([current, original]);
@@ -5861,9 +4829,7 @@ describe("native recruiting assessment effect delivery", () => {
       const sourceLine = promptContext(request)
         .split("\n")
         .find((line) => line.startsWith("Native message source reference"))!;
-      expect(
-        JSON.parse(sourceLine.slice(sourceLine.indexOf("{"))),
-      ).toMatchObject({
+      expect(JSON.parse(sourceLine.slice(sourceLine.indexOf("{")))).toMatchObject({
         messageId: current.id,
         files: [],
       });
@@ -5876,19 +4842,15 @@ describe("native recruiting assessment effect delivery", () => {
       expect(sourceLine).toContain(
         "locate the saved originals through available scoped history before asking for reattachment",
       );
-      expect(
-        request.history.find((message) => message.id === original.id)?.content,
-      ).toContain("dyna-first.csv");
-      expect(
-        request.history.find((message) => message.id === original.id)?.content,
-      ).toContain("dyna-second.csv");
+      expect(request.history.find((message) => message.id === original.id)?.content).toContain(
+        "dyna-first.csv",
+      );
+      expect(request.history.find((message) => message.id === original.id)?.content).toContain(
+        "dyna-second.csv",
+      );
       const tools = request.tools.map((tool) => tool.name);
       expect(tools).toEqual(
-        expect.arrayContaining([
-          "search_history",
-          "read_history",
-          "artifact_read",
-        ]),
+        expect.arrayContaining(["search_history", "read_history", "artifact_read"]),
       );
       const prior = await request.executeTool!(
         "read_history",
@@ -5972,9 +4934,8 @@ describe("native recruiting assessment effect delivery", () => {
       const original = structuredClone(f.effects);
       f.prisma.$queryRaw.mockResolvedValue([originalMessage]);
       f.prisma.run.findMany.mockResolvedValue([oldRun] as never);
-      f.prisma.externalEffect.findMany.mockImplementation(
-        async ({ where } = {}) =>
-          where?.status === "completed" ? [oldEffect] : [],
+      f.prisma.externalEffect.findMany.mockImplementation(async ({ where } = {}) =>
+        where?.status === "completed" ? [oldEffect] : [],
       );
       const findFirst = vi.fn(async ({ select }) =>
         select.result ? { result: oldEffect.result } : oldEffect,
@@ -5997,9 +4958,7 @@ describe("native recruiting assessment effect delivery", () => {
           server: { enabled: true, revision: access === "revision" ? 2 : 1 },
         };
       });
-      Object.assign(f.prisma, {
-        botMcpServer: { findFirst: assignmentLookup },
-      });
+      Object.assign(f.prisma, { botMcpServer: { findFirst: assignmentLookup } });
       const base = { messageId: originalMessage.id, linkedRunId: oldRun.id };
       f.runtimeRun.mockImplementation(async function* (request) {
         if (access === "database-error") {
@@ -6011,15 +4970,9 @@ describe("native recruiting assessment effect delivery", () => {
             ),
           ).rejects.toBe(databaseError);
         } else {
-          const metadata = await request.executeTool!(
-            "read_history",
-            base,
-            "list-receipts",
-          );
+          const metadata = await request.executeTool!("read_history", base, "list-receipts");
           expect(metadata).toMatchObject({ untrusted: true, receipt: null });
-          expect(JSON.stringify(metadata)).not.toContain(
-            "Original private request",
-          );
+          expect(JSON.stringify(metadata)).not.toContain("Original private request");
           const result = await request.executeTool!(
             "read_history",
             { ...base, effectId: oldEffect.id },
@@ -6038,13 +4991,8 @@ describe("native recruiting assessment effect delivery", () => {
             });
             expect(text).not.toContain("fixture-secret");
           } else {
-            expect(result).toMatchObject({
-              receipt: null,
-              runs: [{ effects: [] }],
-            });
-            expect(
-              findFirst.mock.calls.some(([query]) => query.select.result),
-            ).toBe(false);
+            expect(result).toMatchObject({ receipt: null, runs: [{ effects: [] }] });
+            expect(findFirst.mock.calls.some(([query]) => query.select.result)).toBe(false);
           }
         }
         yield { type: "done", text: "Done" };
@@ -6095,12 +5043,7 @@ describe("native recruiting assessment effect delivery", () => {
       botId: "bot-1",
       seq: 2,
       blocks: [
-        {
-          kind: "ask",
-          text: "Which implementation?",
-          status: "answered",
-          answer: answerText,
-        },
+        { kind: "ask", text: "Which implementation?", status: "answered", answer: answerText },
       ],
     };
     const older = { ...answer, id: "older-run-user", runId: "older-run" };
@@ -6116,11 +5059,7 @@ describe("native recruiting assessment effect delivery", () => {
       id: "peer-message",
       blocks: [{ kind: "bot_message_received", text: "Peer-authored answer" }],
     };
-    for (const laterPause of [
-      undefined,
-      "run.waiting_input",
-      "computer.takeover.requested",
-    ]) {
+    for (const laterPause of [undefined, "run.waiting_input", "computer.takeover.requested"]) {
       for (let attempt = 0; attempt < 2; attempt++) {
         const f = fixture(runId, [], { attachmentStore: false });
         f.runData.sourceMessageId = original.id;
@@ -6165,31 +5104,22 @@ describe("native recruiting assessment effect delivery", () => {
           },
         ];
         f.prisma.message.findMany.mockImplementation(async (query) => {
-          const ids = (query as { where?: { id?: { in: string[] } } }).where?.id
-            ?.in;
+          const ids = (query as { where?: { id?: { in: string[] } } }).where?.id?.in;
           return ids
             ? sourceRows.filter((message) => ids.includes(message.id))
             : [older, botAuthored, peer];
         });
         f.runtimeRun.mockImplementation(async function* (request) {
-          expect(request.sourceMessageId).toBe(
-            laterPause ? original.id : answer.id,
-          );
+          expect(request.sourceMessageId).toBe(laterPause ? original.id : answer.id);
           expect(request.prompt.startsWith(answerText)).toBe(!laterPause);
           expect(request.prompt).toContain(answerText);
-          expect(request.prompt.includes(original.blocks[0]!.text)).toBe(
-            Boolean(laterPause),
-          );
-          expect(
-            request.history.find((message) => message.id === original.id),
-          ).toMatchObject({
+          expect(request.prompt.includes(original.blocks[0]!.text)).toBe(Boolean(laterPause));
+          expect(request.history.find((message) => message.id === original.id)).toMatchObject({
             requiredForRun: true,
             role: "user",
             content: `${original.blocks[0]!.text}\n[file: candidate.pdf (application/pdf, 42 bytes)]`,
           });
-          expect(
-            request.history.find((message) => message.id === card.id),
-          ).toMatchObject({
+          expect(request.history.find((message) => message.id === card.id)).toMatchObject({
             requiredForRun: true,
             role: "assistant",
             content: "Which implementation?",
@@ -6204,15 +5134,11 @@ describe("native recruiting assessment effect delivery", () => {
               content: expect.stringContaining("private-selected-value"),
             });
             expect(request.prompt).not.toContain("private-selected-value");
-            expect(request.instructions).not.toContain(
-              "private-selected-value",
-            );
+            expect(request.instructions).not.toContain("private-selected-value");
           }
           const metadata = promptContext(request)
             .split("\n")
-            .filter((line) =>
-              line.startsWith("Native message source reference"),
-            )
+            .filter((line) => line.startsWith("Native message source reference"))
             .map((line) => JSON.parse(line.slice(line.indexOf("{"))));
           expect(metadata.map((source) => source.messageId)).toEqual(
             laterPause ? [original.id, answer.id] : [answer.id, original.id],
@@ -6231,27 +5157,16 @@ describe("native recruiting assessment effect delivery", () => {
               {
                 blockIndex: 0,
                 length: 50,
-                selection: {
-                  kind: "message_text",
-                  blockIndex: 0,
-                  start: 0,
-                  end: 50,
-                },
+                selection: { kind: "message_text", blockIndex: 0, start: 0, end: 50 },
               },
             ],
           });
           expect(
-            request.history.find(
-              (message) => message.id === "bot-authored-user",
-            ),
-          ).toMatchObject({
-            role: "user",
-            content: "[bot peer-bot] Old JD from Sourcer",
-          });
-          expect(
-            request.history.find((message) => message.id === answer.id)
-              ?.content,
-          ).toBe(answerText);
+            request.history.find((message) => message.id === "bot-authored-user"),
+          ).toMatchObject({ role: "user", content: "[bot peer-bot] Old JD from Sourcer" });
+          expect(request.history.find((message) => message.id === answer.id)?.content).toBe(
+            answerText,
+          );
           yield { type: "done" as const, text: "Done" };
         });
         await f.run();
@@ -6265,9 +5180,7 @@ describe("native recruiting assessment effect delivery", () => {
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
     vi.mocked(executeRecruitingAssessmentTool).mockImplementation(
       async (deps, trusted, input, context) => {
-        expect(deps).toEqual(
-          expect.objectContaining({ prisma: f.prisma, artifacts: f.artifacts }),
-        );
+        expect(deps).toEqual(expect.objectContaining({ prisma: f.prisma, artifacts: f.artifacts }));
         expect(input).toEqual(args);
         expect(trusted).toMatchObject({
           runId: "assessment-save",
@@ -6287,36 +5200,26 @@ describe("native recruiting assessment effect delivery", () => {
         throw new Error("assessment ACK lost");
       },
     );
-    f.setCalls([
-      { name: "recruiting_assess", args, executionId: "before-ack" },
-    ]);
+    f.setCalls([{ name: "recruiting_assess", args, executionId: "before-ack" }]);
     await f.run("assessment ACK lost");
     expect(f.effects).toHaveLength(1);
     expect(f.results).toEqual([]);
     // A restarted run may have no current role; the immutable completed receipt still needs ACL validation.
     f.thread.activeRecruitingRoleId = null;
-    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(
-      async (_deps, trusted) => {
-        expect(trusted.save?.contextArtifact).toBeUndefined();
-        expect(f.effects[0]?.status).toBe("completed");
-        return saved as Awaited<
-          ReturnType<typeof executeRecruitingAssessmentTool>
-        >;
-      },
-    );
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async (_deps, trusted) => {
+      expect(trusted.save?.contextArtifact).toBeUndefined();
+      expect(f.effects[0]?.status).toBe("completed");
+      return saved as Awaited<ReturnType<typeof executeRecruitingAssessmentTool>>;
+    });
     f.setCalls([{ name: "recruiting_assess", args, executionId: "after-ack" }]);
     await f.run();
     expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
     expect(f.effects).toHaveLength(1);
     expect(f.effects[0]?.result).toEqual(saved);
     expect(f.results).toEqual([saved]);
-    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(
-      new IsolationError(),
-    );
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(new IsolationError());
     await f.run();
-    expect(f.results[1]).toEqual({
-      error: "Recruiting assessment or source is unavailable",
-    });
+    expect(f.results[1]).toEqual({ error: "Recruiting assessment or source is unavailable" });
     expect(f.effects[0]?.result).toEqual(saved);
     expect(f.connector.execute).not.toHaveBeenCalled();
   });
@@ -6350,27 +5253,19 @@ describe("native recruiting assessment effect delivery", () => {
       details: { input: "paused" },
       terminate: true as const,
     };
-    vi.mocked(executeRecruitingAssessmentTool).mockImplementationOnce(
-      async (_deps, trusted) => {
-        expect(trusted.save?.effectRequest).toEqual(request);
-        expect(trusted.attemptId).toBe("attempt-1");
-        Object.assign(f.effects[0]!, { status: "completed", result: binding });
-        return paused;
-      },
-    );
-    f.setCalls([
-      { name: "recruiting_assess", args: request, executionId: "ask" },
-    ]);
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementationOnce(async (_deps, trusted) => {
+      expect(trusted.save?.effectRequest).toEqual(request);
+      expect(trusted.attemptId).toBe("attempt-1");
+      Object.assign(f.effects[0]!, { status: "completed", result: binding });
+      return paused;
+    });
+    f.setCalls([{ name: "recruiting_assess", args: request, executionId: "ask" }]);
     await f.run();
     expect(f.effects[0]?.result).toEqual(binding);
     const answered = {
-      question: {
-        block: { kind: "ask", status: "answered", answer: "Personal" },
-      },
+      question: { block: { kind: "ask", status: "answered", answer: "Personal" } },
     };
-    vi.mocked(executeRecruitingAssessmentTool).mockResolvedValueOnce(
-      answered as never,
-    );
+    vi.mocked(executeRecruitingAssessmentTool).mockResolvedValueOnce(answered as never);
     await f.run();
     expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
     expect(f.results.at(-1)).toEqual(answered);
@@ -6381,15 +5276,9 @@ describe("native recruiting assessment effect delivery", () => {
   it("reads without an adopted context and does not dispatch a connector", async () => {
     const f = fixture("assessment-read");
     const read = { operation: "read", candidateKey: "candidate-1" };
-    const result = {
-      status: "current" as const,
-      workspace: null,
-      assessment: saved,
-    };
+    const result = { status: "current" as const, workspace: null, assessment: saved };
     vi.mocked(executeRecruitingAssessmentTool).mockResolvedValue(result);
-    f.setCalls([
-      { name: "recruiting_assess", args: read, executionId: "read" },
-    ]);
+    f.setCalls([{ name: "recruiting_assess", args: read, executionId: "read" }]);
     await f.run();
     expect(f.results).toEqual([result]);
     expect(executeRecruitingAssessmentTool).toHaveBeenCalledWith(
@@ -6400,22 +5289,14 @@ describe("native recruiting assessment effect delivery", () => {
     );
     expect(f.connector.execute).not.toHaveBeenCalled();
     // A completed generic read effect must not freeze role selection or source access.
-    const updated = {
-      status: "current" as const,
-      workspace: null,
-      assessment: null,
-    };
+    const updated = { status: "current" as const, workspace: null, assessment: null };
     vi.mocked(executeRecruitingAssessmentTool).mockResolvedValueOnce(updated);
     await f.run();
     expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
     expect(f.results[1]).toEqual(updated);
-    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValueOnce(
-      new IsolationError(),
-    );
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValueOnce(new IsolationError());
     await f.run();
-    expect(f.results[2]).toEqual({
-      error: "Recruiting assessment or source is unavailable",
-    });
+    expect(f.results[2]).toEqual({ error: "Recruiting assessment or source is unavailable" });
     expect(f.effects).toHaveLength(1);
   });
 
@@ -6424,11 +5305,7 @@ describe("native recruiting assessment effect delivery", () => {
     const source = {
       id: "source-1",
       kind: "original_material" as const,
-      anchor: {
-        kind: "message" as const,
-        messageId: "human-1",
-        locator: "text",
-      },
+      anchor: { kind: "message" as const, messageId: "human-1", locator: "text" },
       readState: "read" as const,
       readAt: "2026-10-16T00:00:00.000Z",
       quote: "private-evidence-value",
@@ -6440,17 +5317,12 @@ describe("native recruiting assessment effect delivery", () => {
       },
     };
     const input = { ...args, sourceRefs: [source] };
-    const receipt = {
-      ...saved,
-      assessment: { ...saved.assessment, sourceRefs: [source] },
-    };
+    const receipt = { ...saved, assessment: { ...saved.assessment, sourceRefs: [source] } };
     vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async () => {
       Object.assign(f.effects[0]!, { status: "completed", result: receipt });
       return receipt;
     });
-    f.setCalls([
-      { name: "recruiting_assess", args: input, executionId: "save" },
-    ]);
+    f.setCalls([{ name: "recruiting_assess", args: input, executionId: "save" }]);
     await f.run();
     await f.run();
     expect(executeRecruitingAssessmentTool).toHaveBeenCalledTimes(2);
@@ -6470,9 +5342,7 @@ describe("native recruiting assessment effect delivery", () => {
     async (failure) => {
       const f = fixture("assessment-invalid-semantics");
       vi.mocked(executeRecruitingAssessmentTool).mockRejectedValue(failure);
-      f.setCalls([
-        { name: "recruiting_assess", args, executionId: "invalid-semantics" },
-      ]);
+      f.setCalls([{ name: "recruiting_assess", args, executionId: "invalid-semantics" }]);
       await f.run();
       expect(f.results).toEqual([{ error: failure.message }]);
       expect(f.effects[0]?.status).toBe("completed");
@@ -6497,22 +5367,13 @@ describe("native recruiting assessment effect delivery", () => {
       text: "Please enable JavaScript",
       truncated: false,
     });
-    f.setCalls([
-      {
-        name: "web_fetch",
-        args: { url: receipt.url },
-        executionId: "before-role",
-      },
-    ]);
+    f.setCalls([{ name: "web_fetch", args: { url: receipt.url }, executionId: "before-role" }]);
     await f.run();
     expect(f.thread.activeRecruitingRoleId).toBeNull();
     expect(retainRecruitingWebMaterial).toHaveBeenCalledExactlyOnceWith(
       { prisma: f.prisma, artifacts: f.artifacts },
       expect.objectContaining({
-        actor: expect.objectContaining({
-          spaceId: "space-1",
-          userId: "user-1",
-        }),
+        actor: expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
         runId: "jd-web-source",
         threadId: "thread-1",
         botId: "bot-1",
@@ -6541,10 +5402,7 @@ describe("native recruiting assessment effect delivery", () => {
       await f.web.fetch.mock.results[1]?.value,
       expect.anything(),
     );
-    expect(f.results[1]).toMatchObject({
-      text: "Public evidence",
-      sourceMaterial: receipt,
-    });
+    expect(f.results[1]).toMatchObject({ text: "Public evidence", sourceMaterial: receipt });
     f.web.fetch.mockRejectedValueOnce(new Error("not available"));
     await f.run();
     expect(retainRecruitingWebMaterial).toHaveBeenCalledTimes(2);
@@ -6584,20 +5442,14 @@ describe("native recruiting assessment effect delivery", () => {
       expect.objectContaining({ url: receipt.url }),
       expect.anything(),
     );
-    expect(
-      vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2],
-    ).toMatchObject({
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "Simulation Scientist",
       brief: null,
       sourceRefs: [
         {
           kind: "original_material",
-          anchor: {
-            kind: "artifact",
-            artifact: receipt.artifact,
-            locator: "text",
-          },
+          anchor: { kind: "artifact", artifact: receipt.artifact, locator: "text" },
           readAt: receipt.readAt,
           url: receipt.url,
           quote: "Build simulation for robots.",
@@ -6628,9 +5480,7 @@ describe("native recruiting assessment effect delivery", () => {
     f.setCalls([]);
     await f.run();
     expect(f.web.fetch).not.toHaveBeenCalled();
-    expect(
-      vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2],
-    ).toMatchObject({
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "Simulation Scientist",
       brief: null,
@@ -6677,66 +5527,43 @@ describe("native recruiting assessment effect delivery", () => {
     await f.run();
     // The first question comes from the coordinator itself, not after a teammate starts up.
     expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
-    expect(
-      vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2],
-    ).toMatchObject({
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "New role",
       brief: null,
       intent: { basis: "direct", quote: text },
     });
-    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
-      "Do not create a role in this turn",
-    );
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
   });
 
   it("streams a question and its choices while the card is still being written", async () => {
     const f = fixture("streamed-question");
-    f.runtimeRun.mockImplementationOnce(async function* (
-      request: AgentRunRequest,
-    ) {
-      request.onToolCallDelta?.({
-        id: "ask-1",
-        name: "ask_user",
-        args: { question: "Where" },
-      });
+    f.runtimeRun.mockImplementationOnce(async function* (request: AgentRunRequest) {
+      request.onToolCallDelta?.({ id: "ask-1", name: "ask_user", args: { question: "Where" } });
       await new Promise((resolve) => setTimeout(resolve, 120));
       request.onToolCallDelta?.({
         id: "ask-1",
         name: "ask_user",
-        args: {
-          question: "Where should they be?",
-          options: ["Remote", "Bay Area"],
-        },
+        args: { question: "Where should they be?", options: ["Remote", "Bay Area"] },
       });
       yield { type: "done" as const, text: "Done" };
     });
     await f.run();
-    const publish = f.executorDeps.events
-      .publishTransient as unknown as ReturnType<typeof vi.fn>;
+    const publish = f.executorDeps.events.publishTransient as unknown as ReturnType<typeof vi.fn>;
     await vi.waitFor(() =>
       expect(
         publish.mock.calls
-          .map(
-            ([event]) => event as { type: string; payload: { text?: string } },
-          )
+          .map(([event]) => event as { type: string; payload: { text?: string } })
           .filter((event) => event.type === "thread.progress")
           .map((event) => event.payload.text),
-      ).toEqual(
-        expect.arrayContaining([
-          "Where",
-          "Where should they be?\n· Remote\n· Bay Area",
-        ]),
-      ),
+      ).toEqual(expect.arrayContaining(["Where", "Where should they be?\n· Remote\n· Bay Area"])),
     );
   });
 
   it("posts a progress line while the pasted JD's role is still saving", async () => {
     const f = fixture("pasted-jd-async");
     let release: (() => void) | undefined;
-    const original = vi
-      .mocked(executeRecruitingRoleTool)
-      .getMockImplementation();
+    const original = vi.mocked(executeRecruitingRoleTool).getMockImplementation();
     vi.mocked(executeRecruitingRoleTool).mockImplementationOnce((async (
       ...args: Parameters<typeof executeRecruitingRoleTool>
     ) => {
@@ -6758,11 +5585,7 @@ describe("native recruiting assessment effect delivery", () => {
       },
     ]) as never);
     f.setCalls([
-      {
-        name: "message_user",
-        args: { message: "Reading the role." },
-        executionId: "progress-1",
-      },
+      { name: "message_user", args: { message: "Reading the role." }, executionId: "progress-1" },
     ]);
     const running = f.run();
     await vi.waitFor(() => expect(f.results).toHaveLength(1));
@@ -6794,14 +5617,10 @@ describe("native recruiting assessment effect delivery", () => {
         createdAt: new Date(),
       },
     ]) as never);
-    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
-      text: jd,
-    } as never);
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({ text: jd } as never);
     f.setCalls([]);
     await f.run();
-    expect(
-      vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2],
-    ).toMatchObject({
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
       title: "Simulation Scientist",
       brief: null,
@@ -6811,14 +5630,9 @@ describe("native recruiting assessment effect delivery", () => {
     expect(prompt).toContain("Build simulation for robots.");
     expect(prompt).toContain("Do not read the file again");
     // Both server-side steps show live, like the model's own calls.
-    const append = f.executorDeps.events.append as unknown as ReturnType<
-      typeof vi.fn
-    >;
+    const append = f.executorDeps.events.append as unknown as ReturnType<typeof vi.fn>;
     const steps = append.mock.calls
-      .map(
-        ([event]) =>
-          event as { type: string; payload: Record<string, unknown> },
-      )
+      .map(([event]) => event as { type: string; payload: Record<string, unknown> })
       .filter((event) => event.type.startsWith("agent.tool."))
       .map((event) => `${event.type} ${event.payload.name}`);
     expect(steps).toEqual([
@@ -6840,36 +5654,20 @@ describe("native recruiting assessment effect delivery", () => {
   });
 
   it("completes a candidate key cut short only when one saved key continues it", () => {
-    const saved = [
-      "linkedin:/in/dmitry-s-4b2a1",
-      "linkedin:/in/jane-d-1",
-      "linkedin:/in/jane-d-2",
-    ];
+    const saved = ["linkedin:/in/dmitry-s-4b2a1", "linkedin:/in/jane-d-1", "linkedin:/in/jane-d-2"];
     expect(continuedCandidateKey("linkedin:/in/dmitry-s", saved)).toBe(
       "linkedin:/in/dmitry-s-4b2a1",
     );
-    expect(continuedCandidateKey("linkedin:/in/jane-d", saved)).toBe(
-      "linkedin:/in/jane-d",
-    );
-    expect(continuedCandidateKey("linkedin:/in/alex", saved)).toBe(
-      "linkedin:/in/alex",
-    );
+    expect(continuedCandidateKey("linkedin:/in/jane-d", saved)).toBe("linkedin:/in/jane-d");
+    expect(continuedCandidateKey("linkedin:/in/alex", saved)).toBe("linkedin:/in/alex");
     // A cut inside the name also completes when one saved key continues it.
-    const named = [
-      "linkedin:/in/dmitry-shapovalov",
-      "linkedin:/in/alexander-k",
-    ];
+    const named = ["linkedin:/in/dmitry-shapovalov", "linkedin:/in/alexander-k"];
     expect(continuedCandidateKey("linkedin:/in/dmitry-s", named)).toBe(
       "linkedin:/in/dmitry-shapovalov",
     );
-    expect(continuedCandidateKey("linkedin:/in/alex", named)).toBe(
-      "linkedin:/in/alex",
-    );
+    expect(continuedCandidateKey("linkedin:/in/alex", named)).toBe("linkedin:/in/alex");
     expect(
-      continuedCandidateKey("linkedin:/in/dmitry-s", [
-        ...named,
-        "linkedin:/in/dmitry-smirnov",
-      ]),
+      continuedCandidateKey("linkedin:/in/dmitry-s", [...named, "linkedin:/in/dmitry-smirnov"]),
     ).toBe("linkedin:/in/dmitry-s");
   });
 
@@ -6881,22 +5679,14 @@ describe("native recruiting assessment effect delivery", () => {
       { name: "Ana Ruiz", candidateKey: "linkedin:/in/ana-r-2" },
       { name: null, candidateKey: "linkedin:/in/x" },
     ];
-    expect(namedCandidateKey("linkedin:/in/zimu-gong", rows)).toBe(
-      "linkedin:/in/zim-gong",
-    );
-    expect(namedCandidateKey("linkedin:/in/sam-lee-2042", rows)).toBe(
-      "linkedin:/in/saml2042",
-    );
+    expect(namedCandidateKey("linkedin:/in/zimu-gong", rows)).toBe("linkedin:/in/zim-gong");
+    expect(namedCandidateKey("linkedin:/in/sam-lee-2042", rows)).toBe("linkedin:/in/saml2042");
     expect(namedCandidateKey("linkedin:/in/sam-lee-placeholder", rows)).toBe(
       "linkedin:/in/saml2042",
     );
     // Two saved people share the name, or the key is one word: left as given.
-    expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe(
-      "linkedin:/in/ana-ruiz",
-    );
-    expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe(
-      "linkedin:/in/sam",
-    );
+    expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe("linkedin:/in/ana-ruiz");
+    expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe("linkedin:/in/sam");
   });
 
   it("fills the role revision only for recruiting_research operations whose schema takes it", () => {
@@ -6913,22 +5703,14 @@ describe("native recruiting assessment effect delivery", () => {
         operation,
         expectedRoleRevision: 1,
       });
-      expect(JSON.stringify(parsed.error?.issues)).toContain(
-        "unrecognized_keys",
-      );
+      expect(JSON.stringify(parsed.error?.issues)).toContain("unrecognized_keys");
     }
   });
 
   it("maps a mistyped key to the one saved person it is close to, never an ambiguous one", () => {
     const rows = [
-      {
-        name: "Angelo Jones",
-        candidateKey: "linkedin:/in/angelo-jones-77a1b2",
-      },
-      {
-        name: "Andrea J Gastaldi",
-        candidateKey: "linkedin:/in/andrea-gastaldi-5c9d",
-      },
+      { name: "Angelo Jones", candidateKey: "linkedin:/in/angelo-jones-77a1b2" },
+      { name: "Andrea J Gastaldi", candidateKey: "linkedin:/in/andrea-gastaldi-5c9d" },
       { name: "Chris Park", candidateKey: "linkedin:/in/chris-park-1" },
       { name: "Chris Parks", candidateKey: "linkedin:/in/chris-parks-2" },
     ];
@@ -6939,9 +5721,7 @@ describe("native recruiting assessment effect delivery", () => {
       "linkedin:/in/andrea-gastaldi-5c9d",
     );
     // Close to two saved people, or too short to tell: left as given and refused.
-    expect(nearCandidateKey("linkedin:/in/chris-parkk", rows)).toBe(
-      "linkedin:/in/chris-parkk",
-    );
+    expect(nearCandidateKey("linkedin:/in/chris-parkk", rows)).toBe("linkedin:/in/chris-parkk");
     expect(nearCandidateKey("linkedin:/in/bob", rows)).toBe("linkedin:/in/bob");
   });
 
@@ -6952,16 +5732,12 @@ describe("native recruiting assessment effect delivery", () => {
       "linkedin:/in/ana-1990",
       "linkedin:/in/bo-1990",
     ];
-    expect(
-      continuedCandidateKey("linkedin:/in/jonathan-doe-1a2b3c4d", saved),
-    ).toBe("linkedin:/in/jon-doe-1a2b3c4d");
-    expect(continuedCandidateKey("linkedin:/in/sam-lee-2042", saved)).toBe(
-      "linkedin:/in/saml2042",
+    expect(continuedCandidateKey("linkedin:/in/jonathan-doe-1a2b3c4d", saved)).toBe(
+      "linkedin:/in/jon-doe-1a2b3c4d",
     );
+    expect(continuedCandidateKey("linkedin:/in/sam-lee-2042", saved)).toBe("linkedin:/in/saml2042");
     // Two saved people end in the same digits: ambiguous, left for the model to correct.
-    expect(continuedCandidateKey("linkedin:/in/ann-1990", saved)).toBe(
-      "linkedin:/in/ann-1990",
-    );
+    expect(continuedCandidateKey("linkedin:/in/ann-1990", saved)).toBe("linkedin:/in/ann-1990");
   });
 
   it("fits a long question card by dropping leading context, keeping the question", () => {
@@ -6976,9 +5752,7 @@ describe("native recruiting assessment effect delivery", () => {
 
   it("titles a pasted JD from its first line and ignores short messages", () => {
     const body = "x".repeat(400);
-    expect(pastedJobTitle(`Job title:\n**Field Engineer**\n${body}`)).toBe(
-      "Field Engineer",
-    );
+    expect(pastedJobTitle(`Job title:\n**Field Engineer**\n${body}`)).toBe("Field Engineer");
     expect(pastedJobTitle(`# Senior Analyst\n${body}`)).toBe("Senior Analyst");
     expect(pastedJobTitle(`职位：仓储经理\n${body}`)).toBe("仓储经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
@@ -6999,13 +5773,11 @@ describe("native recruiting assessment effect delivery", () => {
         `仓库运营经理（亚特兰大，现场办公），5年以上仓储运营管理经验，英文即可，薪资面议。${body}`,
       ),
     ).toBe("仓库运营经理（亚特兰大，现场办公）");
+    expect(pastedJobTitle(`Senior Accountant\nAbout us: we build things.\n${body}`)).toBe(
+      "Senior Accountant",
+    );
     expect(
-      pastedJobTitle(`Senior Accountant\nAbout us: we build things.\n${body}`),
-    ).toBe("Senior Accountant");
-    expect(
-      pastedJobTitle(
-        "帮我把这个岗位的要求改一下：现场办公改成远程，不要求中文，其他不变。",
-      ),
+      pastedJobTitle("帮我把这个岗位的要求改一下：现场办公改成远程，不要求中文，其他不变。"),
     ).toBeNull();
   });
 
@@ -7021,12 +5793,10 @@ describe("native recruiting assessment effect delivery", () => {
     const f = fixture("assessment-unbind-steering");
     f.thread.activeRecruitingRoleId = "role-1";
     vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
-    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(
-      async (_deps, trusted) => {
-        expect(trusted.save?.contextArtifact).toBeUndefined();
-        throw new IsolationError();
-      },
-    );
+    vi.mocked(executeRecruitingAssessmentTool).mockImplementation(async (_deps, trusted) => {
+      expect(trusted.save?.contextArtifact).toBeUndefined();
+      throw new IsolationError();
+    });
     f.claimSteering.mockImplementation(async () => {
       f.thread.activeRecruitingRoleId = null;
       return [
@@ -7047,13 +5817,7 @@ describe("native recruiting assessment effect delivery", () => {
           "after-unbind",
         ),
       );
-      f.results.push(
-        await request.executeTool!(
-          "recruiting_assess",
-          args,
-          "save-after-unbind",
-        ),
-      );
+      f.results.push(await request.executeTool!("recruiting_assess", args, "save-after-unbind"));
       yield { type: "done" as const, text: "Done" };
     });
     await f.run();
@@ -7073,19 +5837,16 @@ describe("native recruiting assessment effect delivery", () => {
       semanticMemoryEnabled: false,
       messagingChannelRun: false,
     };
+    expect(selectBuiltinToolsForRun(options).map((tool) => tool.name)).toContain(
+      "recruiting_assess",
+    );
     expect(
-      selectBuiltinToolsForRun(options).map((tool) => tool.name),
-    ).toContain("recruiting_assess");
-    expect(
-      selectBuiltinToolsForRun({
-        ...options,
-        disabledBuiltinTools: ["recruiting_assess"],
-      }).map((tool) => tool.name),
-    ).not.toContain("recruiting_assess");
-    expect(
-      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map(
+      selectBuiltinToolsForRun({ ...options, disabledBuiltinTools: ["recruiting_assess"] }).map(
         (tool) => tool.name,
       ),
+    ).not.toContain("recruiting_assess");
+    expect(
+      selectBuiltinToolsForRun({ ...options, messagingChannelRun: true }).map((tool) => tool.name),
     ).not.toContain("recruiting_assess");
   });
 });
@@ -7094,11 +5855,7 @@ describe("final reply before the terminal workspace checkpoint", () => {
   it("publishes the reply, then checkpoints under the run lease, then finalizes without a copy", async () => {
     const f = fixture("reply-before-checkpoint");
     f.setCalls([
-      {
-        name: "write_file",
-        args: { path: "notes.txt", content: "saved" },
-        executionId: "w1",
-      },
+      { name: "write_file", args: { path: "notes.txt", content: "saved" }, executionId: "w1" },
     ]);
     let releaseCheckpoint!: (revision: string) => void;
     checkpointWorkspace.mockImplementationOnce(
@@ -7113,9 +5870,7 @@ describe("final reply before the terminal workspace checkpoint", () => {
     expect(f.published).toEqual([
       {
         role: "bot",
-        blocks: expect.arrayContaining([
-          expect.objectContaining({ kind: "text", text: "Done" }),
-        ]),
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
       },
     ]);
     expect(f.runData.status).toBe("running");
@@ -7137,9 +5892,7 @@ describe("final reply before the terminal workspace checkpoint", () => {
     expect(f.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "completed",
-        blocks: expect.arrayContaining([
-          expect.objectContaining({ kind: "text", text: "Done" }),
-        ]),
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
       }),
     );
   });
@@ -7158,14 +5911,13 @@ describe("resume brief", () => {
 
   it("keeps secrets and payloads out of the argument summary", () => {
     expect(
-      toolArgsSummary(
-        { query: "find x", api_key: "sk-live-123", nested: { a: 1 }, limit: 5 },
-        ["sk-live-123"],
-      ),
+      toolArgsSummary({ query: "find x", api_key: "sk-live-123", nested: { a: 1 }, limit: 5 }, [
+        "sk-live-123",
+      ]),
     ).toBe("query=find x, limit=5");
-    expect(
-      toolArgsSummary({ note: "token sk-live-123 inside" }, ["sk-live-123"]),
-    ).not.toContain("sk-live-123");
+    expect(toolArgsSummary({ note: "token sk-live-123 inside" }, ["sk-live-123"])).not.toContain(
+      "sk-live-123",
+    );
     expect(toolArgsSummary("plain")).toBeUndefined();
   });
 
@@ -7173,11 +5925,7 @@ describe("resume brief", () => {
     expect(await resumeBriefForRun(prismaWith([]), run)).toBeUndefined();
     const many = Array.from({ length: 60 }, (_, i) => ({
       type: "agent.tool.completed",
-      payload: {
-        name: `mcp_search_${i}`,
-        executionId: `x${i}`,
-        outcome: "succeeded",
-      },
+      payload: { name: `mcp_search_${i}`, executionId: `x${i}`, outcome: "succeeded" },
     }));
     const brief = (await resumeBriefForRun(prismaWith(many), run))!;
     expect(brief.length).toBeLessThanOrEqual(2_100);
@@ -7190,23 +5938,12 @@ describe("resume brief", () => {
       prismaWith([
         {
           type: "agent.tool.called",
-          payload: {
-            name: "recruiting_role",
-            executionId: "a",
-            argsSummary: "operation=read",
-          },
+          payload: { name: "recruiting_role", executionId: "a", argsSummary: "operation=read" },
         },
-        {
-          type: "agent.tool.completed",
-          payload: { name: "recruiting_role", executionId: "a" },
-        },
+        { type: "agent.tool.completed", payload: { name: "recruiting_role", executionId: "a" } },
         {
           type: "agent.tool.called",
-          payload: {
-            name: "web_search_advanced_exa",
-            executionId: "b",
-            argsSummary: "query=cad",
-          },
+          payload: { name: "web_search_advanced_exa", executionId: "b", argsSummary: "query=cad" },
         },
       ]),
       run,
@@ -7246,18 +5983,9 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
   it("scopes bot command variables to the shell command text", async () => {
     const f = fixture("shell-scope");
     vi.mocked(shellCommandEnvironment).mockClear();
-    f.setCalls([
-      {
-        name: "shell",
-        args: { command: "echo $CLI_TOKEN" },
-        executionId: "sh-1",
-      },
-    ]);
+    f.setCalls([{ name: "shell", args: { command: "echo $CLI_TOKEN" }, executionId: "sh-1" }]);
     // The fixture sandbox cannot execute; the environment scope is read before that step.
-    await createRunExecutor(f.executorDeps).continueRun(
-      f.runData.id,
-      "worker-1",
-    );
+    await createRunExecutor(f.executorDeps).continueRun(f.runData.id, "worker-1");
     expect(shellCommandEnvironment).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ command: "echo $CLI_TOKEN" }),
     );
@@ -7275,13 +6003,7 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
         route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
       } as never,
     ]);
-    f.setCalls([
-      {
-        name: "gmail_send_email",
-        args: { to: "a@example.test" },
-        executionId: "s1",
-      },
-    ]);
+    f.setCalls([{ name: "gmail_send_email", args: { to: "a@example.test" }, executionId: "s1" }]);
     await f.run();
     expect(f.results).toEqual([
       { error: expect.stringContaining("opened by an external message") },
@@ -7318,21 +6040,12 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
   it("merges a memory edit into the current document and commits it against the read revision", async () => {
     const f = fixture("memory-edit");
     f.memoryRead.mockResolvedValue({
-      documents: [
-        {
-          path: "MEMORY.md",
-          content: "Likes tea.\nMeets Mondays.",
-          revision: 4,
-        },
-      ],
+      documents: [{ path: "MEMORY.md", content: "Likes tea.\nMeets Mondays.", revision: 4 }],
     } as never);
     f.setCalls([
       {
         name: "remember",
-        args: {
-          edit: { find: "Mondays", replace: "Tuesdays" },
-          expectedRevision: 4,
-        },
+        args: { edit: { find: "Mondays", replace: "Tuesdays" }, expectedRevision: 4 },
         executionId: "edit-1",
       },
       {
@@ -7361,39 +6074,24 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
 
 describe("remembered tool fixes", () => {
   it("learns the change that fixed a failed call and hands it to the next run's same error", async () => {
-    const saved: Array<{
-      path: string;
-      content: string;
-      scope: string;
-      botId?: string;
-    }> = [];
+    const saved: Array<{ path: string; content: string; scope: string; botId?: string }> = [];
     const first = fixture("run-fix-1");
-    first.memoryCommit.mockImplementation((async (
-      request: (typeof saved)[number],
-    ) => {
+    first.memoryCommit.mockImplementation((async (request: (typeof saved)[number]) => {
       saved.push(request);
       return { path: request.path, revision: 1 };
     }) as never);
     let failNext = true;
-    (first.web.search as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => {
-        if (!failNext) return [];
-        failNext = false;
-        throw new Error("Page token 8812 cannot be combined with a new filter");
-      },
-    );
+    (first.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!failNext) return [];
+      failNext = false;
+      throw new Error("Page token 8812 cannot be combined with a new filter");
+    });
     first.setCalls([
-      {
-        name: "web_search",
-        args: { query: "usc alumni", mode: "strict" },
-        executionId: "a",
-      },
+      { name: "web_search", args: { query: "usc alumni", mode: "strict" }, executionId: "a" },
       { name: "web_search", args: { query: "usc alumni" }, executionId: "b" },
     ]);
     await first.run();
-    expect(first.results[0]).toMatchObject({
-      error: expect.stringContaining("Page token"),
-    });
+    expect(first.results[0]).toMatchObject({ error: expect.stringContaining("Page token") });
     expect(first.results[0]).not.toHaveProperty("knownFix");
     const fixes = saved.find((request) => request.path === "tool-fixes.md");
     expect(fixes).toMatchObject({ scope: "bot", botId: first.runData.botId });
@@ -7401,32 +6099,17 @@ describe("remembered tool fixes", () => {
     expect(fixes?.content).toContain("worked after: removed `mode`");
 
     const second = fixture("run-fix-2");
-    second.memoryRead.mockImplementation(
-      async (request: { scope: string; path?: string }) => ({
-        documents:
-          request.scope === "bot" && request.path === "tool-fixes.md"
-            ? [
-                {
-                  id: "doc-1",
-                  path: "tool-fixes.md",
-                  content: fixes!.content,
-                  revision: 1,
-                },
-              ]
-            : [],
-      }),
-    );
-    (second.web.search as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => {
-        throw new Error("Page token 9145 cannot be combined with a new filter");
-      },
-    );
+    second.memoryRead.mockImplementation(async (request: { scope: string; path?: string }) => ({
+      documents:
+        request.scope === "bot" && request.path === "tool-fixes.md"
+          ? [{ id: "doc-1", path: "tool-fixes.md", content: fixes!.content, revision: 1 }]
+          : [],
+    }));
+    (second.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      throw new Error("Page token 9145 cannot be combined with a new filter");
+    });
     second.setCalls([
-      {
-        name: "web_search",
-        args: { query: "usc", mode: "strict" },
-        executionId: "c",
-      },
+      { name: "web_search", args: { query: "usc", mode: "strict" }, executionId: "c" },
     ]);
     await second.run();
     expect(second.results[0]).toMatchObject({
@@ -7437,13 +6120,10 @@ describe("remembered tool fixes", () => {
 
   it("keeps the tool result unchanged when memory cannot be read or saved", async () => {
     const f = fixture("run-fix-3");
-    f.memoryRead.mockImplementation(
-      async (request: { scope: string; path?: string }) => {
-        if (request.path === "tool-fixes.md")
-          throw new Error("database unavailable");
-        return { documents: [] };
-      },
-    );
+    f.memoryRead.mockImplementation(async (request: { scope: string; path?: string }) => {
+      if (request.path === "tool-fixes.md") throw new Error("database unavailable");
+      return { documents: [] };
+    });
     f.memoryCommit.mockRejectedValue(new Error("database unavailable"));
     let failNext = true;
     (f.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
@@ -7489,12 +6169,7 @@ describe("approval cards on a new user message", () => {
       role: "user",
       botId: null,
       runId: f.runData.id,
-      blocks: [
-        {
-          kind: "text" as const,
-          text: "Can you read my latest Gmail and calendar?",
-        },
-      ],
+      blocks: [{ kind: "text" as const, text: "Can you read my latest Gmail and calendar?" }],
     };
     f.runData.sourceMessageId = human.id;
     f.prisma.message.findMany.mockResolvedValue([card, human]);
@@ -7507,8 +6182,6 @@ describe("approval cards on a new user message", () => {
     expect(prompt).toContain(
       'still waiting for the user, nobody has answered: "Confirm interview booking → Adam Test"',
     );
-    expect(prompt).toContain(
-      "not an answer to those cards: answer what it actually asks",
-    );
+    expect(prompt).toContain("not an answer to those cards: answer what it actually asks");
   });
 });
