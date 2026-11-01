@@ -6366,8 +6366,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             plannedEarlyRefusalAt ??= now;
             return now - plannedEarlyRefusalAt < 3_000;
           };
+          // A people-search agent run takes minutes, so it too waits until the first picks
+          // from the planned rows are on screen; after them it is the way to fill the ten.
+          const quickSearch = name.endsWith("web_search_advanced_exa") || name === "web_search";
           if (
-            (name.endsWith("web_search_advanced_exa") || name === "web_search") &&
+            (quickSearch || (name.endsWith("agent_run") && !firstPicksShown)) &&
             plannedNewPeople >= PLANNED_POOL_ENOUGH &&
             !executionId.startsWith(`${runId}:planned-search:`) &&
             !(await deps.prisma.externalEffect.findFirst({
