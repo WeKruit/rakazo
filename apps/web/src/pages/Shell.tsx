@@ -21,7 +21,7 @@ import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../lib/recruiting-read-view";
 
@@ -69,6 +69,7 @@ import { RecruitingReadCacheContext } from "./recruiting/shared";
 import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 import { StackedConversation } from "./shell/StackedConversation";
+import { stackedConversationTarget } from "./shell/stacked-conversation-target";
 
 const CreateGroupForm = lazyPanel(() =>
   withFeatureMessages(() => import("./GroupPanel")).then((module) => module.CreateGroupForm),
@@ -119,7 +120,12 @@ export function ShellPage() {
     ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
   const { t } = useLingui();
   // A waiting conversation opened from the corner, stacked over the current page.
-  const [stacked, setStacked] = useState<string | null>(null);
+  const [stacked, setStacked] = useState<{ groupId: string; messageId?: string } | null>(null);
+  const openStacked = useCallback(
+    (groupId: string, messageId?: string) =>
+      setStacked(messageId ? { groupId, messageId } : { groupId }),
+    [],
+  );
   const {
     navigate,
     session,
@@ -198,7 +204,23 @@ export function ShellPage() {
     newRoleAttachments,
     roleCreationError,
   } = model;
-  const stackedGroup = stacked ? groups.find((group) => group.id === stacked) : undefined;
+  const stackedGroup = stacked ? groups.find((group) => group.id === stacked.groupId) : undefined;
+  // A link to a moment in another conversation, as Kruit cites it, opens stacked from the right.
+  useEffect(() => {
+    function openLinkedConversation(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = (event.target as Element | null)?.closest?.(".rk-chat-markdown a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      const target = stackedConversationTarget(anchor.href, window.location.origin);
+      if (!target || !groups.some((group) => group.id === target.groupId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openStacked(target.groupId, target.messageId);
+    }
+    document.addEventListener("click", openLinkedConversation, true);
+    return () => document.removeEventListener("click", openLinkedConversation, true);
+  }, [groups, openStacked]);
   const roleCreationForm = (
     <CreateGroupForm
       key={JSON.stringify([
@@ -367,12 +389,14 @@ export function ShellPage() {
             model.recruitingWorkspaceView === "conversation" ||
             (model.roleChatWorkspace && !model.roleChatHidden)
           }
-          onOpen={(id) => setStacked(id)}
+          onOpen={(id) => openStacked(id)}
         />
       )}
       {stackedGroup ? (
         <StackedConversation
+          key={`${stackedGroup.id}:${stacked?.messageId ?? ""}`}
           groupId={stackedGroup.id}
+          messageId={stacked?.messageId}
           title={
             stackedGroup.id.startsWith("recruiting-global-")
               ? RECRUITING_GLOBAL_AGENT_NAME
@@ -384,7 +408,11 @@ export function ShellPage() {
             setStacked(null);
             setPanel(null);
             setMobileSidebarOpen(false);
-            navigate(`/app/g/${encodeURIComponent(stackedGroup.id)}?view=conversation`);
+            navigate(
+              `/app/g/${encodeURIComponent(stackedGroup.id)}?view=conversation${
+                stacked?.messageId ? `&m=${encodeURIComponent(stacked.messageId)}` : ""
+              }`,
+            );
           }}
         />
       ) : null}
