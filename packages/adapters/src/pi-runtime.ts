@@ -1742,6 +1742,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
           ...(options === undefined ? {} : { options }),
+          ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
           ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
         };

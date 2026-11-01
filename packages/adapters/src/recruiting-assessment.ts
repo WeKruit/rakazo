@@ -219,22 +219,15 @@ export async function executeRecruitingCandidatesTool(
           }
         : result;
     }
-    if (!roleId) {
-      succeeded = true;
-      return { status: "no_current_role" as const };
-    }
-    if (input.operation === "round") {
-      const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
-        threadId: trusted.threadId,
-      });
-      itemCount = round?.candidates.length ?? 0;
-      succeeded = true;
-      return round ? { status: "found" as const, round } : { status: "no_round" as const };
-    }
     if (input.operation === "list") {
-      const { operation: _operation, ...query } = input;
+      const { operation: _operation, roleId: namedRoleId, ...query } = input;
+      const listRoleId = roleId ?? namedRoleId;
+      if (!listRoleId) {
+        succeeded = true;
+        return { status: "no_current_role" as const };
+      }
       const result = await listRecruitingCandidates(deps.prisma, trusted.actor, {
-        roleId,
+        roleId: listRoleId,
         ...query,
       });
       queryMs = Math.round(performance.now() - queryStarted);
@@ -275,6 +268,18 @@ export async function executeRecruitingCandidatesTool(
             : item;
         }),
       };
+    }
+    if (!roleId) {
+      succeeded = true;
+      return { status: "no_current_role" as const };
+    }
+    if (input.operation === "round") {
+      const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
+        threadId: trusted.threadId,
+      });
+      itemCount = round?.candidates.length ?? 0;
+      succeeded = true;
+      return round ? { status: "found" as const, round } : { status: "no_round" as const };
     }
     const { operation: _operation, ...query } = input;
     if (!deps.artifacts) throw new IsolationError();
