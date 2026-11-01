@@ -680,7 +680,7 @@ export function ShellConversation({
                     </h1>
                   )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1">
                   {roleChatWorkspace ? (
                     <Button
                       variant="ghost"
