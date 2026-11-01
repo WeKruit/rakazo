@@ -301,8 +301,16 @@ function filterSql(actor: Actor, filters: RecruitingContactFilters) {
   return where.length ? Prisma.sql`WHERE ${Prisma.join(where, " AND ")}` : Prisma.empty;
 }
 
+/**
+ * Name order ignores leading punctuation, digits, symbols and emoji (". Ann", "✨ Ann" sort as
+ * "Ann"), and names with no letters at all ("2026-10-12 11:15") go last instead of first.
+ */
+const JUNK_PREFIX =
+  "^[\\s0-9!-/:-@\\[-`{-~\\u00a0-\\u00bf\\u2000-\\u2bff\\u3000-\\u303f\\ufe00-\\ufe0f\\uff01-\\uff0f\\U0001f000-\\U0010ffff]+";
+const NAME_KEY = Prisma.sql`lower(regexp_replace(coalesce(p.name, ''), ${JUNK_PREFIX}, ''))`;
+
 const ORDER = {
-  name: Prisma.sql`lower(p.name) ASC NULLS LAST, p.person_key`,
+  name: Prisma.sql`(${NAME_KEY} = '') ASC, ${NAME_KEY} ASC, p.person_key`,
   added: Prisma.sql`p.added_at DESC NULLS LAST, p.person_key`,
   contacted: Prisma.sql`p.last_contacted DESC NULLS LAST, p.person_key`,
   replied: Prisma.sql`p.last_replied DESC NULLS LAST, p.person_key`,
