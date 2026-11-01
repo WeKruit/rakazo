@@ -600,6 +600,7 @@ export async function mockRecruitingApp(
         roles,
         items: filtered.slice(0, Number(input.limit ?? 30)),
         nextCursor: null,
+        total: filtered.length,
         unread: {
           count: rows.filter(isUnread).length,
           unknownThreads: 0,

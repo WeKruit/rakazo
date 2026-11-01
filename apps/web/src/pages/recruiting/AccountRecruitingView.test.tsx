@@ -89,6 +89,7 @@ const indexPage = (
     latestIncomingAt: email.direction === "received" ? email.date : null,
   })),
   nextCursor: null,
+  total: emails.length,
   unread: {
     count: 0,
     unknownThreads: emails.filter((email) => !email.direction || !email.date).length,
@@ -144,7 +145,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
     );
     expect(read).toHaveBeenCalledTimes(3);
     expect(read.mock.calls.map(([input]) => input)).toEqual([
-      { view: "roles", cursor: undefined, limit: 5 },
+      { view: "roles", limit: 5 },
       { view: "interview", roleId: "one", limit: 1 },
       { view: "interview", roleId: "two", limit: 1 },
     ]);
@@ -170,7 +171,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
   }
 });
 
-it("loads the next campaign lead page without losing sibling campaigns or repeating a person", async () => {
+it("pages campaign recipients back and forth without losing sibling campaigns or rereading a page", async () => {
   const lead = (email: string) => ({ candidateKey: null, email, status: 1, interestStatus: null });
   const campaign = (id: string) => ({
     status: "ready" as const,
@@ -187,7 +188,7 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       {
         roleId: "one",
         campaigns: input.campaignId
-          ? [{ ...first, leads: [...first.leads, lead("new@example.test")], nextLeadCursor: null }]
+          ? [{ ...first, leads: [lead("new@example.test")], nextLeadCursor: null }]
           : [first, second],
       },
     ],
@@ -216,11 +217,9 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       expect.objectContaining({ view: "roles", briefedOnly: true }),
       expect.anything(),
     );
-    await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Load more")!
-        .click(),
-    );
+    const button = (label: string) =>
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+    await act(async () => button("Next page").click());
     expect(read).toHaveBeenLastCalledWith({
       view: "sequence",
       roleId: "one",
@@ -229,10 +228,18 @@ it("loads the next campaign lead page without losing sibling campaigns or repeat
       campaignLeadCursor: "lead-page-two",
       limit: 20,
     });
-    expect(container.textContent?.match(/one@example.test/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain("one@example.test");
     expect(container.textContent).toContain("new@example.test");
     expect(container.textContent).toContain("Campaign two");
     expect(container.textContent).toContain("two@example.test");
+    const reads = read.mock.calls.length;
+    await act(async () => button("Page 1").click());
+    expect(container.textContent).toContain("one@example.test");
+    expect(container.textContent).not.toContain("new@example.test");
+    await act(async () => button("Page 2").click());
+    expect(container.textContent).toContain("new@example.test");
+    // Pages already read are shown again without another provider read.
+    expect(read.mock.calls.length).toBe(reads);
   } finally {
     await act(async () => pageRoot.unmount());
   }
@@ -319,6 +326,42 @@ it.each([
     }
   },
 );
+
+it("pages saved mail by number and reads only the chosen page", async () => {
+  mockIndex({ ...indexPage([]), total: 75 });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offset: expect.anything() }),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 60, limit: 30 }));
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Previous page"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 30 }));
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
 
 it("reports an unavailable campaign read without claiming that there is no campaign", async () => {
   read.mockResolvedValue({
@@ -823,11 +866,13 @@ it("lists every role's people in one server-paged table", async () => {
     expect(container.textContent).toContain("UCLA");
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Next")!
-        .click(),
+      container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),
     );
     expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
   } finally {
     await act(async () => pageRoot.unmount());
     container.remove();

@@ -1,5 +1,6 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Button, Card, CardContent, Checkbox } from "@rakazo/ui-web";
+import { ListPager } from "../../components/ListPager";
 import { readRecruitingPanelState } from "../../lib/right-panel-state";
 import {
   CandidateAssessment,
@@ -49,7 +50,8 @@ export function RecruitingLegacyResults({
     showCrm,
     selectCandidate,
     discussCandidate,
-    loadMoreCandidates,
+    goToCandidatePage,
+    candidatePageIndex,
     setShortlist,
   } = model;
   return (
@@ -365,16 +367,12 @@ export function RecruitingLegacyResults({
               }}
             />
           )}
-          {candidatePage.nextCursor ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={candidateLoading}
-              onClick={() => void loadMoreCandidates()}
-            >
-              <Trans>Load more</Trans>
-            </Button>
-          ) : null}
+          <ListPager
+            page={candidatePageIndex}
+            pageCount={Math.ceil(candidatePage.total / 30)}
+            onPage={goToCandidatePage}
+            disabled={candidateLoading}
+          />
         </>
       ) : null}
     </>

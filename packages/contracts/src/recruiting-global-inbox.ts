@@ -29,6 +29,8 @@ export const GlobalRecruitingInboxInputSchema = z.strictObject({
       }
     }, "Invalid mail cursor")
     .optional(),
+  /** Threads to skip, to open a numbered page. Not combined with `cursor`. */
+  offset: z.number().int().min(0).max(100_000).optional(),
   limit: z.number().int().min(1).max(50).default(30),
 });
 export type GlobalRecruitingInboxInput = z.infer<typeof GlobalRecruitingInboxInputSchema>;
@@ -44,6 +46,8 @@ export const GlobalRecruitingInboxOutputSchema = z.strictObject({
     }),
   ),
   nextCursor: z.string().nullable(),
+  /** Threads matching the filters; null when read from a cursor. */
+  total: z.number().int().nonnegative().nullable(),
   unread: z.strictObject({
     count: z.number().int().nonnegative(),
     unknownThreads: z.number().int().nonnegative(),

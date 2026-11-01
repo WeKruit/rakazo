@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: candidatePage.total
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "{0, plural, =1 {# candidate} other {# candidates}}"
+msgstr ""
+
 #. placeholder {0}: waiting.length
 #: src/pages/shell/KruitDock.tsx
 msgid "{0, plural, one {# item needs your attention} other {# items need your attention}}"
@@ -74,12 +79,6 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "{0} MB"
 msgstr "{0} МБ"
-
-#. placeholder {0}: rows.length
-#. placeholder {1}: candidatePage.total
-#: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "{0} of {1}"
-msgstr ""
 
 #. placeholder {0}: value.total
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
@@ -2142,6 +2141,10 @@ msgstr "Получить учетные данные"
 msgid "Go to email {0}"
 msgstr ""
 
+#: src/components/ListPager.tsx
+msgid "Go to page"
+msgstr ""
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Good example"
 msgstr ""
@@ -2468,7 +2471,6 @@ msgstr "Загрузить более ранние сообщения"
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 #: src/pages/recruiting/shared.tsx
-#: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Load more"
 msgstr ""
 
@@ -2826,8 +2828,8 @@ msgstr ""
 msgid "New sequence"
 msgstr ""
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Next"
+#: src/components/ListPager.tsx
+msgid "Next page"
 msgstr ""
 
 #. placeholder {0}: stage.nextStep
@@ -3298,6 +3300,15 @@ msgstr ""
 msgid "Owner"
 msgstr ""
 
+#. placeholder {0}: item + 1
+#: src/components/ListPager.tsx
+msgid "Page {0}"
+msgstr ""
+
+#: src/components/ListPager.tsx
+msgid "Pages"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Partial"
@@ -3428,8 +3439,8 @@ msgstr ""
 msgid "Preview steps"
 msgstr ""
 
-#: src/pages/recruiting/AllContacts.tsx
-msgid "Previous"
+#: src/components/ListPager.tsx
+msgid "Previous page"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
