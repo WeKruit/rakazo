@@ -704,6 +704,7 @@ import {
   contactLookupCountdownNote,
   finishWorkEstimate,
   startWorkEstimate,
+  waitWithCountdown,
   withWorkNote,
   workEstimateAfterAgentRun,
   workEstimateForResearch,
@@ -10844,15 +10845,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "wait_for_work") {
-            return waitForBackgroundWork(deps.prisma, {
-              threadId: run.threadId,
-              selfRunId: run.id,
-              ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
-              mode: args.mode === "any" ? "any" : "all",
-              timeoutSeconds:
-                typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
-              signal: context.signal,
-            });
+            return waitWithCountdown(
+              deps.prisma,
+              { spaceId: run.spaceId, threadId: run.threadId },
+              typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
+              (timeoutSeconds) =>
+                waitForBackgroundWork(deps.prisma, {
+                  threadId: run.threadId,
+                  selfRunId: run.id,
+                  ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
+                  mode: args.mode === "any" ? "any" : "all",
+                  timeoutSeconds,
+                  signal: context.signal,
+                }),
+            );
           }
           if (name === "task_catalog") {
             return taskCatalogFromTool(deps, {

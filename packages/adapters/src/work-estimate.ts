@@ -2,7 +2,12 @@ import type { JobPublisher } from "@rakazo/adapter-kit";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import type { WorkEstimate, WorkEstimateKind } from "@rakazo/core";
-import { estimateWorkMs, peopleNamedIn, workCountdownsElapsed } from "@rakazo/core";
+import {
+  estimateWorkMs,
+  peopleNamedIn,
+  workCountdownLeftMs,
+  workCountdownsElapsed,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { COMPLETION_EMAIL_TOOL } from "./completion-email.js";
 import { mcpObject } from "./recruiting-research.js";
@@ -191,6 +196,17 @@ export async function currentWorkEstimate(
   thread: { spaceId: string; threadId: string },
   now = Date.now(),
 ): Promise<WorkEstimate | null> {
+  const open = await currentOpenEstimate(prisma, thread, now);
+  if (!open) return null;
+  const { id: _id, reported: _reported, ...estimate } = open;
+  return estimate;
+}
+
+async function currentOpenEstimate(
+  prisma: PrismaClient,
+  thread: { spaceId: string; threadId: string },
+  now: number,
+): Promise<Open | null> {
   const rows = await prisma.externalEffect.findMany({
     where: {
       kind: WORK_ESTIMATE_KIND,
@@ -225,10 +241,39 @@ export async function currentWorkEstimate(
     )
       continue;
     if (await finishReached(prisma, row)) continue;
-    const { id: _id, reported: _reported, ...estimate } = open;
-    return estimate;
+    return open;
   }
   return null;
+}
+
+/**
+ * Waiting on background work lasts until the recruiter's countdown runs out, never longer, like
+ * Workloop's wait: the agent then reports progress and waits again. Without a countdown the
+ * requested wait stands.
+ */
+export async function waitWithCountdown<T extends { timedOut: boolean }>(
+  prisma: PrismaClient,
+  thread: { spaceId: string; threadId: string },
+  requestedSeconds: number | undefined,
+  wait: (timeoutSeconds: number | undefined) => Promise<T>,
+  clock: () => number = Date.now,
+): Promise<T | (T & { countdown: string })> {
+  const open = await currentOpenEstimate(prisma, thread, clock()).catch(() => null);
+  const left = open ? workCountdownLeftMs(open, clock()) : null;
+  if (!open?.estimateMs || left === null) return wait(requestedSeconds);
+  // A couple of seconds past the end, so the run-out countdown is counted as elapsed.
+  const untilEnd = Math.ceil(left / 1000) + 2;
+  const capped = requestedSeconds === undefined || untilEnd <= requestedSeconds;
+  const result = await wait(capped ? untilEnd : requestedSeconds);
+  if (!result.timedOut || !capped) return result;
+  const due = countdownReportDue(open, clock());
+  if (!due) return result;
+  await markCountdownReported(prisma, open.id, due).catch(() => undefined);
+  const more = minutes(open.estimateMs);
+  return {
+    ...result,
+    countdown: `The recruiter's countdown of about ${more} minutes ran out and started over. Tell them in one line how many people the role has in Results now and that the work keeps going, about ${more} more minutes; ask nothing. Then wait again.`,
+  };
 }
 
 /** Countdowns run out since the last report, or null when none is owed. */
