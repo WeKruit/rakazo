@@ -4,12 +4,14 @@ const TIMEOUT_MS = 4_000;
 const MAX_USER_CHARS = 1_200;
 const MAX_REPLY_CHARS = 2_400;
 const MAX_SUGGESTION_CHARS = 120;
+const EARLIER_TURNS = 6;
+const MAX_EARLIER_CHARS = 500;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
 const INSTRUCTIONS = [
   "You suggest the next message the user is most likely to send in this chat with their recruiting assistant.",
   "Reply with only that message, written as the user, at most 12 words, in the language the user writes in.",
-  "Make it a natural next step that follows from the assistant's reply, such as answering its question or asking for the next piece of work.",
+  "Make it the natural next step in the task the conversation is working on (for example the next step of setting up a role), usually answering the assistant's question or asking for the next piece of work. Never a generic greeting or a change of topic.",
   "Never suggest approving, sending or confirming emails, outreach or interview invitations.",
   "No quotes, no explanation, no markdown. If there is no clear next step, reply with nothing.",
 ].join(" ");
@@ -39,6 +41,8 @@ export function cleanSuggestion(raw: string): string | null {
 export async function suggestNextMessage(input: {
   runtime: AgentRuntime;
   model: AgentRunModel;
+  /** Messages before this turn, oldest first; only the last few are used. */
+  earlier?: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
   userText: string;
   replyText: string;
   runId: string;
@@ -48,7 +52,15 @@ export async function suggestNextMessage(input: {
   threadId: string;
   onUsage?: (event: Extract<AgentRuntimeEvent, { type: "usage" }>) => Promise<unknown>;
 }): Promise<string | null> {
+  const earlier = (input.earlier ?? [])
+    .filter((turn) => turn.text.trim())
+    .slice(-EARLIER_TURNS)
+    .map(
+      (turn) =>
+        `${turn.role === "user" ? "User" : "Assistant"}: ${clip(turn.text, MAX_EARLIER_CHARS)}`,
+    );
   const prompt = [
+    ...(earlier.length ? ["Earlier in the conversation:", ...earlier, "", "Latest turn:"] : []),
     "User:",
     clip(input.userText, MAX_USER_CHARS),
     "",

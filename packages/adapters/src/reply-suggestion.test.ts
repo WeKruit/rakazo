@@ -37,6 +37,27 @@ describe("reply suggestion", () => {
     expect(seen[0]?.model.thinkingLevel).toBe("off");
   });
 
+  it("gives the model the last few earlier turns so the guess fits the current task", async () => {
+    const seen: Array<{ prompt: string }> = [];
+    await suggestNextMessage({
+      ...base,
+      earlier: [
+        { role: "user", text: "too old" },
+        ...Array.from({ length: 6 }, (_, index) => ({
+          role: index % 2 ? ("assistant" as const) : ("user" as const),
+          text: `turn ${index}`,
+        })),
+        { role: "user", text: "我要招一个做 Agent 的 SWE" },
+      ],
+      runtime: runtimeReplying("应届生也可以", seen),
+    });
+    expect(seen[0]?.prompt).toContain("我要招一个做 Agent 的 SWE");
+    expect(seen[0]?.prompt).not.toContain("too old");
+    expect(seen[0]?.prompt.indexOf("Earlier in the conversation:")).toBeLessThan(
+      seen[0]?.prompt.indexOf("Latest turn:") ?? -1,
+    );
+  });
+
   it("drops empty, failed or overlong output", () => {
     expect(cleanSuggestion("")).toBeNull();
     expect(cleanSuggestion("I hit a problem: timeout")).toBeNull();

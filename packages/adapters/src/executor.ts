@@ -14418,6 +14418,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             void suggestNextMessage({
               runtime: deps.runtime,
               model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+              earlier: historyMessages
+                .filter(
+                  (message) =>
+                    message.id !== currentTurnMessage?.id &&
+                    (message.role === "user" || message.role === "bot"),
+                )
+                .map((message) => ({
+                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                  text: message.blocks
+                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                    .join("\n"),
+                })),
               userText: turnUserText,
               replyText: text,
               runId,
