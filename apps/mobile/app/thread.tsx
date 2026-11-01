@@ -611,7 +611,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const [replyTarget, setReplyTarget] = useState<MobileMessage | null>(null);
   const [replyQuote, setReplyQuote] = useState<string | null>(null);
   const [quoteTarget, setQuoteTarget] = useState<MobileMessage | null>(null);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [skippedAttachments, setSkippedAttachments] = useState<
+    Array<{ id: string; name: string; label: string }>
+  >([]);
   const [sending, setSending] = useState(false);
   const backgroundTasks = snap?.backgroundTasks ?? [];
   const [openStage, setOpenStage] = useState<{
@@ -1635,7 +1637,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     setReplyQuote(null);
     setQuoteTarget(null);
     setMarkdownPreview(null);
-    setAttachmentNotice(null);
+    setSkippedAttachments([]);
     setError(null);
   }, [threadKey]);
 
@@ -1721,7 +1723,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
     setReplyTarget(null);
     setReplyQuote(null);
-    setAttachmentNotice(null);
+    setSkippedAttachments([]);
     if (pinnedAroundRef.current) showLatest();
     performScroll(scrollBehavior.current.jumpToLatest());
     publishThreadScrollState(scrollBehavior.current.state());
@@ -2053,12 +2055,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         })),
       ]);
     }
-    setAttachmentNotice(
-      result.skipped.length
-        ? t("Skipped {items}", {
-            items: result.skipped.map((item) => formatAttachmentSkip(item)).join(", "),
-          })
-        : null,
+    setSkippedAttachments(
+      result.skipped.map((item, index) => ({
+        id: `${Date.now()}-${index}`,
+        name: item.name,
+        label: formatAttachmentSkip(item),
+      })),
     );
   }
 
@@ -2742,10 +2744,41 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             />
           </GlassSurface>
         ) : null}
-        {attachmentNotice ? (
-          <Text style={{ color: tokens.warning, marginTop: 12, fontSize: 13 }}>
-            {attachmentNotice}
-          </Text>
+        {skippedAttachments.length ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+            {skippedAttachments.map((item) => (
+              <View
+                key={item.id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: tokens.warning,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text
+                  style={{ color: tokens.warning, fontSize: 13, maxWidth: 220 }}
+                  numberOfLines={1}
+                >
+                  {item.label}
+                </Text>
+                <Pressable
+                  accessibilityLabel={t("Remove {name}", { name: item.name })}
+                  onPress={() =>
+                    setSkippedAttachments((current) =>
+                      current.filter((skipped) => skipped.id !== item.id),
+                    )
+                  }
+                >
+                  <NativeSymbol ios="xmark" android="close" size={14} color={tokens.warning} />
+                </Pressable>
+              </View>
+            ))}
+          </View>
         ) : null}
         {activePendingAttachments.length ? (
           <View

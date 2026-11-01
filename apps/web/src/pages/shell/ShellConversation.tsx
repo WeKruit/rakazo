@@ -127,6 +127,7 @@ export function ShellConversation({
     exportingConversation,
     setExportingConversation,
     attachmentNotice,
+    removeSkippedAttachment,
     fileInputRef,
     panel,
     recruitingRefresh,
@@ -927,6 +928,7 @@ export function ShellConversation({
                       : activePendingAttachments
                   }
                   attachmentNotice={attachmentNotice}
+                  onRemoveSkippedAttachment={removeSkippedAttachment}
                   sendError={sendError}
                   runError={emptyCrmChat ? null : displayedRunError}
                   runErrorId={emptyCrmChat ? null : displayedRunErrorId}

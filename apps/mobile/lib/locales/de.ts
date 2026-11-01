@@ -222,7 +222,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Sending…": "Wird gesendet…",
   "Show {label}": "{label} anzeigen",
   "Skill {name}": "Skill {name}",
-  "Skipped {items}": "{items} übersprungen",
   "Speak message": "Nachricht vorlesen",
   Play: "Abspielen",
   Pause: "Pause",

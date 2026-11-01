@@ -1,9 +1,9 @@
 import { t } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { AgentSkillCatalogEntry, ThreadMessage } from "@rakazo/contracts";
-import { ATTACHMENT_ALLOWED_MIME_TYPES } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
+  ATTACHMENT_ACCEPT,
   clampMentionHighlightIndex,
   mentionChipKey,
   replyAttachment,
@@ -59,6 +59,8 @@ import { isFileDrag, isFilePaste } from "../../lib/pending-attachments";
 import type { CandidateDiscussionContext } from "../RecruitingPanel";
 import { ComposerReplyPreview } from "../shell/chat-context";
 import { FALLBACK_BOT_COLOR } from "./constants";
+import type { SkippedAttachment } from "./skipped-attachments";
+import { SkippedAttachmentChips } from "./skipped-attachments";
 
 export type PendingAttachment = {
   id: string;
@@ -67,7 +69,6 @@ export type PendingAttachment = {
   previewUrl?: string;
 };
 
-export const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 export function candidateReferenceText(candidate: CandidateDiscussionContext): string {
   const reference = [
     t`Name: ${candidate.name ?? t`Name missing`}`,
@@ -94,6 +95,7 @@ export const Composer = memo(function Composer({
   disabled,
   pendingAttachments,
   attachmentNotice,
+  onRemoveSkippedAttachment,
   sendError,
   runError,
   runErrorId,
@@ -129,7 +131,8 @@ export const Composer = memo(function Composer({
   running: boolean;
   disabled?: boolean;
   pendingAttachments: PendingAttachment[];
-  attachmentNotice: string | null;
+  attachmentNotice: readonly SkippedAttachment[];
+  onRemoveSkippedAttachment: (id: string) => void;
   sendError: string | null;
   runError: string | null;
   runErrorId: string | null;
@@ -632,11 +635,7 @@ export const Composer = memo(function Composer({
           }}
         />
       ) : null}
-      {attachmentNotice ? (
-        <div className="mb-3 rounded-[14px] border border-warning/40 bg-warning/10 px-4 py-2 text-[13px] text-warning">
-          {attachmentNotice}
-        </div>
-      ) : null}
+      <SkippedAttachmentChips items={attachmentNotice} onRemove={onRemoveSkippedAttachment} />
       {pendingAttachments.length ? (
         <div className="mb-3 flex flex-wrap gap-2">
           {pendingAttachments.map((attachment) => (
