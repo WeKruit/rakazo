@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
-import { answerableAskMessageIds } from "@rakazo/core";
+import { answerableAskMessageIds, userVisibleMessages } from "@rakazo/core";
 import { Button, Textarea } from "@rakazo/ui-web";
 import { ArrowLeft, Maximize2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -94,7 +94,9 @@ export function StackedConversation({
     const box = scroller.current;
     if (box && !focused) box.scrollTop = box.scrollHeight;
   }, [lastId, focused]);
-  const shown = focused ? around : (snapshot?.messages ?? null);
+  // Same filter as the full conversation: internal continuations and peer chatter stay hidden.
+  const source = focused ? around : (snapshot?.messages ?? null);
+  const shown = source && userVisibleMessages(source);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

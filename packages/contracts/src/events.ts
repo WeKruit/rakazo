@@ -287,9 +287,6 @@ const askQuestion = {
     .describe(
       "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
     ),
-};
-// Last, so the question and its choices stream to the person before the search plan is written.
-const askPlannedSearches = {
   plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
     "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
   ),
@@ -303,9 +300,8 @@ export const AskUserInputSchema = z.union([
       .max(4)
       .refine((values) => new Set(values).size === values.length),
     multiple: AskMultiple.optional(),
-    ...askPlannedSearches,
   }),
-  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema, ...askPlannedSearches }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 

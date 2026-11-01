@@ -39,6 +39,7 @@ const snapshot = {
   activeRuns: [{ id: "run", status: "waiting_input" }],
   messages: [
     { id: "hello", runId: "old", blocks: [{ kind: "text" }] },
+    { id: "continue", role: "system", internal: true, blocks: [{ kind: "text" }] },
     { id: "card", runId: "run", blocks: [{ kind: "ask", status: "pending" }] },
   ],
 };
@@ -70,6 +71,8 @@ it("stacks the waiting conversation, answers its card there and goes back", asyn
   expect(api.get).toHaveBeenCalledWith({ groupId: "role" });
   const card = host.querySelector<HTMLButtonElement>('[data-message="card"]')!;
   expect(card.dataset.canAnswer).toBe("true");
+  // An automatic continuation is internal and never shown, as in the full conversation.
+  expect(host.querySelector('[data-message="continue"]')).toBeNull();
   expect(host.querySelector<HTMLElement>('[data-message="hello"]')!.dataset.canAnswer).toBe(
     "false",
   );
