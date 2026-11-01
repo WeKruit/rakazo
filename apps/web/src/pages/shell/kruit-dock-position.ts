@@ -5,9 +5,11 @@ const KEY = "kruit-dock-position";
 export const DOCK_MARGIN = 16;
 const STEP = 16;
 const SAMPLE = 16;
+/** Breathing room kept around the dock so it never touches a control. */
+const GAP = 8;
 
 export const INTERACTIVE =
-  'button, a[href], input, textarea, select, summary, [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"]';
+  'button, a[href], input, textarea, select, summary, [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"], fieldset';
 
 export function clampOffset(offset: DockOffset, box: Box, viewport: Box): DockOffset {
   const clamp = (value: number, max: number) => Math.max(8, Math.min(value, Math.max(8, max)));
@@ -47,12 +49,13 @@ export function findFreeOffset(
 ): DockOffset {
   const fallback = { right: DOCK_MARGIN, bottom: DOCK_MARGIN };
   const free = (offset: DockOffset) => {
-    const left = viewport.width - offset.right - box.width;
-    const top = viewport.height - offset.bottom - box.height;
-    for (let x = 0; x <= box.width; x += SAMPLE) {
-      for (let y = 0; y <= box.height; y += SAMPLE) {
-        if (blocked(left + Math.min(x, box.width - 1), top + Math.min(y, box.height - 1)))
-          return false;
+    const left = viewport.width - offset.right - box.width - GAP;
+    const top = viewport.height - offset.bottom - box.height - GAP;
+    const width = box.width + GAP * 2;
+    const height = box.height + GAP * 2;
+    for (let x = 0; x <= width; x += SAMPLE) {
+      for (let y = 0; y <= height; y += SAMPLE) {
+        if (blocked(left + Math.min(x, width - 1), top + Math.min(y, height - 1))) return false;
       }
     }
     return true;

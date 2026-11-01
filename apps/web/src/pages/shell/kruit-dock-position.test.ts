@@ -19,6 +19,19 @@ it("never lands on a control: rises above a send button in the corner", () => {
     for (let y = top; y <= top + box.height; y += 4) expect(inRect(x, y, send)).toBe(false);
 });
 
+it("keeps clear of the box around a composer, not only its buttons", () => {
+  const composer = { l: 520, t: 740, w: 460, h: 48 };
+  const offset = findFreeOffset(box, viewport, (x, y) => inRect(x, y, composer));
+  const left = viewport.width - offset.right - box.width;
+  const top = viewport.height - offset.bottom - box.height;
+  const apart =
+    left + box.width < composer.l ||
+    left > composer.l + composer.w ||
+    top + box.height < composer.t ||
+    top > composer.t + composer.h;
+  expect(apart).toBe(true);
+});
+
 it("moves to the left edge when the whole right edge is taken", () => {
   const rightColumn = { l: 900, t: 0, w: 100, h: 800 };
   const offset = findFreeOffset(box, viewport, (x, y) => inRect(x, y, rightColumn));
