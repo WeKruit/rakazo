@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: waiting.length
+#: src/pages/shell/KruitDock.tsx
+msgid "{0, plural, one {# item needs your attention} other {# items need your attention}}"
+msgstr "{0, plural, one {# пункт требует внимания} few {# пункта требуют внимания} many {# пунктов требуют внимания} other {# пункта требуют внимания}}"
+
 #. placeholder {0}: step.peopleWithEmail
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{0, plural, one {# person with email} other {# people with email}}"
