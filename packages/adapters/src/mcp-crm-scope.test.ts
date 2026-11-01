@@ -1,5 +1,5 @@
 import { getRecruitingWorkspaceCrmTarget } from "@rakazo/db";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentCrmScopedArgs, McpConnector, scopedInstantlyCampaign } from "./mcp-connector.js";
 
 vi.mock("@rakazo/db", async (original) => ({
@@ -21,6 +21,7 @@ const membership = { version: 2, candidate_ids: [candidate], role_candidate_ids:
 const receipt = (data: unknown) => ({ structuredContent: { data } });
 
 beforeEach(() => vi.mocked(getRecruitingWorkspaceCrmTarget).mockReset());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("agent CRM candidate and correspondence scope", () => {
   it.each([
@@ -172,7 +173,10 @@ describe("agent CRM candidate and correspondence scope", () => {
   });
 });
 
-function fixture(endpoint = "https://crm.example.test/mcp") {
+function fixture(
+  endpoint = "https://crm.example.test/mcp",
+  options: ConstructorParameters<typeof McpConnector>[2] = {},
+) {
   const server = {
     id: target.mcpServerId,
     revision: 1,
@@ -194,7 +198,7 @@ function fixture(endpoint = "https://crm.example.test/mcp") {
     botMcpServer: { findFirst: vi.fn(async () => assignment) },
     run: { findFirst: vi.fn(async () => ({ threadId: "current-thread" })) },
   };
-  const connector = new McpConnector(prisma as never, {} as never);
+  const connector = new McpConnector(prisma as never, {} as never, options);
   const callTool = vi.fn(async (name: string, _args?: Record<string, unknown>) =>
     name === "get_crm_role"
       ? receipt({
@@ -488,6 +492,92 @@ describe("direct Instantly MCP email reads", () => {
       }),
     ).toMatchObject([{ type: "error" }]);
     expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_email"]);
+  });
+  it.each(["active", "inactive", "changed-name"])(
+    "uses the same authoritative sender gate for shared remote replies: %s",
+    async (mode) => {
+      vi.stubEnv("INSTANTLY_API_KEY", "synthetic-platform-mail-key");
+      const fetch = vi.fn(async (_url: string | URL | Request) =>
+        Response.json({
+          email: email.eaccount,
+          status: mode === "inactive" ? 0 : 1,
+          setup_pending: false,
+          warmup_status: 1,
+          first_name: mode === "changed-name" ? "Other" : "Acme",
+          last_name: "",
+        }),
+      );
+      const f = fixture("https://mcp.instantly.ai/mcp", {
+        network: { fetch, resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }] },
+      });
+      vi.spyOn(
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [email.campaign_id] });
+      Object.assign(f.prisma, {
+        externalEffect: {
+          findMany: vi.fn(async () => [
+            {
+              result: {
+                email: email.eaccount,
+                displayName: "Acme",
+                domain: "example.test",
+                emailProvider: 1,
+              },
+            },
+          ]),
+        },
+      });
+      f.callTool.mockResolvedValue({ structuredContent: email } as never);
+      const events = await f.collect("reply_to_email", {
+        reply_to_uuid: email.id,
+        eaccount: email.eaccount,
+        body_text: "Exact reply",
+        to: email.from_address_email,
+        subject: "Re: Example",
+        skip_validation: false,
+      });
+      expect(events).toMatchObject([{ type: mode === "active" ? "result" : "error" }]);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(String(fetch.mock.calls[0]?.[0])).toContain(
+        `/accounts/${encodeURIComponent(email.eaccount)}`,
+      );
+      expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(
+        mode === "active" ? ["get_email", "reply_to_email"] : ["get_email"],
+      );
+    },
+  );
+  it("blocks a shared remote reply from a legacy mailbox without the account's confirmed sender receipt", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "synthetic-platform-mail-key");
+    const f = scopedFixture();
+    Object.assign(f.prisma, { externalEffect: { findMany: vi.fn(async () => []) } });
+    f.callTool.mockResolvedValue({ structuredContent: email } as never);
+    const events = await f.collect("reply_to_email", {
+      reply_to_uuid: email.id,
+      eaccount: email.eaccount,
+      body_text: "Exact reply",
+      to: email.from_address_email,
+      subject: "Re: Example",
+      skip_validation: false,
+    });
+    expect(events).toMatchObject([{ type: "error" }]);
+    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_email"]);
+  });
+  it("keeps the existing authorized personal connection reply behavior", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "");
+    const f = scopedFixture();
+    f.callTool.mockResolvedValue({ structuredContent: email } as never);
+    expect(
+      await f.collect("reply_to_email", {
+        reply_to_uuid: email.id,
+        eaccount: email.eaccount,
+        body_text: "Exact reply",
+        to: email.from_address_email,
+        subject: "Re: Example",
+        skip_validation: false,
+      }),
+    ).toMatchObject([{ type: "result" }]);
+    expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_email", "reply_to_email"]);
   });
   it("blocks a direct remote reply on another role campaign before the send call", async () => {
     const f = scopedFixture();

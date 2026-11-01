@@ -8,6 +8,7 @@ import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import { useRecruitingDetail } from "./detail";
 import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
+import { MailReplyCards } from "./MailReplyCards";
 import { ProfileImage } from "./ProfileImage";
 import { initials, storedProfileFields } from "./profile";
 import { sequenceLine, useSequenceLabels, useSequenceStats } from "./SequenceStats";
@@ -530,38 +531,57 @@ export function InboxTab({
               </TabNotice>
             ) : null}
             {selected ? (
-              <EmailConversation
-                readState={inboxReadState}
-                key={selectedCandidateId}
-                items={conversationItems}
-                candidateId={selectedCandidateId}
-                selectedId={selected.id}
-                candidateName={selectedPerson?.name}
-                candidateTitle={selectedPerson?.title}
-                onSelect={(email) => setEmailId(email.id)}
-                onOpenProfile={
-                  detail && selectedPerson
-                    ? () =>
-                        detail.open({
-                          view: "contact",
-                          person: selectedPerson,
-                          role: {
-                            roleId: props.roleId,
-                            spaceId: props.spaceId,
-                            conversation: props.conversation,
-                          },
-                        })
-                    : undefined
-                }
-                onDraftReply={
-                  onDraftReply && selectedContext
-                    ? (email) => {
-                        const context = contextFor(email);
-                        if (context) onDraftReply(context);
-                      }
-                    : undefined
-                }
-              />
+              <>
+                <EmailConversation
+                  readState={inboxReadState}
+                  key={selectedCandidateId}
+                  items={conversationItems}
+                  candidateId={selectedCandidateId}
+                  selectedId={selected.id}
+                  candidateName={selectedPerson?.name}
+                  candidateTitle={selectedPerson?.title}
+                  onSelect={(email) => setEmailId(email.id)}
+                  onOpenProfile={
+                    detail && selectedPerson
+                      ? () =>
+                          detail.open({
+                            view: "contact",
+                            person: selectedPerson,
+                            role: {
+                              roleId: props.roleId,
+                              spaceId: props.spaceId,
+                              conversation: props.conversation,
+                            },
+                          })
+                      : undefined
+                  }
+                  onDraftReply={
+                    onDraftReply && selectedContext
+                      ? (email) => {
+                          const context = contextFor(email);
+                          if (context) onDraftReply(context);
+                        }
+                      : undefined
+                  }
+                />
+                {props.conversation && selected.sourceId && selected.eaccount?.trim() ? (
+                  <MailReplyCards
+                    key={JSON.stringify([
+                      selected.sourceId,
+                      selected.threadId ?? selected.providerMessageId ?? selected.id,
+                    ])}
+                    conversation={props.conversation}
+                    readCacheScope={props.readCacheScope}
+                    refreshSignal={props.refreshSignal}
+                    filter={{
+                      sourceId: selected.sourceId,
+                      mailbox: selected.eaccount,
+                      ...(selected.threadId ? { threadId: selected.threadId } : {}),
+                      emailIds: [selected.providerMessageId ?? selected.id],
+                    }}
+                  />
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

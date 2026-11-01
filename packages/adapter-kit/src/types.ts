@@ -18,6 +18,8 @@ export interface AdapterContext {
   homeLifecycleClaim?: { computerId: string; providerRef: string | null; updatedAt: Date };
   /** Trusted in-process scheduling confirmation binding; never a provider argument. */
   schedulingConfirmationEffectId?: string;
+  /** Trusted native approval for creating/selecting a sending identity; never an RPC/tool argument. */
+  senderConfirmationEffectId?: string;
   /** Opaque fence for releasing a graphical screen without tearing down its replacement. */
   screenLeaseId?: string;
   /** When releasing a screen after cancel, also stop orphaned browser work on that screen. */

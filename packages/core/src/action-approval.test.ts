@@ -28,6 +28,13 @@ import {
 } from "./action-approval.js";
 
 describe("internalMcpWriteEndpoint", () => {
+  it("requires explicit confirmation only for sender creation and selection", () => {
+    const route = { connectorId: "mcp", toolName: "native_instantly_ensure_sender" };
+    for (const operation of ["read", "propose"])
+      expect(toolRequiresExplicitApproval("renamed", route, { operation })).toBe(false);
+    for (const operation of ["confirm", "select"])
+      expect(toolRequiresExplicitApproval("renamed", route, { operation })).toBe(true);
+  });
   it("treats Instantly writes that never send as internal, and keeps activation confirmed", () => {
     for (const name of [
       "native_instantly_create_campaign",

@@ -179,6 +179,7 @@ import {
   ComputerCommandSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
+  MailReplySendAnswerSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   parseTicketRef,
   SIDEBAR_PREVIEW_MAX_LENGTH,
@@ -1558,12 +1559,16 @@ export function createRouter(deps: RouterDeps) {
           create: {
             id: "default",
             ownerUserId: context.actor.userId,
+            sendingMailboxLimit: input.sendingMailboxLimit ?? 2,
             signupsEnabled: input.signupsEnabled ?? true,
             signupAllowlist: (input.signupAllowlist ?? []).join(","),
             signupPolicyInitialized: true,
             computerHost: input.computerHost ?? undefined,
           },
           update: {
+            ...(input.sendingMailboxLimit === undefined
+              ? {}
+              : { sendingMailboxLimit: input.sendingMailboxLimit }),
             ...(input.signupsEnabled === undefined ? {} : { signupsEnabled: input.signupsEnabled }),
             ...(input.signupAllowlist ? { signupAllowlist: input.signupAllowlist.join(",") } : {}),
             ...(input.signupsEnabled === undefined && input.signupAllowlist === undefined
@@ -2695,6 +2700,7 @@ export function createRouter(deps: RouterDeps) {
           input.around,
           input.includePeerRuns,
           input.includePeerReceipts,
+          input.mailReplyFor,
         );
         return {
           ...page,
@@ -3209,6 +3215,10 @@ export function createRouter(deps: RouterDeps) {
           username: input.username,
         });
         if (!answered) {
+          if (MailReplySendAnswerSchema.safeParse(input.answer).success)
+            throw new ORPCError("CONFLICT", {
+              message: "This reply is no longer awaiting approval",
+            });
           // The wait already ended (it expired or was stopped). The answer starts the work the
           // way a message does, replying to the card so the run still sees the question.
           const closed = await findClosedAskAnswer(deps.prisma, {
@@ -7990,6 +8000,7 @@ async function computerScreenContext(
 async function deploymentDto(prisma: PrismaClient, sandboxProvider: string) {
   const settings = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
   return {
+    sendingMailboxLimit: settings?.sendingMailboxLimit ?? 2,
     ownerUserId: settings?.ownerUserId ?? null,
     signupsEnabled: settings?.signupsEnabled ?? true,
     signupAllowlist: settings?.signupAllowlist

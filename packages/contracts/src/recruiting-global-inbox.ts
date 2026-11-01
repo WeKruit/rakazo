@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { Id } from "./ids.js";
 import { RecruitingCorrespondenceSchema, RecruitingRoleCandidateSchema } from "./recruiting.js";
 import { RecruitingAccountRoleSchema } from "./recruiting-account.js";
 
@@ -8,7 +9,11 @@ export const GlobalRecruitingInboxInputSchema = z.strictObject({
   sourceId: z.string().min(1).max(512).optional(),
   unreadOnly: z.boolean().optional(),
   thread: z
-    .strictObject({ roleId: z.string().min(1).max(512), key: z.string().min(1).max(8192) })
+    .strictObject({
+      roleId: z.string().min(1).max(512),
+      key: z.string().min(1).max(8192),
+      emailId: Id.optional(),
+    })
     .optional(),
   cursor: z
     .string()

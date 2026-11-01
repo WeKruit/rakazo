@@ -497,6 +497,7 @@ export async function readGlobalRecruitingInbox(
       SELECT mail.* FROM annotated mail ${input.unreadOnly ? Prisma.sql`LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=mail.thread_key` : Prisma.empty}
       WHERE true ${filter}
       ${thread ? Prisma.sql`AND role_id=${thread.roleId}` : Prisma.sql`AND has_incoming`}
+      ${thread?.emailId ? Prisma.sql`AND mail.provider_message_id=${thread.emailId}` : Prisma.empty}
       ${input.unreadOnly ? Prisma.sql`AND mail.thread_key IS NOT NULL AND NOT unknown AND latest_incoming_at IS NOT NULL AND (COALESCE(c.unread,false) OR latest_incoming_at>COALESCE(c.last_read_at,${baseline.initializedAt}))` : Prisma.empty}
     ), selected AS (
       ${thread ? Prisma.sql`SELECT * FROM eligible` : Prisma.sql`SELECT DISTINCT ON(role_id,view_key) * FROM eligible WHERE matches ORDER BY role_id,view_key,(direction='received') DESC NULLS LAST,message_at DESC NULLS LAST,id DESC`}

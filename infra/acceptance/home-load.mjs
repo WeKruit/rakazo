@@ -137,6 +137,7 @@ try {
   }
   const homeFailed = failed;
   for (const view of views) {
+    const mainTestId = view === "sequence" ? "account-sequences" : "account-recruiting-view";
     const opened = Date.now();
     await page.goto(`${origin}/app?view=${view}&role=all`, {
       waitUntil: "commit",
@@ -144,8 +145,8 @@ try {
     const until = (complete, timeout) =>
       page
         .waitForFunction(
-          (complete) => {
-            const main = document.querySelector('[data-testid="account-recruiting-view"]');
+          ({ complete, mainTestId }) => {
+            const main = document.querySelector(`[data-testid="${mainTestId}"]`);
             if (
               main === null ||
               document.querySelector('nav[aria-label="Role conversations"] button') === null ||
@@ -161,7 +162,7 @@ try {
                 main.querySelectorAll("section[aria-label]").length === 0)
             );
           },
-          complete,
+          { complete, mainTestId },
           { timeout, polling: 100 },
         )
         .then(() => Date.now() - opened)
@@ -169,14 +170,14 @@ try {
     const ms = await until(false, viewBudget);
     const done = ms === null ? null : await until(true, Math.max(1, completeBudget - ms));
     const broken = await page
-      .getByTestId("account-recruiting-view")
+      .getByTestId(mainTestId)
       .getByText(/^Could not (load|read)/)
       .first()
       .isVisible()
       .catch(() => false);
     // Platform suppliers stay behind the product; only connections the recruiter made may show.
     const text = await page
-      .getByTestId("account-recruiting-view")
+      .getByTestId(mainTestId)
       .innerText()
       .catch(() => "");
     const vendor = text.match(VENDORS)?.[0];

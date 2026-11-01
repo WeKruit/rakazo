@@ -58,6 +58,7 @@ import {
   readInstantlyEmailPage,
   sameInstantlyAddresses,
 } from "./instantly-reply.js";
+import { requireSendingMailboxReady } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -1174,6 +1175,7 @@ export class McpConnector implements ConnectorProvider {
         args = { ...args, campaign_id: campaignId };
       }
 
+      let replyMailbox: string | undefined;
       if (emailScope && call.route.toolName === "reply_to_email") {
         await requireMcpToolAssignment(this.prisma, context, call.route, "get_email");
         if (typeof args.reply_to_uuid !== "string" || !UUID.test(args.reply_to_uuid))
@@ -1194,6 +1196,7 @@ export class McpConnector implements ConnectorProvider {
           throw new IsolationError(
             "Reply anchor does not belong to the current role campaign and mailbox",
           );
+        replyMailbox = email.eaccount;
       }
 
       if (crmTarget) {
@@ -1250,6 +1253,20 @@ export class McpConnector implements ConnectorProvider {
       ) {
         await this.assertInstantlyScope(context, assignment.server.id, emailScope);
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+      }
+      if (replyMailbox && sharedInstantlyAccount(assignment.server)) {
+        const credential = await this.authorizeInstantlyRest(call, context, []);
+        const rest = instantlyRest(
+          createSafeRemoteFetch(this.options.network?.fetch, this.options.network?.resolveHostname),
+          credential.key,
+          context.signal,
+        );
+        await requireSendingMailboxReady(this.prisma, rest, context, replyMailbox);
+        await context.reauthorize?.();
+        await this.assertInstantlyScope(context, assignment.server.id, emailScope);
+        const current = await this.authorizeInstantlyRest(call, context, []);
+        if (current.secretId !== credential.secretId || current.digest !== credential.digest)
+          throw new IsolationError();
       }
       callStarted = true;
       calledAt = Date.now();
@@ -1548,12 +1565,15 @@ export class McpConnector implements ConnectorProvider {
         call.route!.toolName,
         call.args,
         sharedInstantlyAccount(credential.server)
-          ? await ownedInstantly(this.prisma, context.spaceId, credential.server.id).then(
-              (owned) => ({
-                campaigns: new Set(owned.campaigns),
-                mailboxes: new Set(owned.mailboxes),
-              }),
-            )
+          ? await ownedInstantly(
+              this.prisma,
+              context.spaceId,
+              credential.server.id,
+              context.userId,
+            ).then((owned) => ({
+              campaigns: new Set(owned.campaigns),
+              mailboxes: new Set(owned.mailboxes),
+            }))
           : undefined,
       );
       if (call.route!.toolName === "native_instantly_get_email") await assertScope();
@@ -1751,7 +1771,12 @@ export class McpConnector implements ConnectorProvider {
       select: { secretId: true, transport: true, endpoint: true },
     });
     if (!server || !sharedInstantlyAccount(server)) return null;
-    const { campaigns: campaignIds } = await ownedInstantly(this.prisma, context.spaceId, serverId);
+    const { campaigns: campaignIds } = await ownedInstantly(
+      this.prisma,
+      context.spaceId,
+      serverId,
+      context.userId,
+    );
     if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
   }

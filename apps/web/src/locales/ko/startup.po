@@ -369,6 +369,10 @@ msgstr ""
 msgid "Add attachment"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Add Cc"
+msgstr ""
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Add email"
 msgstr ""
@@ -711,6 +715,7 @@ msgstr ""
 msgid "Base URL"
 msgstr "서버 주소"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Bcc"
 msgstr ""
@@ -890,6 +895,7 @@ msgstr ""
 msgid "Cards"
 msgstr "카드"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Cc"
 msgstr ""
@@ -1312,6 +1318,10 @@ msgstr "그룹을 만들지 못했습니다."
 msgid "Could not create role"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not discard this reply."
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1393,6 +1403,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Could not load replies."
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Could not load reply drafts."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
@@ -1526,6 +1540,10 @@ msgstr "메시지를 보내지 못했습니다."
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "가르치기를 시작하지 못했습니다."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not submit this reply."
+msgstr ""
 
 #: src/pages/shell/useShellComputer.ts
 msgid "Could not take control"
@@ -1737,6 +1755,10 @@ msgstr ""
 msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Delivery unconfirmed"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "설명"
@@ -1757,12 +1779,20 @@ msgstr ""
 msgid "Direct MCP"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Discard"
+msgstr ""
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard changes"
 msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard unsaved changes?"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Discarded"
 msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -1855,6 +1885,10 @@ msgstr ""
 
 #: src/components/RunTrace.tsx
 msgid "Duration not recorded"
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Earlier drafts"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
@@ -1956,6 +1990,10 @@ msgstr ""
 msgid "Enter a password"
 msgstr "비밀번호를 입력하세요"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Enter a reply and valid Cc email addresses."
+msgstr ""
+
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
 msgstr "올바른 이메일을 입력하세요"
@@ -2032,6 +2070,7 @@ msgstr "매우 높음"
 msgid "failed"
 msgstr "실패"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Failed"
 msgstr "실패"
@@ -2162,6 +2201,7 @@ msgstr ""
 msgid "Forgot password?"
 msgstr "비밀번호를 잊으셨나요?"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -2317,6 +2357,10 @@ msgstr ""
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "In reply to"
 msgstr ""
 
 #: src/lib/ticket-status.ts
@@ -2650,6 +2694,10 @@ msgstr "낮음"
 msgid "Low"
 msgstr "낮음"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Mail"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Mail results include indexed saved messages."
 msgstr ""
@@ -2867,6 +2915,7 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/KruitDock.tsx
 msgid "Needs approval"
 msgstr "승인 필요"
@@ -3013,6 +3062,10 @@ msgstr ""
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "No longer active"
+msgstr "이미 종료된 요청입니다"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No matching accounts"
@@ -3236,6 +3289,7 @@ msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr ""
 
 #: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open"
@@ -3343,6 +3397,10 @@ msgstr ""
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Organization API key"
 msgstr "조직 API 키"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Original email"
+msgstr ""
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Original email content"
@@ -3660,6 +3718,7 @@ msgstr ""
 msgid "Recently discovered"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr ""
@@ -3871,8 +3930,16 @@ msgstr ""
 msgid "Reply"
 msgstr "답장"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Reply body"
+msgstr ""
+
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Reply drafts"
 msgstr ""
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
@@ -4456,6 +4523,7 @@ msgstr ""
 msgid "Selected role · deduplicated people"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Send"
@@ -4493,6 +4561,7 @@ msgstr ""
 msgid "Sender not reported"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
@@ -4506,10 +4575,12 @@ msgstr ""
 msgid "Sending schedule"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Sending…"
 msgstr "보내는 중…"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4517,6 +4588,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Sent (all time): {sentTotal}"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Sent email"
 msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
@@ -4941,6 +5016,7 @@ msgstr ""
 msgid "Strong Match"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Subject"
 msgstr ""
@@ -5168,6 +5244,7 @@ msgstr ""
 msgid "Title: {0}"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "To"
 msgstr ""

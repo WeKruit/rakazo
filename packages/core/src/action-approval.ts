@@ -91,6 +91,7 @@ export const INSTANTLY_MCP_ENDPOINT = "https://mcp.instantly.ai/mcp";
 
 /** Instantly writes that never send: draft campaigns, enrolling leads into draft/paused campaigns, interest, pause. */
 const INSTANTLY_NATIVE_INTERNAL_WRITES = new Set([
+  "native_instantly_ensure_sender",
   "native_instantly_create_campaign",
   "native_instantly_create_role_draft",
   "native_instantly_update_role_draft",
@@ -215,6 +216,12 @@ export function toolRequiresExplicitApproval(
   args?: Record<string, unknown>,
   serverEndpoint?: string | null,
 ): boolean {
+  if (
+    route?.connectorId === "mcp" &&
+    route.toolName === "native_instantly_ensure_sender" &&
+    (args?.operation === "confirm" || args?.operation === "select")
+  )
+    return true;
   if (
     EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
     (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))

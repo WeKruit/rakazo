@@ -338,7 +338,13 @@ export class ComposioConnector implements ComposioProvider {
   async sessionForExecute(
     userId: string,
     connections: ReturnType<typeof connectedComposioConnections>,
+    requiredConnectionId?: string,
   ): Promise<ComposioSession> {
+    if (
+      requiredConnectionId &&
+      !connections.some((connection) => connection.id === requiredConnectionId)
+    )
+      throw new Error("The selected connected account is unavailable.");
     const canonicalToolkits = await this.canonicalizeToolkits(
       connections.map((connection) => connection.externalId),
     );
@@ -349,15 +355,31 @@ export class ComposioConnector implements ComposioProvider {
     const accountIdsByToolkit = new Map<string, Set<string>>();
     for (const connection of connections) {
       const accountId = connection.providerRef?.trim();
-      if (!accountId) continue;
+      if (!accountId) {
+        if (connection.id === requiredConnectionId)
+          throw new Error("The selected connected account is unavailable.");
+        continue;
+      }
       // No-auth and legacy rows store the toolkit slug rather than a remote
       // connected-account id. Only concrete account ids can scope a session.
-      if (composioSlugKey(accountId) === composioSlugKey(connection.externalId)) continue;
+      if (composioSlugKey(accountId) === composioSlugKey(connection.externalId)) {
+        if (connection.id === requiredConnectionId)
+          throw new Error("The selected connection has no concrete account identity.");
+        continue;
+      }
       // Drop refs the provider no longer lists as ACTIVE so a revoked sibling
       // with a deleted account cannot fail the whole tool-router session.
-      if (liveAccountIds && !liveAccountIds.has(accountId)) continue;
+      if (liveAccountIds && !liveAccountIds.has(accountId)) {
+        if (connection.id === requiredConnectionId)
+          throw new Error("The selected connected account is no longer active.");
+        continue;
+      }
       const toolkit = canonicalByKey.get(composioSlugKey(connection.externalId));
-      if (!toolkit) continue;
+      if (!toolkit) {
+        if (connection.id === requiredConnectionId)
+          throw new Error("The selected connection's service is unavailable.");
+        continue;
+      }
       const ids = accountIdsByToolkit.get(toolkit) ?? new Set<string>();
       ids.add(accountId);
       accountIdsByToolkit.set(toolkit, ids);
@@ -466,9 +488,20 @@ export class ComposioConnector implements ComposioProvider {
   async *execute(call: ConnectorCall, context: AdapterContext): AsyncIterable<ConnectorEvent> {
     const executed = [];
     try {
+      const available = connectedComposioConnections(context);
+      const connections = call.route?.resourceId
+        ? available.filter(
+            (item) =>
+              item.id === call.route!.resourceId &&
+              (!call.route!.resourceRevision || item.providerRef === call.route!.resourceRevision),
+          )
+        : available;
+      if (call.route?.resourceId && connections.length !== 1)
+        throw new Error("The selected connected account is unavailable.");
       const session = await this.sessionForExecute(
         context.userId,
-        connectedComposioConnections(context),
+        connections,
+        call.route?.resourceId,
       );
       const planned = expandComposioMultiExecute(call.tool, call.args ?? {});
       for (const item of planned) {

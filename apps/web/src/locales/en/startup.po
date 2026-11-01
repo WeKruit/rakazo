@@ -369,6 +369,10 @@ msgstr "Add a schedule, webhook, GitHub, or message trigger"
 msgid "Add attachment"
 msgstr "Add attachment"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Add Cc"
+msgstr "Add Cc"
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Add email"
 msgstr "Add email"
@@ -711,6 +715,7 @@ msgstr "Background tasks"
 msgid "Base URL"
 msgstr "Base URL"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Bcc"
 msgstr "Bcc"
@@ -890,6 +895,7 @@ msgstr "Candidates"
 msgid "Cards"
 msgstr "Cards"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Cc"
 msgstr "Cc"
@@ -1312,6 +1318,10 @@ msgstr "Could not create group"
 msgid "Could not create role"
 msgstr "Could not create role"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not discard this reply."
+msgstr "Could not discard this reply."
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1394,6 +1404,10 @@ msgstr "Could not load reminders."
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Could not load replies."
 msgstr "Could not load replies."
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Could not load reply drafts."
+msgstr "Could not load reply drafts."
 
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Could not load roles."
@@ -1526,6 +1540,10 @@ msgstr "Could not send that"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "Could not start teaching"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not submit this reply."
+msgstr "Could not submit this reply."
 
 #: src/pages/shell/useShellComputer.ts
 msgid "Could not take control"
@@ -1737,6 +1755,10 @@ msgstr "Delivery"
 msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr "Delivery hours and timezone apply to the whole sequence."
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Delivery unconfirmed"
+msgstr "Delivery unconfirmed"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "Description"
@@ -1757,6 +1779,10 @@ msgstr "Dimension"
 msgid "Direct MCP"
 msgstr "Direct MCP"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Discard"
+msgstr "Discard"
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard changes"
 msgstr "Discard changes"
@@ -1764,6 +1790,10 @@ msgstr "Discard changes"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard unsaved changes?"
 msgstr "Discard unsaved changes?"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Discarded"
+msgstr "Discarded"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Dismiss"
@@ -1856,6 +1886,10 @@ msgstr "Due"
 #: src/components/RunTrace.tsx
 msgid "Duration not recorded"
 msgstr "Duration not recorded"
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Earlier drafts"
+msgstr "Earlier drafts"
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Earliest observed contact in period"
@@ -1956,6 +1990,10 @@ msgstr "Engagement"
 msgid "Enter a password"
 msgstr "Enter a password"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Enter a reply and valid Cc email addresses."
+msgstr "Enter a reply and valid Cc email addresses."
+
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
 msgstr "Enter a valid email"
@@ -2032,6 +2070,7 @@ msgstr "Extra high"
 msgid "failed"
 msgstr "failed"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Failed"
 msgstr "Failed"
@@ -2162,6 +2201,7 @@ msgstr "For sequence \"{0}\" in this role, email {1}, subject \"{2}\", body: {3}
 msgid "Forgot password?"
 msgstr "Forgot password?"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -2318,6 +2358,10 @@ msgstr "in a minute"
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
 msgstr "In progress"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "In reply to"
+msgstr "In reply to"
 
 #: src/lib/ticket-status.ts
 msgid "In review"
@@ -2650,6 +2694,10 @@ msgstr "Low"
 msgid "Low"
 msgstr "Low"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Mail"
+msgstr "Mail"
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Mail results include indexed saved messages."
 msgstr "Mail results include indexed saved messages."
@@ -2867,6 +2915,7 @@ msgstr "Name: {0}"
 msgid "Needs an answer"
 msgstr "Needs an answer"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/KruitDock.tsx
 msgid "Needs approval"
 msgstr "Needs approval"
@@ -3013,6 +3062,10 @@ msgstr "No loaded candidates match these filters."
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "No longer active"
+msgstr "No longer active"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No matching accounts"
@@ -3236,6 +3289,7 @@ msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
 
 #: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open"
@@ -3343,6 +3397,10 @@ msgstr "OR"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Organization API key"
 msgstr "Organization API key"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Original email"
+msgstr "Original email"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Original email content"
@@ -3660,6 +3718,7 @@ msgstr "Received"
 msgid "Recently discovered"
 msgstr "Recently discovered"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr "Recipients unavailable"
@@ -3871,9 +3930,17 @@ msgstr "Replies to that cohort"
 msgid "Reply"
 msgstr "Reply"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Reply body"
+msgstr "Reply body"
+
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
 msgstr "Reply cancelled"
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Reply drafts"
+msgstr "Reply drafts"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Reply handling"
@@ -4456,6 +4523,7 @@ msgstr "Selected conversation"
 msgid "Selected role · deduplicated people"
 msgstr "Selected role · deduplicated people"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Send"
@@ -4493,6 +4561,7 @@ msgstr "Sender"
 msgid "Sender not reported"
 msgstr "Sender not reported"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
@@ -4506,10 +4575,12 @@ msgstr "Sending mailbox"
 msgid "Sending schedule"
 msgstr "Sending schedule"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Sending…"
 msgstr "Sending…"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4518,6 +4589,10 @@ msgstr "Sent"
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Sent (all time): {sentTotal}"
 msgstr "Sent (all time): {sentTotal}"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Sent email"
+msgstr "Sent email"
 
 #: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AddToSequenceDialog.tsx
@@ -4941,6 +5016,7 @@ msgstr "Stored CRM messages only. Native and imported correspondence are not inc
 msgid "Strong Match"
 msgstr "Strong Match"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Subject"
 msgstr "Subject"
@@ -5168,6 +5244,7 @@ msgstr "Timezone"
 msgid "Title: {0}"
 msgstr "Title: {0}"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "To"
 msgstr "To"

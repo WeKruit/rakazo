@@ -47,6 +47,7 @@ export function buildApprovalAskBlock(
     crmImportTarget?: RecruitingCrmTarget;
     instantlyActivation?: InstantlyActivationDisplay;
     instantlyReply?: InstantlyReplyDisplay;
+    instantlySender?: { email: string; displayName: string; select: boolean };
   },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const scheduleUpdate = toolName === "schedule_update";
@@ -120,21 +121,23 @@ export function buildApprovalAskBlock(
     : nativeMemory
       ? `saving ${{ save_shared_memory: "shared", save_group_memory: "group" }[toolName] ?? "private"} memory`
       : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
-  const detail = options?.instantlyActivation
-    ? formatInstantlyActivation(options.instantlyActivation)
-    : options?.instantlyReply
-      ? formatInstantlyReply(options.instantlyReply)
-      : formatApprovalDetail(
-          toolName,
-          redactToolArgsForReview(args, secrets),
-          options?.reviewReason,
-          preference,
-          nativeMemory,
-          crmOperation,
-          considerationOperation,
-          options?.recruiting,
-          options?.crmImportTarget,
-        );
+  const detail = options?.instantlySender
+    ? `${options.instantlySender.displayName} <${options.instantlySender.email}>`
+    : options?.instantlyActivation
+      ? formatInstantlyActivation(options.instantlyActivation)
+      : options?.instantlyReply
+        ? formatInstantlyReply(options.instantlyReply)
+        : formatApprovalDetail(
+            toolName,
+            redactToolArgsForReview(args, secrets),
+            options?.reviewReason,
+            preference,
+            nativeMemory,
+            crmOperation,
+            considerationOperation,
+            options?.recruiting,
+            options?.crmImportTarget,
+          );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   const outboundAction = outboundTitle(toolName);
   const outboundTarget =
@@ -147,29 +150,31 @@ export function buildApprovalAskBlock(
       redactSecrets(
         scheduleUpdate
           ? "Review routine change"
-          : options?.instantlyActivation
-            ? "Confirm sending the first email"
-            : outbound
-              ? outbound
-              : crmTarget
-                ? "Review CRM role connection"
-                : crmImport
-                  ? "Review CRM import"
-                  : shortlist
-                    ? "Review shortlist change"
-                    : considerationOperation
-                      ? "Review consideration change"
-                      : crmOperation === "crm_bind_candidate_role"
-                        ? "Review CRM role binding"
-                        : crmOperation === "crm_update_candidate_stage"
-                          ? "Review CRM stage change"
-                          : crmOperation === "crm_append_candidate_note"
-                            ? "Review CRM note"
-                            : recruitingApproval
-                              ? summary
-                              : toolName === "create_space"
-                                ? `${summary}?`
-                                : `Review before ${summary}`,
+          : options?.instantlySender
+            ? "Use this sending address?"
+            : options?.instantlyActivation
+              ? "Confirm sending the first email"
+              : outbound
+                ? outbound
+                : crmTarget
+                  ? "Review CRM role connection"
+                  : crmImport
+                    ? "Review CRM import"
+                    : shortlist
+                      ? "Review shortlist change"
+                      : considerationOperation
+                        ? "Review consideration change"
+                        : crmOperation === "crm_bind_candidate_role"
+                          ? "Review CRM role binding"
+                          : crmOperation === "crm_update_candidate_stage"
+                            ? "Review CRM stage change"
+                            : crmOperation === "crm_append_candidate_note"
+                              ? "Review CRM note"
+                              : recruitingApproval
+                                ? summary
+                                : toolName === "create_space"
+                                  ? `${summary}?`
+                                  : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -186,40 +191,49 @@ export function buildApprovalAskBlock(
         : safeDetail,
     status: "pending",
     // A real send is confirmed each time; it is never "always allowed".
-    actions: options?.sendPreference
+    actions: options?.instantlySender
       ? [
-          { id: "allow", label: "Confirm and send" },
-          { id: "always", label: "Send when I say send" },
-          { id: "deny", label: "Cancel" },
+          {
+            id: "allow",
+            label: "Use this address",
+            outcome: "created",
+          },
+          { id: "deny", label: "Change the address", outcome: "cancelled" },
         ]
-      : options?.instantlyActivation || options?.instantlyReply
+      : options?.sendPreference
         ? [
             { id: "allow", label: "Confirm and send" },
+            { id: "always", label: "Send when I say send" },
             { id: "deny", label: "Cancel" },
           ]
-        : !crmOperation && toolName === "create_space"
+        : options?.instantlyActivation || options?.instantlyReply
           ? [
-              { id: "allow", label: "Create space", outcome: "created" },
-              { id: "deny", label: "Cancel", outcome: "cancelled" },
+              { id: "allow", label: "Confirm and send" },
+              { id: "deny", label: "Cancel" },
             ]
-          : recruitingApproval
+          : !crmOperation && toolName === "create_space"
             ? [
-                {
-                  id: "allow",
-                  label:
-                    args.stage === "brief"
-                      ? "Looks good, start searching"
-                      : args.stage === "documents"
-                        ? "Approve documents"
-                        : "Approve calibration",
-                },
-                { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
+                { id: "allow", label: "Create space", outcome: "created" },
+                { id: "deny", label: "Cancel", outcome: "cancelled" },
               ]
-            : [
-                { id: "allow", label: "Allow once" },
-                ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
-                { id: "deny", label: "Deny" },
-              ],
+            : recruitingApproval
+              ? [
+                  {
+                    id: "allow",
+                    label:
+                      args.stage === "brief"
+                        ? "Looks good, start searching"
+                        : args.stage === "documents"
+                          ? "Approve documents"
+                          : "Approve calibration",
+                  },
+                  { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
+                ]
+              : [
+                  { id: "allow", label: "Allow once" },
+                  ...(oneTimeOnly ? [] : [{ id: "always", label: "Always allow this tool" }]),
+                  { id: "deny", label: "Deny" },
+                ],
   };
 }
 
@@ -237,6 +251,9 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   return [
     `Role: ${display.campaignName ?? "this role"}`,
     `From: ${unknown(display.mailbox)}`,
+    ...(display.senderState
+      ? [`Sending address: ${display.senderState.state}`, `Warmup: ${display.senderState.warmup}`]
+      : []),
     `To (${count}):`,
     ...shown.flatMap((r) => [
       `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,

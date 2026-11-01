@@ -369,6 +369,10 @@ msgstr "添加定时、Webhook、GitHub 或消息触发器"
 msgid "Add attachment"
 msgstr "添加附件"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Add Cc"
+msgstr "添加抄送"
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Add email"
 msgstr "添加邮件"
@@ -711,6 +715,7 @@ msgstr "后台任务"
 msgid "Base URL"
 msgstr "Base URL"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Bcc"
 msgstr "密送"
@@ -890,6 +895,7 @@ msgstr "候选人"
 msgid "Cards"
 msgstr "卡片"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Cc"
 msgstr "抄送"
@@ -1312,6 +1318,10 @@ msgstr "无法创建群组"
 msgid "Could not create role"
 msgstr "无法创建岗位"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not discard this reply."
+msgstr "无法放弃这份回复。"
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1394,6 +1404,10 @@ msgstr "无法加载提醒。"
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Could not load replies."
 msgstr "无法加载回复。"
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Could not load reply drafts."
+msgstr "无法加载回复草稿。"
 
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Could not load roles."
@@ -1526,6 +1540,10 @@ msgstr "无法发送"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "无法开始学习"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not submit this reply."
+msgstr "无法提交这份回复。"
 
 #: src/pages/shell/useShellComputer.ts
 msgid "Could not take control"
@@ -1737,6 +1755,10 @@ msgstr "发送设置"
 msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr "发送时段和时区适用于整个邮件序列。"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Delivery unconfirmed"
+msgstr "发送结果待确认"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "描述"
@@ -1757,6 +1779,10 @@ msgstr "维度"
 msgid "Direct MCP"
 msgstr "直连 MCP"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Discard"
+msgstr "放弃"
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard changes"
 msgstr "放弃更改"
@@ -1764,6 +1790,10 @@ msgstr "放弃更改"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard unsaved changes?"
 msgstr "放弃未保存的更改？"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Discarded"
+msgstr "已放弃"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Dismiss"
@@ -1856,6 +1886,10 @@ msgstr "截止时间"
 #: src/components/RunTrace.tsx
 msgid "Duration not recorded"
 msgstr "未记录耗时"
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Earlier drafts"
+msgstr "更早的草稿"
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Earliest observed contact in period"
@@ -1956,6 +1990,10 @@ msgstr "互动情况"
 msgid "Enter a password"
 msgstr "请输入密码"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Enter a reply and valid Cc email addresses."
+msgstr "请输入回复正文和有效的抄送邮箱。"
+
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
 msgstr "请输入有效的电子邮件地址"
@@ -2032,6 +2070,7 @@ msgstr "极高"
 msgid "failed"
 msgstr "失败"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Failed"
 msgstr "失败"
@@ -2162,6 +2201,7 @@ msgstr "针对此岗位的邮件序列“{0}”，邮箱 {1}，主题“{2}”�
 msgid "Forgot password?"
 msgstr "忘记密码？"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -2318,6 +2358,10 @@ msgstr ""
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
 msgstr "进行中"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "In reply to"
+msgstr "回复邮件"
 
 #: src/lib/ticket-status.ts
 msgid "In review"
@@ -2650,6 +2694,10 @@ msgstr "低"
 msgid "Low"
 msgstr "低"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Mail"
+msgstr "邮件"
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Mail results include indexed saved messages."
 msgstr "邮件搜索覆盖已建立索引的已存邮件。"
@@ -2867,6 +2915,7 @@ msgstr "姓名：{0}"
 msgid "Needs an answer"
 msgstr "需要回答"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/KruitDock.tsx
 msgid "Needs approval"
 msgstr "需要确认"
@@ -3013,6 +3062,10 @@ msgstr "已加载的候选人中没有符合这些筛选条件的结果。"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr "没有已加载的候选人符合这个日期筛选。"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "No longer active"
+msgstr "已停用"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No matching accounts"
@@ -3236,6 +3289,7 @@ msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "只能删除空的空间。请先删除其中的助手和群组。"
 
 #: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Open"
@@ -3343,6 +3397,10 @@ msgstr "或"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Organization API key"
 msgstr "组织 API 密钥"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Original email"
+msgstr "原邮件"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Original email content"
@@ -3660,6 +3718,7 @@ msgstr "已收到"
 msgid "Recently discovered"
 msgstr "最近发现"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr "收件人不可用"
@@ -3871,9 +3930,17 @@ msgstr "该群体的回复"
 msgid "Reply"
 msgstr "回复"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Reply body"
+msgstr "回复正文"
+
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
 msgstr "已取消回复"
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Reply drafts"
+msgstr "回复草稿"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Reply handling"
@@ -4456,6 +4523,7 @@ msgstr "选定会话"
 msgid "Selected role · deduplicated people"
 msgstr "选定岗位 · 按人去重"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Send"
@@ -4493,6 +4561,7 @@ msgstr "发件人"
 msgid "Sender not reported"
 msgstr "未提供发件人"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
@@ -4506,10 +4575,12 @@ msgstr "发件邮箱"
 msgid "Sending schedule"
 msgstr "发送安排"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Sending…"
 msgstr "正在发送…"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4518,6 +4589,10 @@ msgstr "已发送"
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Sent (all time): {sentTotal}"
 msgstr "已发送（累计）：{sentTotal}"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Sent email"
+msgstr "已发送邮件"
 
 #: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/AddToSequenceDialog.tsx
@@ -4941,6 +5016,7 @@ msgstr "仅包含已存储的 CRM 邮件，不含原生及导入的邮件记录�
 msgid "Strong Match"
 msgstr "强匹配"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Subject"
 msgstr "主题"
@@ -5168,6 +5244,7 @@ msgstr "时区"
 msgid "Title: {0}"
 msgstr "职位：{0}"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "To"
 msgstr "收件人"
