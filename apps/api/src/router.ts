@@ -407,7 +407,6 @@ import {
 } from "./thread-message-pages.js";
 import {
   cancelThreadBackgroundTask,
-  latestReplySuggestion,
   listThreadBackgroundTasks,
   reactToThreadMessage,
   resolveThreadTarget,
@@ -2678,8 +2677,7 @@ export function createRouter(deps: RouterDeps) {
           projectMs: Math.round(finishedAt - snapshotAt),
           totalMs: Math.round(finishedAt - startedAt),
         });
-        const suggestion = await latestReplySuggestion(deps.prisma, messages);
-        return { ...snapshot, messages, ...(suggestion ? { suggestion } : {}) };
+        return { ...snapshot, messages };
       }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
