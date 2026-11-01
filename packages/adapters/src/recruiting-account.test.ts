@@ -130,9 +130,12 @@ function fixture() {
     },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }) => rows.find((row) => match(row, where)) ?? null),
-      findMany: vi.fn(async ({ where, take }) =>
-        rows.filter((row) => match(row, where)).slice(0, take),
+      findMany: vi.fn(async ({ where, skip = 0, take }) =>
+        rows
+          .filter((row) => match(row, where))
+          .slice(skip, take === undefined ? undefined : skip + take),
       ),
+      count: vi.fn(async ({ where }) => rows.filter((row) => match(row, where)).length),
     },
   } as unknown as PrismaClient;
   const deps = { prisma, artifacts: {} as never, connectors: {} as never };
@@ -279,6 +282,23 @@ describe("account recruiting reads", () => {
     });
     expect(second.items.map((item) => item.roleId)).toEqual(["c"]);
     expect(second.nextCursor).toBeNull();
+    expect(first.total).toBe(3);
+    expect(second.total).toBeUndefined();
+    const jumped = await readRecruitingAccountView(deps, actor, {
+      view: "roles",
+      limit: 2,
+      offset: 2,
+    });
+    expect(jumped.items.map((item) => item.roleId)).toEqual(["c"]);
+    expect(jumped.total).toBe(3);
+    await expect(
+      readRecruitingAccountView(deps, actor, {
+        view: "roles",
+        limit: 2,
+        offset: 2,
+        cursor: "b",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
   it("reports each role's status from saved records for the global agent", async () => {
     const { deps, prisma } = fixture();

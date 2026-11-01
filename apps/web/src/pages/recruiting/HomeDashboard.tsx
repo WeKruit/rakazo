@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingOverviewRole } from "@rakazo/contracts";
+import { RecruitingOverviewRoleSchema } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import {
   Badge,
@@ -13,6 +14,7 @@ import {
 } from "@rakazo/ui-web";
 import { Check, ChevronRight, PanelLeftOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { ListPager } from "../../components/ListPager";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
@@ -33,6 +35,8 @@ import { RecruitingAnalytics } from "./RecruitingAnalytics";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
+/** Roles listed at once in a Home breakdown. */
+const ROLES_PER_PAGE = 10;
 type ObservedBooking = { groupId: string; event: RecruitingOverviewRole["bookings"][number] };
 type Overview = {
   roles: RoleSummary[];
@@ -46,6 +50,42 @@ type Overview = {
 /** Each reported role's latest read, or "failed" when its own numbers could not be read. */
 type RoleReads = ReadonlyMap<string, RecruitingOverviewRole | "failed">;
 type OverviewState = { scope?: string; reads: RoleReads; done: boolean; failed?: boolean };
+
+/**
+ * The latest Home numbers for this account, kept in the browser so the page opens with them at
+ * once while the fresh read streams in. Only counts are kept, never calendar events.
+ */
+const storedOverviewKey = (scope: string) => `rakazo:home-overview:${scope}`;
+function storedOverview(scope: string | undefined): RoleReads | undefined {
+  if (!scope) return undefined;
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(storedOverviewKey(scope)) ?? "null");
+    if (!Array.isArray(value)) return undefined;
+    const reads = new Map<string, RecruitingOverviewRole>();
+    for (const entry of value) {
+      const role = RecruitingOverviewRoleSchema.safeParse(entry);
+      if (role.success) reads.set(role.data.groupId, role.data);
+    }
+    return reads;
+  } catch {
+    return undefined;
+  }
+}
+function storeOverview(scope: string | undefined, reads: RoleReads) {
+  if (!scope) return;
+  try {
+    localStorage.setItem(
+      storedOverviewKey(scope),
+      JSON.stringify(
+        [...reads.values()].flatMap((read) =>
+          read === "failed" ? [] : [{ ...read, bookings: [], bookingUnknown: true }],
+        ),
+      ),
+    );
+  } catch {
+    // A full or blocked browser store only means the next visit starts empty.
+  }
+}
 
 function overviewFrom(groupIds: readonly string[], state: OverviewState): Overview | undefined {
   const known = groupIds.flatMap((id) => {
@@ -97,7 +137,9 @@ function useOverview(
   const saved = (): OverviewState => ({
     scope,
     reads:
-      (slot ? (savedRecruitingRead(cache, slot) as RoleReads | undefined) : undefined) ?? new Map(),
+      (slot ? (savedRecruitingRead(cache, slot) as RoleReads | undefined) : undefined) ??
+      storedOverview(scope) ??
+      new Map(),
     done: false,
   });
   const [state, setState] = useState<OverviewState>(saved);
@@ -121,6 +163,7 @@ function useOverview(
           // Roles this read did not report are no longer bound to a role.
           reads = new Map([...reads].filter(([id]) => fresh.has(id)));
           rememberRecruitingRead(cache, slot, reads, cache?.epoch);
+          storeOverview(scope, reads);
           setState({ scope, reads, done: true });
           return;
         }
@@ -129,6 +172,8 @@ function useOverview(
         // A failed refresh keeps the numbers that were already read.
         if (event.kind === "failed" && reads.has(id) && reads.get(id) !== "failed") continue;
         reads = new Map(reads).set(id, event.kind === "role" ? event.role : "failed");
+        // Kept as each role arrives, so leaving Home before the read ends still helps next time.
+        storeOverview(scope, reads);
         setState({ scope, reads, done: false });
       }
     })().catch(() => {
@@ -170,38 +215,46 @@ function RoleBreakdown({
   genericNavigation?: boolean;
 }) {
   const { t } = useLingui();
+  const [page, setPage] = useState(0);
+  const pageCount = Math.ceil(items.length / ROLES_PER_PAGE);
+  const shown = Math.min(page, Math.max(0, pageCount - 1));
   return (
-    <ul className="mt-3 space-y-1 border-t pt-2" aria-label={t`Projects`} aria-live="polite">
-      {items.map(({ role, count, partial }) => {
-        const group = roleGroups.get(role.roleId);
-        return group ? (
-          <li key={role.roleId}>
-            <Button
-              variant="ghost"
-              className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
-              onClick={() =>
-                filterForRole
-                  ? onOpenRole(group.id, view, filterForRole(role))
-                  : onOpenRole(group.id, view)
-              }
-            >
-              <span className="min-w-0 truncate">
-                {group.name}
-                {genericNavigation ? (
-                  <span className="block text-xs text-muted-foreground">
-                    <Trans>View role records</Trans>
+    <>
+      <ul className="mt-3 space-y-1 border-t pt-2" aria-label={t`Projects`} aria-live="polite">
+        {items
+          .slice(shown * ROLES_PER_PAGE, (shown + 1) * ROLES_PER_PAGE)
+          .map(({ role, count, partial }) => {
+            const group = roleGroups.get(role.roleId);
+            return group ? (
+              <li key={role.roleId}>
+                <Button
+                  variant="ghost"
+                  className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
+                  onClick={() =>
+                    filterForRole
+                      ? onOpenRole(group.id, view, filterForRole(role))
+                      : onOpenRole(group.id, view)
+                  }
+                >
+                  <span className="min-w-0 truncate">
+                    {group.name}
+                    {genericNavigation ? (
+                      <span className="block text-xs text-muted-foreground">
+                        <Trans>View role records</Trans>
+                      </span>
+                    ) : null}
                   </span>
-                ) : null}
-              </span>
-              <span className="shrink-0 tabular-nums">
-                {count === null ? "—" : `${partial ? "≥" : ""}${count}`}
-              </span>
-              <ChevronRight size={14} aria-hidden />
-            </Button>
-          </li>
-        ) : null;
-      })}
-    </ul>
+                  <span className="shrink-0 tabular-nums">
+                    {count === null ? "—" : `${partial ? "≥" : ""}${count}`}
+                  </span>
+                  <ChevronRight size={14} aria-hidden />
+                </Button>
+              </li>
+            ) : null;
+          })}
+      </ul>
+      <ListPager page={shown} pageCount={pageCount} onPage={setPage} />
+    </>
   );
 }
 

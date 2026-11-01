@@ -684,6 +684,15 @@ suite("stored global Inbox projection", () => {
     const first = await read({ query: "Subject volume", limit: 50 });
     const second = await read({ query: "Subject volume", limit: 50, cursor: first.nextCursor! });
     expect(new Set([...first.items, ...second.items].map((row) => row.key)).size).toBe(100);
+    // A numbered page reads only its rows and carries the full count of matching threads.
+    expect(first.total).toBe(24_000);
+    expect(second.total).toBeNull();
+    const jumped = await read({ query: "Subject volume", limit: 50, offset: 50 });
+    expect(jumped.items.map((row) => row.key)).toEqual(second.items.map((row) => row.key));
+    expect(jumped.total).toBe(24_000);
+    const last = await read({ query: "Subject volume", limit: 50, offset: 23_990 });
+    expect(last.items).toHaveLength(10);
+    expect(last.nextCursor).toBeNull();
     expect(first.coverage.importsComplete).toBe(true);
     expect(
       await prisma.recruitingInboxInitialization.findUnique({

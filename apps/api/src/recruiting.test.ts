@@ -6031,11 +6031,12 @@ describe("live CRM browser reads", () => {
     await expect(page({ limit: 51 })).rejects.toThrow();
     await expect(page({ cursor: "01" })).rejects.toThrow();
   });
-  it("shares one request's CRM memberships across its reads", async () => {
+  it("shares one request's CRM memberships and role list across its reads", async () => {
     const f = browserFixture();
     const crmMemberships = new Map();
+    const crmRoleLists = new Map();
     const read = () =>
-      api.getRecruitingCrmData({ ...f.deps, crmMemberships }, actor, target, {
+      api.getRecruitingCrmData({ ...f.deps, crmMemberships, crmRoleLists }, actor, target, {
         operation: "candidates",
         serverId: "crm",
         serverRevision: 3,
@@ -6048,6 +6049,9 @@ describe("live CRM browser reads", () => {
     const tools = f.execute.mock.calls.map(([call]) => call.route!.toolName);
     expect(tools.filter((tool) => tool === "list_crm_memberships")).toHaveLength(1);
     expect(tools.filter((tool) => tool === "list_crm_candidates")).toHaveLength(2);
+    expect(tools.filter((tool) => tool === "list_crm_roles")).toHaveLength(1);
+    // Each role still reads its own CRM role record.
+    expect(tools.filter((tool) => tool === "get_crm_role")).toHaveLength(2);
   });
   it("reads every candidate page of a role while checking the role binding once", async () => {
     const f = browserFixture();

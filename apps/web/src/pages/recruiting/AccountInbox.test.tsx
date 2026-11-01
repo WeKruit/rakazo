@@ -108,8 +108,11 @@ it("switches one selected detail atomically while keeping role and mailbox attri
     expect(detail.textContent).toContain("second@example.test");
     expect(detail.textContent).not.toContain("Full message belonging to first");
     expect(detail.parentElement?.parentElement?.textContent).toContain(
-      "Role two · Team mail · team@example.test",
+      "Role two · team@example.test",
     );
+    // Connection names can be supplier names; customers see only the mailbox.
+    expect(rootHost.textContent).not.toContain("Team mail");
+    expect(rootHost.textContent).not.toContain("Work mail");
     await act(async () =>
       [...rootHost.querySelectorAll("button")]
         .find((button) => button.textContent === "Open role")!

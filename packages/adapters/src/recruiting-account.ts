@@ -19,6 +19,7 @@ import {
   listRecruitingReminders,
   listRecruitingSchedulingPlans,
   listRoutinesDto,
+  Prisma,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
@@ -170,7 +171,8 @@ export async function readRecruitingAccountView(
       throw new ORPCError("NOT_FOUND");
     if (
       (input.itemCursor && !input.roleId) ||
-      (input.cursor && input.roleId && input.view !== "routines")
+      (input.cursor && input.roleId && input.view !== "routines") ||
+      (input.offset && (input.cursor || input.roleId || input.view === "routines"))
     )
       throw new ORPCError("BAD_REQUEST");
     if (
@@ -178,13 +180,18 @@ export async function readRecruitingAccountView(
       (!input.roleId || !input.campaignId || !input.campaignServerId || input.view !== "sequence")
     )
       throw new ORPCError("BAD_REQUEST");
+    const listed = {
+      ...scope,
+      ...(input.briefedOnly ? { currentRevision: { brief: { not: Prisma.AnyNull } } } : {}),
+    };
     const rows = await deps.prisma.recruitingRole.findMany({
       where: {
-        ...scope,
+        ...listed,
         ...(input.roleId ? { id: input.roleId } : {}),
         ...(input.cursor && input.view !== "routines" ? { id: { gt: input.cursor } } : {}),
       },
       orderBy: { id: "asc" },
+      ...(input.offset ? { skip: input.offset } : {}),
       take: input.limit + 1,
       select: {
         id: true,
@@ -529,6 +536,9 @@ export async function readRecruitingAccountView(
       roles,
       items,
       nextCursor: rows.length > input.limit ? (page.at(-1)?.id ?? null) : null,
+      ...(input.roleId || input.cursor
+        ? {}
+        : { total: await deps.prisma.recruitingRole.count({ where: listed }) }),
     });
   });
 }

@@ -149,7 +149,7 @@ import {
   validateStoredModelAuth,
   verifyMcpInstall,
 } from "@rakazo/adapters";
-import type { CrmMembershipReads } from "@rakazo/adapters/recruiting-reads";
+import type { CrmMembershipReads, CrmRoleListReads } from "@rakazo/adapters/recruiting-reads";
 import type { Auth, FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
 import {
   createOwnerVouchedAccount,
@@ -4204,9 +4204,11 @@ export function createRouter(deps: RouterDeps) {
           return target;
         };
         const crmMemberships: CrmMembershipReads = new Map();
+        const crmRoleLists: CrmRoleListReads = new Map();
         const readDeps = async (group: { id: string }, signal: AbortSignal) => ({
           prisma: deps.prisma,
           crmMemberships,
+          crmRoleLists,
           artifacts: deps.artifacts,
           connectors: deps.connectors,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,

@@ -258,7 +258,37 @@ function resumeChoiceLabel(
  */
 /** A message typed in the chat box while a card was open: the agent decides whether it answers. */
 export function chatReplyToAsk(text: string): string {
-  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, then ask the question again if you still need the answer.)`;
+  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, and once it is handled (including a teammate's reply) ask the same question again with ask_user; the open card is gone, so never end without asking it again.)`;
+}
+
+/**
+ * The bot's last question, when a message typed in the chat closed its card and the bot has asked
+ * nothing since. A teammate's report back then reminds the bot to ask it again.
+ */
+export async function questionClosedByChat(
+  tx: Prisma.TransactionClient,
+  input: { threadId: string; botId: string },
+): Promise<{ question: string; reply: string } | undefined> {
+  const latest = await tx.message.findFirst({
+    where: {
+      threadId: input.threadId,
+      botId: input.botId,
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { blocks: true, runId: true },
+  });
+  const parsed = MessageBlockSchema.array().safeParse(latest?.blocks);
+  const ask = parsed.success ? parsed.data.findLast((block) => block.kind === "ask") : undefined;
+  if (ask?.kind !== "ask" || ask.status !== "answered" || typeof ask.answer !== "string") return;
+  if (!latest?.runId) return;
+  const run = await tx.run.findFirst({
+    where: { id: latest.runId, threadId: input.threadId },
+    select: { task: { select: { prompt: true } } },
+  });
+  if (!run?.task.prompt.endsWith(`${ask.text}\nAnswer: ${chatReplyToAsk(ask.answer)}`)) return;
+  return { question: ask.text, reply: ask.answer };
 }
 
 function resumePrompt(

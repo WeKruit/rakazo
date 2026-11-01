@@ -70,13 +70,15 @@ export function writeRightPanelState(key: string, panel: Panel, routineId?: stri
 const candidateFiltersSchema = ListRecruitingCandidatesInput.omit({
   roleId: true,
   cursor: true,
+  offset: true,
   limit: true,
 });
 export type RecruitingPanelState = {
   tab: "role" | "dashboard" | "evidence" | "missing" | "memory" | "activity";
   candidateView: "cards" | "table";
-  filters: Omit<ListRecruitingCandidatesInput, "roleId" | "cursor" | "limit">;
-  pageCount: number;
+  filters: Omit<ListRecruitingCandidatesInput, "roleId" | "cursor" | "offset" | "limit">;
+  /** The numbered candidate page on screen, from 1. */
+  page: number;
   selectedCandidateKey: string | null;
   detailOpen: boolean;
   /** The recruiter picked the sort; otherwise it follows the best one the list offers. */
@@ -88,7 +90,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
     tab: "role",
     candidateView: "table",
     filters: { sort: "ranking" },
-    pageCount: 1,
+    page: 1,
     selectedCandidateKey: null,
     detailOpen: false,
   };
@@ -101,8 +103,8 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
       !["role", "dashboard", "evidence", "missing", "memory", "activity"].includes(value.tab) ||
       !["cards", "table"].includes(value.candidateView) ||
       !filters.success ||
-      !Number.isSafeInteger(value.pageCount) ||
-      value.pageCount < 1 ||
+      !Number.isSafeInteger(value.page) ||
+      value.page < 1 ||
       (value.selectedCandidateKey !== null &&
         !ListRecruitingCandidatesInput.shape.roleId.safeParse(value.selectedCandidateKey)
           .success) ||
@@ -113,7 +115,7 @@ export function readRecruitingPanelState(key: string | null): RecruitingPanelSta
       tab: value.tab,
       candidateView: value.candidateView,
       filters: { ...filters.data },
-      pageCount: value.pageCount,
+      page: value.page,
       selectedCandidateKey: value.selectedCandidateKey,
       detailOpen: value.detailOpen,
       ...(value.userSort === true ? { userSort: true } : {}),

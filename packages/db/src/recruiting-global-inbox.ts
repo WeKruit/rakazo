@@ -448,8 +448,10 @@ export async function readGlobalRecruitingInbox(
     unreadOnly: raw.unreadOnly,
     thread: raw.thread,
     cursor: raw.cursor,
+    offset: raw.offset,
     limit: raw.limit,
   });
+  if (input.cursor && input.offset) throw new Error("Pass either a cursor or an offset.");
   const cursor = input.cursor ? cursorSchema.parse(input.cursor) : null;
   return prisma.$transaction(async (tx) => {
     await authorize?.();
@@ -484,6 +486,7 @@ export async function readGlobalRecruitingInbox(
         person: unknown;
         message_at: Date | null;
         latest_incoming_at: Date | null;
+        total: bigint;
       }[]
     >(Prisma.sql`${base}, annotated AS (
       SELECT mail.*,
@@ -500,8 +503,8 @@ export async function readGlobalRecruitingInbox(
       ${input.unreadOnly ? Prisma.sql`AND mail.thread_key IS NOT NULL AND NOT unknown AND latest_incoming_at IS NOT NULL AND (COALESCE(c.unread,false) OR latest_incoming_at>COALESCE(c.last_read_at,${baseline.initializedAt}))` : Prisma.empty}
     ), selected AS (
       ${thread ? Prisma.sql`SELECT * FROM eligible` : Prisma.sql`SELECT DISTINCT ON(role_id,view_key) * FROM eligible WHERE matches ORDER BY role_id,view_key,(direction='received') DESC NULLS LAST,message_at DESC NULLS LAST,id DESC`}
-    ) SELECT * FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
-      ORDER BY message_at DESC NULLS LAST,id DESC LIMIT ${input.limit + 1}`);
+    ) SELECT *, count(*) OVER() AS total FROM selected WHERE true ${cursor ? Prisma.sql`AND (COALESCE(message_at,'-infinity'::timestamp),id)<(COALESCE(${date(cursor.at)},'-infinity'::timestamp),${cursor.id})` : Prisma.empty}
+      ORDER BY message_at DESC NULLS LAST,id DESC LIMIT ${input.limit + 1} OFFSET ${input.offset ?? 0}`);
     const summary = await inboxSummary(tx, actor, baseline.initializedAt);
     const page = rows.slice(0, input.limit);
     const last = page.at(-1);
@@ -547,6 +550,8 @@ export async function readGlobalRecruitingInbox(
               JSON.stringify({ at: last.message_at?.toISOString() ?? null, id: last.id }),
             ).toString("base64url")
           : null,
+      // count(*) OVER() is taken before LIMIT/OFFSET; a page past the end has no row to carry it.
+      total: cursor ? null : rows[0] ? Number(rows[0].total) : input.offset ? null : 0,
       ...summary,
     };
   });

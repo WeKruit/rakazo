@@ -1,4 +1,4 @@
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
   Button,
   Dialog,
@@ -9,6 +9,7 @@ import {
 } from "@rakazo/ui-web";
 import { Bookmark } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ListPager } from "../../components/ListPager";
 import { readRecruitingPanelState } from "../../lib/right-panel-state";
 import { AddToSequenceDialog } from "./AddToSequenceDialog";
 import { CandidateDirectory } from "./CandidateDirectory";
@@ -281,21 +282,15 @@ export function ShortlistDirectory({
         </p>
       ) : null}
       <footer className="sticky bottom-0 z-20 flex min-h-12 items-center justify-between gap-2 border-t bg-background py-2 text-sm">
-        <span className="tabular-nums">
-          <Trans>
-            {rows.length} of {candidatePage.total}
-          </Trans>
+        <span className="tabular-nums text-muted-foreground">
+          <Plural value={candidatePage.total} _1="# candidate" other="# candidates" />
         </span>
-        {candidatePage.nextCursor ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={model.candidateLoading}
-            onClick={() => void model.loadMoreCandidates()}
-          >
-            <Trans>Load more</Trans>
-          </Button>
-        ) : null}
+        <ListPager
+          page={model.candidatePageIndex}
+          pageCount={Math.ceil(candidatePage.total / 30)}
+          onPage={model.goToCandidatePage}
+          disabled={model.candidateLoading}
+        />
       </footer>
       <AddToSequenceDialog
         open={enroll}
