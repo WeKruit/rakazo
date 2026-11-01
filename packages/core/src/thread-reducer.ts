@@ -58,6 +58,8 @@ export type LiveThread = {
   toolExecutions?: { open: string[]; done: Record<string, Record<string, unknown>> };
   /** User messages a working reply has not read yet; they stay editable until it does. */
   queuedMessageIds?: readonly string[];
+  /** Guessed next user message after a run's reply; shown only while that reply is the latest. */
+  suggestion?: { runId: string; text: string };
 };
 
 export type LiveThreadEvent = {
@@ -76,6 +78,7 @@ const runTriggers = new Set<string>(RUN_TRIGGERS);
 const SNAPSHOT_EVENT_TYPES = new Set([
   "thread.cleared",
   "thread.progress",
+  "thread.suggestion",
   "thread.subagent",
   "thread.cloud_agent",
   "agent.tool.called",
@@ -133,6 +136,14 @@ SELF_CONTAINED_EVENT_TYPES.delete("thread.message.reaction");
 
 export function eventNeedsSnapshotRead(event: { type: string }): boolean {
   return !SELF_CONTAINED_EVENT_TYPES.has(event.type);
+}
+
+/** The suggestion to show, when the thread's newest message is still the reply it follows. */
+export function currentSuggestion(thread: Pick<LiveThread, "messages" | "suggestion">) {
+  const suggestion = thread.suggestion;
+  if (!suggestion) return null;
+  const last = thread.messages.findLast((message) => !message.internal);
+  return last?.role === "bot" && last.runId === suggestion.runId ? suggestion.text : null;
 }
 
 /** Run ends and input pauses: the points where clients used to re-read the whole thread. */
@@ -322,6 +333,11 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       ),
       messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
     };
+  }
+  if (event.type === "thread.suggestion") {
+    const text = typeof payload.text === "string" ? payload.text : "";
+    if (event.threadId !== prev.threadId || !event.runId || !text) return prev;
+    return { ...prev, cursor, suggestion: { runId: event.runId, text } };
   }
   if (event.type === "thread.cleared") {
     return {
