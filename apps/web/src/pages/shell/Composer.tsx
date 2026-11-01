@@ -141,12 +141,7 @@ export const Composer = memo(function Composer({
   fileInputRef: RefObject<HTMLInputElement | null>;
   onAttachmentPick: (files: FileList | null) => boolean;
   onRemoveAttachment: (attachment: PendingAttachment) => void;
-  onSend: (
-    text: string,
-    mentions: ComposerMention[],
-    clientNonce: string,
-    queueMode?: "steer" | "follow_up",
-  ) => Promise<boolean>;
+  onSend: (text: string, mentions: ComposerMention[], clientNonce: string) => Promise<boolean>;
   onStop: () => Promise<void>;
   onStopAll?: () => Promise<void>;
   hasBackgroundWork?: boolean;
@@ -167,8 +162,6 @@ export const Composer = memo(function Composer({
   const { t } = useLingui();
   const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
   const [draft, setDraft] = useState(() => readComposerDraft(draftKey));
-  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
-  useEffect(() => setQueueMode("steer"), [draftKey]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(() => {
     const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(draft);
     return mentionMatch ? (mentionMatch[1] ?? "") : null;
@@ -446,10 +439,7 @@ export const Composer = memo(function Composer({
     const mentions = selectedMentions;
     setSelectedMentions([]);
     try {
-      const accepted =
-        (await (queueMode === "follow_up"
-          ? onSend(text, mentions, clientNonce, queueMode)
-          : onSend(text, mentions, clientNonce))) !== false;
+      const accepted = (await onSend(text, mentions, clientNonce)) !== false;
       settleComposerDraftSubmission(draftKey, submission, accepted);
       if (accepted) return;
     } catch {
@@ -837,21 +827,6 @@ export const Composer = memo(function Composer({
             onPaste={handlePaste}
             onKeyDown={(event) => {
               if (
-                running &&
-                event.key === "Tab" &&
-                !event.shiftKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                !event.altKey &&
-                !event.nativeEvent.isComposing &&
-                !mentionPickerOpen &&
-                !slashQuery
-              ) {
-                event.preventDefault();
-                setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"));
-                return;
-              }
-              if (
                 event.key === "Backspace" &&
                 draft.length === 0 &&
                 (selectedSkill !== null || selectedMentions.length > 0)
@@ -916,18 +891,6 @@ export const Composer = memo(function Composer({
           />
         </div>
         <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
-          {running ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              aria-pressed={queueMode === "follow_up"}
-              title={t`Tab to switch`}
-              onClick={() => setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"))}
-            >
-              {queueMode === "follow_up" ? t`Follow up` : t`Steer`}
-            </Button>
-          ) : null}
           {onVoice && draft.trim().length === 0 ? (
             <Button
               variant="outline"

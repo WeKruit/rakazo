@@ -55,7 +55,6 @@ const shellApi = vi.hoisted(() => ({
   messages: vi.fn(),
   followUp: vi.fn(),
   send: vi.fn(),
-  updateQueued: vi.fn(),
   answer: vi.fn(),
   stop: vi.fn(),
   createArtifact: vi.fn(),
@@ -144,7 +143,6 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       messages: shellApi.messages,
       followUp: shellApi.followUp,
       send: shellApi.send,
-      updateQueued: shellApi.updateQueued,
       answer: shellApi.answer,
       stop: shellApi.stop,
       reportTiming: vi.fn(async () => ({ ok: true as const })),
@@ -4853,24 +4851,14 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
 });
 
 describe("Composer", () => {
-  it("uses Tab during work to queue the message until the reply finishes", async () => {
+  it("sends right away during work, with no queue mode to pick", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend, { running: true });
+    expect(container?.textContent).not.toContain("Steer");
     type(textarea, "Then check the next role");
-    act(() =>
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
-      ),
-    );
-    expect(container?.textContent).toContain("Follow up");
     pressEnter(textarea);
     await act(async () => {});
-    expect(onSend).toHaveBeenCalledWith(
-      "Then check the next role",
-      [],
-      expect.any(String),
-      "follow_up",
-    );
+    expect(onSend).toHaveBeenCalledWith("Then check the next role", [], expect.any(String));
   });
 
   it("lets Shift+Tab leave the composer and Tab complete a mention", () => {
@@ -5744,7 +5732,7 @@ it.each(["busy", "background", "card", "reconnect"] as const)(
   },
 );
 
-it("queues a message sent during a working reply above the composer until the reply reads it", async () => {
+it("sends a message during a working reply right away and shows it in the transcript", async () => {
   const streams: Array<{
     options: Parameters<typeof CoreModule.runThreadSubscription>[0];
     head: { threadId: string; cursor: number };
@@ -5779,14 +5767,12 @@ it("queues a message sent during a working reply above the composer until the re
     });
   await emit(event(100, "run.started", { trigger: "user" }));
   shellApi.send.mockResolvedValue({ runId: "run-steer", taskId: "task-steer", seq: 101 });
-  shellApi.updateQueued.mockResolvedValue({ ok: true });
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   type(composer, "Only senior people please");
   await view.click("Send");
-  // It waits for the next step; Send now is the interjection.
-  expect(shellApi.send).toHaveBeenLastCalledWith(
-    expect.not.objectContaining({ interrupt: expect.anything() }),
-  );
+  // It goes in right away and shows in the transcript at once.
+  expect(shellApi.send).toHaveBeenLastCalledWith(expect.objectContaining({ interrupt: true }));
+  expect(container!.textContent).toContain("Only senior people please");
   await emit(
     event(101, "thread.message.created", {
       messageId: "queued-1",
@@ -5795,13 +5781,8 @@ it("queues a message sent during a working reply above the composer until the re
       queued: true,
     }),
   );
-  const queue = () => container!.querySelector('ul[aria-label="Queued messages"]');
-  expect(queue()?.textContent).toContain("Only senior people please");
-  expect(container!.querySelector('[data-message-id="queued-1"]')).toBeNull();
-  await view.click("Send now");
-  expect(shellApi.updateQueued).toHaveBeenLastCalledWith(
-    expect.objectContaining({ messageId: "queued-1", change: { action: "send_now" } }),
-  );
+  expect(container!.querySelector('ul[aria-label="Queued messages"]')).toBeNull();
+  expect(container!.querySelector('[data-message-id="queued-1"]')).not.toBeNull();
   await emit(
     event(102, "run.steering.claimed", {
       steeringIds: ["s-1"],
@@ -5809,7 +5790,6 @@ it("queues a message sent during a working reply above the composer until the re
       nextMessageSeq: 3,
     }),
   );
-  expect(queue()).toBeNull();
   expect(container!.textContent).toContain("Only senior people please");
   await emit(event(103, "run.requeued", { status: "queued" }));
   expect(container!.textContent).toContain("Interrupted, resuming…");
@@ -6152,7 +6132,7 @@ it("retries a failed reply without sending or clearing the recruiter's new draft
   expect(shellApi.send).toHaveBeenCalledExactlyOnceWith({
     groupId: "group-1",
     text: "Try again",
-    queueMode: "steer",
+    interrupt: true,
     clientNonce: expect.any(String),
     addressing: "coordinator",
   });

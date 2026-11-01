@@ -43,7 +43,6 @@ const RoleSetupCard = lazyPanel(() =>
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
-import { QueuedMessages } from "../shell/queued-messages";
 import { Transcript } from "../shell/Transcript";
 import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
@@ -214,8 +213,6 @@ export function ShellConversation({
     runErrorComputerBotId,
     handleRunErrorPresented,
     transcriptMessages,
-    queuedMessages,
-    changeQueuedMessage,
     transcriptArtifactTarget,
     resolveTranscriptBot,
     workingBots,
@@ -845,7 +842,7 @@ export function ShellConversation({
                   onBotChanged={refreshBots}
                   onAddRoutine={addSkillRoutine}
                   onContinue={() =>
-                    void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), "steer", true)
+                    void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), true)
                   }
                   voiceReady={Boolean(voiceStatus?.ready)}
                   speakingMessageId={speakingMessageId}
@@ -884,16 +881,6 @@ export function ShellConversation({
                   className="px-6 pb-2 text-center text-[13px] text-muted-foreground"
                 >
                   <Trans>Interrupted, resuming…</Trans>
-                </div>
-              ) : null}
-              {!emptyCrmChat && queuedMessages.length ? (
-                <div className="-mb-2 px-3 md:px-6">
-                  <QueuedMessages
-                    messages={queuedMessages}
-                    onEdit={(id, text) => changeQueuedMessage(id, { action: "edit", text })}
-                    onRemove={(id) => changeQueuedMessage(id, { action: "remove" })}
-                    onSendNow={(id) => changeQueuedMessage(id, { action: "send_now" })}
-                  />
                 </div>
               ) : null}
               {recordingSkill ? (
@@ -954,15 +941,13 @@ export function ShellConversation({
                     if (runErrorComputerBotId) {
                       void rpc.computer
                         .reset({ botId: runErrorComputerBotId })
-                        .then(() =>
-                          sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true),
-                        )
+                        .then(() => sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), true))
                         .catch((error: unknown) =>
                           setSendError(errorText(error, t`Could not reset the computer.`)),
                         );
                       return;
                     }
-                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true);
+                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), true);
                   }}
                   retryLabel={
                     runErrorNeedsReconnect
