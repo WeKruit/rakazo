@@ -123,6 +123,7 @@ import {
   isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
+  isChineseText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -153,7 +154,7 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_ENGLISH_NOTE,
+  REPLY_IN_CHINESE_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -162,7 +163,6 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
-  recruiterQuestionNotInEnglish,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
@@ -838,6 +838,34 @@ async function savedRoleCandidateKeys(
   });
 }
 
+/**
+ * A note computed beside the turn that must never hold it up: taken into the opening context
+ * when already back, else handed to the run's next model step with its other context notices.
+ */
+export function lateNote(pending: Promise<string | undefined>) {
+  let ready: string | undefined;
+  let delivered = false;
+  void pending.then(
+    (note) => {
+      ready = note;
+    },
+    () => undefined,
+  );
+  const take = () => {
+    if (delivered || !ready) return undefined;
+    delivered = true;
+    return ready;
+  };
+  return {
+    takeReady: take,
+    async withNotice(notice: Promise<string | undefined> | undefined) {
+      const context = await notice;
+      const note = take();
+      return [context, note].filter(Boolean).join("\n\n") || undefined;
+    },
+  };
+}
+
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -1136,7 +1164,7 @@ const ASK_DECLINES =
 const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
 
 /** A message typed while an approval card waits is its own request, never the card's answer. */
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
@@ -1187,8 +1215,8 @@ export const STEERING_ACK =
 
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
-const ASK_IN_ENGLISH =
-  "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
+const ASK_IN_RECRUITER_LANGUAGE =
+  "Not asked: questions and options to the recruiter are written in the language of their own latest message, not the JD's. Ask the same question again in that language, with the same options and plannedSearches.";
 
 const PLANNED_SEARCHES_EMPTY =
   "Not asked yet: plannedSearches: [] means the recruiter said not to look for people outside their own list. If they did not, ask the same question again with four plannedSearches; when the question is about the location, use the JD's location, since the answer only narrows or widens it. If they did say so, ask again with [] unchanged.";
@@ -4575,7 +4603,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const listing = await loadLivePluginSlugs(deps.listConnectedPluginSlugs, run.userId);
           if (listing.ok) {
             liveSlugs = listing.slugs;
-            await persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
+            // Bookkeeping for the next run; this run already uses the live list.
+            void persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
               () => undefined,
             );
           }
@@ -4842,6 +4871,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .catch(() => undefined)
             : Promise.resolve(undefined),
         );
+        const lateNotes = lateNote(preferenceNotePromise);
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -5306,15 +5336,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           resolved.acceptsImages,
         );
         const acceptsImages = deps.runtime.describe().capabilities.scripted || modelSeesImages;
-        const groupContext = thread.groupId
-          ? await loadGroupContext(deps.prisma, thread.groupId, {
-              id: bot.id,
-              name: bot.name,
-            })
-          : undefined;
-        const hasMessagingIdentity = deps.messaging
-          ? await deps.messaging.hasIdentity(bot.id)
-          : false;
+        // Independent reads for the prompt run together rather than one after another.
+        const [groupContext, hasMessagingIdentity, sourceClientNonce] = await Promise.all([
+          thread.groupId
+            ? loadGroupContext(deps.prisma, thread.groupId, { id: bot.id, name: bot.name })
+            : undefined,
+          deps.messaging ? deps.messaging.hasIdentity(bot.id) : false,
+          // Calls carry no schema flag: the sending client encodes them in the clientNonce.
+          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
+            ? deps.prisma.message
+                .findUnique({
+                  where: { id: run.sourceMessageId },
+                  select: { clientNonce: true },
+                })
+                .then((row) => row?.clientNonce ?? null)
+            : null,
+        ]);
         const messagingContext = hasMessagingIdentity
           ? [messagingDmSurfaceNote(), messagingChannelRun ? messagingChannelPrivacyBlock() : null]
               .filter(Boolean)
@@ -5333,16 +5370,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ));
           }
         }
-        // Calls carry no schema flag: the sending client encodes them in the clientNonce.
-        const sourceClientNonce =
-          (run.trigger === "user" || run.trigger === "follow_up") && run.sourceMessageId
-            ? ((
-                await deps.prisma.message.findUnique({
-                  where: { id: run.sourceMessageId },
-                  select: { clientNonce: true },
-                })
-              )?.clientNonce ?? null)
-            : null;
         // A hang-up run has no source message: its own nonce carries the call it closes.
         const callEndRun = run.trigger === "call_end";
         const callClientNonceForRun = callEndRun ? run.clientNonce : sourceClientNonce;
@@ -6373,8 +6400,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // The model's first tools run once the role from a job link is saved.
-          if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
+          // Tools that use the role from a job wait for its save; the first question and progress
+          // lines do not, so the save never holds them up. The turn still ends after the save.
+          if (
+            !executionId.startsWith(`${runId}:job-`) &&
+            name !== "ask_user" &&
+            name !== "message_user"
+          )
+            await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           // import_csv still names its role, so it gets the thread's role instead.
@@ -8613,10 +8646,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const replayRole = async () => {
             try {
-              return await deliverRecruitingRoleResult(
-                await executeRole(),
+              // Timing for the role save that runs before the first question; the rest of the
+              // call's duration is approval gating and the effect claim.
+              const executeAt = Date.now();
+              const executed = await executeRole();
+              const deliverAt = Date.now();
+              const delivered = await deliverRecruitingRoleResult(
+                executed,
                 args.operation === "read",
               );
+              getLogger().info("recruiting.role.timing", {
+                runId,
+                operation: args.operation,
+                executeMs: deliverAt - executeAt,
+                deliverMs: Date.now() - deliverAt,
+              });
+              return delivered;
             } catch (error) {
               return roleError(error);
             }
@@ -12509,7 +12554,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
@@ -12829,11 +12874,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .join(" ")
           : "";
         const languageNote =
-          hideVendors &&
-          lastRecruiterText &&
-          recruiterQuestionNotInEnglish(lastRecruiterText, messages)
-            ? REPLY_IN_ENGLISH_NOTE
-            : undefined;
+          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -12948,7 +12989,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
-          preferenceNote: await preferenceNotePromise,
+          // The judge's preference nudge never holds up the turn: it joins now only if already
+          // back, otherwise at the run's next model step.
+          preferenceNote: lateNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -13128,7 +13171,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
         if (runModel === configuredRunModel) {
-          runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
+          runModel = {
+            ...configuredRunModel,
+            ...(turnModel.thinkingLevel ? { thinkingLevel: turnModel.thinkingLevel } : {}),
+            routed: "configured",
+            routeReason: turnModel.reason,
+          };
         }
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
@@ -13153,6 +13201,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (usage.inputTokens ?? 0) +
               (usage.cacheReadTokens ?? 0) +
               (usage.cacheWriteTokens ?? 0);
+          };
+          // Spend is counted in memory above; the usage row and timing audit are written in the
+          // background so a model call's end never waits on the database.
+          const recordUsageInBackground = (
+            event: Extract<AgentRuntimeEvent, { type: "usage" }>,
+          ) => {
+            void recordUsage(
+              deps.prisma,
+              event,
+              {
+                spaceId: run.spaceId,
+                botId: bot.id,
+                userId: run.userId,
+                runId,
+                parentRunId: runId,
+                operationId: runId,
+              },
+              estimateCatalogTokenCostUsd,
+            )
+              .then(() =>
+                appendUsageTimingAudit(
+                  deps,
+                  { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                  event,
+                ),
+              )
+              .catch((error) =>
+                getLogger().warn("usage record failed", { runId, error: String(error) }),
+              );
           };
           let firstModelEventMs: number | null = null;
           // Logged for a turn that ends with a question too, not only a completed one.
@@ -13209,27 +13286,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   threadId: thread.id,
                   runId,
                   sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
-                  onUsage: async (event) => {
+                  onUsage: (event) => {
                     runCostUsd += event.costUsd ?? 0;
                     countPromptCache(event);
-                    await recordUsage(
-                      deps.prisma,
-                      event,
-                      {
-                        spaceId: run.spaceId,
-                        botId: bot.id,
-                        userId: run.userId,
-                        runId,
-                        parentRunId: runId,
-                        operationId: runId,
-                      },
-                      estimateCatalogTokenCostUsd,
-                    );
-                    await appendUsageTimingAudit(
-                      deps,
-                      { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                      event,
-                    );
+                    recordUsageInBackground(event);
                   },
                   prompt,
                   contextStrategy,
@@ -13405,14 +13465,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
                     if (known) return `"${known.key}" → "${known.value}"`;
-                    // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
+                    // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
                       !askLanguageBounced &&
-                      recruiterQuestionNotInEnglish(question, messages)
+                      isChineseText(question) !== isChineseText(lastRecruiterText)
                     ) {
                       askLanguageBounced = true;
-                      return { instead: ASK_IN_ENGLISH };
+                      return { instead: ASK_IN_RECRUITER_LANGUAGE };
                     }
                     // Any intake answer may be the last one, and the first people come from the searches
                     // planned with it; without four of them the answer turn waits on its own searches.
@@ -13450,7 +13510,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       completeRunStep,
                     );
                   },
-                  claimContextNotice: scripted ? undefined : contextWatch?.claimNotice,
+                  claimContextNotice: scripted
+                    ? undefined
+                    : () => lateNotes.withNotice(contextWatch?.claimNotice()),
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
@@ -14033,24 +14095,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } else if (event.type === "usage" && !event.accounted) {
               runCostUsd += event.costUsd ?? 0;
               countPromptCache(event);
-              await recordUsage(
-                deps.prisma,
-                event,
-                {
-                  spaceId: run.spaceId,
-                  botId: bot.id,
-                  userId: run.userId,
-                  runId,
-                  parentRunId: runId,
-                  operationId: runId,
-                },
-                estimateCatalogTokenCostUsd,
-              );
-              await appendUsageTimingAudit(
-                deps,
-                { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
-                event,
-              );
+              recordUsageInBackground(event);
             } else if (event.type === "thinking") {
               const { type: _type, ...thinking } = event;
               lastThinking = thinking;

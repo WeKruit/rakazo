@@ -25,7 +25,7 @@ import {
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_ENGLISH_NOTE,
+  REPLY_IN_CHINESE_NOTE,
   sendToNote,
 } from "./recruiting-defaults.js";
 
@@ -50,7 +50,7 @@ const TEXTS = {
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_ENGLISH_NOTE,
+  REPLY_IN_CHINESE_NOTE,
   NAMED_EMAILS_NOTE,
   sendToNote: sendToNote(20),
   "Recruitment intake and handoff skill": skill("Recruitment intake and handoff"),
@@ -136,9 +136,9 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Rounds were filled with people who missed a stated must-have.",
   },
   {
-    rule: "English questions",
+    rule: "questions follow the recruiter, not the JD",
     in: "RECRUITING_INTAKE_FLOW",
-    phrase: "Write every question and option in English.",
+    phrase: "Write every question and option in the recruiter's language, never the JD's.",
     why: "Clarifying questions followed a Chinese JD into Chinese.",
   },
   {
@@ -1119,22 +1119,22 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
 
   // Recruiter language and every teammate
   {
-    rule: "English first",
+    rule: "reply in the recruiter's language",
     in: "RECRUITER_LANGUAGE",
-    phrase: "Write everything the recruiter sees in English",
-    why: "Replies followed a Chinese JD or recruiter into Chinese.",
+    phrase: "in the language of the recruiter's own latest message, never the JD's",
+    why: "A recruiter writing Chinese got English replies; a Chinese JD pulled replies into Chinese.",
   },
   {
-    rule: "another language only on request",
+    rule: "candidate emails stay English",
     in: "RECRUITER_LANGUAGE",
-    phrase: "Use another language only when the recruiter explicitly asks for it.",
-    why: "Replies followed a Chinese JD or recruiter into Chinese.",
+    phrase: "Emails and drafts to candidates and saved brief labels stay in English",
+    why: "Candidate-facing material must not follow the recruiter's chat language.",
   },
   {
-    rule: "English turn note",
-    in: "REPLY_IN_ENGLISH_NOTE",
-    phrase: "write every reply, summary, question and card of this turn in English",
-    why: "A recruiter writing Chinese still pulled replies into Chinese.",
+    rule: "Chinese turn note",
+    in: "REPLY_IN_CHINESE_NOTE",
+    phrase: "write every reply, summary, question and card of this turn in Chinese",
+    why: "A recruiter writing Chinese got English replies.",
   },
   {
     rule: "internals stay internal",

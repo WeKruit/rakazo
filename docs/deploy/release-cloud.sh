@@ -174,6 +174,11 @@ if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 
   && [ "${RELEASE_SKIP_TEST_ENV:-}" != "$SHORT" ] && ! passed_on_test; then
   die "$SHORT has not passed on the test environment; run RELEASE_TARGET=test first (RELEASE_SKIP_TEST_ENV=$SHORT for an emergency)"
 fi
+# Staging → production sync: every config key the test app has must exist in production, and no
+# production value may point at the test environment. Prints key names only.
+if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
+  python3 "$REPO/docs/deploy/promote-check.py" | sed 's/^/  /' || die "staging → production config sync is incomplete (see above)"
+fi
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = premerge ] && { run_tests; log "PREMERGE OK $SHA_IN on main ${SHORT} (safe to merge)"; exit 0; }
 if [ "$MODE" = prebuild ]; then

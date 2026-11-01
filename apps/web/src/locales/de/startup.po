@@ -426,7 +426,6 @@ msgstr "{path} angehängt"
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "Anhang"
 
@@ -583,10 +582,6 @@ msgstr "Server nicht erreichbar."
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Cancel"
 msgstr "Abbrechen"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Cancel edit"
-msgstr ""
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -1150,10 +1145,6 @@ msgid "Could not update computer"
 msgstr ""
 
 #: src/pages/shell/useShellMessages.ts
-msgid "Could not update message"
-msgstr ""
-
-#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr ""
 
@@ -1402,10 +1393,6 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: src/pages/shell/queued-messages.tsx
-msgid "Edit queued message"
-msgstr ""
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
@@ -1600,10 +1587,6 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
-msgstr ""
-
-#: src/pages/shell/Composer.tsx
-msgid "Follow up"
 msgstr ""
 
 #: src/pages/Auth.tsx
@@ -2563,13 +2546,8 @@ msgid "Qualifying work"
 msgstr ""
 
 #: src/lib/roster-status.ts
-#: src/pages/shell/queued-messages.tsx
 msgid "Queued"
 msgstr "In Warteschlange"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Queued messages"
-msgstr ""
 
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
@@ -2757,10 +2735,6 @@ msgstr ""
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "Erwähnung von {0} entfernen"
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Remove queued message"
-msgstr ""
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -3006,7 +2980,6 @@ msgstr ""
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "Speichern"
 
@@ -3137,10 +3110,6 @@ msgstr "Löschcode senden"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
-msgstr ""
-
-#: src/pages/shell/queued-messages.tsx
-msgid "Send now"
 msgstr ""
 
 #: src/pages/recruiting/CrmWorkbench.tsx
@@ -3414,10 +3383,6 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
-#: src/pages/shell/Composer.tsx
-msgid "Steer"
-msgstr ""
-
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr ""
@@ -3492,10 +3457,6 @@ msgstr ""
 
 #: src/pages/shell/command-palette.tsx
 msgid "Switch bot"
-msgstr ""
-
-#: src/pages/shell/Composer.tsx
-msgid "Tab to switch"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
