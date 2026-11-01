@@ -226,6 +226,31 @@ it("shows each role as it streams in, with partial totals until the read ends", 
   expect(text()).not.toContain("could not be read");
 });
 
+it("does not report a failure while saved numbers wait for their sources", async () => {
+  overview.mockImplementation(async function* () {
+    yield {
+      kind: "role",
+      role: {
+        groupId: "g1",
+        roleId: "r1",
+        shortlisted: 3,
+        shortlistedDates: [],
+        contacted: null,
+        replied: null,
+        interested: null,
+        interestedPartial: false,
+        incomplete: true,
+        bookings: [],
+        bookingUnknown: true,
+      },
+    };
+    await new Promise(() => undefined);
+  });
+  await render();
+  expect(text()).toContain("Shortlisted");
+  expect(text()).not.toContain("could not be read");
+});
+
 it("opens a recent role, newest first", async () => {
   await render();
   const recents = [...container.querySelectorAll('[aria-label="Recents"] button')];

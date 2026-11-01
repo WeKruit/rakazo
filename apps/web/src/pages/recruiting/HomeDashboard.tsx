@@ -100,8 +100,9 @@ function overviewFrom(groupIds: readonly string[], state: OverviewState): Overvi
     roles,
     missingGroups,
     pendingGroups,
+    // Saved numbers arrive first marked incomplete; only a finished read can report a failure.
     incompleteGroups: [
-      ...roles.filter((role) => role.incomplete).map((role) => role.groupId),
+      ...(state.done ? roles.filter((role) => role.incomplete).map((role) => role.groupId) : []),
       ...missingGroups,
     ],
     bookings: roles.flatMap((role) =>
