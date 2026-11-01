@@ -2,7 +2,7 @@ import { i18n } from "@lingui/core";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import type { ThreadMessage } from "@rakazo/contracts";
-import { attachmentsForThread, isActive, threadTailPhase } from "@rakazo/core";
+import { attachmentsForThread, currentSuggestion, isActive, threadTailPhase } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
 import {
   BriefcaseBusiness,
@@ -1011,6 +1011,9 @@ export function ShellConversation({
                   replyQuote={emptyCrmChat ? null : activeReplyQuote}
                   replyTargetName={emptyCrmChat ? undefined : replyTargetName}
                   onClearReply={clearReply}
+                  suggestion={
+                    emptyCrmChat || !activeSnapshot ? null : currentSuggestion(activeSnapshot)
+                  }
                   mentionTargets={showToolActivity ? composerMentionTargets : []}
                   agentSkills={showToolActivity ? agentSkills : []}
                   onSlashOpen={showToolActivity ? refreshAgentSkills : undefined}

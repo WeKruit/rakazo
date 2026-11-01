@@ -99,6 +99,7 @@ async function runWithModel(
     sourceMessage?: HistoryMessage;
     /** The model's final reply; defaults to "Done". */
     finalText?: string;
+    replySuggestions?: boolean;
   } = {},
 ) {
   const run = {
@@ -284,6 +285,7 @@ async function runWithModel(
     events,
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
+    replySuggestions: options.replySuggestions,
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
@@ -295,8 +297,42 @@ async function runWithModel(
   }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
-  return { request, get, prisma, run, finalizeRun };
+  return { request, get, prisma, run, finalizeRun, runtimeRun, events };
 }
+
+describe("reply suggestion", () => {
+  it("after a reply, asks the model once for the user's next message and sends it live", async () => {
+    const { runtimeRun, events, finalizeRun } = await runWithModel(
+      TEXT_ONLY_MODEL,
+      undefined,
+      false,
+      false,
+      { finalText: "Here are ten people.", replySuggestions: true },
+    );
+    await vi.waitFor(() =>
+      expect(events.publishTransient).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "thread.suggestion", runId: "run-1" }),
+      ),
+    );
+    const suggestionCall = runtimeRun.mock.calls.at(-1)![0];
+    expect(suggestionCall.runId).toBe("run-1:suggestion");
+    expect(suggestionCall.tools).toEqual([]);
+    expect(suggestionCall.prompt).toContain("Here are ten people.");
+    // The reply was final before the suggestion call started.
+    expect(finalizeRun.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeRun.mock.invocationCallOrder.at(-1)!,
+    );
+  });
+
+  it("skips runs that a person did not start", async () => {
+    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+      priorRoutineRun: { id: "run-0", completedAt: new Date(), replyText: "x" },
+      replySuggestions: true,
+    });
+    expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":suggestion"))).toBe(true);
+  });
+});
 
 describe("handed-in stage", () => {
   const handoff = (toBotId: string) => ({
