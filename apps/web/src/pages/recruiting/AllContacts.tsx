@@ -29,7 +29,7 @@ import {
 } from "@rakazo/ui-web";
 import { ChevronDown, ListFilter, Mail, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
 import { AddToSequenceDialog } from "./AddToSequenceDialog";
@@ -68,9 +68,13 @@ export function AllContacts({
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const urlQuery = searchParams.get("query") ?? "";
   const detail = useRecruitingDetail();
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [query, setQuery] = useState(urlQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(urlQuery.trim());
+  useEffect(() => setQuery(urlQuery), [urlQuery]);
   const [filters, setFilters] = useState<RecruitingContactFilters>({});
   const [text, setText] = useState<Partial<Record<TextKey, string>>>({});
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
@@ -88,6 +92,16 @@ export function AllContacts({
   const [dialogText, setDialogText] = useState("");
   const [notice, setNotice] = useState<{ error: boolean; text: string }>();
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!location.state?.recruitingSearch) return;
+    setQuery(urlQuery);
+    setDebouncedQuery(urlQuery.trim());
+    setFilters({});
+    setText({});
+    setDebouncedText({});
+    setDays({});
+    setOffset(0);
+  }, [location.key]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -726,7 +740,7 @@ export function AllContacts({
             )}
           </p>
           {rows.length ? (
-            <div className="max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
+            <div className="hire-contact-table-scroll max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
               <table className="w-full min-w-[1100px] text-left text-sm" aria-busy={loading}>
                 <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
                   <tr>

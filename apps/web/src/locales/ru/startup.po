@@ -212,10 +212,6 @@ msgstr "{name}: завершено"
 msgid "{name} stopped"
 msgstr "{name}: остановлено"
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "{people} people"
-msgstr ""
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
 msgstr "{peopleAdded, plural, one {Добавлен # человек} few {Добавлено # человека} many {Добавлено # человек} other {Добавлено # человека}}"
@@ -1175,6 +1171,7 @@ msgstr ""
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -1937,6 +1934,10 @@ msgstr ""
 msgid "Expand {0}"
 msgstr "Развернуть {0}"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Expand navigation"
+msgstr ""
+
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Experience"
 msgstr ""
@@ -2137,6 +2138,10 @@ msgstr ""
 msgid "Get credentials"
 msgstr "Получить учетные данные"
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Global search"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Go to email {0}"
@@ -2259,6 +2264,7 @@ msgid "In review"
 msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Inbox"
 msgstr ""
@@ -2571,6 +2577,10 @@ msgstr "Низкий"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "Низкий"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Mail results include indexed saved messages."
+msgstr ""
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Mark as replied"
@@ -2967,6 +2977,10 @@ msgstr "Удаленные MCP-серверы не найдены"
 msgid "No replies yet."
 msgstr ""
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "No results"
+msgstr "Нет результатов"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
 msgstr ""
@@ -3024,6 +3038,7 @@ msgstr ""
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/ShellMessage.tsx
 msgid "No subject"
@@ -3866,6 +3881,7 @@ msgstr ""
 #: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
@@ -3955,6 +3971,7 @@ msgid "Role: {0}"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Roles"
 msgstr ""
@@ -4144,9 +4161,11 @@ msgid "Schools"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search"
 msgstr "Поиск"
 
@@ -4198,6 +4217,10 @@ msgstr ""
 msgid "Search roles"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Search roles, contacts, sequences and saved mail."
+msgstr ""
+
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Search saved mail"
 msgstr ""
@@ -4218,6 +4241,10 @@ msgstr ""
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Search…"
 msgstr ""
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Searching…"
+msgstr "Поиск…"
 
 #. placeholder {0}: person?.name ?? lead.name ?? lead.email
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -4326,6 +4353,7 @@ msgid "Sent"
 msgstr ""
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr ""
@@ -4364,10 +4392,6 @@ msgstr ""
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Sequences"
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Sequences without a role"
 msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -4558,6 +4582,10 @@ msgstr ""
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "Обновление программного обеспечения"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Some results could not be loaded."
+msgstr ""
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Some saved contact details could not be displayed."
@@ -5039,6 +5067,10 @@ msgstr ""
 msgid "Unknown response"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Unknown sender"
+msgstr ""
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Unknown status"
 msgstr ""
@@ -5052,6 +5084,7 @@ msgid "Unmute"
 msgstr "Включить микрофон"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Unnamed"
 msgstr ""
 
@@ -5199,6 +5232,14 @@ msgstr ""
 
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Value"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "View all contacts"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "View all messages"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx

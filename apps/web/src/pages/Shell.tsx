@@ -599,7 +599,7 @@ export function ShellPage() {
       model.messagingSettingsOpen ||
       model.settingsOpen ||
       (model.contextChat && model.botMenu) ||
-      (model.showToolActivity && model.commandPaletteOpen) ||
+      model.commandPaletteOpen ||
       (model.peerConversation && model.active) ? (
         <ShellOverlays model={model} />
       ) : null}

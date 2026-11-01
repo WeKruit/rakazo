@@ -212,10 +212,6 @@ msgstr "{name} 已完成"
 msgid "{name} stopped"
 msgstr "{name} 已停止"
 
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "{people} people"
-msgstr "{people} 人"
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
 msgstr "{peopleAdded, plural, other {已新增 # 人}}"
@@ -1175,6 +1171,7 @@ msgstr "已联系"
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -1937,6 +1934,10 @@ msgstr "未提供执行进度"
 msgid "Expand {0}"
 msgstr "展开 {0}"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Expand navigation"
+msgstr "展开导航"
+
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Experience"
 msgstr "工作经历"
@@ -2137,6 +2138,10 @@ msgstr "有缺口"
 msgid "Get credentials"
 msgstr "获取凭据"
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Global search"
+msgstr "全局搜索"
+
 #. placeholder {0}: index + 1
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Go to email {0}"
@@ -2259,6 +2264,7 @@ msgid "In review"
 msgstr "审核中"
 
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Inbox"
 msgstr "收件箱"
@@ -2571,6 +2577,10 @@ msgstr "低"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "低"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Mail results include indexed saved messages."
+msgstr "邮件搜索覆盖已建立索引的已存邮件。"
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Mark as replied"
@@ -2967,6 +2977,10 @@ msgstr "未找到远程 MCP 服务器"
 msgid "No replies yet."
 msgstr "尚无回复。"
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "No results"
+msgstr "无结果"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
 msgstr "未关联岗位"
@@ -3024,6 +3038,7 @@ msgstr "这个岗位暂无已保存的邮件。"
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/ShellMessage.tsx
 msgid "No subject"
@@ -3866,6 +3881,7 @@ msgstr "重启后已恢复"
 #: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Retry"
@@ -3955,6 +3971,7 @@ msgid "Role: {0}"
 msgstr "岗位：{0}"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Roles"
 msgstr "岗位"
@@ -4144,9 +4161,11 @@ msgid "Schools"
 msgstr "学校"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Search"
 msgstr "搜索"
 
@@ -4198,6 +4217,10 @@ msgstr "搜索调整"
 msgid "Search roles"
 msgstr "搜索岗位"
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Search roles, contacts, sequences and saved mail."
+msgstr "搜索职位、联系人、邮件序列和已存邮件。"
+
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Search saved mail"
 msgstr "搜索已保存的邮件"
@@ -4218,6 +4241,10 @@ msgstr "搜索更新 {0}"
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Search…"
 msgstr "搜索…"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Searching…"
+msgstr "正在搜索…"
 
 #. placeholder {0}: person?.name ?? lead.name ?? lead.email
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -4326,6 +4353,7 @@ msgid "Sent"
 msgstr "已发送"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Sequence"
 msgstr "邮件序列"
@@ -4365,10 +4393,6 @@ msgstr "邮件序列时区"
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Sequences"
 msgstr "邮件序列"
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Sequences without a role"
-msgstr "未关联岗位的序列"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Serenity endpoint is required."
@@ -4558,6 +4582,10 @@ msgstr "已跳过"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Software update"
 msgstr "软件更新"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Some results could not be loaded."
+msgstr "部分搜索结果未能加载。"
 
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Some saved contact details could not be displayed."
@@ -5039,6 +5067,10 @@ msgstr "未知"
 msgid "Unknown response"
 msgstr "回应未知"
 
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "Unknown sender"
+msgstr "未知发件人"
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Unknown status"
 msgstr "状态未知"
@@ -5052,6 +5084,7 @@ msgid "Unmute"
 msgstr "取消静音"
 
 #: src/pages/recruiting/AllContacts.tsx
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Unnamed"
 msgstr "未命名"
 
@@ -5200,6 +5233,14 @@ msgstr "UTC · 仅绘制已记录的发送时间"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Value"
 msgstr "值"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "View all contacts"
+msgstr "查看全部联系人"
+
+#: src/pages/recruiting/RecruitingGlobalSearch.tsx
+msgid "View all messages"
+msgstr "查看全部邮件"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "View all roles"

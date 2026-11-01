@@ -5,7 +5,7 @@ import { Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
 import { AccountInbox } from "./AccountInbox";
@@ -47,6 +47,7 @@ export function AccountRecruitingView({
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const requested = params.get("view");
   const view = isAccountRecruitingView(requested) ? requested : "shortlist";
@@ -54,9 +55,17 @@ export function AccountRecruitingView({
   const scopedGroupId = params.has("role") ? undefined : groupId;
   // Every role's people in one list, filtered and paged by the server.
   const globalInbox = view === "inbox" && !renderCorrespondence;
-  const [mailQuery, setMailQuery] = useState("");
-  const [mailSearch, setMailSearch] = useState("");
+  const urlQuery = params.get("query") ?? "";
+  const [mailQuery, setMailQuery] = useState(urlQuery);
+  const [mailSearch, setMailSearch] = useState(urlQuery.trim());
+  useEffect(() => setMailQuery(urlQuery), [urlQuery]);
   const [mailUnread, setMailUnread] = useState(false);
+  useEffect(() => {
+    if (!location.state?.recruitingSearch) return;
+    setMailQuery(urlQuery);
+    setMailSearch(urlQuery.trim());
+    setMailUnread(false);
+  }, [location.key]);
   useEffect(() => {
     const timer = setTimeout(() => setMailSearch(mailQuery.trim()), 300);
     return () => clearTimeout(timer);
@@ -765,6 +774,7 @@ export function AccountRecruitingView({
                       : undefined
                   }
                   serverReadKey={readKey}
+                  requestedThread={params.get("mailThread")}
                   query={mailQuery}
                   onQueryChange={setMailQuery}
                   onFilterChange={(value) => setMailUnread(value === "unread")}

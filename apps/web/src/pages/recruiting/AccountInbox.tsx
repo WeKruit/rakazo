@@ -33,6 +33,7 @@ type Props = {
     latestIncomingAt: string | null;
   }[];
   serverReadKey?: string;
+  requestedThread?: string | null;
   query?: string;
   onQueryChange?: (value: string) => void;
   onFilterChange?: (value: string) => void;
@@ -153,6 +154,7 @@ export function AccountInbox({
   onOpenProfile,
   serverThreads,
   serverReadKey,
+  requestedThread,
   query,
   onQueryChange,
   onFilterChange,
@@ -176,10 +178,31 @@ export function AccountInbox({
   const [filter, setFilter] = useState("all");
   const [chosen, setChosen] = useState<string>();
   const [selectedEmail, setSelectedEmail] = useState<string>();
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(Boolean(requestedThread));
   const railTrigger = useRef<HTMLButtonElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
-  const selected = rows.find((row) => row.key === chosen) ?? rows[0];
+  const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
+  const requestedRow =
+    requestedServerThread &&
+    rows.find(
+      (item) =>
+        item.roleId === requestedServerThread.roleId &&
+        item.emails.some(
+          (email) =>
+            email.id === requestedServerThread.emailId &&
+            email.sourceId === requestedServerThread.sourceId &&
+            (email.organizationId ?? null) === requestedServerThread.organizationId &&
+            (email.eaccount ?? null) === requestedServerThread.mailbox,
+        ),
+    );
+  const selected = rows.find((row) => row.key === chosen) ?? requestedRow ?? rows[0];
+  useEffect(() => {
+    const row = requestedRow;
+    if (row) {
+      setChosen(row.key);
+      setMobileDetail(true);
+    }
+  }, [requestedThread, requestedRow?.key]);
   useEffect(() => {
     if (selected && selected.key !== chosen) setChosen(selected.key);
   }, [selected?.key, chosen]);

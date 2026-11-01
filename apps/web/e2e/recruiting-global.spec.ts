@@ -118,7 +118,10 @@ for (const width of [1440, 390]) {
         person("avery", "Avery Example", roles[0]!, tagged.length ? ["Hot"] : []),
         person("blake", "Blake Example", roles[1]!, []),
       ].filter(
-        (item) => !input.filters.roleIds || input.filters.roleIds.includes(item.roles[0]!.id),
+        (item) =>
+          (!input.filters.roleIds || input.filters.roleIds.includes(item.roles[0]!.id)) &&
+          (!input.filters.query ||
+            item.name.toLowerCase().includes(input.filters.query.toLowerCase())),
       );
       await route.fulfill({ json: { json: { items, total: items.length, nextCursor: null } } });
     });
@@ -137,10 +140,42 @@ for (const width of [1440, 390]) {
       tagged.push(route.request().postDataJSON().json);
       await route.fulfill({ json: { json: { ok: true } } });
     });
+    await page.route("**/rpc/search/recruitingTargets", async (route) => {
+      await route.fulfill({
+        json: {
+          json: {
+            items: [
+              {
+                kind: "role",
+                title: "Avery role",
+                roleId: roles[0]!.id,
+                roleTitle: roles[0]!.title,
+                groupId: roles[0]!.groupId,
+                botId: null,
+                campaignId: null,
+                serverId: null,
+              },
+            ],
+          },
+        },
+      });
+    });
     await page.goto("/app?view=contacts&role=all");
     const list = page.getByRole("region", { name: "All contacts", exact: true });
     await expect(list.getByText("Avery Example")).toBeVisible();
     await expect(list.getByText("Blake Example")).toBeVisible();
+    const tableScroll = list.locator(".hire-contact-table-scroll");
+    await page.mouse.move(0, 0);
+    await expect(tableScroll).toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
+    await tableScroll.hover();
+    await expect(tableScroll).not.toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
+    const search = list.getByRole("textbox", { name: "Search contacts", exact: true });
+    await search.fill("Blake");
+    await expect(list.getByText("Avery Example")).toHaveCount(0);
+    await expect(list.getByText("Blake Example")).toBeVisible();
+    expect(reads.at(-1)?.filters.query).toBe("Blake");
+    await search.fill("");
+    await expect(list.getByText("Avery Example")).toBeVisible();
     await captureScreenshot(page, testInfo, `all-contacts-${width}`);
 
     await list.getByRole("button", { name: "Filter", exact: true }).click();
@@ -163,5 +198,26 @@ for (const width of [1440, 390]) {
     await expect(list.getByText("Tagged 1 contacts.")).toBeVisible();
     expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"] }]);
     await expect(list.getByText("Hot", { exact: true })).toBeVisible();
+    await page.keyboard.press("Control+k");
+    const searchDialog = page.getByRole("dialog", { name: "Search", exact: true });
+    await searchDialog.getByRole("combobox", { name: "Global search", exact: true }).fill("Blake");
+    await expect(searchDialog.getByRole("option", { name: /Avery role/ })).toBeVisible();
+    const contactResult = searchDialog.getByRole("option", { name: /^Blake Example/ });
+    await expect(contactResult).toBeVisible();
+    await captureScreenshot(page, testInfo, `global-search-${width}`);
+    await contactResult.click();
+    await expect(searchDialog).not.toBeVisible();
+    await expect(page).toHaveURL(/view=contacts&role=all&query=Blake&detail=/);
+    await expect(
+      page
+        .getByTestId("recruiting-detail-panel")
+        .getByRole("heading", { name: "Blake Example", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+k");
+    await searchDialog.getByRole("combobox", { name: "Global search", exact: true }).fill("Avery");
+    await searchDialog.getByRole("option", { name: /^Interview availability/ }).click();
+    await expect(page).toHaveURL(/view=inbox&role=all&query=Avery&mailThread=/);
+    await expect(page.getByTestId("email-conversation")).toBeVisible();
   });
 }

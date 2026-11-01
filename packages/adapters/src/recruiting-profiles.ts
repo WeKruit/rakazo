@@ -156,7 +156,8 @@ function records(value: unknown, depth = 0, found: Record_[] = []): Record_[] {
     return found;
   }
   if (!isRecord(value)) return found;
-  if (Array.isArray(value.experience) || "picture_url" in value) found.push(value);
+  if (Array.isArray(value.experience) || "picture_url" in value || "profile_picture_url" in value)
+    found.push(value);
   for (const nested of Object.values(value)) records(nested, depth + 1, found);
   return found;
 }

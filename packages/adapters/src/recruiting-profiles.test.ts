@@ -70,6 +70,18 @@ describe("linkedinPersonKey", () => {
 });
 
 describe("profileFromLookup", () => {
+  it.each(["picture_url", "profile_picture_url"])(
+    "retains a photo-only %s record for the exact saved person",
+    (field) => {
+      const result = { data: { linkedin_url: record.linkedin_url, [field]: record.picture_url } };
+      expect(profileFromLookup(result, ENDPOINT, KEY)?.facts).toMatchObject({
+        profileImageUrl: record.picture_url,
+        experience: [],
+        education: [],
+      });
+      expect(profileFromLookup(result, ENDPOINT, "linkedin:/in/another-person")).toBeNull();
+    },
+  );
   it("maps the person's own record into dated history, logos and photo", () => {
     const found = profileFromLookup(mcpResult, ENDPOINT, KEY);
     expect(found?.provider).toBe("coresignal");

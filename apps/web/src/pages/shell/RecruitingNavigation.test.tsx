@@ -105,7 +105,7 @@ it("distinguishes duplicate role titles by creation time without showing interna
   }
 });
 
-it("lists saved sequences without a role, in business wording, and hides them when the read fails", async () => {
+it("does not fetch or display sequences without a role in navigation", async () => {
   const source = { serverId: "server-1", serverRevision: 1, name: "CRM" };
   const organizationId = "00000000-0000-4000-8000-000000000001";
   const checkedAt = "2026-10-24T00:00:00.000Z";
@@ -178,14 +178,10 @@ it("lists saved sequences without a role, in business wording, and hides them wh
   try {
     await act(async () => render());
     await act(async () => {});
-    const toggle = [...container.querySelectorAll("button")].find((button) =>
-      button.textContent?.startsWith("Sequences without a role"),
+    expect(container.textContent).not.toContain("Sequences without a role");
+    expect(crmData.mock.calls.some(([input]) => input.operation === "unassignedSequences")).toBe(
+      false,
     );
-    expect(toggle?.textContent).toBe("Sequences without a role1");
-    await act(async () => toggle!.click());
-    expect(container.textContent).toContain("Spring outreach");
-    expect(container.textContent).toContain("Paused · 12 people · Replied 3");
-    expect(container.textContent).not.toContain("sequence-1");
   } finally {
     act(() => root.unmount());
   }

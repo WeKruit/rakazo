@@ -121,13 +121,15 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
       data-testid="bots-sidebar"
       data-bots-sidebar-density={botsSidebarDensity}
       data-collapsed={botsSidebarCollapsed ? "true" : "false"}
-      inert={botsSidebarCollapsed && !mobileSidebarOpen ? true : undefined}
+      inert={showToolActivity && botsSidebarCollapsed && !mobileSidebarOpen ? true : undefined}
       style={{ "--bots-sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
       className={`absolute inset-y-0 start-0 z-40 flex w-[calc(100%-48px)] max-w-[316px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar transition-[transform,width,opacity] md:relative md:z-auto md:translate-x-0 ${
         mobileSidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"
       } ${
         botsSidebarCollapsed
-          ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
+          ? showToolActivity
+            ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
+            : "md:w-16 md:max-w-16"
           : "md:w-(--bots-sidebar-width) md:max-w-none"
       }`}
     >
@@ -139,6 +141,11 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             </div>
           ) : null}
           <RecruitingNavigation
+            compact={botsSidebarCollapsed && !mobileSidebarOpen}
+            onSearch={() => {
+              model.setCommandPaletteOpen(true);
+              setMobileSidebarOpen(false);
+            }}
             loading={!initialBotsLoaded}
             onPrefetchRole={(id) =>
               prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)
@@ -190,7 +197,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
               setMobileSidebarOpen(false);
               navigate(kruitHref);
             }}
-            onCollapse={() => setBotsSidebarCollapsedPref(true)}
+            onCollapse={() => setBotsSidebarCollapsedPref(!botsSidebarCollapsed)}
             canOpenDashboard={Boolean(activeSnapshot?.threadId)}
             canCreateRole={
               Boolean(newRoleSource && canCreateRoleFrom(newRoleSource.id)) ||
@@ -230,12 +237,23 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] text-foreground/75">
               {initials}
             </span>
-            <span className="text-[14.5px] text-foreground/90">{userName}</span>
+            <span
+              className={
+                botsSidebarCollapsed && !showToolActivity
+                  ? "md:sr-only"
+                  : "text-[14.5px] text-foreground/90"
+              }
+            >
+              {userName}
+            </span>
           </>
         }
         triggerProps={{
           "data-testid": "user-menu-trigger",
-          className: "flex items-center gap-[11px] px-[18px] py-3.5",
+          className:
+            botsSidebarCollapsed && !showToolActivity
+              ? "flex items-center justify-center py-3.5"
+              : "flex items-center gap-[11px] px-[18px] py-3.5",
         }}
         side="top"
         align="start"
