@@ -532,7 +532,14 @@ export function firstPartyMcpUrl(value: string | undefined): string | undefined 
 }
 
 function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" | "endpoint">) {
-  if (server.secretId || server.transport !== "streamable_http") return undefined;
+  if (server.transport !== "streamable_http") return undefined;
+  // Outreach mail ships with the product: when the deployment has its account, every user's
+  // connection uses it, including one that still holds a key saved before.
+  if (server.endpoint === INSTANTLY_MCP) {
+    const key = process.env.INSTANTLY_API_KEY?.trim();
+    return key ? { key, label: "Outreach email", replacesSecret: true } : undefined;
+  }
+  if (server.secretId) return undefined;
   if (server.endpoint === "https://api.autumn.ai/mcp")
     return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
   if (server.endpoint === "https://mcp.fullenrich.com/mcp")
@@ -693,13 +700,14 @@ export async function loadMcpCredentialRecord(
   context: AdapterContext,
   onRef?: (ref: string, recordId: string) => void,
 ) {
-  const secret = server.secretId
-    ? await prisma.secret.findFirst({
-        where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
-      })
-    : null;
-  if (secret) onRef?.(secret.ciphertext, secret.id);
   const platformService = platformMcpCredential(server);
+  const secret =
+    server.secretId && !platformService?.replacesSecret
+      ? await prisma.secret.findFirst({
+          where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
+        })
+      : null;
+  if (secret) onRef?.(secret.ciphertext, secret.id);
   const deploymentKey = platformService?.key;
   if (platformService && !deploymentKey && !platformService.keyless)
     throw new Error(`${platformService.label} is not configured on this server`);
@@ -1648,7 +1656,7 @@ export class McpConnector implements ConnectorProvider {
       server,
       context,
     );
-    if (!secret || !plaintext)
+    if (!plaintext)
       throw new Error(
         `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
       );
@@ -1665,7 +1673,7 @@ export class McpConnector implements ConnectorProvider {
       throw new Error("An unambiguous existing API key is required");
     redactions.push(key);
     context.signal.throwIfAborted();
-    return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
+    return { server, key, secretId: secret?.id ?? null, digest: credentialDigest(plaintext) };
   }
 
   /** Resolve only this run's current workspace, never another role owned by the same user. */
