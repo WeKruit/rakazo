@@ -30,7 +30,7 @@
 //                  reports at its countdown if one shows and answers a bare "再来点"). Cases in a
 //                  wave run side by side; resume runs alone. approval (--only approval: a new
 //                  message never answers a waiting booking card) needs a calendar connection.
-//   --suite staging-quick  only the first, free wave (smoke, pages, memory, ui, approval): the
+//   --suite staging-quick  only the free waves (smoke, pages, memory, then ui): the
 //                  deploy gate. ui runs ui-regressions.mjs in a browser.
 //   --staging      allows the cases that touch shared state or restart the test server
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
@@ -218,7 +218,7 @@ const SELF_TALK = /\?\s*Wait\.|\bNeed correctly\b/;
 const mostlyChinese = (text) =>
   (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]/g)?.length ?? 0);
 /** Checks every recruiter-visible message must pass, whatever the case. */
-function commonChecks(messages, failures) {
+function commonChecks(messages, failures, { asked: sent = "" } = {}) {
   for (const message of recruiterSees(messages)) {
     const text = botText(message);
     // Replies follow the recruiter's language: English unless their last message was Chinese.
@@ -228,7 +228,7 @@ function commonChecks(messages, failures) {
         !item.internal &&
         Date.parse(item.createdAt) <= Date.parse(message.createdAt),
     );
-    const chinese = asked ? mostlyChinese(botText(asked)) : false;
+    const chinese = mostlyChinese(asked ? botText(asked) : sent);
     if (!chinese && mostlyChinese(text)) failures.push(`not English: "${text.slice(0, 80)}"`);
     if (!chinese && text.includes("、"))
       failures.push(`Chinese list separator: "${text.slice(0, 80)}"`);
@@ -575,14 +575,12 @@ async function stage(name, body) {
 const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.json`), "utf8"));
 // Cases in one wave run side by side, like recruiters working at once; resume restarts the
 // server, so it runs alone after the others.
-const STAGING_WAVES = [
-  ["smoke", "pages", "memory", "ui", "approval"],
-  ["progress", "midwork"],
-  ["resume"],
-];
+// ui talks to Kruit too, so it waits for memory. approval stays out until staging has its own
+// Cal.com connection: today Scheduling asks to connect one instead of showing the booking card.
+const STAGING_WAVES = [["smoke", "pages", "memory"], ["ui"], ["progress", "midwork"], ["resume"]];
 // The release gate's quick part: free, about six minutes. The full suite searches, so it is the
 // release thread's one paid run a day.
-const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 1) : STAGING_WAVES;
+const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 2) : STAGING_WAVES;
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
@@ -1478,7 +1476,7 @@ try {
       `记住一个长期偏好：以后给我汇报时，把我的团队叫做「${team}」组。`,
       { fixture: true, limitMs: 3 * 60_000, until: answered },
     );
-    commonChecks(told.replies, failures);
+    commonChecks(told.replies, failures, { asked: "记住一个长期偏好" });
     let saved;
     for (const end = Date.now() + 90_000; !saved && Date.now() < end; await sleep(5_000))
       saved = (await memoryDocs()).find((doc) => doc.content.includes(team));

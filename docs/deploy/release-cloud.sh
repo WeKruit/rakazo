@@ -14,7 +14,7 @@
 #                                   # and database; needs RAKAZO_TEST_URL). No unit tests, no gap wait.
 #                                   # Production only accepts a main SHA whose code passed there first.
 #                                   # A test deploy then runs the quick staging journeys (sign-in, pages,
-#                                   # Kruit memory, booking card, browser regressions; free, ~6 min); only
+#                                   # Kruit memory, browser regressions; free, ~8 min); only
 #                                   # a pass marks the commit as passed.
 #                                   # Needs RELEASE_CASES and RAKAZO_EMAIL/RAKAZO_PASSWORD.
 #   RELEASE_TARGET=test release-cloud.sh <SHA> journeys
@@ -183,7 +183,7 @@ if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 
   die "$SHORT has not passed on the test environment; run RELEASE_TARGET=test first (RELEASE_SKIP_TEST_ENV=$SHORT for an emergency)"
 fi
 # The recruiter's real path on the test environment, run on the deployed build. "staging-quick"
-# (sign-in, pages, Kruit memory, booking card, browser regressions) gates the deploy; "staging" adds the first question, searches with
+# (sign-in, pages, Kruit memory, browser regressions) gates the deploy; "staging" adds the first question, searches with
 # a countdown, mid-search messages and a server restart mid-search (about 20 minutes and a few
 # dollars of capped searches). Nothing is sent: the test environment has no mail or outreach
 # credentials. $1 is the release folder, $2 the suite.

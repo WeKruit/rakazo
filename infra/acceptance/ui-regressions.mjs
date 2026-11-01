@@ -37,6 +37,8 @@ fs.mkdirSync(OUT, { recursive: true });
 const ONLY = option("--only")?.split(",");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FIXTURE_MARK = "测试固定 · ";
+// Each run asks something new: Kruit rightly refuses to send the same card twice.
+const tag = `T${Date.now().toString(36).slice(-5)}`;
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -156,7 +158,7 @@ try {
     if (!kruit) return failures.push("no Kruit chat on this account");
     const replies = await ask(
       kruit.id,
-      "测试：请只发一张可以多选的问题卡片问我这个测试岗位接受哪些城市，选项 Atlanta、Dallas、Houston、Chicago。不要做别的事。",
+      `测试 ${tag}：请只发一张可以多选的问题卡片问我测试岗位 ${tag} 接受哪些城市，问题里写上 ${tag}，选项 Atlanta、Dallas、Houston、Chicago。不要做别的事。`,
       (items) => items.some((message) => message.blocks?.some((block) => block.kind === "ask")),
       2 * 60_000,
     );
@@ -166,7 +168,14 @@ try {
     if (!card) return failures.push("Kruit sent no question card within 2 min");
     if (!card.multiple) failures.push("the card was sent as single-choice (multiple is off)");
     await page.goto(`${ORIGIN}/app/g/${kruit.id}`);
-    const boxes = page.getByRole("checkbox");
+    // This run's card: the newest one with checkboxes and a send button.
+    const cardBox = page
+      .locator("div")
+      .filter({ has: page.getByRole("checkbox") })
+      .filter({ has: page.getByRole("button", { name: /^(Send answer|Submit|Send|提交|发送)$/ }) })
+      .filter({ hasText: tag })
+      .last();
+    const boxes = cardBox.getByRole("checkbox");
     await boxes
       .first()
       .waitFor({ timeout: 20_000 })
@@ -179,14 +188,11 @@ try {
     if (!(await boxes.nth(1).isEnabled()))
       return failures.push("the first click submitted the card");
     await boxes.nth(1).click();
-    await page
-      .getByRole("button", { name: /^(Submit|Send|提交|发送)$/ })
-      .last()
-      .click();
+    await cardBox.getByRole("button", { name: /^(Send answer|Submit|Send|提交|发送)$/ }).click();
     await sleep(3_000);
     const answer = (await messages(kruit.id)).filter((message) => message.role === "user").at(-1);
     const picked = textOf(answer ?? {});
-    if (!(/Atlanta|Dallas|Houston|Chicago/.test(picked) && /[,，、]|\band\b/.test(picked)))
+    if (!(/Atlanta|Dallas|Houston|Chicago/.test(picked) && /[,，、;；]|\band\b/.test(picked)))
       failures.push(`the sent answer does not hold two picks: "${picked.slice(0, 80)}"`);
   });
 
@@ -219,9 +225,17 @@ try {
     await box.waitFor({ timeout: 20_000 });
     await box.fill(jd);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
+    // The page moves to the new role's chat; its id names the role this check made.
+    await page
+      .waitForURL(/\/app\/g\/(?!recruiting-global)[^/?]+/, { timeout: 30_000 })
+      .catch(() => {});
+    const id = page.url().match(/\/app\/g\/((?!recruiting-global)[^/?]+)/)?.[1];
     let created;
     for (let end = Date.now() + 90_000; Date.now() < end; await sleep(3_000)) {
-      created = (await groups()).find((group) => !before.has(group.id));
+      const now = await groups().catch(() => []);
+      created = id
+        ? now.find((group) => group.id === id)
+        : now.find((group) => !before.has(group.id));
       if (created && !/^new role$/i.test(created.name.trim())) break;
     }
     if (!created) return failures.push("no new role chat appeared within 90 s");
