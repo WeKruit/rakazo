@@ -13,7 +13,7 @@ import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
 import type * as DatabaseModule from "@rakazo/db";
 import type { PauseRunForInput } from "@rakazo/db";
-import { IsolationError, RecruitingConflictError } from "@rakazo/db";
+import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
@@ -241,6 +241,14 @@ function fixture({
     createdAt: new Date(),
   };
   const externalEffect = {
+    findFirst: vi.fn(
+      async ({ where }: { where: { id?: string; status?: string } }) =>
+        effects.find(
+          (effect) =>
+            (!where.id || effect.id === where.id) &&
+            (!where.status || effect.status === where.status),
+        ) ?? null,
+    ),
     findMany: vi.fn(
       async ({
         where,
@@ -449,10 +457,11 @@ function fixture({
     setCalls(next: typeof calls) {
       calls = next;
     },
-    async run({ allowFailure = false } = {}) {
+    async run({ allowFailure = false, expectModel = true } = {}) {
       run.status = "queued";
       await executor.continueRun(run.id, "worker-1");
-      expect(runtimeRun).toHaveBeenCalled();
+      if (expectModel) expect(runtimeRun).toHaveBeenCalled();
+      else expect(runtimeRun).not.toHaveBeenCalled();
       expect(prisma.attempt.update).not.toHaveBeenCalled();
       if (!allowFailure)
         expect(finalizeRun).not.toHaveBeenCalledWith(
@@ -1689,9 +1698,8 @@ describe.each([
 });
 
 const sendActions = [
-  { id: "allow", label: "Confirm and send" },
-  { id: "always", label: "Send when I say send" },
-  { id: "deny", label: "Cancel" },
+  { id: "allow", label: "Send" },
+  { id: "deny", label: "Discard" },
 ];
 const onceActions = [
   { id: "allow", label: "Allow once" },
@@ -1741,12 +1749,12 @@ describe("recruiter-instructed email send", () => {
     return f;
   }
 
-  it("sends without a card when the recruiter says send after seeing the exact text", async () => {
+  it("requires the Send click even after the recruiter says send and saw the exact text", async () => {
     const f = await instructedSend(
       "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
     );
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
   });
 
   it("keeps the card when the exact text was never shown", async () => {
@@ -1773,12 +1781,12 @@ describe("recruiter-instructed email send", () => {
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
   });
 
-  it("sends on the recruiter's word when they chose send when I say send", async () => {
+  it("requires the Send click even with a previously saved send preference", async () => {
     const f = await instructedSend("我会回复 candidate@example.test 周二可以。", "发吧", [
       { effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" },
     ]);
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
   });
 
   it("keeps the card for a send the recruiter did not ask for, even with that choice saved", async () => {
@@ -2073,6 +2081,66 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     body: { text: replyArgs.body_text },
     ue_type: 3,
   };
+
+  it("records a clicked reply as failed without dispatch when its original source is no longer authorized", async () => {
+    const f = replyFixture();
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.status = "approved";
+    effect.result = { mailReplyApproval: { ...draft, status: "sending" } };
+    replyProof.mockResolvedValue(null);
+    f.runtimeRun.mockClear();
+    await f.run({ expectModel: false });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(effect).toMatchObject({ status: "failed", result: { dispatched: false } });
+    expect(f.effects).toHaveLength(1);
+  });
+
+  it("dispatches a clicked edited reply through the same effect before any model call", async () => {
+    const editedBody = "The recruiter edited this sentence.";
+    const f = replyFixture({
+      structuredContent: {
+        ...sentEmail,
+        body: { text: editedBody },
+        cc_address_email_list: "copy@example.test",
+      },
+    });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    const originalId = effect.id;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: ["copy@example.test"],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        cc: ["copy@example.test"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run({ expectModel: false });
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual({
+      ...replyArgs,
+      body_text: editedBody,
+      cc_address_email_list: "copy@example.test",
+    });
+    expect(f.effects).toHaveLength(1);
+    expect(effect).toMatchObject({
+      id: originalId,
+      status: "completed",
+      result: { status: "sent_recorded" },
+    });
+  });
 
   it.each([
     null,
@@ -3894,5 +3962,94 @@ describe("unattended memory writes after external text", () => {
       expect.objectContaining({ where: expect.objectContaining({ type: "agent.tool.called" }) }),
     );
     expect(f.results.at(-1)).toEqual({ ok: true, path: "MEMORY.md", revision: 1 });
+  });
+});
+
+describe("editable Gmail reply approval", () => {
+  it("keeps the pinned mailbox/anchor and sends edited text once without a model roundtrip", async () => {
+    const args = {
+      thread_id: "gmail-thread",
+      recipient_email: "candidate@example.test",
+      message_body: "Initial Gmail reply",
+      user_id: "me",
+    };
+    const f = fixture({
+      name: "GMAIL_REPLY_TO_THREAD",
+      readOnly: false,
+      inputSchema: { type: "object" },
+      route: { connectorId: "composio", toolName: "GMAIL_REPLY_TO_THREAD" },
+      connectorResults: {
+        GMAIL_GET_PROFILE: { data: { emailAddress: "sender@example.test" } },
+        GMAIL_FETCH_MESSAGE_BY_THREAD_ID: {
+          data: {
+            messages: [
+              {
+                messageId: "gmail-anchor",
+                sender: "candidate@example.test",
+                to: ["sender@example.test"],
+                subject: "Original Gmail subject",
+              },
+            ],
+          },
+        },
+        GMAIL_REPLY_TO_THREAD: { data: { id: "gmail-sent", threadId: "gmail-thread" } },
+      },
+    });
+    f.prisma.connection.findMany.mockResolvedValue([
+      {
+        id: "gmail-connection",
+        connectorId: "composio",
+        provider: "gmail",
+        providerRef: "gmail-account",
+        displayName: "Gmail",
+        status: "connected",
+      },
+    ] as never);
+    f.setCalls([{ args, executionId: "gmail-draft" }]);
+    await f.run();
+    const effect = f.effects.find((item) => item.kind === "GMAIL_REPLY_TO_THREAD")!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    expect(draft).toMatchObject({
+      from: "sender@example.test",
+      subject: "Original Gmail subject",
+      inReplyTo: { emailId: "gmail-anchor", sourceId: "gmail-connection" },
+    });
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: "Edited Gmail sentence",
+      cc: ["copy@example.test"],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: "Edited Gmail sentence",
+        cc: ["copy@example.test"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    f.execute.mockClear();
+    await f.run({ expectModel: false });
+    const sends = f.execute.mock.calls.filter(
+      ([call]) => call.route?.toolName === "GMAIL_REPLY_TO_THREAD",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.[0]).toMatchObject({
+      route: {
+        connectorId: "composio",
+        resourceId: "gmail-connection",
+        resourceRevision: "gmail-account",
+      },
+      args: {
+        ...args,
+        message_body: "Edited Gmail sentence",
+        is_html: false,
+        cc: ["copy@example.test"],
+      },
+    });
+    expect(f.effects.filter((item) => item.kind === "GMAIL_REPLY_TO_THREAD")).toHaveLength(1);
+    expect(effect.status).toBe("completed");
   });
 });

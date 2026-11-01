@@ -541,3 +541,44 @@ it("submits every picked option plus typed text on a multi-select question", asy
     container.remove();
   }
 });
+
+it.each(["Create address", "Use this address"])(
+  "keeps sender %s consent distinct from creating a space or completing provisioning",
+  async (label) => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const block: AskBlock = {
+      kind: "ask",
+      text: "Create this sending address?",
+      detail: "Example Recruiting <team@sender.example>",
+      status: "pending",
+      approvalEffectId: "sender-confirmation",
+      actions: [
+        { id: "allow", label, outcome: "created" },
+        { id: "deny", label: "Change the address", outcome: "cancelled" },
+      ],
+    };
+    try {
+      await act(async () => root.render(<AskCard block={block} canAnswer onAnswer={vi.fn()} />));
+      expect(
+        [...container.querySelectorAll("button")].map((button) => button.textContent),
+      ).toContain(label);
+      expect(container.textContent).not.toContain("Create space");
+      await act(async () =>
+        root.render(
+          <AskCard
+            block={{ ...block, status: "answered", answer: "allow" }}
+            canAnswer={false}
+            onAnswer={vi.fn()}
+          />,
+        ),
+      );
+      expect(container.textContent).toContain("Address confirmed");
+      expect(container.textContent).not.toContain("Created");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  },
+);

@@ -243,7 +243,42 @@ export const AskFormResponseSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("decline") }),
 ]);
 export type AskFormResponse = z.infer<typeof AskFormResponseSchema>;
-export const AskAnswerSchema = z.union([z.string().min(1), AskFormResponseSchema]);
+export const MailReplySendAnswerSchema = z.strictObject({
+  action: z.literal("send"),
+  body: z
+    .string()
+    .min(1)
+    .max(20_000)
+    .refine((value) => Boolean(value.trim())),
+  cc: z.array(z.email()).max(100),
+});
+export type MailReplySendAnswer = z.infer<typeof MailReplySendAnswerSchema>;
+export const MailReplySchema = z.strictObject({
+  from: z.string().nullable(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  bcc: z.array(z.string()),
+  subject: z.string(),
+  body: z.string(),
+  inReplyTo: z.strictObject({
+    emailId: Id,
+    sourceId: Id,
+    threadId: z.string().nullable(),
+    subject: z.string().nullable(),
+    sender: z.string().nullable(),
+    inboxKey: z.string().optional(),
+  }),
+  status: z.enum(["needs_approval", "sending", "sent", "discarded", "failed", "unknown"]),
+  sentAt: IsoDate.nullable(),
+  canAnswer: z.boolean().optional(),
+  error: z.string().optional(),
+});
+export type MailReply = z.infer<typeof MailReplySchema>;
+export const AskAnswerSchema = z.union([
+  z.string().min(1),
+  AskFormResponseSchema,
+  MailReplySendAnswerSchema,
+]);
 export type AskAnswer = z.infer<typeof AskAnswerSchema>;
 
 export function parseAskFormResponse(
@@ -423,6 +458,7 @@ export const AskBlockSchema = z
     kind: z.literal("ask"),
     text: z.string(),
     approvalEffectId: Id.optional(),
+    mailReply: MailReplySchema.optional(),
     approvalEvidenceHash: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -453,6 +489,17 @@ export const AskBlockSchema = z
       )
       .optional(),
   })
+  .refine(
+    (block) =>
+      !block.mailReply ||
+      Boolean(
+        block.approvalEffectId &&
+          block.actions?.every((action) => ["allow", "deny"].includes(action.id)) &&
+          block.actions.some((action) => action.id === "allow") &&
+          block.actions.some((action) => action.id === "deny"),
+      ),
+    "A mail reply belongs to one one-time native approval",
+  )
   .refine(
     (block) =>
       !block.requestedSchema ||

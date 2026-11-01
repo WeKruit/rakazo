@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { buildApprovalAskBlock } from "@rakazo/adapters";
 import type {
   Actor,
+  MailReplyMessageFilter,
   MessageBlock,
   ProductEvent,
   ThreadMessage,
@@ -28,6 +29,7 @@ import {
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient } from "@rakazo/db";
+import { projectMailReplyCards } from "@rakazo/db";
 
 type MessageDb = PrismaClient | Prisma.TransactionClient;
 
@@ -95,6 +97,13 @@ export async function projectRecruitingApprovalFiles<
     ),
   ];
   if (!ids.length) return clean;
+  const mailIds = candidates.flatMap((message) =>
+    message.blocks.flatMap((block) =>
+      block.kind === "ask" && block.mailReply && block.approvalEffectId
+        ? [block.approvalEffectId]
+        : [],
+    ),
+  );
 
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const where = {
@@ -108,13 +117,21 @@ export async function projectRecruitingApprovalFiles<
     status: true,
     request: true,
     result: true,
-    run: { select: { botId: true } },
+    updatedAt: true,
+    run: { select: { botId: true, status: true } },
   } as const;
   const effects = await prisma.externalEffect.findMany({
     where: {
       ...where,
       id: { in: ids },
-      kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] },
+      ...(mailIds.length
+        ? {
+            OR: [
+              { kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] } },
+              { id: { in: mailIds } },
+            ],
+          }
+        : { kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] } }),
     },
     select,
   });
@@ -258,7 +275,7 @@ export async function projectRecruitingApprovalFiles<
       ? [{ effect, input: parsed.data }]
       : [];
   });
-  if (!documents.length) return clean;
+  if (!documents.length) return projectMailReplyCards(prisma, actor, clean, effects);
   const artifactIds = [...new Set(documents.map(({ input }) => input.documents.jdText.artifactId))];
   const [artifacts, thread] = await Promise.all([
     prisma.artifact.findMany({
@@ -289,68 +306,75 @@ export async function projectRecruitingApprovalFiles<
     sources.success && criteria.success
       ? [...sources.data, ...criteria.data.flatMap((criterion) => criterion.sourceRefs)]
       : [];
-  return clean.map((message) => {
-    if (!candidates.includes(message)) return message;
-    const matches = documents.filter(
-      ({ effect }) =>
-        effect.runId === message.runId &&
-        effect.run.botId === message.botId &&
-        message.blocks.some(
-          (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
-        ),
-    );
-    return {
-      ...message,
-      blocks: message.blocks.map((block) => {
-        if (block.kind !== "file") return block;
-        const match = matches.find(
-          ({ input }) => input.documents.jdText.artifactId === block.artifactId,
-        );
-        if (!match) return block;
-        const ref = match.input.documents.jdText;
-        const artifact = artifacts.find((row) => row.id === ref.artifactId);
-        if (
-          !artifact ||
-          artifact.hash !== ref.sha256 ||
-          artifact.name !== block.name ||
-          artifact.size !== block.size ||
-          artifact.mimeType !== block.mimeType
-        )
-          return block;
-        const source =
-          role?.id === match.input.roleId &&
-          role.revision === match.input.expectedRoleRevision &&
-          revision?.id === role.currentRevisionId &&
-          revision.roleId === role.id &&
-          revision.revision === role.revision
-            ? refs.find(
-                (source) =>
-                  source.readState === "read" &&
-                  source.quote &&
-                  source.anchor.kind === "artifact" &&
-                  source.anchor.locator === "text" &&
-                  source.anchor.artifact.artifactId === ref.artifactId &&
-                  source.anchor.artifact.sha256 === ref.sha256 &&
-                  refs.every((other) => other.id !== source.id || isDeepStrictEqual(other, source)),
-              )
-            : undefined;
-        // Without a readable saved source the plain file card (name, size, download) is more useful.
-        if (!source || !revision) return block;
-        return {
-          ...block,
-          preview: {
-            label: "Job description",
-            source: {
-              kind: "role" as const,
-              threadId,
-              roleRevisionId: revision.id,
-              sourceRefId: source.id,
+  return projectMailReplyCards(
+    prisma,
+    actor,
+    clean.map((message) => {
+      if (!candidates.includes(message)) return message;
+      const matches = documents.filter(
+        ({ effect }) =>
+          effect.runId === message.runId &&
+          effect.run.botId === message.botId &&
+          message.blocks.some(
+            (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+          ),
+      );
+      return {
+        ...message,
+        blocks: message.blocks.map((block) => {
+          if (block.kind !== "file") return block;
+          const match = matches.find(
+            ({ input }) => input.documents.jdText.artifactId === block.artifactId,
+          );
+          if (!match) return block;
+          const ref = match.input.documents.jdText;
+          const artifact = artifacts.find((row) => row.id === ref.artifactId);
+          if (
+            !artifact ||
+            artifact.hash !== ref.sha256 ||
+            artifact.name !== block.name ||
+            artifact.size !== block.size ||
+            artifact.mimeType !== block.mimeType
+          )
+            return block;
+          const source =
+            role?.id === match.input.roleId &&
+            role.revision === match.input.expectedRoleRevision &&
+            revision?.id === role.currentRevisionId &&
+            revision.roleId === role.id &&
+            revision.revision === role.revision
+              ? refs.find(
+                  (source) =>
+                    source.readState === "read" &&
+                    source.quote &&
+                    source.anchor.kind === "artifact" &&
+                    source.anchor.locator === "text" &&
+                    source.anchor.artifact.artifactId === ref.artifactId &&
+                    source.anchor.artifact.sha256 === ref.sha256 &&
+                    refs.every(
+                      (other) => other.id !== source.id || isDeepStrictEqual(other, source),
+                    ),
+                )
+              : undefined;
+          // Without a readable saved source the plain file card (name, size, download) is more useful.
+          if (!source || !revision) return block;
+          return {
+            ...block,
+            preview: {
+              label: "Job description",
+              source: {
+                kind: "role" as const,
+                threadId,
+                roleRevisionId: revision.id,
+                sourceRefId: source.id,
+              },
             },
-          },
-        };
-      }),
-    };
-  });
+          };
+        }),
+      };
+    }),
+    effects,
+  );
 }
 
 export async function projectRecruitingApprovalEvent(
@@ -439,12 +463,30 @@ export async function loadMessagePage(
   around?: { messageId?: string; seq?: number },
   includePeerRuns = false,
   includePeerReceipts = false,
+  mailReplyFor?: MailReplyMessageFilter,
 ): Promise<ThreadMessagePage> {
+  const mailFilter: Prisma.MessageWhereInput = mailReplyFor
+    ? {
+        OR: [
+          ...(mailReplyFor.threadId ? [{ threadId: mailReplyFor.threadId }] : []),
+          ...(mailReplyFor.emailIds ?? []).map((emailId) => ({ emailId })),
+        ].map((anchor) => ({
+          blocks: {
+            array_contains: [
+              {
+                kind: "ask",
+                mailReply: { inReplyTo: { sourceId: mailReplyFor.sourceId, ...anchor } },
+              },
+            ],
+          },
+        })),
+      }
+    : {};
   if (around) {
     let targetSeq = around.seq;
     if (targetSeq === undefined && around.messageId) {
       const row = await prisma.message.findFirst({
-        where: { id: around.messageId, threadId },
+        where: { ...mailFilter, id: around.messageId, threadId },
         select: { seq: true },
       });
       targetSeq = row?.seq;
@@ -454,7 +496,7 @@ export async function loadMessagePage(
       const minSeq = Math.max(0, targetSeq - half);
       const maxSeq = targetSeq + half;
       const rows = await prisma.message.findMany({
-        where: { threadId, seq: { gte: minSeq, lte: maxSeq } },
+        where: { ...mailFilter, threadId, seq: { gte: minSeq, lte: maxSeq } },
         orderBy: { seq: "asc" },
         take: pageSize,
         include: { replyTo: { select: replySelection } },
@@ -463,7 +505,9 @@ export async function loadMessagePage(
       const coveredThroughSeq = truncated ? (rows[rows.length - 1]?.seq ?? maxSeq) : maxSeq;
       const first = rows[0];
       const hasOlder = first
-        ? (await prisma.message.count({ where: { threadId, seq: { lt: first.seq } } })) > 0
+        ? (await prisma.message.count({
+            where: { ...mailFilter, threadId, seq: { lt: first.seq } },
+          })) > 0
         : false;
       // Peer text/activity stays out of the normal transcript (including the
       // around target). Receipts remain via withoutPeerRunMessages; full peer
@@ -482,6 +526,7 @@ export async function loadMessagePage(
   while (true) {
     const rows = await prisma.message.findMany({
       where: {
+        ...mailFilter,
         threadId,
         ...(cursor === undefined ? {} : { seq: { lt: cursor } }),
       },

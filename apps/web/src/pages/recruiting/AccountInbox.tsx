@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
+import { MailReplyCards } from "./MailReplyCards";
 import { ProfileImage } from "./ProfileImage";
 import { initials, storedProfileFields } from "./profile";
 import { RetryNotice } from "./RetryNotice";
@@ -14,6 +15,7 @@ import { emailThreadIdentity, useInboxReadState } from "./useInboxReadState";
 
 type AccountItem = RecruitingAccountViewOutput["items"][number];
 type Props = {
+  accountKey?: string;
   roles: RecruitingAccountViewOutput["roles"];
   items: AccountItem[];
   spaceId?: string;
@@ -140,6 +142,7 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
 }
 
 export function AccountInbox({
+  accountKey,
   roles,
   items,
   spaceId,
@@ -620,6 +623,41 @@ export function AccountInbox({
                   }
                   onSelect={(message) => setSelectedEmail(message.id)}
                   readState={readState}
+                />
+              ) : null}
+              {email.sourceId && roles.find((role) => role.id === selected.roleId)?.groupId ? (
+                <MailReplyCards
+                  key={JSON.stringify([
+                    selected.key,
+                    email.sourceId,
+                    email.threadId ?? email.providerMessageId ?? email.id,
+                  ])}
+                  conversation={{
+                    groupId: roles.find((role) => role.id === selected.roleId)!.groupId!,
+                  }}
+                  readCacheScope={accountKey}
+                  filter={{
+                    sourceId: email.sourceId,
+                    ...(email.threadId ? { threadId: email.threadId } : {}),
+                    emailIds: [email.providerMessageId ?? email.id],
+                  }}
+                />
+              ) : email.sourceId && roles.find((role) => role.id === selected.roleId)?.botId ? (
+                <MailReplyCards
+                  key={JSON.stringify([
+                    selected.key,
+                    email.sourceId,
+                    email.threadId ?? email.providerMessageId ?? email.id,
+                  ])}
+                  conversation={{
+                    botId: roles.find((role) => role.id === selected.roleId)!.botId!,
+                  }}
+                  readCacheScope={accountKey}
+                  filter={{
+                    sourceId: email.sourceId,
+                    ...(email.threadId ? { threadId: email.threadId } : {}),
+                    emailIds: [email.providerMessageId ?? email.id],
+                  }}
                 />
               ) : null}
               {serverThread && detail?.key === detailKey && detail.nextCursor ? (

@@ -44,7 +44,11 @@ describe("native reply_to_email", () => {
       context,
       "server",
       "native_instantly_reply_to_email",
-      { reply_to_uuid: ORIGINAL.id, body: { text: "收到，谢谢" } },
+      {
+        reply_to_uuid: ORIGINAL.id,
+        body: { text: "收到，谢谢" },
+        cc_address_email_list: "copy@example.test",
+      },
     );
     expect(result).toEqual({ id: "sent-1" });
     expect(rest).toHaveBeenLastCalledWith("POST", "/emails/reply", {
@@ -52,6 +56,7 @@ describe("native reply_to_email", () => {
       eaccount: "team@example.test",
       subject: "Re: Founding Engineer",
       body: { text: "收到，谢谢" },
+      cc_address_email_list: "copy@example.test",
     });
   });
 
@@ -83,7 +88,7 @@ describe("native reply_to_email", () => {
       reply_to_uuid: ORIGINAL.id,
       body: { text: "收到，谢谢" },
     });
-    expect(display).toEqual({
+    expect(display).toMatchObject({
       to: "ada@example.test",
       from: "team@example.test",
       subject: "Re: Founding Engineer",
@@ -322,11 +327,12 @@ describe("shared mail account isolation", () => {
       { kind: "instantly_role_campaign", result: null },
     ]);
     await expect(
-      ownedInstantly({ externalEffect: { findMany } } as never, "s", "server"),
-    ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["me@ours.test", "second@ours.test"] });
+      ownedInstantly({ externalEffect: { findMany } } as never, "s", "server", "owner"),
+    ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["second@ours.test"] });
     expect(findMany).toHaveBeenCalledWith({
       where: {
         spaceId: "s",
+        run: { userId: "owner", spaceId: "s" },
         kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
         status: "completed",
         request: { path: ["serverId"], equals: "server" },

@@ -8,6 +8,14 @@ import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
+import {
+  confirmedSendingMailboxes,
+  defaultSendingMailbox,
+  EnsureSenderInput,
+  ensureSendingIdentity,
+  requireSendingMailboxReady,
+  sendingMailboxState,
+} from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
@@ -162,6 +170,11 @@ const ReplyToEmailInput = z.strictObject({
     "Your connected mailbox that sends the reply; omit to use the mailbox that holds the original email.",
   ),
   subject: z.string().min(1).max(500).optional().describe('Omit for "Re: <original subject>".'),
+  cc_address_email_list: z
+    .string()
+    .max(10_000)
+    .refine((value) => !/[\r\n\0]/.test(value))
+    .optional(),
   body: z.strictObject({
     text: z.string().min(1).max(20_000),
     html: z.string().min(1).max(50_000).optional(),
@@ -177,6 +190,12 @@ const tool = (name: string, schema: z.ZodType, readOnly: boolean, description: s
   description: `${LOCAL} ${description}`,
 });
 export const nativeInstantlyWrites = [
+  tool(
+    "ensure_sender",
+    EnsureSenderInput,
+    false,
+    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. First ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+  ),
   tool(
     "get_role_draft",
     ReadRoleDraftInput,
@@ -363,10 +382,17 @@ function enrollable(status: unknown) {
     );
 }
 
-async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
+async function requireOwnMailbox(
+  rest: InstantlyRest,
+  eaccount: string,
+  allowPendingSender = false,
+) {
   try {
     await rest("GET", `/accounts/${encodeURIComponent(eaccount)}`);
+    return true;
   } catch (error) {
+    if (allowPendingSender && error instanceof InstantlyRestError && error.status === 404)
+      return false;
     if (error instanceof InstantlyRestError && error.status === 404)
       throw new Error(`${eaccount} is not one of your connected Instantly mailboxes`);
     if (error instanceof IsolationError)
@@ -528,9 +554,16 @@ function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>)
   };
 }
 
-async function createCampaign(rest: InstantlyRest, input: z.output<typeof CreateCampaignInput>) {
-  await requireOwnMailbox(rest, input.eaccount);
-  return rest("POST", "/campaigns", campaignBody(input.name, input));
+async function createCampaign(
+  rest: InstantlyRest,
+  input: z.output<typeof CreateCampaignInput>,
+  allowPendingSender = false,
+) {
+  const connected = await requireOwnMailbox(rest, input.eaccount, allowPendingSender);
+  return rest("POST", "/campaigns", {
+    ...campaignBody(input.name, input),
+    email_list: connected ? [input.eaccount] : [],
+  });
 }
 
 /** The provider can store a body as blank (it drops one containing "&"), so read it back. */
@@ -592,11 +625,13 @@ export async function lastUsedMailbox(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
   serverId: string,
+  userId: string,
 ) {
   const effect = await prisma.externalEffect.findFirst({
     where: {
       spaceId,
       kind: "instantly_role_campaign",
+      run: { userId, spaceId },
       status: "completed",
       request: { path: ["serverId"], equals: serverId },
     },
@@ -614,11 +649,13 @@ async function defaultMailbox(
   context: AdapterContext,
   serverId: string,
 ) {
+  const confirmed = await defaultSendingMailbox(prisma, context);
+  if (confirmed) return confirmed;
   const accounts = await rest("GET", "/accounts?limit=100");
   const emails = (Array.isArray(accounts.items) ? (accounts.items as { email?: unknown }[]) : [])
     .map((item) => item.email)
     .filter((email): email is string => typeof email === "string");
-  const last = await lastUsedMailbox(prisma, context.spaceId, serverId);
+  const last = await lastUsedMailbox(prisma, context.spaceId, serverId, context.userId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
   if (!picked)
     throw new Error(
@@ -635,6 +672,7 @@ export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
   3: "Completed",
 };
 export type InstantlyActivationDisplay = {
+  senderState?: { state: string; warmup: string; readyAt: null };
   campaignName: string | null;
   status: string | null;
   mailbox: string | null;
@@ -697,10 +735,12 @@ export async function ownedInstantly(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
   serverId: string,
+  userId: string,
 ): Promise<{ campaigns: string[]; mailboxes: string[] }> {
   const effects = await prisma.externalEffect.findMany({
     where: {
       spaceId,
+      run: { userId, spaceId },
       kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
       status: "completed",
       request: { path: ["serverId"], equals: serverId },
@@ -713,7 +753,7 @@ export async function ownedInstantly(
     const value = (result ?? {}) as Partial<RoleBinding> & { email?: unknown };
     if (kind === "instantly_role_campaign" && typeof value.campaignId === "string")
       campaigns.add(value.campaignId);
-    const sender = kind === "instantly_sender_account" ? value.email : value.eaccount;
+    const sender = kind === "instantly_sender_account" ? value.email : undefined;
     if (typeof sender === "string" && sender.includes("@")) mailboxes.add(mailboxKey(sender));
   }
   return { campaigns: [...campaigns].sort(), mailboxes: [...mailboxes].sort() };
@@ -1004,6 +1044,19 @@ export async function describeCampaignActivation(
           : { firstEmail: null };
   return {
     ...("refusal" in plan ? { refusal: plan.refusal } : {}),
+    ...(campaign?.senderState &&
+    typeof campaign.senderState === "object" &&
+    !Array.isArray(campaign.senderState) &&
+    typeof (campaign.senderState as Record<string, unknown>).state === "string" &&
+    typeof (campaign.senderState as Record<string, unknown>).warmup === "string"
+      ? {
+          senderState: {
+            state: String((campaign.senderState as Record<string, unknown>).state),
+            warmup: String((campaign.senderState as Record<string, unknown>).warmup),
+            readyAt: null,
+          },
+        }
+      : {}),
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
     status:
       typeof campaign?.status === "number"
@@ -1024,6 +1077,7 @@ export type InstantlyReplyDisplay = {
   subject: string;
   inReplyTo: string | null;
   body: string;
+  original?: Record<string, unknown>;
 };
 /** Vendor-free facts for the reply confirmation card; the original is read with the native get_email tool. */
 export async function describeReplyToEmail(
@@ -1053,6 +1107,7 @@ export async function describeReplyToEmail(
           .join(", ")
       : null,
     body: input.success ? input.data.body.text : "",
+    original,
   };
 }
 
@@ -1062,12 +1117,17 @@ async function readEmail(rest: InstantlyRest, id: string) {
   return email;
 }
 
-async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToEmailInput>) {
+async function replyToEmail(
+  rest: InstantlyRest,
+  input: z.output<typeof ReplyToEmailInput>,
+  ready?: (email: string) => Promise<unknown>,
+) {
   const original = await readEmail(rest, input.reply_to_uuid);
   const eaccount =
     input.eaccount ?? (typeof original.eaccount === "string" ? original.eaccount : "");
   if (!eaccount) throw new Error("The original email names no mailbox; pass eaccount");
   await requireOwnMailbox(rest, eaccount);
+  await ready?.(eaccount);
   if (typeof original.eaccount === "string" && !sameAddress(original.eaccount, eaccount))
     throw new Error(`${input.reply_to_uuid} is not in the ${eaccount} mailbox`);
   const subject =
@@ -1080,6 +1140,9 @@ async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToE
     eaccount,
     subject,
     body: input.body,
+    ...(input.cc_address_email_list !== undefined
+      ? { cc_address_email_list: input.cc_address_email_list }
+      : {}),
   });
 }
 
@@ -1219,7 +1282,11 @@ async function ensureRoleCampaign(
   const adopt = (await sameTitleCampaigns(prisma, context, rest, role)).find(
     (entry) => entry.campaign.id !== existing?.binding.campaignId,
   )?.campaign;
-  const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
+  const pendingAllowed = (await confirmedSendingMailboxes(prisma, context)).some(
+    (sender) => sender.email === eaccount.toLowerCase(),
+  );
+  const campaign =
+    adopt ?? (await createCampaign(rest, { ...input, eaccount, name }, pendingAllowed));
   if (adopt && adopt.stop_on_reply !== true)
     await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
   if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
@@ -1752,17 +1819,33 @@ async function activateCampaign(
   context: AdapterContext,
   serverId: string,
   input: z.output<typeof ActivateCampaignInput>,
+  confirmedSenderRequired = false,
 ) {
   const campaignId =
     input.campaign_id ??
     (await ensureRoleCampaign(prisma, rest, context, serverId, { timezone: "America/Chicago" }))
       .campaignId;
-  const campaign = await rest("GET", `/campaigns/${campaignId}`);
+  let campaign = await rest("GET", `/campaigns/${campaignId}`);
+  const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
+  if (confirmedSenderRequired) {
+    let senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+    if (!senders.length && bound?.binding.eaccount) {
+      await requireSendingMailboxReady(prisma, rest, context, bound.binding.eaccount);
+      await rest("PATCH", `/campaigns/${campaignId}`, { email_list: [bound.binding.eaccount] });
+      campaign = await rest("GET", `/campaigns/${campaignId}`);
+      senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+      if (senders.length !== 1 || senders[0] !== bound.binding.eaccount)
+        throw new Error("The confirmed sending address was not saved on this campaign.");
+    }
+    if (!senders.length || senders.some((email) => typeof email !== "string"))
+      throw new Error("Choose this account's confirmed sending address before sending.");
+    for (const email of senders)
+      await requireSendingMailboxReady(prisma, rest, context, String(email));
+  }
   if (!firstEmail(campaign))
     throw new Error(
       "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
     );
-  const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
   const leads = await allLeads(rest, campaignId);
   const templated = isTemplated(campaign);
   const plan = planSend(
@@ -2018,7 +2101,9 @@ async function createAssociatedDraft(
       eaccount:
         Array.isArray(expected.email_list) && typeof expected.email_list[0] === "string"
           ? expected.email_list[0]
-          : "",
+          : "eaccount" in input && typeof input.eaccount === "string"
+            ? input.eaccount
+            : ((await defaultSendingMailbox(prisma, context)) ?? ""),
       leads: {},
       created: true,
     };
@@ -2122,6 +2207,8 @@ async function roleDraft(
   const mailboxes = (Array.isArray(accounts.items) ? accounts.items : []).flatMap((item) =>
     typeof item?.email === "string" ? [item.email as string] : [],
   );
+  for (const sender of await confirmedSendingMailboxes(prisma, context))
+    if (!mailboxes.includes(sender.email)) mailboxes.push(sender.email);
   const associations = await prisma.externalEffect.findMany({
     where: {
       spaceId: context.spaceId,
@@ -2225,6 +2312,8 @@ export async function runInstantlyWrite(
     throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
   const rest = owned ? ownedInstantlyRest(accountRest, owned) : accountRest;
   switch (toolName) {
+    case "native_instantly_ensure_sender":
+      return ensureSendingIdentity(prisma, accountRest, context, serverId, args);
     case "native_instantly_get_role_draft":
       return roleDraft(prisma, rest, context, serverId, ReadRoleDraftInput.parse(args));
     case "native_instantly_clone_role_draft": {
@@ -2278,7 +2367,11 @@ export async function runInstantlyWrite(
     case "native_instantly_create_role_draft": {
       const input = CreateRoleDraftInput.parse(args);
       const role = await requireRole(prisma, context, input.role_id);
-      await requireOwnMailbox(rest, input.eaccount);
+      const connected = await requireOwnMailbox(
+        rest,
+        input.eaccount,
+        Boolean(owned?.mailboxes.has(input.eaccount.toLowerCase())),
+      );
       return createAssociatedDraft(
         prisma,
         rest,
@@ -2288,7 +2381,7 @@ export async function runInstantlyWrite(
         "create",
         input.client_nonce,
         input,
-        campaignBody(input.name, input),
+        { ...campaignBody(input.name, input), email_list: connected ? [input.eaccount] : [] },
       );
     }
     case "native_instantly_update_role_draft": {
@@ -2323,12 +2416,19 @@ export async function runInstantlyWrite(
         throw new Error(
           "This sequence changed since it was opened. Reopen it before saving again.",
         );
-      await requireOwnMailbox(rest, input.eaccount);
+      const connected = await requireOwnMailbox(
+        rest,
+        input.eaccount,
+        Boolean(owned?.mailboxes.has(input.eaccount.toLowerCase())),
+      );
       await reserveSequenceEffect(prisma, context, effectKey, input);
       try {
         // ponytail: this revision claim fences native editors. The provider has no CAS;
         // an external writer racing final GET/PATCH needs provider ETag/If-Match support.
-        const expected = campaignBody(input.name, input);
+        const expected = {
+          ...campaignBody(input.name, input),
+          email_list: connected ? [input.eaccount] : [],
+        };
         await rest("PATCH", `/campaigns/${input.campaign_id}`, expected);
         await context.reauthorize?.();
         const output = await roleDraft(prisma, rest, context, serverId, input, expected, effectKey);
@@ -2374,6 +2474,14 @@ export async function runInstantlyWrite(
       );
     case "native_instantly_get_campaign": {
       const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
+      const senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+      const binding =
+        owned && !senders.length
+          ? await bindingOfCampaign(prisma, context, serverId, String(campaign.id))
+          : null;
+      const mailbox = typeof senders[0] === "string" ? senders[0] : binding?.binding.eaccount;
+      const senderState =
+        owned && mailbox ? await sendingMailboxState(accountRest, mailbox) : undefined;
       return {
         id: campaign.id,
         name: campaign.name,
@@ -2381,6 +2489,7 @@ export async function runInstantlyWrite(
         stop_on_reply: campaign.stop_on_reply,
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
+        ...(senderState ? { senderState } : {}),
         recipients: await leadEmails(rest, String(campaign.id)),
         campaign_schedule: campaign.campaign_schedule,
         sequences: campaign.sequences,
@@ -2389,13 +2498,26 @@ export async function runInstantlyWrite(
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
     case "native_instantly_activate_campaign":
-      return activateCampaign(prisma, rest, context, serverId, ActivateCampaignInput.parse(args));
+      return activateCampaign(
+        prisma,
+        rest,
+        context,
+        serverId,
+        ActivateCampaignInput.parse(args),
+        Boolean(owned),
+      );
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
     case "native_instantly_get_email":
       return readEmail(rest, EmailIdInput.parse(args).id);
     case "native_instantly_reply_to_email":
-      return replyToEmail(rest, ReplyToEmailInput.parse(args));
+      return replyToEmail(
+        rest,
+        ReplyToEmailInput.parse(args),
+        owned
+          ? (email) => requireSendingMailboxReady(prisma, accountRest, context, email)
+          : undefined,
+      );
     case "native_instantly_ensure_role_campaign":
       return ensureRoleCampaign(
         prisma,

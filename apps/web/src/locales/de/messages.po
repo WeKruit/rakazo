@@ -366,6 +366,14 @@ msgstr ""
 msgid "Adding…"
 msgstr "Wird hinzugefügt…"
 
+#: src/components/AskCard.tsx
+msgid "Address change requested"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Address confirmed"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1016,6 +1024,10 @@ msgstr ""
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "Passwort ändern"
+
+#: src/components/AskCard.tsx
+msgid "Change the address"
+msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Change the date range or status to review saved records. Empty space does not confirm availability."
@@ -2150,6 +2162,10 @@ msgstr "Erstellen"
 msgid "Create a section and move {0} into it."
 msgstr "Erstelle einen Abschnitt und verschiebe {0} dorthin."
 
+#: src/components/AskCard.tsx
+msgid "Create address"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
 msgstr "Gruppe erstellen"
@@ -2161,6 +2177,10 @@ msgstr ""
 #: src/components/AskCard.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Create space"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Create this sending address?"
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -3588,6 +3608,10 @@ msgstr "Niedrig"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Mail"
 msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
@@ -6836,9 +6860,17 @@ msgstr ""
 msgid "Use the connected service to check this role. Saved results will appear here when the agent finishes."
 msgstr ""
 
+#: src/components/AskCard.tsx
+msgid "Use this address"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Use this model"
 msgstr "Dieses Modell verwenden"
+
+#: src/components/AskCard.tsx
+msgid "Use this sending address?"
+msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Use unique guest email addresses, a valid meeting link, and notes up to 1000 characters."

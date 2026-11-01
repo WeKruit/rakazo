@@ -285,6 +285,18 @@ export const RecruitingQuestionSchema = z.strictObject({
 });
 export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 
+export const MailReplyMessageFilterSchema = z
+  .strictObject({
+    sourceId: Id,
+    threadId: Id.optional(),
+    emailIds: z.array(Id).min(1).max(50).optional(),
+  })
+  .refine(
+    (input) => Boolean(input.threadId || input.emailIds?.length),
+    "Provide an original email or mail thread",
+  );
+export type MailReplyMessageFilter = z.infer<typeof MailReplyMessageFilterSchema>;
+
 const threadTarget = z
   .object({
     botId: Id.optional(),
@@ -441,6 +453,7 @@ export const appContract = {
     update: oc
       .input(
         z.object({
+          sendingMailboxLimit: z.number().int().min(1).max(100).optional(),
           signupsEnabled: z.boolean().optional(),
           signupAllowlist: z.array(z.string()).optional(),
           computerHost: z.enum(["docker", "this-mac"]).nullable().optional(),
@@ -597,6 +610,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           before: z.number().int().nonnegative().optional(),
+          mailReplyFor: MailReplyMessageFilterSchema.optional(),
           includePeerRuns: z.boolean().optional(),
           includePeerReceipts: z.boolean().optional(),
           around: z

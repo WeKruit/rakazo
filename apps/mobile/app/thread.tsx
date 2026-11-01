@@ -117,6 +117,7 @@ import { GlassSurface } from "../components/glass-surface";
 import type { ImageArtifactPreviewTarget } from "../components/image-artifact-viewer";
 import { InlineImageAttachment } from "../components/inline-image-attachment";
 import { isLiveCardBlock, LiveCards } from "../components/LiveCards";
+import { MailReplyAskContent } from "../components/MailReplyAskContent";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import type { MarkdownArtifactPreviewTarget } from "../components/markdown-artifact-preview";
 import { MarkdownArtifactPreview } from "../components/markdown-artifact-preview";
@@ -259,6 +260,14 @@ function formatApprovalAnswer(
   if (!answer) return t("Answered");
   const selectedAction = actions?.find((action) => action.id === answer);
   const outcome = selectedAction?.outcome;
+  if (
+    approval &&
+    outcome === "created" &&
+    ["Create address", "Use this address"].includes(selectedAction?.label ?? "")
+  )
+    return t("Address confirmed");
+  if (approval && outcome === "cancelled" && selectedAction?.label === "Change the address")
+    return t("Address change requested");
   if (approval && outcome === "created") return t("Created");
   if (approval && outcome === "cancelled") return t("Cancelled");
   const label = selectedAction?.label;
@@ -3827,9 +3836,9 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
   const askBlock = message.blocks.find(
-    (block) => block.kind === "ask" && Boolean(block.actions?.length),
+    (block) => block.kind === "ask" && Boolean(block.actions?.length || block.mailReply),
   );
-  if (askBlock?.kind === "ask" && askBlock.actions?.length) {
+  if (askBlock?.kind === "ask" && (askBlock.actions?.length || askBlock.mailReply)) {
     return (
       <View style={{ gap: 8, width: "100%" }}>
         <View
@@ -3843,63 +3852,84 @@ const MessageBubble = memo(function MessageBubble({
             paddingVertical: 14,
           }}
         >
-          {askBlock.text ? (
-            <Text
-              {...actionProps}
-              style={{ color: tokens.foreground, fontSize: 15.5, lineHeight: 23 }}
-            >
-              {askBlock.text}
-            </Text>
-          ) : null}
-          {canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
-            <AskDeadline expiresAt={askExpiresAt} />
-          ) : null}
-          {askBlock.detail ? (
-            <Text
-              {...(askBlock.text ? {} : actionProps)}
-              style={{
-                color: tokens.mutedForeground,
-                marginTop: askBlock.text ? 8 : 0,
-                fontSize: 12.5,
-                fontFamily: "Menlo",
-                lineHeight: 20,
-              }}
-            >
-              {askBlock.detail}
-            </Text>
-          ) : null}
-          {askBlock.status === "answered" ? (
-            <Text
-              {...actionProps}
-              style={{
-                color: tokens.success,
-                marginTop: 12,
-                fontSize: 13.5,
-                fontWeight: "600",
-              }}
-            >
-              {formatApprovalAnswer(
-                askBlock.answer,
-                askBlock.actions,
-                Boolean(askBlock.approvalEffectId),
-              )}
-            </Text>
-          ) : canAnswer && onAnswer ? (
-            <AskActions
-              actions={askBlock.actions}
-              allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
-              multiple={Boolean(askBlock.multiple) && !isApprovalAskBlock(askBlock)}
-              accessibilityActions={actionProps.accessibilityActions}
-              onAccessibilityAction={actionProps.onAccessibilityAction}
-              onAnswer={(answer) => onAnswer(message, answer)}
-            />
+          {askBlock.mailReply ? (
+            <>
+              {canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
+                <AskDeadline expiresAt={askExpiresAt} />
+              ) : null}
+              <MailReplyAskContent
+                reply={askBlock.mailReply}
+                canAnswer={canAnswer}
+                pending={askBlock.status !== "answered"}
+                onAnswer={(answer) => onAnswer(message, answer)}
+              />
+            </>
           ) : (
-            <Text
-              {...actionProps}
-              style={{ color: tokens.mutedForeground, marginTop: 12, fontSize: 13.5 }}
-            >
-              {t("No longer active")}
-            </Text>
+            <>
+              {askBlock.text ? (
+                <Text
+                  {...actionProps}
+                  style={{ color: tokens.foreground, fontSize: 15.5, lineHeight: 23 }}
+                >
+                  {askBlock.approvalEffectId &&
+                  ["Create this sending address?", "Use this sending address?"].includes(
+                    askBlock.text,
+                  )
+                    ? t(askBlock.text)
+                    : askBlock.text}
+                </Text>
+              ) : null}
+              {canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
+                <AskDeadline expiresAt={askExpiresAt} />
+              ) : null}
+              {askBlock.detail ? (
+                <Text
+                  {...(askBlock.text ? {} : actionProps)}
+                  style={{
+                    color: tokens.mutedForeground,
+                    marginTop: askBlock.text ? 8 : 0,
+                    fontSize: 12.5,
+                    fontFamily: "Menlo",
+                    lineHeight: 20,
+                  }}
+                >
+                  {askBlock.detail}
+                </Text>
+              ) : null}
+              {askBlock.status === "answered" ? (
+                <Text
+                  {...actionProps}
+                  style={{
+                    color: tokens.success,
+                    marginTop: 12,
+                    fontSize: 13.5,
+                    fontWeight: "600",
+                  }}
+                >
+                  {formatApprovalAnswer(
+                    askBlock.answer,
+                    askBlock.actions,
+                    Boolean(askBlock.approvalEffectId),
+                  )}
+                </Text>
+              ) : canAnswer && onAnswer ? (
+                <AskActions
+                  actions={askBlock.actions ?? []}
+                  allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
+                  multiple={Boolean(askBlock.multiple) && !isApprovalAskBlock(askBlock)}
+                  accessibilityActions={actionProps.accessibilityActions}
+                  onAccessibilityAction={actionProps.onAccessibilityAction}
+                  onAnswer={(answer) => onAnswer(message, answer)}
+                />
+              ) : (
+                <Text
+                  {...actionProps}
+                  style={{ color: tokens.mutedForeground, marginTop: 12, fontSize: 13.5 }}
+                >
+                  {t("No longer active")}
+                </Text>
+              )}
+            </>
           )}
         </View>
         {appConnectBlocks.map((block, index) => (
@@ -4195,7 +4225,10 @@ function AskBlock({
         {...actionProps}
         style={{ color: tokens.foreground, fontSize: 15.5, fontWeight: "600" }}
       >
-        {ask.text}
+        {ask.approvalEffectId &&
+        ["Create this sending address?", "Use this sending address?"].includes(ask.text)
+          ? t(ask.text)
+          : ask.text}
       </Text>
       {canAnswer && !answered && askExpiresAt ? <AskDeadline expiresAt={askExpiresAt} /> : null}
       {secretInput && ask.credential ? (

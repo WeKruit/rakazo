@@ -959,7 +959,12 @@ export async function getRecruitingRoleSetup(
         label: "First email not prepared yet; prepared automatically on first outreach",
         action: { kind: "ask_agent", prompt: "Prepare the first email for this role" },
       });
-      const email = await lastUsedMailbox(deps.prisma, actor.spaceId, campaign.serverId);
+      const email = await lastUsedMailbox(
+        deps.prisma,
+        actor.spaceId,
+        campaign.serverId,
+        actor.userId,
+      );
       items.push(
         email
           ? { key: "sender", state: "ready", label: email, detail: { email } }

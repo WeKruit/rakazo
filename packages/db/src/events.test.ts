@@ -315,6 +315,111 @@ function appendClient(client: { $transaction: (...args: never[]) => unknown }): 
 }
 
 describe("native approval answer provenance", () => {
+  function replyAnswerFixture() {
+    const request = [
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        route: {
+          connectorId: "mcp",
+          resourceId: "mail",
+          resourceRevision: 1,
+          toolName: "reply_to_email",
+        },
+        args: {
+          reply_to_uuid: "original-email",
+          eaccount: "sender@example.test",
+          to: "candidate@example.test",
+          subject: "Re: Original",
+          body_text: "Original draft",
+          body_html: "<p>Original draft</p>",
+          skip_validation: false,
+        },
+      },
+    ];
+    const f = approvalAnswerFixture(request);
+    const ask = f.rows[0]!.blocks[1]!;
+    if (ask.kind !== "ask") throw new Error("Missing approval");
+    ask.actions = [
+      { id: "allow", label: "Send" },
+      { id: "deny", label: "Discard" },
+    ];
+    ask.mailReply = {
+      from: "sender@example.test",
+      to: ["candidate@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Re: Original",
+      body: "Original draft",
+      inReplyTo: {
+        sourceId: "mail",
+        emailId: "original-email",
+        threadId: "original-thread",
+        subject: "Original",
+        sender: "candidate@example.test",
+      },
+      status: "needs_approval",
+      sentAt: null,
+    };
+    return f;
+  }
+  it("saves a Send edit on the original effect and binds its exact effective request hash once", async () => {
+    const f = replyAnswerFixture();
+    const answer = { action: "send" as const, body: "Edited sentence", cc: ["copy@example.test"] };
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(true);
+    expect(f.effect.id).toBe("effect-1");
+    expect(f.effect.request).toMatchObject([
+      "__rakazoCatalogTool",
+      "direct",
+      {
+        args: {
+          body_text: "Edited sentence",
+          cc_address_email_list: "copy@example.test",
+          eaccount: "sender@example.test",
+          to: "candidate@example.test",
+          reply_to_uuid: "original-email",
+        },
+      },
+    ]);
+    expect(
+      ((f.effect.request as unknown[])[2] as { args: Record<string, unknown> }).args,
+    ).not.toHaveProperty("body_html");
+    expect(f.effect.status).toBe("approved");
+    expect(f.rows).toHaveLength(1);
+    expect(f.rows[0]!.blocks[1]).toMatchObject({
+      mailReply: { body: "Edited sentence", cc: ["copy@example.test"], status: "sending" },
+    });
+    expect(f.tx.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "effect.approval.answered",
+          payload: expect.objectContaining({
+            effectId: "effect-1",
+            answer: "allow",
+            requestHash: createHash("sha256")
+              .update(stableJsonValue(f.effect.request))
+              .digest("hex"),
+          }),
+        }),
+      }),
+    );
+    expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(false);
+  });
+  it.each(["allow", "always"])(
+    "a reply card cannot be sent by a plain %s answer",
+    async (answer) => {
+      const f = replyAnswerFixture();
+      expect(await answerRunInput(f.prisma, { ...f.input, answer })).toBe(false);
+      expect(f.effect.status).toBe("intended");
+    },
+  );
+  it("discard keeps the original message and marks the same effect denied", async () => {
+    const f = replyAnswerFixture();
+    expect(await answerRunInput(f.prisma, { ...f.input, answer: "deny" })).toBe(true);
+    expect(f.effect.status).toBe("denied");
+    expect(f.rows).toHaveLength(1);
+    expect(f.rows[0]!.blocks[1]).toMatchObject({ mailReply: { status: "discarded" } });
+  });
   it.each(["allow", "deny"])("legacy official Cal card permits only denial: %s", async (answer) => {
     const f = approvalAnswerFixture([
       "__rakazoCatalogTool",

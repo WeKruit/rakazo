@@ -770,6 +770,7 @@ export function AccountRecruitingView({
                   </p>
                 ) : null}
                 <AccountInbox
+                  accountKey={accountKey}
                   key={pageKey}
                   roles={page?.roles ?? []}
                   items={page?.items ?? []}

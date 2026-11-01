@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each([false, true])("shows the exact sender and fixed human outcomes (%s)", (select) => {
+    const block = buildApprovalAskBlock("sender-effect", "native_instantly_ensure_sender", {}, [], {
+      instantlySender: { email: "team@example.test", displayName: "Chosen Company", select },
+    });
+    expect(block.text).toBe(select ? "Use this sending address?" : "Create this sending address?");
+    expect(block.detail).toBe("Chosen Company <team@example.test>");
+    expect(block.actions).toEqual([
+      { id: "allow", label: select ? "Use this address" : "Create address", outcome: "created" },
+      { id: "deny", label: "Change the address", outcome: "cancelled" },
+    ]);
+    expect(JSON.stringify(block)).not.toMatch(/instantly|always/i);
+  });
   it("confirms exact server-owned requirements in the original one-time card without model display fields", () => {
     const request = RecruitingApprovalToolInputSchema.parse({
       stage: "brief",
