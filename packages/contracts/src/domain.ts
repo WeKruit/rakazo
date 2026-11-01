@@ -1205,6 +1205,8 @@ export const ThreadSnapshotSchema = z.object({
   run: RunSchema.nullable(),
   activeRuns: z.array(RunSchema).optional(),
   computer: ComputerStatusSchema.optional(),
+  /** Guessed next user message after the newest reply, while that reply is still the newest. */
+  suggestion: z.object({ runId: Id, text: z.string() }).optional(),
 });
 export type ThreadSnapshot = z.infer<typeof ThreadSnapshotSchema>;
 
