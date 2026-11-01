@@ -435,6 +435,9 @@ export function useShellRecruiting({
         return `${inGroup && groupId ? `/app/g/${groupId}` : active?.id ? `/app/${active.id}` : "/app"}?${next}`;
       }
       const scope = searchParams.get("role");
+      // One Inbox: inside a role it opens the account Inbox filtered to that role.
+      if (view === "inbox")
+        return `/app?${new URLSearchParams({ view, role: scope ?? currentBindingRead?.workspace?.role.id ?? "all" })}`;
       if (!scope && !inGroup && active?.id && knownThreadId)
         return `/app/${active.id}?${new URLSearchParams({ view })}`;
       return groupId && !groupId.startsWith("recruiting-global-") && !scope
