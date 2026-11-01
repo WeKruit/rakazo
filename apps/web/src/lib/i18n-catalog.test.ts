@@ -54,7 +54,7 @@ function readProductCatalog(path: string, encoding: "utf8") {
 
 // The product is translated to Chinese; other locales fall back to English.
 const ZH_RECRUITING: Record<string, string> = {
-  "Match score": "匹配分数",
+  "Best match": "最佳匹配",
   "Stop {name}": "停止 Synthetic agent",
 };
 
@@ -226,13 +226,13 @@ describe("lingui catalogs", () => {
     }
   });
 
-  it("compiles match-score and member-stop labels without source-message descriptors", async () => {
+  it("compiles match-sort and member-stop labels without source-message descriptors", async () => {
     const config = getConfig({
       configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
     });
     const [catalog] = await getCatalogs(config);
     const source = await catalog!.read("en");
-    const entries = ["Match score", "Stop {name}"].map((message) => {
+    const entries = ["Best match", "Stop {name}"].map((message) => {
       const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === message);
       expect(entry, message).toBeDefined();
       return entry!;

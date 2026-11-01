@@ -7,6 +7,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ThreadTarget } from "./thread-target.js";
 import {
   cancelSupersededQueuedRuns,
+  latestReplySuggestion,
   reactToThreadMessage,
   sendThreadMessage,
   stoppedNotice,
@@ -5164,5 +5165,36 @@ describe("send path round trips", () => {
     expect(deps.jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ payload: expect.objectContaining({ runId: "run-1" }) }),
     );
+  });
+});
+
+describe("latestReplySuggestion", () => {
+  function prismaWith(payload: unknown) {
+    const findFirst = vi.fn(async () => (payload === undefined ? null : { payload }));
+    return { prisma: { event: { findFirst } } as unknown as PrismaClient, findFirst };
+  }
+
+  it("returns the saved suggestion for the newest reply", async () => {
+    const { prisma, findFirst } = prismaWith({ text: "下一步做什么？" });
+    const result = await latestReplySuggestion(prisma, [
+      { role: "user", runId: null },
+      { role: "bot", runId: "run-2" },
+      { role: "user", runId: null, internal: true },
+    ]);
+    expect(result).toEqual({ runId: "run-2", text: "下一步做什么？" });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { runId: "run-2", type: "thread.suggestion" } }),
+    );
+  });
+
+  it("returns nothing once the person has written again", async () => {
+    const { prisma, findFirst } = prismaWith({ text: "x" });
+    expect(
+      await latestReplySuggestion(prisma, [
+        { role: "bot", runId: "run-1" },
+        { role: "user", runId: null },
+      ]),
+    ).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 });

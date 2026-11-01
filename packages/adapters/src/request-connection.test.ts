@@ -7,6 +7,7 @@ const args = { serverId: "server-1", reason: "To read candidate replies." };
 
 function fixture({
   secretId = null as string | null,
+  endpoint = null as string | null,
   assigned = true,
   pendingRun = undefined as string | undefined,
   rows = [] as Array<{ id: string; slug: string; name: string; endpoint: string | null }>,
@@ -18,6 +19,7 @@ function fixture({
         name: "Instantly",
         secretId,
         transport: "streamable_http",
+        endpoint,
       })),
       findMany: vi.fn(async () => rows),
       create: vi.fn(async () => ({ id: "server-new" })),
@@ -65,6 +67,19 @@ describe("request_connection", () => {
         where: { id: "server-1", spaceId: "space-1", userId: "user-1", enabled: true },
       }),
     );
+  });
+
+  it("treats the product's own outreach mail as connected without a card", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
+    try {
+      const f = fixture({ endpoint: "https://mcp.instantly.ai/mcp" });
+      expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
+        status: "connected",
+      });
+      expect(f.pause).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("pauses on one native connect card when not connected", async () => {
