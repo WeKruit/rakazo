@@ -320,6 +320,18 @@ export function AccountRecruitingView({
         ))
     );
   });
+  // Name the calendars that could not be read, so the recruiter knows which one to fix.
+  const failedCalendarList = [
+    ...new Set(
+      page?.items.flatMap(
+        (item) =>
+          item.correspondence?.connections
+            .filter((connection) => connection.checkIssue?.status === "failed")
+            .map((connection) => connection.name) ?? [],
+      ) ?? [],
+    ),
+  ];
+  const failedCalendars = failedCalendarList.join(", ");
   const calendarConnected = page?.items.some((item) =>
     item.correspondence?.connections.some((connection) => connection.status !== "needs_connection"),
   );
@@ -406,11 +418,16 @@ export function AccountRecruitingView({
               ) : null}
               {calendarFailed ? (
                 <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                  <Trans>Could not load calendar records.</Trans>
+                  {failedCalendarList.length ? (
+                    <Trans>Could not read {failedCalendars}.</Trans>
+                  ) : (
+                    <Trans>Could not load calendar records.</Trans>
+                  )}
                 </RetryNotice>
               ) : null}
+              {/* One calendar failing still shows what the other calendars returned. */}
               {(calendarConnected || events.length > 0) &&
-              (!calendarFailed || events.length > 0) ? (
+              (!calendarFailed || events.length > 0 || failedCalendarList.length > 0) ? (
                 <InterviewCalendar events={events} />
               ) : null}
               {!renderCorrespondence

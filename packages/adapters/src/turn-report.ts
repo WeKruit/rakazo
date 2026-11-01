@@ -172,6 +172,13 @@ type Entry =
  * while it consumes the runtime's events, so narration written before a tool call never counts
  * as that call's report; results arrive from the tool executor.
  */
+const MEMORY_SAVE_TOOLS = new Set([
+  "remember",
+  "save_memory",
+  "save_shared_memory",
+  "save_group_memory",
+]);
+
 export class TurnReportLedger {
   private readonly entries: Entry[] = [];
   private readonly settled = new Map<string, ToolSettlement>();
@@ -249,6 +256,15 @@ export class TurnReportLedger {
     return this.entries.some(
       (entry) => entry.kind === "tool" && this.settled.get(entry.id)?.ok === true,
     );
+  }
+
+  /** A memory save was tried in this attempt and none of the tries was saved. */
+  memorySaveFailed(): boolean {
+    const saves = this.entries.filter(
+      (entry): entry is Extract<Entry, { kind: "tool" }> =>
+        entry.kind === "tool" && MEMORY_SAVE_TOOLS.has(entry.name),
+    );
+    return saves.length > 0 && saves.every((entry) => this.settled.get(entry.id)?.ok === false);
   }
 
   /** Any consequential work in this attempt. */
