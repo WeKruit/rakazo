@@ -526,6 +526,7 @@ const PAID_CASES = [
   "first10",
   "first10-long",
   "progress",
+  "midwork",
   "t1",
   "t3",
   "contacts",
