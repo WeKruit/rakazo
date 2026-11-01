@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { ORPCError } from "@orpc/client";
 import type {
   GlobalRecruitingInboxOutput,
   RecruitingAccountViewOutput,
@@ -293,7 +295,9 @@ it.each([
       ],
       nextCursor: null,
     });
-    if (retry) globalRead.mockRejectedValue(new Error("saved index unavailable"));
+    // A transient failure keeps loading and retries; a definite answer shows the error.
+    if (retry)
+      globalRead.mockRejectedValue(new ORPCError("BAD_REQUEST", { message: "unavailable" }));
     else mockIndex(indexPage(emails, partial || !!nextCursor));
     const container = document.createElement("div");
     const pageRoot = createRoot(container);
@@ -349,17 +353,57 @@ it("pages saved mail by number and reads only the chosen page", async () => {
     );
     expect(globalRead).toHaveBeenLastCalledWith(
       expect.not.objectContaining({ offset: expect.anything() }),
+      expect.anything(),
     );
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
     );
-    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 60, limit: 30 }));
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 60, limit: 30 }),
+      expect.anything(),
+    );
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Previous page"]')!.click(),
     );
-    expect(globalRead).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 30 }));
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 30 }),
+      expect.anything(),
+    );
   } finally {
     await act(async () => pageRoot.unmount());
+  }
+});
+
+it("keeps the Inbox loading through a failed read right after a deploy, then shows it", async () => {
+  vi.useFakeTimers();
+  read.mockResolvedValue({ roles, items: [], nextCursor: null });
+  globalRead.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).not.toContain("Could not load recruiting records.");
+    await act(async () => vi.advanceTimersByTimeAsync(1_500));
+    expect(globalRead).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Could not load recruiting records.");
+    expect(container.textContent).toContain("No indexed mail matches this view.");
+  } finally {
+    await act(async () => pageRoot.unmount());
+    vi.useRealTimers();
   }
 });
 
