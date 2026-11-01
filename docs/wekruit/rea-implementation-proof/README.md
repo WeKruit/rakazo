@@ -51,3 +51,11 @@ Synthetic actual-App browser checks cover the persistent 64px icon rail, full-di
 - [Global search, phone](global-search-390.png)
 
 The avatar parser now retains photo-only `profile_picture_url` records, with exact-person regression coverage. Missing source photos and failed/expired source URLs still require a scoped live inventory; this change does not claim to repair every CRM-only avatar.
+
+### Actual-route Sequence and role-directory corrections
+
+The global Sequence route now renders six metric cards, period and schedule controls, a searchable sequence table, saved-contact filtering and numeric/date sorting. Each role cursor reads the existing CRM mirror and retained native campaign associations without provider/candidate/correspondence fan-out. Actual created timestamps are retained when supplied; missing privacy, owner, timing and other metadata remain unknown. Native contact filtering uses completed enrollment receipts (never staged recipients), with partial saved-membership coverage.
+
+Direct group/bot Sequence and Interview routes now load the owned workspace and render their native components. Sequence results preserve exact campaign/source identity, and New sequence chooses a role before opening the existing draft composer. Historical source send totals remain explicitly labeled all-time rather than being presented as a date-filtered contacted count.
+
+View all roles opens `/app?view=roles`: the complete owned active-role catalog, searchable across its 50-row pages. It is distinct from the All roles business-scope selector. Archived role controls remain in the sidebar. Latest stage numbered Contacts/Inbox/role paging and retry behavior are retained.

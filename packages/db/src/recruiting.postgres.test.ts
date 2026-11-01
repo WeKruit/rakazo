@@ -6552,6 +6552,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     expect(new Set([...page.items, ...next.items].map((item) => item.candidateKey)).size).toBe(4);
     expect(next.nextCursor).toBeNull();
+    // Jumping to a numbered page reads the same rows as walking there by cursor.
+    const jumped = await recruiting.listRecruitingCandidates(prisma, actor, {
+      roleId: f.role.role.id,
+      limit: 2,
+      sort: "name",
+      offset: 2,
+    });
+    expect(jumped.items.map((item) => item.candidateKey)).toEqual(
+      next.items.map((item) => item.candidateKey),
+    );
+    expect(jumped.total).toBe(4);
     const filtered = await recruiting.listRecruitingCandidates(prisma, actor, {
       roleId: f.role.role.id,
       query: "new company",

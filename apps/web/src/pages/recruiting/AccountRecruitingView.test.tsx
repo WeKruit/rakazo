@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { ORPCError } from "@orpc/client";
 import type {
   GlobalRecruitingInboxOutput,
   RecruitingAccountViewOutput,
@@ -89,6 +91,7 @@ const indexPage = (
     latestIncomingAt: email.direction === "received" ? email.date : null,
   })),
   nextCursor: null,
+  total: emails.length,
   unread: {
     count: 0,
     unknownThreads: emails.filter((email) => !email.direction || !email.date).length,
@@ -144,7 +147,7 @@ it("reads each role on its own, shows one calendar, role labels and a picker tha
     );
     expect(read).toHaveBeenCalledTimes(3);
     expect(read.mock.calls.map(([input]) => input)).toEqual([
-      { view: "roles", cursor: undefined, limit: 5 },
+      { view: "roles", limit: 5 },
       { view: "interview", roleId: "one", limit: 1 },
       { view: "interview", roleId: "two", limit: 1 },
     ]);
@@ -187,7 +190,7 @@ it("lists sibling sequences and routes to exact role detail without expanding le
       {
         roleId: "one",
         campaigns: input.campaignId
-          ? [{ ...first, leads: [...first.leads, lead("new@example.test")], nextLeadCursor: null }]
+          ? [{ ...first, leads: [lead("new@example.test")], nextLeadCursor: null }]
           : [first, second],
       },
     ],
@@ -276,7 +279,9 @@ it.each([
       ],
       nextCursor: null,
     });
-    if (retry) globalRead.mockRejectedValue(new Error("saved index unavailable"));
+    // A transient failure keeps loading and retries; a definite answer shows the error.
+    if (retry)
+      globalRead.mockRejectedValue(new ORPCError("BAD_REQUEST", { message: "unavailable" }));
     else mockIndex(indexPage(emails, partial || !!nextCursor));
     const container = document.createElement("div");
     const pageRoot = createRoot(container);
@@ -309,6 +314,82 @@ it.each([
     }
   },
 );
+
+it("pages saved mail by number and reads only the chosen page", async () => {
+  mockIndex({ ...indexPage([]), total: 75 });
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ offset: expect.anything() }),
+      expect.anything(),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 60, limit: 30 }),
+      expect.anything(),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Previous page"]')!.click(),
+    );
+    expect(globalRead).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 30 }),
+      expect.anything(),
+    );
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("keeps the Inbox loading through a failed read right after a deploy, then shows it", async () => {
+  vi.useFakeTimers();
+  read.mockResolvedValue({ roles, items: [], nextCursor: null });
+  globalRead.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+          <AccountRecruitingView
+            spaceId="space"
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).not.toContain("Could not load recruiting records.");
+    await act(async () => vi.advanceTimersByTimeAsync(1_500));
+    expect(globalRead).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Could not load recruiting records.");
+    expect(container.textContent).toContain("No indexed mail matches this view.");
+  } finally {
+    await act(async () => pageRoot.unmount());
+    vi.useRealTimers();
+  }
+});
 
 it("reports an unavailable campaign read without claiming that there is no campaign", async () => {
   read.mockResolvedValue({
@@ -813,11 +894,13 @@ it("lists every role's people in one server-paged table", async () => {
     expect(container.textContent).toContain("UCLA");
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
-      [...container.querySelectorAll("button")]
-        .find((button) => button.textContent === "Next")!
-        .click(),
+      container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),
     );
     expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "50" });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Page 3"]')!.click(),
+    );
+    expect(listContacts).toHaveBeenLastCalledWith({ filters: {}, limit: 50, cursor: "100" });
   } finally {
     await act(async () => pageRoot.unmount());
     container.remove();

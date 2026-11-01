@@ -46,9 +46,7 @@ for (const width of [1440, 390]) {
       });
       await expect(picker).toHaveValue("all");
       if (view === "sequence") {
-        const campaign = main
-          .getByRole("row")
-          .filter({ has: main.getByRole("link", { name: "Platform outreach", exact: true }) });
+        const campaign = main.getByRole("row").filter({ hasText: "Platform outreach" });
         await expect(campaign.getByRole("cell").nth(3)).toHaveText("2");
         await expect(campaign.getByRole("cell").nth(5)).toHaveText("1");
       }
@@ -140,15 +138,16 @@ for (const width of [1440, 390]) {
       await route.fulfill({ json: { json: { ok: true } } });
     });
     await page.route("**/rpc/search/recruitingTargets", async (route) => {
+      const searchRoleTitle = `${route.request().postDataJSON().json.q} role`;
       await route.fulfill({
         json: {
           json: {
             items: [
               {
                 kind: "role",
-                title: "Avery role",
+                title: searchRoleTitle,
                 roleId: roles[0]!.id,
-                roleTitle: roles[0]!.title,
+                roleTitle: searchRoleTitle,
                 groupId: roles[0]!.groupId,
                 botId: null,
                 campaignId: null,
@@ -200,7 +199,7 @@ for (const width of [1440, 390]) {
     await page.keyboard.press("Control+k");
     const searchDialog = page.getByRole("dialog", { name: "Search", exact: true });
     await searchDialog.getByRole("combobox", { name: "Global search", exact: true }).fill("Blake");
-    await expect(searchDialog.getByRole("option", { name: /Avery role/ })).toBeVisible();
+    await expect(searchDialog.getByRole("option", { name: /Blake role/ })).toBeVisible();
     const contactResult = searchDialog.getByRole("option", { name: /^Blake Example/ });
     await expect(contactResult).toBeVisible();
     await captureScreenshot(page, testInfo, `global-search-${width}`);

@@ -5,6 +5,8 @@ import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { ListPager } from "../../components/ListPager";
+import { retryTransientRead } from "../../lib/read-retry";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
 import { AccountInbox } from "./AccountInbox";
@@ -17,9 +19,10 @@ import { formatDate, TabLoading } from "./shared";
 
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
+const MAIL_PER_PAGE = 30;
 // The all-roles pages read each role on its own and show it when it arrives, so one role with a
 // large CRM never holds back the others. The roles on one page read together.
-const PER_ROLE_VIEWS = new Set(["sequence", "inbox", "interview"]);
+const PER_ROLE_VIEWS = new Set(["inbox", "interview"]);
 
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 
@@ -88,9 +91,15 @@ export function AccountRecruitingView({
     scopedGroupId,
     globalInbox ? [mailSearch, mailUnread] : null,
   ]);
-  const [pagination, setPagination] = useState<{ key: string; cursor: string }>();
+  // Mail and role lists page by number; routines keep their forward cursor.
+  const numbered = globalInbox || (view !== "routines" && role === "all" && !scopedGroupId);
+  const [pagination, setPagination] = useState<{ key: string; cursor?: string; page?: number }>();
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
-  const readKey = JSON.stringify([pageKey, cursor, reload, refreshSignal]);
+  const pageIndex = pagination?.key === pageKey ? (pagination.page ?? 0) : 0;
+  const readKey = JSON.stringify([pageKey, cursor, pageIndex, reload, refreshSignal]);
+  // A page past the end carries no count; keep the last one for these filters.
+  const [mailCount, setMailCount] = useState<{ key: string; total: number }>();
+  const mailTotal = mailCount?.key === pageKey ? mailCount.total : null;
   const page = read?.key === readKey ? read.data : undefined;
   const [pendingRoles, setPendingRoles] = useState<{ key: string; ids: string[] }>();
   const pending = pendingRoles?.key === readKey ? pendingRoles.ids : [];
@@ -100,20 +109,25 @@ export function AccountRecruitingView({
     setLoading(true);
     setFailed(false);
     if (globalInbox) {
-      if (!spaceId) {
-        setLoading(false);
-        setFailed(true);
-        return;
-      }
-      void rpc.recruiting
-        .globalInbox({
-          spaceId,
-          ...(role !== "all" ? { roleId: role } : {}),
-          ...(mailSearch ? { query: mailSearch } : {}),
-          unreadOnly: mailUnread,
-          cursor,
-          limit: 30,
-        })
+      // The account is still loading; the page remounts once it is known.
+      if (!spaceId) return;
+      const abort = new AbortController();
+      // Right after a deploy the first reads can fail; keep loading through that window.
+      void retryTransientRead(
+        () =>
+          rpc.recruiting.globalInbox(
+            {
+              spaceId,
+              ...(role !== "all" ? { roleId: role } : {}),
+              ...(mailSearch ? { query: mailSearch } : {}),
+              unreadOnly: mailUnread,
+              ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+              limit: MAIL_PER_PAGE,
+            },
+            { signal: abort.signal },
+          ),
+        abort.signal,
+      )
         .then((data) => {
           if (cancelled) return;
           const items: AccountPage["items"] = [];
@@ -153,6 +167,7 @@ export function AccountRecruitingView({
             }
           }
           setIndexedMail({ key: readKey, data });
+          if (data.total !== null) setMailCount({ key: pageKey, total: data.total });
           setRead({
             key: readKey,
             data: { roles: data.roles, items, nextCursor: data.nextCursor },
@@ -166,13 +181,18 @@ export function AccountRecruitingView({
         });
       return () => {
         cancelled = true;
+        abort.abort();
       };
     }
     if (PER_ROLE_VIEWS.has(view) && role === "all" && !scopedGroupId) {
       const abort = new AbortController();
       void (async () => {
         const list = await rpc.recruiting.accountView(
-          { view: "roles", cursor, limit: ROLES_PER_PAGE },
+          {
+            view: "roles",
+            ...(pageIndex ? { offset: pageIndex * ROLES_PER_PAGE } : {}),
+            limit: ROLES_PER_PAGE,
+          },
           { signal: abort.signal },
         );
         if (cancelled) return;
@@ -228,7 +248,7 @@ export function AccountRecruitingView({
       .accountView({
         view,
         ...(scopedGroupId ? { groupId: scopedGroupId } : role !== "all" ? { roleId: role } : {}),
-        cursor,
+        ...(numbered ? (pageIndex ? { offset: pageIndex * ROLES_PER_PAGE } : {}) : { cursor }),
         limit: ROLES_PER_PAGE,
       })
       .then((result) => {
@@ -243,7 +263,18 @@ export function AccountRecruitingView({
     return () => {
       cancelled = true;
     };
-  }, [accountKey, view, role, scopedGroupId, cursor, reload, refreshSignal, readKey, allContacts]);
+  }, [
+    accountKey,
+    view,
+    role,
+    scopedGroupId,
+    cursor,
+    pageIndex,
+    reload,
+    refreshSignal,
+    readKey,
+    allContacts,
+  ]);
   const loadMore = async (roleId: string, itemCursor: string) => {
     if (!page || view === "routines" || loadingMore) return;
     setLoadingMore(roleId);
@@ -939,7 +970,20 @@ export function AccountRecruitingView({
                 })
               : null}
           </div>
-          {page?.nextCursor ? (
+          {numbered ? (
+            <div className="mt-4">
+              <ListPager
+                page={pageIndex}
+                pageCount={
+                  globalInbox
+                    ? Math.ceil((mailTotal ?? 0) / MAIL_PER_PAGE)
+                    : Math.ceil((page?.total ?? page?.roles.length ?? 0) / ROLES_PER_PAGE)
+                }
+                onPage={(next) => setPagination({ key: pageKey, page: next })}
+                disabled={loading}
+              />
+            </div>
+          ) : page?.nextCursor ? (
             <Button
               className="mt-4"
               variant="outline"

@@ -130,7 +130,11 @@ if (!signedIn) {
 
 const all = await groups();
 const kruit = all.find((group) => group.name === "Kruit");
-const fixtureRole = all.find((group) => group.name.startsWith(FIXTURE_MARK));
+// Other checks leave fresh, empty test roles behind, so the people check reads a named role when
+// RAKAZO_PEOPLE_ROLE is set and otherwise the longest-standing one.
+const fixtureRole =
+  all.find((group) => group.name === process.env.RAKAZO_PEOPLE_ROLE) ??
+  all.findLast((group) => group.name.startsWith(FIXTURE_MARK));
 
 try {
   await check("ids", async (page, failures) => {
@@ -218,7 +222,7 @@ try {
   await check("title", async (page, failures) => {
     const before = new Set(all.map((group) => group.id));
     await page.goto(`${ORIGIN}/`);
-    await page.getByRole("button", { name: "New Role", exact: true }).first().click();
+    await page.getByRole("button", { name: /^New role$/i }).first().click();
     const title = `${FIXTURE_MARK}仓库主管 ${new Date().toISOString().slice(5, 16)}`;
     const jd = `${title}\n地点：Dallas，现场办公。要求：3 年以上仓库主管经验，带过 20 人以上的团队。`;
     const box = page.getByRole("textbox", { name: "Job description", exact: true });
@@ -241,9 +245,15 @@ try {
     if (!created) return failures.push("no new role chat appeared within 90 s");
     if (/^new role$/i.test(created.name.trim()))
       failures.push('the new role is still called "New role" after 90 s');
-    const sidebar = await page.getByTestId("recruiting-navigation").innerText();
-    if (/\bNew role\b/i.test(sidebar) && !sidebar.includes("仓库主管"))
-      failures.push('the sidebar still shows "New role"');
+    // Older untitled roles can still be listed, so look for this role's own title.
+    const navigation = page.getByTestId("recruiting-navigation");
+    const named = await navigation
+      .getByText(title)
+      .first()
+      .waitFor({ timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!named) failures.push(`the sidebar does not show "${title}" within 30 s`);
     // The test role leaves the sidebar again.
     await rpc("threads/stop", { groupId: created.id, scope: "all" }).catch(() => {});
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});

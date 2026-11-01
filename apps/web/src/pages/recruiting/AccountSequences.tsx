@@ -138,6 +138,7 @@ export function AccountSequences({
           {
             view: "sequence",
             sequenceSummary: true,
+            briefedOnly: true,
             ...(contactSearch ? { sequenceContactQuery: contactSearch } : {}),
             limit: 5,
             ...(cursor ? { cursor } : {}),

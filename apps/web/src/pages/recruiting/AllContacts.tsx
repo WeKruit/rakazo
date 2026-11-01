@@ -27,9 +27,10 @@ import {
   Input,
   Textarea,
 } from "@rakazo/ui-web";
-import { ChevronDown, ListFilter, Mail, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, ListFilter, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { ListPager } from "../../components/ListPager";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
 import { AddToSequenceDialog } from "./AddToSequenceDialog";
@@ -955,22 +956,12 @@ export function AllContacts({
           ) : null}
           {data.total > PAGE_SIZE ? (
             <div className="sticky bottom-0 z-10 flex min-h-12 items-center gap-2 border-t bg-background py-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!offset || loading}
-                onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
-              >
-                <Trans>Previous</Trans>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!data.nextCursor || loading}
-                onClick={() => setOffset(Number(data.nextCursor))}
-              >
-                <Trans>Next</Trans>
-              </Button>
+              <ListPager
+                page={Math.floor(offset / PAGE_SIZE)}
+                pageCount={Math.ceil(data.total / PAGE_SIZE)}
+                onPage={(next) => setOffset(next * PAGE_SIZE)}
+                disabled={loading}
+              />
             </div>
           ) : null}
         </>

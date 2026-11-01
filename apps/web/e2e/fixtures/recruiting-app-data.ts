@@ -565,8 +565,8 @@ export async function mockRecruitingApp(
     }
     let value: unknown;
     if (method === "recruiting/globalInbox" || method === "recruiting/globalInboxSummary") {
-      const roles = accountRolesData().slice(0, 1);
-      const rows = roles.flatMap((role) => {
+      const roles = accountRolesData();
+      const rows = roles.slice(0, 1).flatMap((role) => {
         const item = fixtureAccountItem(role);
         return (item.correspondence?.emails ?? []).map((email) => ({
           roleId: role.id,
@@ -600,6 +600,7 @@ export async function mockRecruitingApp(
         roles,
         items: filtered.slice(0, Number(input.limit ?? 30)),
         nextCursor: null,
+        total: filtered.length,
         unread: {
           count: rows.filter(isUnread).length,
           unknownThreads: 0,

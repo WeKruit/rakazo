@@ -28,12 +28,10 @@ for (const width of [1440, 390]) {
       .getByRole("button", { name: "Next", exact: true })
       .click();
     await expect(page.getByRole("link", { name: "Role 050", exact: true })).toBeVisible();
-    await test
-      .info()
-      .attach(`all-roles-${width}`, {
-        body: await page.screenshot({ path: info.outputPath(`all-roles-${width}.png`) }),
-        contentType: "image/png",
-      });
+    await test.info().attach(`all-roles-${width}`, {
+      body: await page.screenshot({ path: info.outputPath(`all-roles-${width}.png`) }),
+      contentType: "image/png",
+    });
     await search.fill("Role 000");
     await page.getByRole("link", { name: "Role 000", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/app/g/${appGroupId}\\?view=conversation$`));

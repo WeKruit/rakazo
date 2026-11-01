@@ -3059,9 +3059,9 @@ it("omits unused internal assessment controls without applying stored diagnostic
   api.listAssessments.mockResolvedValue([]);
   const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
   const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
-  api.listCandidates.mockImplementation(async ({ cursor, assessmentState, verdict }) => ({
-    ...candidatePage(assessmentState || verdict ? [] : [cursor ? second : first]),
-    nextCursor: assessmentState || verdict || cursor ? null : "page-2",
+  api.listCandidates.mockImplementation(async ({ offset, assessmentState, verdict }) => ({
+    ...candidatePage(assessmentState || verdict ? [] : [offset ? second : first]),
+    total: assessmentState || verdict ? 0 : 31,
     counts: { ...candidatePage().counts, candidates: 2, assessed: 0, unassessed: 2 },
   }));
   const diagnostic = await mounted();
@@ -3090,37 +3090,28 @@ it("omits unused internal assessment controls without applying stored diagnostic
     },
     { signal: expect.any(AbortSignal) },
   );
-  await view.click("Load more");
+  await view.click("Page 2");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     {
       roleId: role.id,
       limit: 30,
       sort: "recent",
-      cursor: "page-2",
+      offset: 30,
     },
     { signal: expect.any(AbortSignal) },
   );
   expect(view.container.querySelector("tbody")?.textContent).toContain(second.name);
+  expect(view.container.querySelector("tbody")?.textContent).not.toContain(first.name);
   await cleanup?.();
   api.listCandidates.mockClear();
+  // Reopening reads only the page that was on screen, not every page before it.
   const reopened = await mounted("thread-1", undefined, false);
-  expect(api.listCandidates).toHaveBeenCalledTimes(2);
-  expect(api.listCandidates).toHaveBeenNthCalledWith(
-    1,
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
     {
       roleId: role.id,
       limit: 30,
       sort: "recent",
-    },
-    { signal: expect.any(AbortSignal) },
-  );
-  expect(api.listCandidates).toHaveBeenNthCalledWith(
-    2,
-    {
-      roleId: role.id,
-      limit: 30,
-      sort: "recent",
-      cursor: "page-2",
+      offset: 30,
     },
     { signal: expect.any(AbortSignal) },
   );
@@ -3621,7 +3612,7 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
   api.listCandidates
     .mockResolvedValueOnce({
       ...candidatePage([synced]),
-      nextCursor: "next-page",
+      total: 31,
       crmTarget: { bindingEffectId: "crm-binding", target: crmTarget },
     })
     .mockResolvedValue({
@@ -3635,7 +3626,8 @@ it("reloads candidate pages when the CRM binding changes during pagination", asy
   await view.click("Evidence");
   await view.click("synced-person");
   await view.expand("CRM receipt");
-  await view.click("Load more");
+  await view.click("Page 2");
+  expect(api.listCandidates.mock.lastCall?.[0]).toMatchObject({ offset: 30 });
   expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
   expect(view.container.querySelector("tbody")?.textContent).not.toContain("synced-person");
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
@@ -3752,9 +3744,9 @@ it("keeps an explicit Dashboard selection through delayed native hydration and p
 it("restores the recruiting list and selected candidate from fresh pages after closing and reopening", async () => {
   const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
   let second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
-  api.listCandidates.mockImplementation(async ({ cursor }) => ({
-    ...candidatePage([cursor ? second : first]),
-    nextCursor: cursor ? null : "page-2",
+  api.listCandidates.mockImplementation(async ({ offset }) => ({
+    ...candidatePage([offset ? second : first]),
+    total: 31,
   }));
   api.listResearch.mockResolvedValue({ tasks: [], actions: [], observations: [savedObservation] });
   const view = await mounted("thread-1", undefined, false);
@@ -3770,7 +3762,7 @@ it("restores the recruiting list and selected candidate from fresh pages after c
       .find((label) => label.textContent === "Shortlisted only")!
       .click();
   });
-  await view.click("Load more");
+  await view.click("Page 2");
   await view.click(second.name);
   await cleanup?.();
   second = { ...second, name: "Synthetic refreshed second" };
@@ -3779,7 +3771,7 @@ it("restores the recruiting list and selected candidate from fresh pages after c
   expect(reopened.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(
     "Evidence",
   );
-  expect(reopened.container.querySelector("table")?.textContent).toContain(first.name);
+  expect(reopened.container.querySelector("table")?.textContent).not.toContain(first.name);
   expect(reopened.container.querySelector("table")?.textContent).toContain(second.name);
   expect(reopened.container.querySelector('[role="dialog"]')?.textContent).toContain(second.name);
   expect(reopened.container.querySelector('[role="dialog"]')?.textContent).not.toContain(
@@ -3796,13 +3788,15 @@ it("restores the recruiting list and selected candidate from fresh pages after c
       sort: "recent",
       sourceEffectId: savedObservation.effectId,
       shortlisted: true,
+      offset: 30,
     },
     { signal: expect.any(AbortSignal) },
   );
-  expect(api.listCandidates).toHaveBeenNthCalledWith(
-    2,
+  expect(api.listCandidates).not.toHaveBeenCalledWith(
     expect.objectContaining({ cursor: "page-2" }),
-    { signal: expect.any(AbortSignal) },
+    {
+      signal: expect.any(AbortSignal),
+    },
   );
   expect(reopened.container.querySelector('select[aria-label="Research round"]')).toHaveProperty(
     "value",
@@ -3920,41 +3914,29 @@ it("ignores an old-round selected-candidate response after the source changes", 
   );
 });
 
-it("ignores a late restored page after filters change and keeps the new depth on reopen", async () => {
+it("ignores a late page after filters change and keeps the new filters on reopen", async () => {
   const first = { ...candidateFixture("first-person", false), name: "Synthetic first" };
   const second = { ...candidateFixture("second-person", false), name: "Synthetic second" };
   const fresh = { ...candidateFixture("fresh-person", false), name: "Synthetic fresh" };
-  let hold = false;
   let finish!: (page: ReturnType<typeof candidatePage>) => void;
-  api.listCandidates.mockImplementation(({ cursor, sort }) => {
+  api.listCandidates.mockImplementation(({ offset, sort }) => {
     if (sort === "recent") return Promise.resolve(candidatePage([fresh]));
-    if (cursor && hold)
+    if (offset)
       return new Promise((resolve) => {
         finish = resolve;
       });
-    return Promise.resolve({
-      ...candidatePage([cursor ? second : first]),
-      nextCursor: cursor ? null : "page-2",
-    });
+    return Promise.resolve({ ...candidatePage([first]), total: 31 });
   });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
-  await view.click("Load more");
-  await cleanup?.();
-  hold = true;
-  const reopened = await mounted("thread-1", undefined, false);
+  await view.click("Page 2");
   expect(finish).toBeDefined();
-  expect(reopened.container.querySelector("tbody")?.textContent).toContain(first.name);
-  expect(reopened.container.querySelector("tbody")?.textContent).not.toContain(second.name);
-  expect(
-    [...reopened.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Load more",
-    ),
-  ).toHaveProperty("disabled", true);
-  await changeSelect(reopened.container, "Candidate sort", "recent");
-  await act(async () => finish(candidatePage([second])));
-  expect(reopened.container.querySelector("tbody")?.textContent).toContain(fresh.name);
-  expect(reopened.container.textContent).not.toContain(second.name);
+  // The current rows stay on screen while the next page loads.
+  expect(view.container.querySelector("tbody")?.textContent).toContain(first.name);
+  await changeSelect(view.container, "Candidate sort", "recent");
+  await act(async () => finish({ ...candidatePage([second]), total: 31 }));
+  expect(view.container.querySelector("tbody")?.textContent).toContain(fresh.name);
+  expect(view.container.textContent).not.toContain(second.name);
   await cleanup?.();
   api.listCandidates.mockClear();
   const again = await mounted("thread-1", undefined, false);
@@ -3969,39 +3951,65 @@ it("ignores a late restored page after filters change and keeps the new depth on
   );
 });
 
-it("keeps the displayed page depth after a restored page fails and is loaded manually", async () => {
+it("opens the last page when a saved page is past the end of the list", async () => {
+  api.listCandidates.mockImplementation(async ({ offset }) => ({
+    ...candidatePage(
+      offset === 90
+        ? []
+        : [{ ...candidateFixture(`person-${offset ?? 0}`, false), name: `person-${offset ?? 0}` }],
+    ),
+    total: 45,
+  }));
+  const view = await mounted("thread-1", undefined, false);
+  await view.click("Evidence");
+  await view.click("Page 2");
+  expect(view.container.querySelector("tbody")?.textContent).toContain("person-30");
+  await cleanup?.();
+  const key = [...Array(localStorage.length)]
+    .map((_, index) => localStorage.key(index)!)
+    .find((name) => localStorage.getItem(name)?.includes('"page":2'))!;
+  localStorage.setItem(key, localStorage.getItem(key)!.replace('"page":2', '"page":4'));
+  api.listCandidates.mockClear();
+  const reopened = await mounted("thread-1", undefined, false);
+  expect(api.listCandidates.mock.calls.map(([input]) => input.offset)).toEqual([90, 30]);
+  expect(reopened.container.querySelector("tbody")?.textContent).toContain("person-30");
+  expect(reopened.container.querySelector('[aria-current="page"]')?.textContent).toBe("2");
+});
+it("keeps the chosen page after its restored read fails and is retried", async () => {
   const people = ["first", "second", "third"].map((name) => ({
     ...candidateFixture(`${name}-person`, false),
     name: `Synthetic ${name}`,
   }));
   let rejectNextPage = false;
-  api.listCandidates.mockImplementation(({ cursor }) => {
-    if (cursor && rejectNextPage) {
+  api.listCandidates.mockImplementation(({ offset }) => {
+    if (offset && rejectNextPage) {
       rejectNextPage = false;
       return Promise.reject(new Error("Page unavailable"));
     }
-    const index = cursor === "page-3" ? 2 : cursor === "page-2" ? 1 : 0;
     return Promise.resolve({
-      ...candidatePage([people[index]!]),
-      nextCursor: index < 2 ? `page-${index + 2}` : null,
+      ...candidatePage([people[(offset ?? 0) / 30]!]),
+      total: 61,
     });
   });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
-  await view.click("Load more");
+  await view.click("Page 2");
   await cleanup?.();
   rejectNextPage = true;
   const reopened = await mounted("thread-1", undefined, false);
   expect(reopened.container.textContent).toContain("Could not load candidates");
-  expect(reopened.container.querySelector("tbody")?.textContent).toContain(people[0]!.name);
-  await reopened.click("Load more");
+  await reopened.click("Retry");
   expect(reopened.container.querySelector("tbody")?.textContent).toContain(people[1]!.name);
+  expect(reopened.container.querySelector("tbody")?.textContent).not.toContain(people[0]!.name);
   await cleanup?.();
   api.listCandidates.mockClear();
   const again = await mounted("thread-1", undefined, false);
   expect(again.container.querySelector("tbody")?.textContent).toContain(people[1]!.name);
   expect(again.container.textContent).not.toContain(people[2]!.name);
-  expect(api.listCandidates).toHaveBeenCalledTimes(2);
+  expect(api.listCandidates).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ offset: 30 }),
+    { signal: expect.any(AbortSignal) },
+  );
 });
 
 it("isolates saved recruiting list preferences by actor, thread and actual role", async () => {
@@ -4182,7 +4190,7 @@ it.each(["tier", "score"])(
 
 it("requests server pages and filters while keeping selected evidence outside the visible page", async () => {
   api.listCandidates
-    .mockResolvedValueOnce({ ...candidatePage(), nextCursor: "page-2", total: 12 })
+    .mockResolvedValueOnce({ ...candidatePage(), total: 42 })
     .mockResolvedValue(candidatePage([candidateFixture("candidate-2", false)]));
   const view = await mounted();
   await view.click("Evidence");
@@ -4193,9 +4201,9 @@ it("requests server pages and filters while keeping selected evidence outside th
     version: 1,
   });
   expect(view.container.textContent).toContain("Original systems requirement");
-  await view.click("Load more");
+  await view.click("Page 2");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
-    expect.objectContaining({ roleId: role.id, cursor: "page-2" }),
+    expect.objectContaining({ roleId: role.id, offset: 30 }),
     { signal: expect.any(AbortSignal) },
   );
   await changeInput(view.container, "Search candidates", "Synthetic");
@@ -4203,7 +4211,8 @@ it("requests server pages and filters while keeping selected evidence outside th
     expect.objectContaining({ query: "Synthetic" }),
     { signal: expect.any(AbortSignal) },
   );
-  expect(api.listCandidates.mock.lastCall?.[0].cursor).toBeUndefined();
+  // A new search starts again from the first page.
+  expect(api.listCandidates.mock.lastCall?.[0].offset).toBeUndefined();
   expect(view.container.textContent).toContain("Original systems requirement");
   await changeSelect(view.container, "Internal assessment", "unassessed");
   await changeSelect(view.container, "Candidate sort", "recent");
@@ -4221,7 +4230,7 @@ it("filters saved result pages alongside search updates and preserves the other 
     { ...savedObservation, effectId: "native-read-2", observedAt: "2026-10-16T01:00:00.000Z" },
   ];
   api.listResearch.mockResolvedValue({ tasks: [f.task], actions: [f.action], observations });
-  api.listCandidates.mockResolvedValue({ ...candidatePage(), nextCursor: "page-2" });
+  api.listCandidates.mockResolvedValue({ ...candidatePage(), total: 31 });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   const select = view.container.querySelector<HTMLSelectElement>(
@@ -4277,13 +4286,13 @@ it("filters saved result pages alongside search updates and preserves the other 
     },
     { signal: expect.any(AbortSignal) },
   );
-  await view.click("Load more");
+  await view.click("Page 2");
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     {
       ...filters,
       actionId: undefined,
       sourceEffectId: savedObservation.effectId,
-      cursor: "page-2",
+      offset: 30,
     },
     { signal: expect.any(AbortSignal) },
   );
@@ -4319,7 +4328,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
     observations: [savedObservation],
   });
   const candidate = { ...candidateFixture(), name: "Synthetic Avery" };
-  api.listCandidates.mockResolvedValue({ ...candidatePage([candidate]), nextCursor: "page-2" });
+  api.listCandidates.mockResolvedValue({ ...candidatePage([candidate]), total: 31 });
   const view = await mounted("thread-1", undefined, false);
   await view.click("Evidence");
   await changeSelect(view.container, "Research round", `source:${savedObservation.effectId}`);
@@ -4330,7 +4339,7 @@ it("ignores late saved-result pages while retaining the original candidate discu
       finish = resolve;
     }),
   );
-  await view.click("Load more");
+  await view.click("Page 2");
   await changeSelect(view.container, "Research round", `action:${f.action.id}`);
   expect(api.listCandidates).toHaveBeenLastCalledWith(
     {

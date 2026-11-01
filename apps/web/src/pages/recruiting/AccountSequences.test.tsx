@@ -76,7 +76,11 @@ it("renders the global overview, exhausts server role cursors, and routes exact 
     ),
   );
   expect(read).toHaveBeenCalledTimes(2);
-  expect(read.mock.calls[1]![0]).toMatchObject({ view: "sequence", cursor: "next-role" });
+  expect(read.mock.calls[1]![0]).toMatchObject({
+    view: "sequence",
+    briefedOnly: true,
+    cursor: "next-role",
+  });
   expect(
     [...host.querySelectorAll("dt")].map((item) => item.textContent?.replace("—", "").trim()),
   ).toEqual(["Contacted", "Active", "Opened", "Clicked", "Replied", "Interested"]);

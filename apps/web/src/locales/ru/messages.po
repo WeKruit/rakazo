@@ -3448,7 +3448,6 @@ msgstr "Прослушивание"
 
 #: src/pages/Artifacts.tsx
 #: src/pages/recruiting/AccountRecruitingView.tsx
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Load more"
 msgstr ""
 

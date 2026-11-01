@@ -60,6 +60,7 @@ it("global sequence summaries use exact owned mirrors and native associations wi
   ]);
   const prisma = {
     recruitingRole: {
+      count: vi.fn(async () => 1),
       findMany: vi.fn(
         async (query: {
           where: { activeThreads?: { some: { userId: string; spaceId: string } } };
