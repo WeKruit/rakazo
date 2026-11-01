@@ -644,3 +644,29 @@ it("pages a long role breakdown ten at a time", async () => {
   await act(async () => button("Page 2").click());
   expect(rows()).toHaveLength(2);
 });
+
+it("keeps each arrived role for the next visit even when the read never finishes", async () => {
+  overview.mockImplementation(async () =>
+    (async function* () {
+      yield {
+        kind: "role" as const,
+        role: {
+          groupId: "g1",
+          roleId: "role-thread-g1",
+          shortlisted: 4,
+          shortlistedDates: [],
+          contacted: null,
+          replied: null,
+          interested: null,
+          interestedPartial: false,
+          incomplete: true,
+          bookings: [],
+          bookingUnknown: true,
+        },
+      };
+      await new Promise(() => undefined);
+    })(),
+  );
+  await render({ readCacheScope: "account-c" });
+  expect(localStorage.getItem("rakazo:home-overview:account-c")).toContain('"shortlisted":4');
+});

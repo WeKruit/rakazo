@@ -52,8 +52,8 @@ type RoleReads = ReadonlyMap<string, RecruitingOverviewRole | "failed">;
 type OverviewState = { scope?: string; reads: RoleReads; done: boolean; failed?: boolean };
 
 /**
- * The last finished Home numbers for this account, kept in the browser so the page opens with
- * them at once while the fresh read streams in. Only counts are kept, never calendar events.
+ * The latest Home numbers for this account, kept in the browser so the page opens with them at
+ * once while the fresh read streams in. Only counts are kept, never calendar events.
  */
 const storedOverviewKey = (scope: string) => `rakazo:home-overview:${scope}`;
 function storedOverview(scope: string | undefined): RoleReads | undefined {
@@ -172,6 +172,8 @@ function useOverview(
         // A failed refresh keeps the numbers that were already read.
         if (event.kind === "failed" && reads.has(id) && reads.get(id) !== "failed") continue;
         reads = new Map(reads).set(id, event.kind === "role" ? event.role : "failed");
+        // Kept as each role arrives, so leaving Home before the read ends still helps next time.
+        storeOverview(scope, reads);
         setState({ scope, reads, done: false });
       }
     })().catch(() => {
