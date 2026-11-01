@@ -559,18 +559,31 @@ export async function latestReplySuggestion(
 ): Promise<{ runId: string; text: string } | null> {
   const last = messages.findLast((message) => !message.internal);
   if (last?.role !== "bot" || !last.runId) return null;
-  const event = await prisma.event
-    .findFirst({
-      where: { runId: last.runId, type: "thread.suggestion" },
-      orderBy: { seq: "desc" },
-      select: { payload: true },
-    })
+  const runId = last.runId;
+  // Never fails the thread read: no suggestion is the fallback.
+  const event = await Promise.resolve()
+    .then(() =>
+      prisma.event.findFirst({
+        where: { runId, type: "thread.suggestion" },
+        orderBy: { seq: "desc" },
+        select: { payload: true },
+      }),
+    )
     .catch(() => null);
   const text = (event?.payload as { text?: unknown } | undefined)?.text;
-  return typeof text === "string" && text ? { runId: last.runId, text } : null;
+  return typeof text === "string" && text ? { runId, text } : null;
 }
 
 export async function threadSnapshot(
+  deps: { prisma: PrismaClient },
+  target: ThreadTarget,
+): Promise<ThreadSnapshot> {
+  const snapshot = await readThreadSnapshot(deps, target);
+  const suggestion = await latestReplySuggestion(deps.prisma, snapshot.messages);
+  return suggestion ? { ...snapshot, suggestion } : snapshot;
+}
+
+async function readThreadSnapshot(
   deps: { prisma: PrismaClient },
   target: ThreadTarget,
 ): Promise<ThreadSnapshot> {
