@@ -1533,6 +1533,7 @@ describe("tool audit ordering", () => {
               {
                 label: name === "web_search" ? "Web search" : "Message user",
                 count: 1,
+                activity: name === "web_search" ? "search" : "writing",
                 status: "failed",
                 executionId,
                 durationMs: 1,
