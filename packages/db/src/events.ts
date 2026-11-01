@@ -258,7 +258,7 @@ function resumeChoiceLabel(
  */
 /** A message typed in the chat box while a card was open: the agent decides whether it answers. */
 export function chatReplyToAsk(text: string): string {
-  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, then ask the question again if you still need the answer.)`;
+  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, and once it is handled (including a teammate's reply) ask the same question again with ask_user; the open card is gone, so never end without asking it again.)`;
 }
 
 function resumePrompt(
