@@ -615,13 +615,26 @@ it.each([
   expect(scheduling).not.toContain("call_api_operation");
 });
 
-it("gives Scheduling its calendar access when a calendar only Main could use is reconnected", async () => {
+it("gives Scheduling its calendar access on reconnect and keeps only one calendar connected", async () => {
   const endpoint = "https://calendarmcp.googleapis.com/mcp/v1";
-  api.servers.mockResolvedValue([server("Calendar", { endpoint })]);
+  const booking = server("Booking", {
+    endpoint: "https://mcp.cal.com/mcp",
+    oauthStatus: "connected",
+    hasSecret: true,
+  });
+  const mailbox = server("Mailbox", {
+    endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+    oauthStatus: "connected",
+    hasSecret: true,
+  });
+  api.servers.mockResolvedValue([server("Calendar", { endpoint }), booking, mailbox]);
   api.assignments.mockResolvedValue([{ ...assignment("Calendar"), allowAllTools: true }]);
+  api.disconnect.mockResolvedValue({ ok: true });
   api.connect.mockImplementation(async () => {
     api.servers.mockResolvedValue([
       server("Calendar", { endpoint, oauthStatus: "connected", hasSecret: true }),
+      booking,
+      mailbox,
     ]);
     return "connected";
   });
@@ -633,6 +646,7 @@ it("gives Scheduling its calendar access when a calendar only Main could use is 
   await act(async () => button(host, "Connect").click());
   expect(api.approve.mock.calls.map(([input]) => input.botId)).toEqual(["main", "scheduling"]);
   expect(api.approve.mock.calls[1]![0].allowedTools).toContain("create_event");
+  expect(api.disconnect.mock.calls).toEqual([[{ serverId: "Booking" }]]);
 });
 
 it("reuses an explicit generic app Connect on the actual coordinator only", async () => {
