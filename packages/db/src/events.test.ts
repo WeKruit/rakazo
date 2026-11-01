@@ -17,6 +17,7 @@ import {
   answerWaitingRunWithTextInTransaction,
   appendEvent,
   appendEventsInTransaction,
+  chatReplyToAsk,
   claimSteering,
   clearThread,
   completedRunBlocks,
@@ -765,7 +766,7 @@ describe("ordinary native Ask answer provenance", () => {
     expect(f.tx.task.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          prompt: "Which city?\nAnswer:   Paris  ",
+          prompt: `Which city?\nAnswer: ${chatReplyToAsk("  Paris  ")}`,
         },
       }),
     );
@@ -2215,7 +2216,9 @@ describe("answerPausedAskWithSteering", () => {
     ]);
     await answerPausedAskWithSteering(prisma as never, input);
     expect(tx.task.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { prompt: "What next?\nAnswer: Find 150." } }),
+      expect.objectContaining({
+        data: { prompt: `What next?\nAnswer: ${chatReplyToAsk("Find 150.")}` },
+      }),
     );
     expect(tx.steeringMessage.delete).toHaveBeenCalledTimes(1);
     expect(tx.steeringMessage.delete).toHaveBeenCalledWith({ where: { id: "steer-2" } });

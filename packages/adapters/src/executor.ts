@@ -5872,6 +5872,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         let contactLookupOwed: { target: number; remaining: number } | undefined;
         let askDeclineBounced = false;
+        // A question bounced once as already answered may be asked again: the reply may have been about something else.
+        const knownAskBounced = new Set<string>();
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -13795,7 +13797,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       question,
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
-                    if (known) return `"${known.key}" → "${known.value}"`;
+                    if (known && !knownAskBounced.has(known.key)) {
+                      knownAskBounced.add(known.key);
+                      return `"${known.key}" → "${known.value}"`;
+                    }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
