@@ -1,0 +1,280 @@
+匿名化布局节点清单（由测量派生，不是原始 AX 树）
+E0 DIV None [匿名内容槽] {'height': 900, 'width': 1440, 'x': 0, 'y': 0}
+E1 DIV None [匿名内容槽] {'height': 900, 'width': 1440, 'x': 0, 'y': 0}
+E2 DIV None [匿名内容槽] {'height': 900, 'width': 244, 'x': 0, 'y': 0}
+E3 DIV None [匿名内容槽] {'height': 900, 'width': 243, 'x': 0, 'y': 0}
+E4 DIV None Toggle Sidebar {'height': 64, 'width': 243, 'x': 0, 'y': 0}
+E5 DIV None Toggle Sidebar {'height': 32, 'width': 243, 'x': 0, 'y': 16}
+E6 A None [匿名内容槽] {'height': 32, 'width': 82, 'x': 16, 'y': 16}
+E7 svg None  {'height': 14, 'width': 82, 'x': 16, 'y': 25}
+E8 BUTTON None Collapse sidebar {'height': 32, 'width': 32, 'x': 195, 'y': 16}
+E9 svg None  {'height': 18, 'width': 18, 'x': 202, 'y': 23}
+E10 DIV None [匿名内容槽] {'height': 764, 'width': 243, 'x': 0, 'y': 64}
+E11 DIV None [匿名内容槽] {'height': 764, 'width': 243, 'x': 0, 'y': 64}
+E12 DIV None New Role {'height': 38, 'width': 243, 'x': 0, 'y': 64}
+E13 UL None New Role {'height': 38, 'width': 227, 'x': 8, 'y': 64}
+E14 LI None New Role {'height': 34, 'width': 227, 'x': 8, 'y': 68}
+E15 A None New Role {'height': 34, 'width': 227, 'x': 8, 'y': 68}
+E16 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 68}
+E17 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 76}
+E18 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 76}
+E19 DIV None [匿名内容槽] {'height': 198, 'width': 243, 'x': 0, 'y': 102}
+E20 UL None [匿名内容槽] {'height': 190, 'width': 227, 'x': 8, 'y': 102}
+E21 LI None Job Brief {'height': 34, 'width': 227, 'x': 8, 'y': 106}
+E22 A None Job Brief {'height': 34, 'width': 227, 'x': 8, 'y': 106}
+E23 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 106}
+E24 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 114}
+E25 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 114}
+E26 LI None Shortlist {'height': 34, 'width': 227, 'x': 8, 'y': 144}
+E27 A None Shortlist {'height': 34, 'width': 227, 'x': 8, 'y': 144}
+E28 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 144}
+E29 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 152}
+E30 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 152}
+E31 LI None Sequence {'height': 34, 'width': 227, 'x': 8, 'y': 182}
+E32 A None Sequence {'height': 34, 'width': 227, 'x': 8, 'y': 182}
+E33 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 182}
+E34 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 190}
+E35 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 190}
+E36 LI None [匿名内容槽] {'height': 34, 'width': 227, 'x': 8, 'y': 220}
+E37 A None Inbox {'height': 34, 'width': 227, 'x': 8, 'y': 220}
+E38 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 220}
+E39 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 228}
+E40 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 228}
+E41 SPAN None [匿名内容槽] {'height': 12, 'width': 12, 'x': 215, 'y': 231}
+E42 LI None Interview {'height': 34, 'width': 227, 'x': 8, 'y': 258}
+E43 A None Interview {'height': 34, 'width': 227, 'x': 8, 'y': 258}
+E44 SPAN None  {'height': 34, 'width': 34, 'x': 8, 'y': 258}
+E45 SPAN None  {'height': 18, 'width': 18, 'x': 16, 'y': 266}
+E46 svg None  {'height': 18, 'width': 18, 'x': 16, 'y': 266}
+E47 DIV None [匿名内容槽] {'height': 248, 'width': 243, 'x': 0, 'y': 300}
+E48 DIV None All Roles {'height': 32, 'width': 227, 'x': 8, 'y': 320}
+E49 UL None [匿名内容槽] {'height': 188, 'width': 227, 'x': 8, 'y': 352}
+E50 LI None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 352}
+E51 A None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 352}
+E52 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 360}
+E53 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 360}
+E54 DIV None  {'height': 24, 'width': 24, 'x': 203, 'y': 358}
+E55 BUTTON None [匿名内容槽] {'height': 24, 'width': 24, 'x': 203, 'y': 358}
+E56 svg None  {'height': 16, 'width': 16, 'x': 207, 'y': 362}
+E57 LI None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 390}
+E58 A None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 390}
+E59 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 398}
+E60 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 398}
+E61 DIV None  {'height': 24, 'width': 24, 'x': 203, 'y': 396}
+E62 BUTTON None [匿名内容槽] {'height': 24, 'width': 24, 'x': 203, 'y': 396}
+E63 svg None  {'height': 16, 'width': 16, 'x': 207, 'y': 400}
+E64 LI None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 428}
+E65 A None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 428}
+E66 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 436}
+E67 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 436}
+E68 DIV None  {'height': 24, 'width': 24, 'x': 203, 'y': 434}
+E69 BUTTON None [匿名内容槽] {'height': 24, 'width': 24, 'x': 203, 'y': 434}
+E70 svg None  {'height': 16, 'width': 16, 'x': 207, 'y': 438}
+E71 LI None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 466}
+E72 A None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 466}
+E73 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 474}
+E74 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 474}
+E75 DIV None  {'height': 24, 'width': 24, 'x': 203, 'y': 472}
+E76 BUTTON None [匿名内容槽] {'height': 24, 'width': 24, 'x': 203, 'y': 472}
+E77 svg None  {'height': 16, 'width': 16, 'x': 207, 'y': 476}
+E78 LI None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 504}
+E79 A None [匿名内容槽] {'height': 36, 'width': 227, 'x': 8, 'y': 504}
+E80 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 512}
+E81 SPAN None [匿名内容槽] {'height': 20, 'width': 199, 'x': 16, 'y': 512}
+E82 DIV None  {'height': 24, 'width': 24, 'x': 203, 'y': 510}
+E83 BUTTON None [匿名内容槽] {'height': 24, 'width': 24, 'x': 203, 'y': 510}
+E84 svg None  {'height': 16, 'width': 16, 'x': 207, 'y': 514}
+E85 DIV None [匿名内容槽] {'height': 72, 'width': 243, 'x': 0, 'y': 828}
+E86 UL None [匿名内容槽] {'height': 56, 'width': 227, 'x': 8, 'y': 836}
+E87 BUTTON None [匿名内容槽] {'height': 56, 'width': 227, 'x': 8, 'y': 836}
+E88 SPAN None [匿名内容槽] {'height': 36, 'width': 36, 'x': 16, 'y': 846}
+E89 SPAN None [匿名内容槽] {'height': 36, 'width': 36, 'x': 16, 'y': 846}
+E90 SPAN None [匿名内容槽] {'height': 44, 'width': 143, 'x': 60, 'y': 842}
+E91 svg None  {'height': 16, 'width': 16, 'x': 211, 'y': 856}
+E92 MAIN None [匿名内容槽] {'height': 900, 'width': 1196, 'x': 244, 'y': 0}
+E93 DIV None [匿名内容槽] {'height': 900, 'width': 1196, 'x': 244, 'y': 0}
+E94 DIV None [匿名内容槽] {'height': 900, 'width': 1196, 'x': 244, 'y': 0}
+E95 DIV None [匿名内容槽] {'height': 900, 'width': 500, 'x': 244, 'y': 0}
+E96 DIV None Inbox {'height': 64, 'width': 499, 'x': 244, 'y': 0}
+E97 H1 None Inbox {'height': 24, 'width': 59.72, 'x': 264, 'y': 19.5}
+E98 BUTTON None [匿名内容槽] {'height': 44, 'width': 459, 'x': 264, 'y': 76}
+E99 SPAN None  {'height': 16, 'width': 16, 'x': 692, 'y': 90}
+E100 svg None  {'height': 16, 'width': 16, 'x': 692, 'y': 90}
+E101 DIV None [匿名内容槽] {'height': 32, 'width': 459, 'x': 264, 'y': 132}
+E102 BUTTON None [匿名内容槽] {'height': 32, 'width': 49.73, 'x': 264, 'y': 132}
+E103 BUTTON None Unread {'height': 32, 'width': 79.06, 'x': 321.73, 'y': 132}
+E104 DIV None [匿名内容槽] {'height': 724, 'width': 499, 'x': 244, 'y': 176}
+E105 DIV None [匿名内容槽] {'height': 1589, 'width': 488, 'x': 244, 'y': -610}
+E106 DIV button [匿名内容槽] {'height': 245.5, 'width': 448, 'x': 264, 'y': -610}
+E107 DIV None [匿名内容槽] {'height': 211.5, 'width': 414, 'x': 281, 'y': -593}
+E108 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': -593}
+E109 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': -593}
+E110 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': -593}
+E111 SPAN None Worth Talking {'height': 24, 'width': 107.34, 'x': 441.61, 'y': -593}
+E112 svg None  {'height': 12, 'width': 12, 'x': 450.61, 'y': -587}
+E113 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': -565}
+E114 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': -511.5}
+E115 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': -511.5}
+E116 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -511.5}
+E117 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -511.5}
+E118 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -481.5}
+E119 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -481.5}
+E120 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -449.5}
+E121 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -449.5}
+E122 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': -449.5}
+E123 DIV None [匿名内容槽] {'height': 32, 'width': 414, 'x': 281, 'y': -413.5}
+E124 SPAN None [匿名内容槽] {'height': 16, 'width': 125.28, 'x': 291, 'y': -405.5}
+E125 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': -404.5}
+E126 DIV button [匿名内容槽] {'height': 247.5, 'width': 448, 'x': 264, 'y': -354.5}
+E127 DIV None [匿名内容槽] {'height': 213.5, 'width': 414, 'x': 281, 'y': -337.5}
+E128 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': -337.5}
+E129 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': -337.5}
+E130 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': -337.5}
+E131 SPAN None Strong Match {'height': 24, 'width': 105.86, 'x': 402.14, 'y': -337.5}
+E132 svg None  {'height': 12, 'width': 12, 'x': 411.14, 'y': -331.5}
+E133 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': -309.5}
+E134 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': -256}
+E135 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': -256}
+E136 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -256}
+E137 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -256}
+E138 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -226}
+E139 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -226}
+E140 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': -194}
+E141 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': -194}
+E142 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': -194}
+E143 DIV None [匿名内容槽] {'height': 34, 'width': 414, 'x': 281, 'y': -158}
+E144 SPAN None [匿名内容槽] {'height': 16, 'width': 142.09, 'x': 291, 'y': -149}
+E145 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': -148}
+E146 SPAN None Resume provided {'height': 22, 'width': 114.13, 'x': 441.09, 'y': -152}
+E147 DIV button [匿名内容槽] {'height': 245.5, 'width': 448, 'x': 264, 'y': -97}
+E148 DIV None [匿名内容槽] {'height': 211.5, 'width': 414, 'x': 281, 'y': -80}
+E149 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': -80}
+E150 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': -80}
+E151 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': -80}
+E152 SPAN None Worth Talking {'height': 24, 'width': 107.34, 'x': 510.86, 'y': -80}
+E153 svg None  {'height': 12, 'width': 12, 'x': 519.86, 'y': -74}
+E154 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': -52}
+E155 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': 1.5}
+E156 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': 1.5}
+E157 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 1.5}
+E158 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 1.5}
+E159 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 31.5}
+E160 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 31.5}
+E161 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 63.5}
+E162 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 63.5}
+E163 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': 63.5}
+E164 DIV None [匿名内容槽] {'height': 32, 'width': 414, 'x': 281, 'y': 99.5}
+E165 SPAN None [匿名内容槽] {'height': 16, 'width': 125.25, 'x': 291, 'y': 107.5}
+E166 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': 108.5}
+E167 DIV button [匿名内容槽] {'height': 245.5, 'width': 448, 'x': 264, 'y': 158.5}
+E168 DIV None [匿名内容槽] {'height': 211.5, 'width': 414, 'x': 281, 'y': 175.5}
+E169 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': 175.5}
+E170 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': 175.5}
+E171 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': 175.5}
+E172 SPAN None Strong Match {'height': 24, 'width': 105.86, 'x': 441.83, 'y': 175.5}
+E173 svg None  {'height': 12, 'width': 12, 'x': 450.83, 'y': 181.5}
+E174 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': 203.5}
+E175 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': 257}
+E176 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': 257}
+E177 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 257}
+E178 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 257}
+E179 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 287}
+E180 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 287}
+E181 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 319}
+E182 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 319}
+E183 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': 319}
+E184 DIV None [匿名内容槽] {'height': 32, 'width': 414, 'x': 281, 'y': 355}
+E185 SPAN None [匿名内容槽] {'height': 16, 'width': 147.73, 'x': 291, 'y': 363}
+E186 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': 364}
+E187 DIV button [匿名内容槽] {'height': 247.5, 'width': 448, 'x': 264, 'y': 414}
+E188 DIV None [匿名内容槽] {'height': 213.5, 'width': 414, 'x': 281, 'y': 431}
+E189 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': 431}
+E190 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': 431}
+E191 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': 431}
+E192 SPAN None Strong Match {'height': 24, 'width': 105.86, 'x': 444.2, 'y': 431}
+E193 svg None  {'height': 12, 'width': 12, 'x': 453.2, 'y': 437}
+E194 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': 459}
+E195 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': 512.5}
+E196 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': 512.5}
+E197 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 512.5}
+E198 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 512.5}
+E199 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 542.5}
+E200 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 542.5}
+E201 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 574.5}
+E202 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 574.5}
+E203 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': 574.5}
+E204 DIV None [匿名内容槽] {'height': 34, 'width': 414, 'x': 281, 'y': 610.5}
+E205 SPAN None [匿名内容槽] {'height': 16, 'width': 128.75, 'x': 291, 'y': 619.5}
+E206 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': 620.5}
+E207 SPAN None Resume provided {'height': 22, 'width': 114.13, 'x': 427.75, 'y': 616.5}
+E208 SPAN None Availability provided {'height': 22, 'width': 129.02, 'x': 549.88, 'y': 616.5}
+E209 DIV button [匿名内容槽] {'height': 245.5, 'width': 448, 'x': 264, 'y': 671.5}
+E210 DIV None [匿名内容槽] {'height': 211.5, 'width': 414, 'x': 281, 'y': 688.5}
+E211 DIV None [匿名内容槽] {'height': 44, 'width': 414, 'x': 281, 'y': 688.5}
+E212 SPAN None  {'height': 44, 'width': 44, 'x': 281, 'y': 688.5}
+E213 DIV None [匿名内容槽] {'height': 24, 'width': 358, 'x': 337, 'y': 688.5}
+E214 SPAN None Worth Talking {'height': 24, 'width': 107.34, 'x': 397.64, 'y': 688.5}
+E215 svg None  {'height': 12, 'width': 12, 'x': 406.64, 'y': 694.5}
+E216 P None [匿名内容槽] {'height': 16, 'width': 358, 'x': 337, 'y': 716.5}
+E217 DIV None [匿名内容槽] {'height': 86, 'width': 414, 'x': 281, 'y': 770}
+E218 DIV None [匿名内容槽] {'height': 54, 'width': 414, 'x': 281, 'y': 770}
+E219 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 770}
+E220 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 770}
+E221 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 800}
+E222 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 800}
+E223 DIV None [匿名内容槽] {'height': 24, 'width': 414, 'x': 281, 'y': 832}
+E224 SPAN None  {'height': 24, 'width': 24, 'x': 281, 'y': 832}
+E225 svg None  {'height': 24, 'width': 24, 'x': 281, 'y': 832}
+E226 DIV None [匿名内容槽] {'height': 32, 'width': 414, 'x': 281, 'y': 868}
+E227 SPAN None [匿名内容槽] {'height': 16, 'width': 130.02, 'x': 291, 'y': 876}
+E228 svg None  {'height': 14, 'width': 14, 'x': 291, 'y': 877}
+E229 DIV None No more messages {'height': 40, 'width': 448, 'x': 264, 'y': 927}
+E230 DIV None [匿名内容槽] {'height': 900, 'width': 696, 'x': 744, 'y': 0}
+E231 DIV None [匿名内容槽] {'height': 900, 'width': 696, 'x': 744, 'y': 0}
+E232 DIV None [匿名内容槽] {'height': 64, 'width': 696, 'x': 744, 'y': 0}
+E233 DIV None [匿名内容槽] {'height': 43.5, 'width': 656, 'x': 764, 'y': 9.75}
+E234 DIV None [匿名内容槽] {'height': 43.5, 'width': 348.55, 'x': 764, 'y': 9.75}
+E235 SPAN None  {'height': 36, 'width': 36, 'x': 764, 'y': 13.5}
+E236 DIV None [匿名内容槽] {'height': 43.5, 'width': 300.55, 'x': 812, 'y': 9.75}
+E237 SPAN button [匿名内容槽] {'height': 19.5, 'width': 180.38, 'x': 812, 'y': 33.75}
+E238 SPAN None  {'height': 14, 'width': 14, 'x': 978.38, 'y': 36.5}
+E239 svg None  {'height': 14, 'width': 14, 'x': 978.38, 'y': 36.5}
+E240 DIV None [匿名内容槽] {'height': 36, 'width': 295.45, 'x': 1124.55, 'y': 13.5}
+E241 BUTTON None Profile {'height': 36, 'width': 89.23, 'x': 1124.55, 'y': 13.5}
+E242 svg None  {'height': 16, 'width': 16, 'x': 1137.55, 'y': 23.5}
+E243 BUTTON None Reply {'height': 36, 'width': 83.38, 'x': 1221.78, 'y': 13.5}
+E244 svg None  {'height': 16, 'width': 16, 'x': 1234.78, 'y': 23.5}
+E245 BUTTON None Schedule {'height': 36, 'width': 106.84, 'x': 1313.16, 'y': 13.5}
+E246 svg None  {'height': 16, 'width': 16, 'x': 1326.16, 'y': 23.5}
+E247 DIV None [匿名内容槽] {'height': 836, 'width': 696, 'x': 744, 'y': 64}
+E248 DIV None [匿名内容槽] {'height': 592.5, 'width': 656, 'x': 764, 'y': 76}
+E249 ARTICLE None [匿名内容槽] {'height': 336.5, 'width': 656, 'x': 764, 'y': 76}
+E250 BUTTON None [匿名内容槽] {'height': 44, 'width': 622, 'x': 781, 'y': 93}
+E251 SPAN None  {'height': 36, 'width': 36, 'x': 781, 'y': 93}
+E252 DIV None [匿名内容槽] {'height': 22.5, 'width': 574, 'x': 829, 'y': 93}
+E253 SPAN button [匿名内容槽] {'height': 18.75, 'width': 174.92, 'x': 930.66, 'y': 94.88}
+E254 SPAN None  {'height': 14, 'width': 14, 'x': 1091.58, 'y': 97.25}
+E255 svg None  {'height': 14, 'width': 14, 'x': 1091.58, 'y': 97.25}
+E256 svg None  {'height': 14, 'width': 14, 'x': 1389, 'y': 97.25}
+E257 DIV None [匿名内容槽] {'height': 252.5, 'width': 622, 'x': 781, 'y': 143}
+E258 DIV presentation [匿名内容槽] {'height': 200.5, 'width': 574, 'x': 829, 'y': 143}
+E259 DIV textbox [匿名内容槽] {'height': 200.5, 'width': 574, 'x': 829, 'y': 143}
+E260 DIV None [匿名内容槽] {'height': 200.5, 'width': 574, 'x': 829, 'y': 143}
+E261 BUTTON None [匿名内容槽] {'height': 20, 'width': 31, 'x': 829, 'y': 323.5}
+E262 BUTTON None Reply {'height': 36, 'width': 83.38, 'x': 829, 'y': 359.5}
+E263 svg None  {'height': 16, 'width': 16, 'x': 842, 'y': 369.5}
+E264 SECTION None [匿名内容槽] {'height': 40, 'width': 656, 'x': 764, 'y': 424.5}
+E265 BUTTON None [匿名内容槽] {'height': 40, 'width': 656, 'x': 764, 'y': 424.5}
+E266 svg None  {'height': 14, 'width': 14, 'x': 1394, 'y': 437.5}
+E267 ARTICLE None [匿名内容槽] {'height': 108, 'width': 656, 'x': 764, 'y': 476.5}
+E268 BUTTON None [匿名内容槽] {'height': 74, 'width': 622, 'x': 781, 'y': 493.5}
+E269 SPAN None  {'height': 36, 'width': 36, 'x': 781, 'y': 493.5}
+E270 DIV None [匿名内容槽] {'height': 22.5, 'width': 574, 'x': 829, 'y': 493.5}
+E271 SPAN button [匿名内容槽] {'height': 18.75, 'width': 174.92, 'x': 930.66, 'y': 495.38}
+E272 SPAN None  {'height': 14, 'width': 14, 'x': 1091.58, 'y': 497.75}
+E273 svg None  {'height': 14, 'width': 14, 'x': 1091.58, 'y': 497.75}
+E274 svg None  {'height': 14, 'width': 14, 'x': 1389, 'y': 497.75}
+E275 SECTION None [匿名内容槽] {'height': 40, 'width': 656, 'x': 764, 'y': 596.5}
+E276 BUTTON None [匿名内容槽] {'height': 40, 'width': 656, 'x': 764, 'y': 596.5}
+E277 svg None  {'height': 14, 'width': 14, 'x': 1394, 'y': 609.5}
+E278 DIV None No more messages {'height': 16, 'width': 656, 'x': 764, 'y': 652.5}

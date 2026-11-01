@@ -1,0 +1,45 @@
+匿名化布局节点清单（由测量派生，不是原始 AX 树）
+E0 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E1 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E2 MAIN None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E3 MAIN None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E4 HEADER None New sequence {'height': 65, 'width': 390, 'x': 0, 'y': 0}
+E5 DIV None New sequence {'height': 64, 'width': 390, 'x': 0, 'y': 0}
+E6 A None [匿名内容槽] {'height': 40, 'width': 40, 'x': 16, 'y': 12}
+E7 svg None  {'height': 20, 'width': 20, 'x': 26, 'y': 22}
+E8 H1 None New sequence {'height': 27, 'width': 119.45, 'x': 64, 'y': 18.5}
+E9 DIV None [匿名内容槽] {'height': 715, 'width': 390, 'x': 0, 'y': 65}
+E10 H2 None [匿名内容槽] {'height': 28, 'width': 347, 'x': 16, 'y': 81}
+E11 DIV group [匿名内容槽] {'height': 80, 'width': 313, 'x': 33, 'y': 202}
+E12 DIV None [匿名内容槽] {'height': 32, 'width': 313, 'x': 33, 'y': 202}
+E13 BUTTON None [匿名内容槽] {'height': 32, 'width': 160, 'x': 186, 'y': 202}
+E14 svg None  {'height': 12, 'width': 12, 'x': 196, 'y': 212}
+E15 BUTTON None [匿名内容槽] {'height': 36, 'width': 313, 'x': 33, 'y': 246}
+E16 SPAN None  {'height': 16, 'width': 16, 'x': 46, 'y': 256}
+E17 svg None  {'height': 14, 'width': 14, 'x': 47, 'y': 257}
+E18 svg None  {'height': 14, 'width': 14, 'x': 319, 'y': 257}
+E19 SECTION None [匿名内容槽] {'height': 355.5, 'width': 347, 'x': 16, 'y': 319}
+E20 H3 None [匿名内容槽] {'height': 21, 'width': 313, 'x': 33, 'y': 336}
+E21 LABEL None [匿名内容槽] {'height': 19.5, 'width': 313, 'x': 33, 'y': 373}
+E22 INPUT None [匿名内容槽] {'height': 36, 'width': 313, 'x': 33, 'y': 398.5}
+E23 LABEL None [匿名内容槽] {'height': 19.5, 'width': 313, 'x': 33, 'y': 446.5}
+E24 svg None  {'height': 16, 'width': 16, 'x': 45, 'y': 482}
+E25 INPUT None [匿名内容槽] {'height': 36, 'width': 313, 'x': 33, 'y': 472}
+E26 LABEL None [匿名内容槽] {'height': 19.5, 'width': 313, 'x': 33, 'y': 520}
+E27 TEXTAREA None [匿名内容槽] {'height': 112, 'width': 313, 'x': 33, 'y': 545.5}
+E28 SECTION None [匿名内容槽] {'height': 482.5, 'width': 347, 'x': 16, 'y': 694.5}
+E29 DIV None [匿名内容槽] {'height': 40, 'width': 313, 'x': 33, 'y': 711.5}
+E30 H3 None Company {'height': 21, 'width': 63.94, 'x': 33, 'y': 721}
+E31 BUTTON None Change company {'height': 40, 'width': 138.86, 'x': 207.14, 'y': 711.5}
+E32 DIV None [匿名内容槽] {'height': 143, 'width': 313, 'x': 33, 'y': 767.5}
+E33 SPAN None  {'height': 64, 'width': 64, 'x': 33, 'y': 767.5}
+E34 LABEL None [匿名内容槽] {'height': 21, 'width': 313, 'x': 33, 'y': 847.5}
+E35 INPUT None [匿名内容槽] {'height': 36, 'width': 313, 'x': 33, 'y': 874.5}
+E36 LABEL None [匿名内容槽] {'height': 19.5, 'width': 313, 'x': 33, 'y': 926.5}
+E37 INPUT None [匿名内容槽] {'height': 36, 'width': 313, 'x': 33, 'y': 952}
+E38 BUTTON None [匿名内容槽] {'height': 28, 'width': 179.89, 'x': 33, 'y': 1004}
+E39 svg None  {'height': 14, 'width': 14, 'x': 33, 'y': 1011}
+E40 TEXTAREA None [匿名内容槽] {'height': 112, 'width': 313, 'x': 33, 'y': 1048}
+E41 DIV None [匿名内容槽] {'height': 40, 'width': 358, 'x': 16, 'y': 792}
+E42 A None Cancel {'height': 40, 'width': 69.36, 'x': 137.86, 'y': 792}
+E43 BUTTON None Continue to emails {'height': 40, 'width': 154.78, 'x': 219.22, 'y': 792}
