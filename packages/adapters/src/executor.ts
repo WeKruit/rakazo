@@ -5939,6 +5939,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
+        // A plain list of one role's people in Kruit's conversation. A name or
+        // profile lookup finds one person; it is not a list to show.
+        const isGlobalRoleList = (args: Record<string, unknown>) =>
+          thread.groupId?.startsWith("recruiting-global-") === true &&
+          args.operation === "list" &&
+          typeof args.roleId === "string" &&
+          args.query === undefined;
         // Kruit lists a role's people with the same lines a role team's round uses.
         const showGlobalRolePeople = async (
           args: Record<string, unknown>,
@@ -5949,14 +5956,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             total?: unknown;
           } | null;
           const items = page?.items;
-          if (
-            !thread.groupId?.startsWith("recruiting-global-") ||
-            args.operation !== "list" ||
-            typeof args.roleId !== "string" ||
-            // A name or profile lookup finds one person; it is not a list to show.
-            args.query !== undefined ||
-            !items?.length
-          )
+          if (!isGlobalRoleList(args) || typeof args.roleId !== "string" || !items?.length)
             return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
             where: { id: args.roleId, spaceId: run.spaceId, userId: run.userId },
@@ -10751,13 +10751,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "recruiting_candidates") {
             try {
               if (!deps.artifacts) throw new IsolationError();
+              // Kruit reads and shows a role's people one page at a time, never the whole pool.
+              const callArgs =
+                isGlobalRoleList(args) &&
+                (typeof args.limit !== "number" || args.limit > SHOWN_ROLE_PEOPLE)
+                  ? { ...args, limit: SHOWN_ROLE_PEOPLE }
+                  : args;
               const result = await executeRecruitingCandidatesTool(
                 { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
                 { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
-                args,
+                callArgs,
                 context,
               );
-              const shown = await showGlobalRolePeople(args, result);
+              const shown = await showGlobalRolePeople(callArgs, result);
               return finish(redactConnectorPayload(shown ?? result, runSecrets));
             } catch (error) {
               return finish(roleError(error));
