@@ -797,4 +797,80 @@ suite("stored global Inbox projection", () => {
       )?.threadKey,
     );
   });
+  it("opens the exact owned original email beyond both the first thread page and the first message page", async () => {
+    const query = "Original anchor lookup fixture";
+    const original = message("display-original-anchor", {
+      providerMessageId: "original-provider-anchor",
+      providerThreadId: "old-anchor-thread",
+      subject: query,
+      body: "Exact full original body",
+      date: "2025-01-01T00:00:00Z",
+    });
+    const newerThreads = Array.from({ length: 51 }, (_, index) =>
+      message(`anchor-new-thread-${index}`, { subject: query, date: "2026-10-20T00:00:00Z" }),
+    );
+    const newerMessages = Array.from({ length: 51 }, (_, index) =>
+      message(`anchor-new-message-${index}`, {
+        subject: query,
+        providerThreadId: "old-anchor-thread",
+        date: "2026-10-19T00:00:00Z",
+      }),
+    );
+    await projectRecruitingInboxMessages(prisma, actor, {
+      roleId,
+      emails: [original, ...newerThreads, ...newerMessages],
+      observedAt: new Date("2026-10-21T00:00:00Z"),
+    });
+    const key = inboxThreadKey({
+      sourceId: "source",
+      organizationId: null,
+      mailbox: "host@example.test",
+      threadId: "old-anchor-thread",
+    });
+    const first = await read({ query, roleId });
+    expect(first.items).toHaveLength(50);
+    expect(first.items.some((row) => row.key === key)).toBe(false);
+    const defaultThread = await read({ thread: { roleId, key } });
+    expect(defaultThread.items).toHaveLength(50);
+    expect(
+      defaultThread.items.some((row) => row.email.providerMessageId === original.providerMessageId),
+    ).toBe(false);
+    const exact = await read({ thread: { roleId, key, emailId: original.providerMessageId! } });
+    expect(exact.items).toHaveLength(1);
+    expect(exact.items[0]?.email).toMatchObject({
+      id: original.id,
+      providerMessageId: original.providerMessageId,
+      body: original.body,
+      snippet: false,
+    });
+    expect(exact.nextCursor).toBeNull();
+    expect(
+      (await read({ thread: { roleId, key, emailId: original.providerMessageId! } }, actors[1]!))
+        .items,
+    ).toEqual([]);
+    expect(
+      (
+        await read({
+          thread: { roleId: actors[1]!.userId, key, emailId: original.providerMessageId! },
+        })
+      ).items,
+    ).toEqual([]);
+    expect(
+      (
+        await read({
+          thread: {
+            roleId,
+            key: inboxThreadKey({
+              sourceId: "other-source",
+              organizationId: null,
+              mailbox: "host@example.test",
+              threadId: "old-anchor-thread",
+            }),
+            emailId: original.providerMessageId!,
+          },
+        })
+      ).items,
+    ).toEqual([]);
+    expect((await read({ thread: { roleId, key, emailId: original.id } })).items).toEqual([]);
+  });
 });

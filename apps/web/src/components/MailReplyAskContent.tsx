@@ -150,10 +150,10 @@ export function MailReplyAskContent({
               <Trans>In reply to</Trans>
             </dt>
             <dd className="break-words">
-              {reply.inReplyTo.inboxKey ? (
+              {reply.inReplyTo.inboxKey && reply.inReplyTo.roleId ? (
                 <Link
                   className="underline underline-offset-2"
-                  to={`/app?view=inbox&role=all&mailThread=${encodeURIComponent(reply.inReplyTo.inboxKey)}`}
+                  to={`/app?${new URLSearchParams({ view: "inbox", role: reply.inReplyTo.roleId, mailThread: reply.inReplyTo.inboxKey, mailMessage: reply.inReplyTo.emailId })}`}
                 >
                   {anchor || t`Original email`}
                 </Link>

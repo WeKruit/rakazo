@@ -95,6 +95,7 @@ describe("mail reply provenance", () => {
       { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
       {
         reply_to_uuid: "email",
+        eaccount: "sender@EXAMPLE.TEST",
         body: { text: "Full draft" },
         cc_address_email_list: "copy@example.test",
       },
@@ -103,16 +104,19 @@ describe("mail reply provenance", () => {
         eaccount: "sender@example.test",
         from_address_email: "candidate@example.test",
         subject: "Original",
-        organization_id: "organization",
+        organization_id: "20000000-0000-4000-8000-000000000001",
         thread_id: "provider-thread",
       },
     );
     expect(draft).toMatchObject({
-      from: "sender@example.test",
+      from: "sender@EXAMPLE.TEST",
       to: ["candidate@example.test"],
       cc: ["copy@example.test"],
       body: "Full draft",
-      inReplyTo: { emailId: "email", inboxKey: expect.any(String) },
+      inReplyTo: {
+        emailId: "email",
+        inboxKey: JSON.stringify(["source", null, "sender@example.test", "provider-thread"]),
+      },
     });
   });
 });

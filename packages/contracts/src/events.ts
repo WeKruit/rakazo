@@ -267,6 +267,7 @@ export const MailReplySchema = z.strictObject({
     subject: z.string().nullable(),
     sender: z.string().nullable(),
     inboxKey: z.string().optional(),
+    roleId: Id.optional(),
   }),
   status: z.enum(["needs_approval", "sending", "sent", "discarded", "failed", "unknown"]),
   sentAt: IsoDate.nullable(),

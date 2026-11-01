@@ -58,6 +58,14 @@ export function AccountRecruitingView({
   const scopedGroupId = params.has("role") ? undefined : groupId;
   // Every role's people in one list, filtered and paged by the server.
   const globalInbox = view === "inbox" && !renderCorrespondence;
+  const mailAnchor = globalInbox && role !== "all" && params.get("mailThread") && params.get("mailMessage")
+    ? { roleId: role, key: params.get("mailThread")!, emailId: params.get("mailMessage")! } : undefined;
+  function clearMailAnchor() {
+    if (!params.has("mailThread")) return;
+    const next = new URLSearchParams(params);
+    next.delete("mailThread"); next.delete("mailMessage");
+    setParams(next);
+  }
   const urlQuery = params.get("query") ?? "";
   const [mailQuery, setMailQuery] = useState(urlQuery);
   const [mailSearch, setMailSearch] = useState(urlQuery.trim());
@@ -89,10 +97,10 @@ export function AccountRecruitingView({
     view,
     role,
     scopedGroupId,
-    globalInbox ? [mailSearch, mailUnread] : null,
+    globalInbox ? [mailSearch, mailUnread, mailAnchor] : null,
   ]);
   // Mail and role lists page by number; routines keep their forward cursor.
-  const numbered = globalInbox || (view !== "routines" && role === "all" && !scopedGroupId);
+  const numbered = (globalInbox && !mailAnchor) || (view !== "routines" && role === "all" && !scopedGroupId);
   const [pagination, setPagination] = useState<{ key: string; cursor?: string; page?: number }>();
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
   const pageIndex = pagination?.key === pageKey ? (pagination.page ?? 0) : 0;
@@ -118,10 +126,12 @@ export function AccountRecruitingView({
           rpc.recruiting.globalInbox(
             {
               spaceId,
-              ...(role !== "all" ? { roleId: role } : {}),
-              ...(mailSearch ? { query: mailSearch } : {}),
-              unreadOnly: mailUnread,
-              ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+              ...(mailAnchor ? { thread: mailAnchor } : {
+                ...(role !== "all" ? { roleId: role } : {}),
+                ...(mailSearch ? { query: mailSearch } : {}),
+                unreadOnly: mailUnread,
+                ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+              }),
               limit: MAIL_PER_PAGE,
             },
             { signal: abort.signal },
@@ -461,6 +471,7 @@ export function AccountRecruitingView({
             onChange={(event) => {
               const next = new URLSearchParams(params);
               next.set("role", event.target.value);
+              next.delete("mailThread"); next.delete("mailMessage");
               setParams(next);
             }}
           >
@@ -760,9 +771,10 @@ export function AccountRecruitingView({
                   }
                   serverReadKey={readKey}
                   requestedThread={params.get("mailThread")}
+                  requestedEmail={params.get("mailMessage")}
                   query={mailQuery}
-                  onQueryChange={setMailQuery}
-                  onFilterChange={(value) => setMailUnread(value === "unread")}
+                  onQueryChange={(value) => { setMailQuery(value); clearMailAnchor(); }}
+                  onFilterChange={(value) => { setMailUnread(value === "unread"); clearMailAnchor(); }}
                   pending={pending}
                   loadingMore={loadingMore}
                   onRetry={() => setReload((value) => value + 1)}

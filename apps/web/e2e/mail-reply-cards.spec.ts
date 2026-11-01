@@ -18,7 +18,8 @@ for (const width of [1440, 390]) {
     );
     await page.goto("/app?view=inbox&role=all");
     const bootstrap = (await (await bootResponse).json()).json;
-    const original = (await (await inboxResponse).json()).json.items[0];
+    const indexPage = (await (await inboxResponse).json()).json;
+    const original = indexPage.items[0];
     const email = original.email;
     const botId = bootstrap.bots[0].id;
     const source: MailReply = {
@@ -34,12 +35,25 @@ for (const width of [1440, 390]) {
         threadId: email.providerThreadId,
         subject: email.subject,
         sender: email.sender,
-        inboxKey: original.key,
+        inboxKey: original.key, roleId: original.roleId,
       },
       status: "needs_approval",
       sentAt: null,
       canAnswer: true,
     };
+    const mailReads: Array<{ thread?: { roleId: string; key: string; emailId?: string } }> = [];
+    let anchorOutsideFirstPage = false;
+    await page.route("**/rpc/recruiting/globalInbox", (route) => {
+      const input = route.request().postDataJSON().json;
+      mailReads.push(input);
+      if (anchorOutsideFirstPage && !input.thread) return route.fulfill({ json: { json: {
+        ...indexPage, total: 100, items: Array.from({ length: 50 }, (_, index) => {
+          const key = JSON.parse(original.key); key[3] = `other-thread-${index}`;
+          return { ...original, key: JSON.stringify(key), email: { ...email, id: `other-${index}`, providerMessageId: `other-${index}`, providerThreadId: `other-thread-${index}`, subject: "Other conversation", body: "Not the original email." } };
+        }),
+      } } });
+      return route.fallback();
+    });
     const saved: ThreadMessage[] = [];
     const answers: unknown[] = [];
     let eventCursor = 0;
@@ -196,7 +210,14 @@ for (const width of [1440, 390]) {
     ).toBeVisible();
     await expect(card.getByText("coordinator@example.test", { exact: true })).toBeVisible();
 
+    anchorOutsideFirstPage = true;
+    await card.getByRole("link").click();
+    await expect(page).toHaveURL(new RegExp(`role=${original.roleId}.*mailMessage=${encodeURIComponent(email.providerMessageId)}`));
+    await expect.poll(() => mailReads.some((input) => input.thread?.roleId === original.roleId && input.thread.key === original.key && input.thread.emailId === email.providerMessageId)).toBe(true);
+    await expect(page.getByTestId("email-conversation").getByText(email.body, { exact: true })).toBeVisible();
+    anchorOutsideFirstPage = false;
     addDraft("second-mail-card");
+    await page.goto(`/app/g/${appGroupId}?view=conversation`);
     await page.reload();
     const second = page.getByTestId("mail-reply-card").nth(1);
     await expect(second).toHaveAttribute("data-status", "needs_approval");

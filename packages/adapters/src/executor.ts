@@ -9650,6 +9650,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         args,
                         replyEvidence?.anchor ?? instantlyReply?.original ?? {},
                       );
+                if (thread.activeRecruitingRoleId)
+                  approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
                 approvalBlock.actions = [
                   { id: "allow", label: "Send" },
                   { id: "deny", label: "Discard" },

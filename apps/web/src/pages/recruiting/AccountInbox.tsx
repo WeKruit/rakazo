@@ -36,6 +36,7 @@ type Props = {
   }[];
   serverReadKey?: string;
   requestedThread?: string | null;
+  requestedEmail?: string | null;
   query?: string;
   onQueryChange?: (value: string) => void;
   onFilterChange?: (value: string) => void;
@@ -156,6 +157,7 @@ export function AccountInbox({
   serverThreads,
   serverReadKey,
   requestedThread,
+  requestedEmail,
   query,
   onQueryChange,
   onFilterChange,
@@ -180,6 +182,7 @@ export function AccountInbox({
   const [chosen, setChosen] = useState<string>();
   const [selectedEmail, setSelectedEmail] = useState<string>();
   const [mobileDetail, setMobileDetail] = useState(Boolean(requestedThread));
+  useEffect(() => setSelectedEmail(undefined), [requestedThread, requestedEmail]);
   const railTrigger = useRef<HTMLButtonElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
   const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
@@ -271,7 +274,11 @@ export function AccountInbox({
     };
   }, [detailKey]);
   const detailEmails = detail?.key === detailKey ? detail.emails : [];
-  const conversationEmails = serverThreads ? detailEmails : (selected?.emails ?? []);
+  const conversationEmails = serverThreads
+    ? requestedEmail
+      ? [...new Map([...(selected?.emails ?? []), ...detailEmails].map((email) => [email.id, email])).values()]
+      : detailEmails
+    : (selected?.emails ?? []);
   const authoritativeThreads = serverThreads?.flatMap((thread) => {
     const email = rows
       .find(
@@ -310,6 +317,7 @@ export function AccountInbox({
   const email =
     conversationEmails.find((item) => item.id === selectedEmail) ??
     selected?.emails.find((item) => item.id === selectedEmail) ??
+    conversationEmails.find((item) => requestedEmail && (item.providerMessageId === requestedEmail || item.id === requestedEmail)) ??
     conversationEmails.find((item) => item.id === selected?.emails[0]?.id) ??
     conversationEmails[0] ??
     selected?.emails[0];

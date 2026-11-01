@@ -7,10 +7,10 @@ describe("buildApprovalAskBlock", () => {
     const block = buildApprovalAskBlock("sender-effect", "native_instantly_ensure_sender", {}, [], {
       instantlySender: { email: "team@example.test", displayName: "Chosen Company", select },
     });
-    expect(block.text).toBe(select ? "Use this sending address?" : "Create this sending address?");
+    expect(block.text).toBe("Use this sending address?");
     expect(block.detail).toBe("Chosen Company <team@example.test>");
     expect(block.actions).toEqual([
-      { id: "allow", label: select ? "Use this address" : "Create address", outcome: "created" },
+      { id: "allow", label: "Use this address", outcome: "created" },
       { id: "deny", label: "Change the address", outcome: "cancelled" },
     ]);
     expect(JSON.stringify(block)).not.toMatch(/instantly|always/i);

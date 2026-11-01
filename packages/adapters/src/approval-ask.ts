@@ -151,9 +151,7 @@ export function buildApprovalAskBlock(
         scheduleUpdate
           ? "Review routine change"
           : options?.instantlySender
-            ? options.instantlySender.select
-              ? "Use this sending address?"
-              : "Create this sending address?"
+            ? "Use this sending address?"
             : options?.instantlyActivation
               ? "Confirm sending the first email"
               : outbound
@@ -197,7 +195,7 @@ export function buildApprovalAskBlock(
       ? [
           {
             id: "allow",
-            label: options.instantlySender.select ? "Use this address" : "Create address",
+            label: "Use this address",
             outcome: "created",
           },
           { id: "deny", label: "Change the address", outcome: "cancelled" },

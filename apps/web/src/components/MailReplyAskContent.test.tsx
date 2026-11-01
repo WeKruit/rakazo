@@ -31,7 +31,7 @@ const reply: MailReply = {
     threadId: "private-thread-id",
     subject: "Interview",
     sender: "person@example.test",
-    inboxKey: "exact-inbox-thread",
+    inboxKey: "exact-inbox-thread", roleId: "role",
   },
   status: "needs_approval",
   sentAt: null,
@@ -96,7 +96,7 @@ it("edits only body and Cc, submits once on Send, then shows actual persisted se
     expect(view.onAnswer).not.toHaveBeenCalled();
     expect(view.container.querySelectorAll("input,textarea")).toHaveLength(2);
     expect(view.container.querySelector("a")?.getAttribute("href")).toBe(
-      "/app?view=inbox&role=all&mailThread=exact-inbox-thread",
+      "/app?view=inbox&role=role&mailThread=exact-inbox-thread&mailMessage=private-email-id",
     );
     expect(view.container.textContent).not.toContain("private-");
     await act(async () => {

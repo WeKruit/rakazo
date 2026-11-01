@@ -31,8 +31,9 @@ export function mailReplyFromAnchor(
   const to = replyAddresses(args.to ?? original.from_address_email);
   const sourceId = route.resourceId;
   const threadId = typeof original.thread_id === "string" ? original.thread_id : null;
-  const organizationId =
-    typeof original.organization_id === "string" ? original.organization_id : null;
+  // The provider workspace is not a CRM organization. Native mail indexes have no CRM org.
+  const organizationId = null;
+  const indexedMailbox = typeof original.eaccount === "string" ? original.eaccount : null;
   return {
     from,
     to,
@@ -54,8 +55,15 @@ export function mailReplyFromAnchor(
       threadId,
       subject: typeof original.subject === "string" ? original.subject : null,
       sender: typeof original.from_address_email === "string" ? original.from_address_email : null,
-      ...(from && threadId
-        ? { inboxKey: inboxThreadKey({ sourceId, organizationId, mailbox: from, threadId }) }
+      ...(indexedMailbox && threadId
+        ? {
+            inboxKey: inboxThreadKey({
+              sourceId,
+              organizationId,
+              mailbox: indexedMailbox,
+              threadId,
+            }),
+          }
         : {}),
     },
     status: "needs_approval",
