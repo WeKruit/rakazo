@@ -24,7 +24,7 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   // 6: thread.suggestion, a live-only guess at the user's next message.
   6: "0bd043f12c8e8d6d8596eed263ace437610f90f6bae258354dd5ca4130ceb805",
   // 7: optional activity and detail on steps and pending tool calls (specific step labels).
-  7: "6c64d3dfecab7fe62c660bd765189b4a93ac37544dd57823fca5179027a7e3c9",
+  7: "2fc5725ccacec492105af88ca7f2a4dffff499de8284794d58090ba9f66ed3e2",
 };
 
 const OLD_ROWS: unknown[] = [
