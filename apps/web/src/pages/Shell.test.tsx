@@ -4892,6 +4892,21 @@ describe("Composer", () => {
     expect(container?.querySelector("[data-testid='mention-chip']")?.textContent).toContain("Bob");
     expect(container?.textContent).not.toContain("Follow up");
   });
+  it("shows the suggested next message as gray text and Tab fills it in", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more" });
+    expect(textarea.placeholder).toBe("Find 20 more");
+    act(() =>
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(textarea.value).toBe("Find 20 more");
+  });
+
+  it("hides the suggestion while a reply is running", () => {
+    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
+    expect(textarea.placeholder).not.toBe("Find 20 more");
+  });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend);
