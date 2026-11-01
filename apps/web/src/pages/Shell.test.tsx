@@ -6297,18 +6297,32 @@ it("keeps the resolved CRM role context in primary navigation links", async () =
     crmTarget: boundCrmTarget,
   });
   const nav = document.querySelector('nav[aria-label="Recruiting workspace"]')!;
-  for (const label of ["Candidates", "Sequence", "Inbox", "Interview", "Kruit"]) {
+  for (const label of ["Candidates", "Sequence", "Interview", "Kruit"]) {
     const link = [...nav.querySelectorAll("a")].find((item) => item.textContent?.trim() === label)!;
     const url = new URL(link.href);
     expect(url.pathname).toBe(new URL(view.getPath(), "http://localhost").pathname);
     expect(url.searchParams.get("role")).not.toBe("all");
   }
+  // Inbox is one account page; this CRM conversation has no saved role to filter by.
   const inbox = [...nav.querySelectorAll("a")].find(
     (item) => item.textContent?.trim() === "Inbox",
   )!;
-  await act(async () => inbox.click());
-  expect(view.getPath()).toContain("view=inbox");
-  expect(view.getPath()).toMatch(/^\/app\/g\/group-new\?view=inbox$/);
+  expect(inbox.getAttribute("href")).toBe("/app?view=inbox&role=all");
+});
+
+it("opens the account Inbox filtered to the open role from primary navigation", async () => {
+  await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  const nav = document.querySelector('nav[aria-label="Recruiting workspace"]')!;
+  await vi.waitFor(() => {
+    const inbox = [...nav.querySelectorAll("a")].find(
+      (item) => item.textContent?.trim() === "Inbox",
+    )!;
+    expect(inbox.getAttribute("href")).toBe("/app?view=inbox&role=internal-role");
+  });
 });
 
 it("opens preserved Work actions from a role through the actual account task and routine routes", async () => {
