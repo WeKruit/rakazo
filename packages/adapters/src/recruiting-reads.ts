@@ -3118,10 +3118,24 @@ export type RecruitingCrmReadDeps = {
    * still checks its own access to the membership tool before using them.
    */
   crmMemberships?: CrmMembershipReads;
+  /** One request's CRM role lists per organization, shared the same way as `crmMemberships`. */
+  crmRoleLists?: CrmRoleListReads;
 };
 export type CrmMembershipReads = Map<
   string,
   Promise<ReturnType<typeof RecruitingCrmMembershipRowsSchema.parse>>
+>;
+export type CrmRoleListReads = Map<
+  string,
+  Promise<
+    {
+      crmRoleId: string;
+      clientId: string;
+      clientLabel: string;
+      roleLabel: string;
+      summary: string | null;
+    }[]
+  >
 >;
 type RecruitingCrmRoleLookup = { operation: "role"; reference: RecruitingCrmRoleReference };
 /**
@@ -3338,6 +3352,7 @@ export async function getRecruitingCrmData(
       return payload.data;
     }
     const memberships: CrmMembershipReads = deps.crmMemberships ?? new Map();
+    const roleLists: CrmRoleListReads = deps.crmRoleLists ?? new Map();
     const membershipRows = async (server: Server) => {
       const key = `${server.id}:${server.revision}`;
       const shared = memberships.get(key);
@@ -3476,19 +3491,31 @@ export async function getRecruitingCrmData(
       await sourceFence(server, "get_crm_role");
       return role;
     }
-    const roles = async () =>
-      parse(
-        RecruitingCrmClientsReadSchema,
-        await read(server, "list_crm_roles", { p_org: input.organizationId }),
-      ).flatMap((client) =>
-        client.roles.map((role) => ({
-          crmRoleId: role.role_spec_id,
-          clientId: client.client_id,
-          clientLabel: client.client_label,
-          roleLabel: role.role_label,
-          summary: role.summary,
-        })),
+    const roles = async () => {
+      const key = `${server.id}:${server.revision}:${input.organizationId}`;
+      const shared = roleLists.get(key);
+      if (shared) {
+        const list = await shared;
+        await sourceFence(server, "list_crm_roles");
+        return list;
+      }
+      const list = read(server, "list_crm_roles", { p_org: input.organizationId }).then((value) =>
+        parse(RecruitingCrmClientsReadSchema, value).flatMap((client) =>
+          client.roles.map((role) => ({
+            crmRoleId: role.role_spec_id,
+            clientId: client.client_id,
+            clientLabel: client.client_label,
+            roleLabel: role.role_label,
+            summary: role.summary,
+          })),
+        ),
       );
+      roleLists.set(key, list);
+      list.catch(() => {
+        if (roleLists.get(key) === list) roleLists.delete(key);
+      });
+      return list;
+    };
     const finish = (value: Record<string, unknown>) =>
       RecruitingCrmDataOutputSchema.parse({
         ...value,
