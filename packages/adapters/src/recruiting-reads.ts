@@ -2189,6 +2189,17 @@ export async function getRecruitingCorrespondence(
       // The Inbox header shows the latest readable check, whichever read it was.
       const checkedAt = effect.updatedAt.toISOString();
       if (checkedAt > output.checkedAt) output.checkedAt = checkedAt;
+      const metadata = correspondenceRecord(correspondenceRecord(result)?._meta);
+      const dispatchStartedAt = correspondenceRecord(
+        metadata?.["rakazo/recruitingInbox"],
+      )?.dispatchStartedAt;
+      // Historical receipts have no dispatch clock; retain their existing observation semantics.
+      const observationAt =
+        isRecruitingInboxRead(call.route) &&
+        typeof dispatchStartedAt === "string" &&
+        Number.isFinite(Date.parse(dispatchStartedAt))
+          ? new Date(dispatchStartedAt)
+          : effect.updatedAt;
       const body = mcpObject(result);
       if (provider.kind === "crm") {
         const data = correspondenceRecord(body?.data);
@@ -2723,8 +2734,8 @@ export async function getRecruitingCorrespondence(
         }
         parsed = true;
         const observedAt = instantlyObservedAt.get(id);
-        if (listRead && observedAt && observedAt >= effect.updatedAt) continue;
-        instantlyObservedAt.set(id, effect.updatedAt);
+        if (listRead && observedAt && observedAt >= observationAt) continue;
+        instantlyObservedAt.set(id, observationAt);
         const fullText =
           email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
         const text = fullText || email.content_preview || "";
@@ -2738,7 +2749,7 @@ export async function getRecruitingCorrespondence(
           sourceName: source.name,
           sourceId: source.id,
           providerMessageId: email.id,
-          ...instantlyEmailObservation(email, effect.updatedAt),
+          ...instantlyEmailObservation(email, observationAt),
           ...(email.thread_id !== undefined ? { providerThreadId: email.thread_id } : {}),
           ...(email.campaign_id !== undefined ? { campaignId: email.campaign_id } : {}),
           ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
@@ -4900,18 +4911,21 @@ export async function indexSavedRecruitingInbox(
   await prisma.$executeRaw`UPDATE recruiting_inbox_index_progress SET native_cursor=NULL WHERE user_id=${actor.userId} AND space_id=${actor.spaceId}`;
 }
 
+export function isRecruitingInboxRead(route: ConnectorRoute | undefined): boolean {
+  return Boolean(
+    route?.connectorId === "mcp" &&
+      route.resourceId &&
+      ["get_email", "list_emails", ...NATIVE_INSTANTLY_READS].includes(route.toolName),
+  );
+}
+
 /** A resolved read leaves the canonical receipt first; never wait for its display projection. */
 export function deferRecruitingInboxReceipt(
   jobs: JobPublisher,
   route: ConnectorRoute | undefined,
   effectId: string,
 ): void {
-  if (
-    route?.connectorId !== "mcp" ||
-    !route.resourceId ||
-    !["get_email", "list_emails", ...NATIVE_INSTANTLY_READS].includes(route.toolName)
-  )
-    return;
+  if (!isRecruitingInboxRead(route)) return;
   void jobs
     .enqueue({
       name: "recruiting_inbox.project",

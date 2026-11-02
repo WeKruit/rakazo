@@ -566,7 +566,7 @@ import {
   linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
-import { deferRecruitingInboxReceipt } from "./recruiting-reads.js";
+import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -9266,7 +9266,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return deliverRecruitingFeedbackResult(
                     retryGate.result as RecruitingFeedbackResult,
                   );
-                return retryGate.result;
+                return publicInboxReceiptResult(retryGate.result);
               }
               if (retryGate.action === "uncertain") {
                 if (atomicRecruitingMutation && current.status === "executing") {
@@ -9787,7 +9787,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ) {
                 return deliverRecruitingFeedbackResult(gate.result as RecruitingFeedbackResult);
               } else {
-                return gate.result;
+                return publicInboxReceiptResult(gate.result);
               }
             }
             if (gate.action === "paused") {
@@ -9831,6 +9831,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const early = await claimOrReturn("intended");
             if (early !== undefined) return early;
           }
+          let inboxDispatchStartedAt: string | undefined;
           const persistEffectResult = (result: unknown) =>
             applied
               ? completeEffect(
@@ -9838,6 +9839,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   applied.effect.id,
                   claimedEffect ? "executing" : "intended",
                   result,
+                  inboxDispatchStartedAt,
                 )
               : Promise.resolve(true);
           const finish = async (result: unknown) => {
@@ -12616,6 +12618,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const connector = deps.connector;
             const executeOnce = async (): Promise<{ result: unknown } | { settled: unknown }> => {
               let result: unknown = { error: `unknown tool ${name}` };
+              if (isRecruitingInboxRead(connectorCall.route))
+                inboxDispatchStartedAt = new Date().toISOString();
               for await (const event of connector.execute(
                 { ...connectorCall, tool: name, args, executionId: effectKey },
                 schedulingSelection?.operation === "confirm" && applied
@@ -17005,11 +17009,35 @@ export async function recordEffect(
   return { duplicate: false, effect };
 }
 
+function publicInboxReceiptResult(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const record = result as Record<string, unknown>;
+  const meta = record._meta;
+  if (
+    !meta ||
+    typeof meta !== "object" ||
+    Array.isArray(meta) ||
+    !("rakazo/recruitingInbox" in meta)
+  )
+    return result;
+  const { "rakazo/recruitingInbox": internal, ...publicMeta } = meta;
+  const { _meta: _storedMeta, ...publicResult } = record;
+  const hadMeta =
+    internal &&
+    typeof internal === "object" &&
+    "providerMetaPresent" in internal &&
+    internal.providerMetaPresent === true;
+  return hadMeta || Object.keys(publicMeta).length
+    ? { ...publicResult, _meta: publicMeta }
+    : publicResult;
+}
+
 async function completeEffect(
   deps: ExecutorDeps,
   effectId: string,
   expectedStatus: "intended" | "executing",
   result: unknown,
+  inboxDispatchStartedAt?: string,
 ) {
   const storedResult =
     result &&
@@ -17018,7 +17046,26 @@ async function completeEffect(
     "details" in result
       ? (result as { details: unknown }).details
       : result;
-  return completeExternalEffect(deps.prisma, effectId, expectedStatus, storedResult as never);
+  // Save the server clock beside the provider envelope in the existing atomic receipt write.
+  const envelope =
+    storedResult && typeof storedResult === "object" && !Array.isArray(storedResult)
+      ? (storedResult as Record<string, unknown>)
+      : undefined;
+  const meta = envelope?._meta;
+  const persisted =
+    inboxDispatchStartedAt && envelope
+      ? {
+          ...envelope,
+          _meta: {
+            ...(meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {}),
+            "rakazo/recruitingInbox": {
+              dispatchStartedAt: inboxDispatchStartedAt,
+              providerMetaPresent: Object.hasOwn(envelope, "_meta"),
+            },
+          },
+        }
+      : storedResult;
+  return completeExternalEffect(deps.prisma, effectId, expectedStatus, persisted as never);
 }
 
 function uncertainEffectError(toolName: string): Error {

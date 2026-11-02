@@ -725,3 +725,39 @@ it("a live observation invalidates only the existing global stored view, never i
   expect(f.events.append).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("replays a slow native read with its persisted dispatch clock after a newer live observation", async () => {
+  const f = liveFixture();
+  const startedAt = "2026-10-22T00:00:00.000Z";
+  f.observation.observedAt = "2026-10-23T00:00:00.000Z";
+  await f.projectLive();
+  f.prisma.externalEffect.findUnique.mockResolvedValue(f.effect as never);
+  f.prisma.externalEffect.findMany.mockImplementation(async (query) =>
+    "result" in (query as { select: object }).select
+      ? [
+          {
+            id: f.effect.id,
+            result: {
+              structuredContent: email(1),
+              _meta: {
+                "rakazo/recruitingInbox": { dispatchStartedAt: startedAt },
+              },
+            },
+          },
+        ]
+      : [
+          {
+            ...f.effect,
+            updatedAt: new Date("2026-10-24T00:00:00Z"),
+            run: { id: "run", botId: "main", sourceMessageId: null },
+          },
+        ],
+  );
+  await f.project();
+  await f.project();
+  expect(
+    vi
+      .mocked(db.projectRecruitingInboxMessages)
+      .mock.calls.map(([, , input]) => input.observedAt.toISOString()),
+  ).toEqual([f.observation.observedAt, startedAt, startedAt]);
+});
