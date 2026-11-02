@@ -260,10 +260,22 @@ function fixture(
       async ({
         where,
       }: {
-        where?: { id?: string; spaceId?: string; runId?: string; status?: string; kind?: string };
+        where?: {
+          id?: string;
+          spaceId?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string;
+        };
       } = {}) =>
         effects.filter((effect) => {
-          if (where?.status && effect.status !== where.status) return false;
+          if (
+            where?.status &&
+            !(typeof where.status === "string"
+              ? effect.status === where.status
+              : where.status.in.includes(effect.status))
+          )
+            return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
@@ -722,6 +734,7 @@ describe("native Cal.com booking approvals", () => {
         expect.anything(),
       );
       expect(f.effects[0]).toMatchObject({ status: "completed", request });
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
       f.setCalls([call(original, "duplicate")]);
       await f.run();
       expect(f.connector.execute).toHaveBeenCalledOnce();
