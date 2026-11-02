@@ -49,6 +49,30 @@ function renderedReplyText(html: string): string | undefined {
   }
 }
 
+const replyLines = (text: string) =>
+  text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .trim();
+
+/** Shared whole-body check; provider/source/anchor authorization belongs to each caller. */
+export function mailReplyBodyMatches(approved: string, rawBody: unknown): boolean {
+  const body = object(rawBody);
+  const normalize = replyLines;
+  if (typeof body?.html === "string") {
+    const rendered = renderedReplyText(body.html);
+    return (
+      rendered !== undefined &&
+      normalize(rendered) === normalize(approved) &&
+      (body.text === undefined ||
+        (typeof body.text === "string" && normalize(body.text) === normalize(approved)))
+    );
+  }
+  return typeof body?.text === "string" && normalize(body.text) === normalize(approved);
+}
+
 /** Only these two mutable fields can enter the saved, one-time native approval. */
 export function editMailReplyRequest(
   request: unknown,
@@ -167,32 +191,36 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         .sort()
         .join("\n");
   const nativeBody = object(payload?.body);
-  const normalize = (text: string) => text.replace(/\r\n?/g, "\n").trim();
   const nativeContent = object(provider?.structuredContent);
-  const htmlText =
-    typeof nativeBody?.html === "string" &&
+  const nativeHtmlAllowed =
     route?.connectorId === "mcp" &&
     route.toolName === "native_instantly_reply_to_email" &&
     nativeContent?.source === "local_native_instantly_rest" &&
     payload?.id !== draft.inReplyTo.emailId &&
     draft.inReplyTo.threadId &&
-    payload?.thread_id === draft.inReplyTo.threadId
+    payload?.thread_id === draft.inReplyTo.threadId;
+  const bodyMatches =
+    (typeof nativeBody?.html !== "string" || nativeHtmlAllowed) &&
+    mailReplyBodyMatches(edited, nativeBody);
+  const rendered =
+    nativeHtmlAllowed && typeof nativeBody?.html === "string"
       ? renderedReplyText(nativeBody.html)
       : undefined;
-  const bodyMatches =
-    typeof nativeBody?.html === "string"
-      ? htmlText !== undefined &&
-        normalize(htmlText) === normalize(edited) &&
-        (nativeBody.text === undefined ||
-          (typeof nativeBody.text === "string" && normalize(nativeBody.text) === normalize(edited)))
-      : typeof nativeBody?.text === "string" && normalize(nativeBody.text) === normalize(edited);
+  const words = (text: string) => text.replace(/\s+/g, " ").trim();
+  // A proven send is irreversible; reveal lost line breaks without suggesting a second send.
+  const formattingChanged =
+    !bodyMatches &&
+    rendered !== undefined &&
+    words(rendered) === words(edited) &&
+    (nativeBody?.text === undefined ||
+      (typeof nativeBody.text === "string" && words(nativeBody.text) === words(edited)));
   const nativeReceipt =
     payload?.ue_type === 3 &&
     typeof payload?.id === "string" &&
     payload?.eaccount === draft.from &&
     sameAddresses(payload?.to_address_email_list, draft.to) &&
     payload?.subject === draft.subject &&
-    bodyMatches &&
+    (bodyMatches || formattingChanged) &&
     sameAddresses(payload?.cc_address_email_list ?? "", draft.cc);
   const sent =
     !error &&
@@ -201,7 +229,8 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
   const reason = MailReplyErrorCodeSchema.safeParse(provider?.error ?? envelope?.error).data;
   return {
     ...draft,
-    body: edited,
+    body: sent && formattingChanged && rendered !== undefined ? replyLines(rendered) : edited,
+    ...(sent && formattingChanged ? { error: "formatting_changed" } : {}),
     ...(effect.status === "uncertain"
       ? { error: "delivery_unconfirmed" }
       : error

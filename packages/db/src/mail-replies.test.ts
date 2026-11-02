@@ -8,7 +8,12 @@ import {
 } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "./client.js";
-import { editMailReplyRequest, mailReplyState, projectMailReplyCards } from "./mail-replies.js";
+import {
+  editMailReplyRequest,
+  mailReplyBodyMatches,
+  mailReplyState,
+  projectMailReplyCards,
+} from "./mail-replies.js";
 
 const actor = {
   userId: "owner",
@@ -343,14 +348,30 @@ it("verifies the native REST text-only HTML body without matching titles, quoted
     status: "sent",
     sentAt: "2026-11-02T02:36:20.000Z",
   });
+  for (const separator of [" ", "\n"]) {
+    const flat = { ...receipt, body: { html: html(escaped.replaceAll("<br>", separator)) } };
+    expect(mailReplyState(reply, effect(flat))).toMatchObject({
+      status: "sent",
+      error: "formatting_changed",
+      body: "谢谢，A & B < C > D. Next line.",
+      sentAt: expect.any(String),
+    });
+    for (const changed of [
+      { to_address_email_list: "foreign@example.test" },
+      { eaccount: "foreign@example.test" },
+      { thread_id: "foreign" },
+      { subject: "foreign" },
+      { id: reply.inReplyTo.emailId },
+      { cc_address_email_list: "foreign@example.test" },
+    ])
+      expect(mailReplyState(reply, effect({ ...flat, ...changed })).status).toBe("unknown");
+  }
   for (const changed of [
     { body: { html: html("Different reply", escaped) } },
     { body: { html: html(`<blockquote>${escaped}</blockquote>`) } },
     { body: { html: html(`<div class="gmail_quote">${escaped}</div>`) } },
     { body: { html: html(`<script>${escaped}</script>`) } },
     { body: { html: html(`<span>${escaped}</span>`) } },
-    { body: { html: html(escaped.replaceAll("<br>", " ")), text: reply.body } },
-    { body: { html: html(escaped.replaceAll("<br>", "\n")), text: reply.body } },
     { body: { html: html(`Different reply ${escaped}`) } },
     { body: { html: html(`${escaped} Extra unapproved sentence.`) } },
     { to_address_email_list: "someone-else@example.test" },
@@ -374,4 +395,17 @@ it("verifies the native REST text-only HTML body without matching titles, quoted
   expect(mailReplyState(reply, effect({ ...receipt, body: { text: reply.body } }))).toMatchObject({
     status: "sent",
   });
+});
+
+it("normalizes only line-internal HTML whitespace and decodes standard entities", () => {
+  for (const text of ["A  B\n\nC", " A\tB\n\n  C", "A B\r\n\r\nC"]) {
+    expect(mailReplyBodyMatches(text, { html: "<p>A B</p><p>C</p>" })).toBe(true);
+    expect(mailReplyBodyMatches(text, { html: "<p>A B C</p>" })).toBe(false);
+    expect(mailReplyBodyMatches(text, { html: "<p>A B\n\nC</p>" })).toBe(false);
+  }
+  expect(
+    mailReplyBodyMatches("中文 \"A&B\" <C> 'D'", {
+      html: "<p>中文 &quot;A&amp;B&quot; &lt;C&gt; &#39;D&#39;</p>",
+    }),
+  ).toBe(true);
 });

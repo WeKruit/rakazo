@@ -84,7 +84,9 @@ it.each(["preserved", "flattened", "raw-newlines", "conflicting-fallback"])(
       } as Prisma.JsonObject,
       updatedAt: new Date("2026-11-02T04:32:00Z"),
     });
-    expect(projected.status).toBe(mode === "preserved" ? "sent" : "unknown");
+    expect(projected.status).toBe("sent");
+    expect(projected.error).toBe(mode === "preserved" ? undefined : "formatting_changed");
+    expect(projected.body.includes("\n")).toBe(mode === "preserved");
   },
 );
 
