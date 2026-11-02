@@ -4609,10 +4609,6 @@ msgid "Sent (all time): {sentTotal}"
 msgstr ""
 
 #: src/components/MailReplyAskContent.tsx
-msgid "Sent with different line or paragraph formatting. View the sent email; do not resend."
-msgstr "Письмо отправлено, но переносы строк или абзацы изменились. Просмотрите отправленное письмо; не отправляйте его повторно."
-
-#: src/components/MailReplyAskContent.tsx
 msgid "Sent email"
 msgstr ""
 

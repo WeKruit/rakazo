@@ -4609,10 +4609,6 @@ msgid "Sent (all time): {sentTotal}"
 msgstr ""
 
 #: src/components/MailReplyAskContent.tsx
-msgid "Sent with different line or paragraph formatting. View the sent email; do not resend."
-msgstr "메일이 전송되었지만 줄 바꿈 또는 단락 형식이 변경되었습니다. 전송된 메일을 확인하고 다시 보내지 마세요."
-
-#: src/components/MailReplyAskContent.tsx
 msgid "Sent email"
 msgstr ""
 

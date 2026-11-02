@@ -5,8 +5,6 @@ export const DE_MESSAGES: Record<string, string> = {
     "Diese Absenderadresse ist noch nicht versandbereit.",
   "The sending address changed. Prepare a new reply for review.":
     "Die Absenderadresse hat sich geändert. Erstelle eine neue Antwort zur Prüfung.",
-  "Sent with different line or paragraph formatting. View the sent email; do not resend.":
-    "Gesendet, aber mit abweichenden Zeilen- oder Absatzumbrüchen. Prüfen Sie die gesendete E-Mail; senden Sie sie nicht erneut.",
   "This reply was not sent.": "Diese Antwort wurde nicht gesendet.",
   "Create this sending address?": "Diese Absenderadresse erstellen?",
   "Use this sending address?": "Diese Absenderadresse verwenden?",

@@ -4609,10 +4609,6 @@ msgid "Sent (all time): {sentTotal}"
 msgstr "已发送（累计）：{sentTotal}"
 
 #: src/components/MailReplyAskContent.tsx
-msgid "Sent with different line or paragraph formatting. View the sent email; do not resend."
-msgstr "邮件已发送，但换行或段落格式发生了变化。请查看已发送的邮件，不要重复发送。"
-
-#: src/components/MailReplyAskContent.tsx
 msgid "Sent email"
 msgstr "已发送邮件"
 

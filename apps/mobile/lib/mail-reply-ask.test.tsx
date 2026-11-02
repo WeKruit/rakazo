@@ -224,26 +224,3 @@ it("keeps the definite failure reason visible in collapsed history", async () =>
   expect(button(host, "Send")).toBeUndefined();
   await act(async () => root.unmount());
 });
-
-it("keeps Sent and shows a formatting notice with the actual readonly sent text", async () => {
-  const actualBody =
-    "Hi Noah, This is a staging QA check. No action is needed. Best, Recruiting Team";
-  const { host, root, onAnswer } = await fixture({
-    ...reply,
-    status: "sent",
-    error: "formatting_changed",
-    body: actualBody,
-  });
-  expect(host.textContent).toContain(
-    "Sent with different line or paragraph formatting. View the sent email; do not resend.",
-  );
-  expect(host.textContent).not.toContain("formatting_changed");
-  expect(button(host, "Send")).toBeUndefined();
-  expect(button(host, "Discard")).toBeUndefined();
-  await act(async () => button(host, "View email").click());
-  const body = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reply message"]')!;
-  expect(body.value).toBe(actualBody);
-  expect(body.readOnly).toBe(true);
-  expect(onAnswer).not.toHaveBeenCalled();
-  await act(async () => root.unmount());
-});
