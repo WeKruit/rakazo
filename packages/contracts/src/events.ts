@@ -605,6 +605,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     text: z.string(),
     /** Provider-generated tool status rather than assistant-authored narration. */
     activity: z.literal(true).optional(),
+    /** A question to the person being written; shown even when reply streaming is off. */
+    question: z.literal(true).optional(),
     pendingToolNames: z.array(z.string()).optional(),
     pendingToolCalls: z
       .array(
@@ -919,7 +921,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 10;
+export const EVENT_FORMAT_VERSION = 11;
 
 export const ProductEventSchema = z
   .object({

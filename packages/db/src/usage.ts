@@ -244,6 +244,17 @@ export async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, user
   );
 }
 
+/** Credits an account with a starting grant has left; null means it is not limited. */
+export async function remainingUsageCredits(prisma: UsageDb, userId: string) {
+  const [row] = await prisma.$queryRaw<Array<{ limit: number | null; spent: number | null }>>`
+    SELECT a."usageCreditLimit" AS "limit",
+      (SELECT SUM(u."costUsd"::numeric * u."creditRate"::numeric)::float8 FROM "usage_records" u
+        WHERE u."userId" = a."id" AND ${SPEND_UNITS}) AS "spent"
+    FROM "user" a WHERE a."id" = ${userId}`;
+  if (row?.limit == null || (await seesOperatorSpend(prisma, userId))) return null;
+  return Math.max(0, rounded(row.limit - (row.spent ?? 0)));
+}
+
 export async function summarizeUsageCosts(
   prisma: UsageDb,
   actor: Scope,
@@ -294,6 +305,7 @@ export async function summarizeUsageCosts(
   );
   return {
     canViewInternalCosts: await seesOperatorSpend(prisma, actor.userId),
+    remaining: await remainingUsageCredits(prisma, actor.userId),
     total: { credits: rounded(total), pending: pending.has("total") },
     month: { credits: rounded(month), pending: pending.has("month") },
     days: [...days]

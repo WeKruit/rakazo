@@ -152,7 +152,15 @@ export default function Account() {
               credits: new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(
                 usage.total.credits,
               ),
-            }) + (usage.total.pending ? ` · ${t("Pending usage")}` : "")
+            }) +
+            (usage.total.pending ? ` · ${t("Pending usage")}` : "") +
+            (usage.remaining == null
+              ? ""
+              : ` · ${t("{credits} remaining", {
+                  credits: new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(
+                    usage.remaining,
+                  ),
+                })}`)
           : undefined
       }
     />

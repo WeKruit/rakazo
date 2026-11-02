@@ -756,6 +756,25 @@ export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
 export const DISCOVERY_FAILURE_TTL_MS = DISCOVERY_CACHE_TTL_MS;
 /** Discovery with this operation id lists every server again, refreshing the cache for runs. */
 export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
+/**
+ * How long a run waits for the shared mail account's remote tool list. Its own mail tools call
+ * the REST API directly, so a cold connection (about 12 s for a new account) must not hold the
+ * first answer; the listing finishes in the background and serves the next run.
+ */
+export const SHARED_MAIL_DISCOVERY_BUDGET_MS = 1_000;
+
+/** The promise's value when it settles within ms, else undefined (it keeps running). */
+async function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(resolve, ms, undefined);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
@@ -920,7 +939,17 @@ export class McpConnector implements ConnectorProvider {
           this.discoveryFailures.delete(failureKey);
         }
         try {
-          const listed = await this.listServerTools(assignment.server, context);
+          const listing = this.listServerTools(assignment.server, context);
+          const listed =
+            sharedInstantlyAccount(assignment.server) &&
+            context.operationId !== DISCOVERY_REFRESH_OPERATION
+              ? await withinBudget(listing, SHARED_MAIL_DISCOVERY_BUDGET_MS)
+              : await listing;
+          if (!listed) {
+            listing.catch(() => undefined);
+            getLogger().info("discovery.deferred", { server: assignment.server.slug });
+            return withCore(localInstantlyTools(assignment, []));
+          }
           reportAllowlistDrift(assignment, listed.tools, context);
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(

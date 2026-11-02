@@ -18,6 +18,7 @@ import {
   McpConnector,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
+  SHARED_MAIL_DISCOVERY_BUDGET_MS,
   sharedInstantlyAccount,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
@@ -346,6 +347,31 @@ describe("local native Instantly thread history", () => {
       ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
+    }
+  });
+  it("answers with the shared account's local mail tools while its remote list is still connecting", async () => {
+    vi.stubEnv("INSTANTLY_API_KEY", "platform-mail-key");
+    const f = fixture();
+    const inner = globalThis.fetch;
+    const pending: ((error: Error) => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) =>
+        new URL(logicalHref(input, init)).origin === "https://mcp.instantly.ai"
+          ? new Promise<Response>((_resolve, reject) => pending.push(reject))
+          : inner(input, init),
+      ),
+    );
+    try {
+      const startedAt = performance.now();
+      const names = (await f.connector.discoverTools(f.context as never)).map((tool) => tool.name);
+      expect(performance.now() - startedAt).toBeLessThan(SHARED_MAIL_DISCOVERY_BUDGET_MS + 1_000);
+      expect(names).toContain("instantly__demo__activate_campaign");
+      expect(names.some((name) => name.startsWith("mcp__"))).toBe(false);
+    } finally {
+      for (const reject of pending) reject(new Error("connection closed"));
+      await f.connector.close();
+      vi.unstubAllEnvs();
     }
   });
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {

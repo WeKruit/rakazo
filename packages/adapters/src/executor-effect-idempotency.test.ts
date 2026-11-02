@@ -5595,8 +5595,8 @@ describe("native recruiting assessment effect delivery", () => {
     );
   });
 
-  it("saves a role team's role from a short first message before the model's first step", async () => {
-    const f = fixture("short-request-role");
+  async function roleTeamFirstTurn(id: string, text: string, calls: unknown[] = []) {
+    const f = fixture(id);
     vi.mocked(executeRecruitingRoleTool).mockClear();
     const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
@@ -5608,31 +5608,52 @@ describe("native recruiting assessment effect delivery", () => {
       chatGroup: { findUnique: vi.fn(async () => null) },
       chatGroupMember: { findMany: vi.fn(async () => []) },
     });
-    const text = "New grads from USC, CS";
     vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
       {
         id: "human-1",
         seq: 1,
         role: "user",
         botId: null,
-        runId: "short-request-role",
+        runId: id,
         blocks: [{ kind: "text", text }],
         createdAt: new Date(),
       },
     ]) as never);
-    f.setCalls([
+    f.setCalls(calls as never);
+    await f.run();
+    return f;
+  }
+
+  it("never saves a role from a greeting in a role team with no role", async () => {
+    const f = await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("no role, no intake question and no people search");
+    expect(prompt).not.toContain("Do not create a role in this turn");
+  });
+
+  it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
+    const f = await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
+      "Only when the recruiter's message describes a role they are hiring for",
+    );
+  });
+
+  it("saves a role team's role from a titled first message before the model's first step", async () => {
+    const text = "Agent engineer\nNew grads from USC, CS";
+    const f = await roleTeamFirstTurn("titled-request-role", text, [
       {
         name: "handoff_to_bot",
         args: { confirm_name: "Sourcer", message: text },
         executionId: "handoff-1",
       },
     ]);
-    await f.run();
     // The first question comes from the coordinator itself, not after a teammate starts up.
     expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
-      title: "New role",
+      title: "Agent engineer",
       brief: null,
       intent: { basis: "direct", quote: text },
     });
@@ -5840,6 +5861,150 @@ describe("native recruiting assessment effect delivery", () => {
       expect.anything(),
       expect.objectContaining({ artifactId: "jd-file", limit: 16_000 }),
     );
+  });
+
+  it("reads a file attached in a role that already has its role, before the model's first step", async () => {
+    const f = fixture("role-attached-notes");
+    Object.assign(f.thread, { activeRecruitingRoleId: "role-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "role-attached-notes",
+        blocks: [
+          { kind: "text", text: "Hiring manager notes" },
+          {
+            kind: "file",
+            artifactId: "notes-file",
+            name: "notes.pdf",
+            mimeType: "application/pdf",
+            size: 100,
+          },
+          {
+            kind: "file",
+            artifactId: "list-file",
+            name: "people.csv",
+            mimeType: "text/csv",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Must have shipped robotics firmware.",
+      hasMore: true,
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Must have shipped robotics firmware.");
+    expect(prompt).toContain("(notes.pdf) is already read for this turn");
+    expect(prompt).toContain("read on from offset 16000");
+    // A candidate list stays with the model, which parses it as CSV.
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ artifactId: "notes-file", limit: 16_000 }),
+    );
+  });
+
+  it("reads the recruiter's attached file for a specialist handed the work", async () => {
+    const f = fixture("handed-attached-file");
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "handoff-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "handoff-1",
+        seq: 2,
+        role: "bot",
+        botId: "bot-2",
+        runId: "main-run",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: "bot-2",
+            toBotId: "bot-1",
+            text: "Book the interview in the attached availability.",
+            hop: 1,
+          },
+        ],
+        createdAt: new Date(2),
+      },
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "main-run",
+        blocks: [
+          {
+            kind: "file",
+            artifactId: "times-file",
+            name: "availability.txt",
+            mimeType: "text/plain",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(1),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Tuesday 2-4pm Pacific",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("(availability.txt) is already read for this turn");
+    expect(prompt).toContain("Tuesday 2-4pm Pacific");
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the recruiter's attached file again for a harness continuation of their turn", async () => {
+    const f = fixture("continued-attached-file");
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "continue-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "continue-1",
+        seq: 3,
+        role: "system",
+        botId: null,
+        runId: "continued-attached-file",
+        clientNonce: "autocontinue:abc",
+        blocks: [{ kind: "text", text: "Continue with the next step." }],
+        createdAt: new Date(3),
+      },
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "first-run",
+        blocks: [
+          {
+            kind: "file",
+            artifactId: "notes-file",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(1),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Code word: blue whale",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("(notes.txt) is already read for this turn");
+    expect(prompt).toContain("Code word: blue whale");
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {

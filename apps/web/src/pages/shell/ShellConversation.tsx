@@ -697,7 +697,7 @@ export function ShellConversation({
                     </div>
                   ) : (
                     <h1
-                      className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground"
+                      className="recruiting-heading min-w-0 truncate text-[20px] leading-none text-foreground sm:text-[27px]"
                       dir="auto"
                     >
                       {inGroup

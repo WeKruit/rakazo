@@ -3134,16 +3134,24 @@ export function conversationSessionId(threadId: string, botId: string, agentId?:
  * The prompt cache key for a conversation's requests: its bot and the exact tool set, so every
  * chat with the same bot shares the cached prefix. Undefined without a conversation session id.
  */
+/** Leading system text that names the bot's role; every account's default bot shares it. */
+const PROMPT_CACHE_PREFIX_CHARS = 4096;
+
+/**
+ * Keyed by the tools and the start of the system prompt, not the bot: a new account's default
+ * bots send the same prefix as every other account's, so their first run reuses that cache
+ * instead of starting cold. Only an identical prefix is ever reused.
+ */
 export function sharedPromptCacheKey(
   sessionId: string | undefined,
-): ((tools: unknown) => string) | undefined {
-  const botId = sessionId?.split(":")[1];
-  if (!botId) return undefined;
-  return (tools) =>
-    `rk:${botId}:${createHash("sha256")
+): ((tools: unknown, system: unknown) => string) | undefined {
+  if (!sessionId?.split(":")[1]) return undefined;
+  return (tools, system) =>
+    `rk:${createHash("sha256")
       .update(JSON.stringify(tools ?? null))
+      .update(JSON.stringify(system ?? null).slice(0, PROMPT_CACHE_PREFIX_CHARS))
       .digest("hex")
-      .slice(0, 16)}`.slice(0, 64);
+      .slice(0, 32)}`;
 }
 
 export function isOpenCodeProvider(provider: string): boolean {
@@ -4206,7 +4214,7 @@ export function reliableStreamOptions(
   }
 
   // OpenAI routes its prompt cache by prompt_cache_key. Keyed by conversation, every new chat
-  // started cold; keyed by bot and tool set, a new chat reuses the cached tools and instructions.
+  // started cold; keyed by tool set and system prefix, a new chat or account reuses it.
   const promptCacheKey = sharedPromptCacheKey(next.sessionId);
   if (promptCacheKey) {
     const callerPayload = next.onPayload;
@@ -4217,9 +4225,9 @@ export function reliableStreamOptions(
         if (!shaped || typeof shaped !== "object" || !("prompt_cache_key" in shaped)) return shaped;
         const body = shaped as { prompt_cache_key?: unknown; tools?: unknown; input?: unknown };
         if (!body.prompt_cache_key) return shaped;
-        const key = promptCacheKey(body.tools);
         // Which part of the prefix changed when a new run misses the cache.
         const first = Array.isArray(body.input) ? body.input[0] : undefined;
+        const key = promptCacheKey(body.tools, first);
         const digest = (value: unknown) =>
           createHash("sha256")
             .update(JSON.stringify(value ?? null))
@@ -4230,6 +4238,11 @@ export function reliableStreamOptions(
           promptCacheKey: key,
           systemSha: digest(first),
           systemChars: JSON.stringify(first ?? null).length,
+          // Where two accounts' system prompts part ways when a shared key still misses.
+          systemPrefixShas: [2_000, 8_000, 16_000, 24_000].map((chars) =>
+            digest(JSON.stringify(first ?? null).slice(0, chars)).slice(0, 6),
+          ),
+          toolsSha: digest(body.tools),
           inputItems: Array.isArray(body.input) ? body.input.length : null,
         });
         return { ...body, prompt_cache_key: key };

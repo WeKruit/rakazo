@@ -7,6 +7,8 @@
 //   multi      A multi-select question card from Kruit takes several picks before it is sent.
 //   people     Kruit lists people in the LinkedIn format the role teams use.
 //   title      A new role's title replaces "New role" once the JD names the role.
+//   greeting   A greeting in a role team with no role saves no role, asks no role question,
+//              and the next unrelated message starts no people search.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   dock       The corner logo follows a mouse drag at once, can be dragged again straight
 //              away, and keeps its place after a reload.
@@ -14,9 +16,9 @@
 //   RAKAZO_ORIGIN=<test origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/ui-regressions.mjs [--only ids,multi] [--out <dir>]
 //
-// Writes to Kruit and creates one role marked 「测试固定 · 」, which it archives again; never runs
-// against production (the regression harness passes --staging). Exit 0 only when every check
-// passes. Prints no credentials.
+// Writes to Kruit and creates two role chats with messages marked 「测试固定 · 」, which it archives
+// again; never runs against production (the regression harness passes --staging). Exit 0 only when
+// every check passes. Prints no credentials.
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -275,6 +277,48 @@ try {
     // The test role leaves the sidebar again.
     await rpc("threads/stop", { groupId: created.id, scope: "all" }).catch(() => {});
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});
+  });
+
+  await check("greeting", async (page, failures) => {
+    if (!kruit?.members.length) return failures.push("no Kruit crew on this account");
+    // A role team with no role, like the one every new account starts with.
+    const id = crypto.randomUUID();
+    await rpc("groups/create", {
+      id,
+      name: "New role",
+      botIds: kruit.members.map((member) => member.botId),
+    });
+    const asked = (replies) =>
+      replies.some((message) => message.blocks?.some((b) => b.kind === "ask"));
+    const answered = (replies) =>
+      replies.some((message) => message.role === "bot" && textOf(message).trim());
+    try {
+      await page.goto(`${ORIGIN}/app/g/${id}`);
+      const box = page.locator('fieldset[aria-label="Message composer"] textarea').first();
+      await box.waitFor({ timeout: 20_000 });
+      const before = new Set((await messages(id)).map((message) => message.id));
+      await box.fill(`${FIXTURE_MARK}你好，你能帮我做什么？`);
+      await box.press("Enter");
+      let replies = [];
+      for (let end = Date.now() + 120_000; Date.now() < end && !answered(replies); ) {
+        await sleep(3_000);
+        replies = (await messages(id).catch(() => [])).filter((m) => !before.has(m.id));
+      }
+      await sleep(5_000);
+      replies = (await messages(id).catch(() => [])).filter((m) => !before.has(m.id));
+      if (!answered(replies)) failures.push("no reply to a greeting within 2 min");
+      if (asked(replies)) failures.push("a greeting got a role question card");
+      // An unrelated second message must not answer anything or start a search.
+      const second = await ask(id, `${FIXTURE_MARK}我现在有哪些在招的职位？`, answered, 120_000);
+      await sleep(5_000);
+      const shown = await page.getByText(/Role intake|找到 \d+ 人|Found \d+ people/).count();
+      await page.screenshot({ path: path.join(OUT, "greeting.png") });
+      if (asked(second)) failures.push("the second message got a role question card");
+      if (shown) failures.push("a role or found people appeared after a greeting");
+    } finally {
+      await rpc("threads/stop", { groupId: id, scope: "all" }).catch(() => {});
+      await rpc("groups/archive", { groupId: id }).catch(() => {});
+    }
   });
 
   await check("reminder", async (page, failures) => {

@@ -185,8 +185,25 @@ verify their email to sign in. On a fresh instance with no SMTP, the first allow
 can register without verification. That signup does not prove mailbox ownership, so create the
 account before exposing the service. Further accounts still need SMTP.
 
+An allowlist entry is an address, an `@domain`, or `*` for anyone. With SMTP, `SIGNUP_ALLOWLIST=*`
+opens registration to every address that proves its mailbox.
+
 For a public deployment, configure SMTP and an allowlist before the API's first start.
 Keep an installation without email on a trusted local network.
+
+### Optional Google sign-in
+
+Set both values on the API to show “Continue with Google” on sign-in and sign-up:
+
+```env
+GOOGLE_CLIENT_ID=replace-with-client-id
+GOOGLE_CLIENT_SECRET=replace-with-client-secret
+```
+
+Register `<BETTER_AUTH_URL>/api/auth/callback/google` as a redirect URI on the Google OAuth
+client. Google must report the address as verified. A new address creates an account under the
+same signup policy as email registration; an address that already has a password account keeps
+signing in with its password.
 
 ### Optional OpenID Connect SSO
 

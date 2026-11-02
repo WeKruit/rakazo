@@ -1237,6 +1237,10 @@ msgstr "Продолжить с {0}"
 msgid "Continue with email"
 msgstr "Продолжить по электронной почте"
 
+#: src/pages/Auth.tsx
+msgid "Continue with Google"
+msgstr "Продолжить с Google"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Conversation"
 msgstr ""
@@ -3402,6 +3406,10 @@ msgstr "Открытие вашего пространства…"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Opens"
 msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "or"
+msgstr "или"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "OR"
@@ -5732,6 +5740,10 @@ msgstr "Вы"
 #: src/pages/Shell.tsx
 msgid "You have control"
 msgstr "Вы управляете"
+
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Contact us to add more."
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Your email address"

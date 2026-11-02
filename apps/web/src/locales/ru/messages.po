@@ -5107,6 +5107,10 @@ msgstr "Освободить компьютер"
 msgid "Release interrupted computer?"
 msgstr "Освободить прерванный компьютер?"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Remaining"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx

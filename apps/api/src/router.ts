@@ -13,6 +13,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import {
   computerControlExpireJobKey,
+  discoveryWarmJob,
   messagingDeliverJob,
   pollCloseJob,
   routineJobKey,
@@ -265,6 +266,7 @@ import {
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
+  remainingUsageCredits,
   renameSpaceForMember,
   renewSpaceDeletionClaim,
   replaceSpaceBackupModels,
@@ -1112,8 +1114,9 @@ export function createRouter(deps: RouterDeps) {
         (value) => ({ value }),
         (error: unknown) => ({ error }),
       );
-    const [needsModel, resolvedTarget, teaching] = await Promise.all([
+    const [needsModel, remaining, resolvedTarget, teaching] = await Promise.all([
       sendNeedsModel(deps, actor),
+      remainingUsageCredits(deps.prisma, actor.userId),
       settled(resolveThreadTarget(deps.prisma, actor, input)),
       input.botId
         ? settled(assertTeachingSendAllowed(deps.prisma, actor.spaceId, input.botId))
@@ -1121,6 +1124,12 @@ export function createRouter(deps: RouterDeps) {
     ]);
     if (needsModel) {
       throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
+    }
+    if (remaining === 0) {
+      throw new ORPCError("CREDITS_EXHAUSTED", {
+        status: 402,
+        message: "Your credits are used up. Contact us to add more.",
+      });
     }
     if ("error" in resolvedTarget) throw resolvedTarget.error;
     if ("error" in teaching) throw teaching.error;
@@ -2546,6 +2555,10 @@ export function createRouter(deps: RouterDeps) {
       }),
       duplicate: authed.groups.duplicate.handler(async ({ context, input }) => {
         const source = await groupRepos.getGroup(context.actor, input.groupId);
+        // Kruit is the one account-wide conversation; a copy would act as a new role's team and
+        // open a role, and its intake and search, from the first message.
+        if (source.id.startsWith("recruiting-global-"))
+          throw new ORPCError("BAD_REQUEST", { message: "Kruit can't be duplicated" });
         try {
           return await groupRepos.createGroup(context.actor, {
             name: duplicateBotName(source.name),
@@ -5737,12 +5750,17 @@ export function createRouter(deps: RouterDeps) {
       },
     },
     onboarding: {
-      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
-        ensureRecruitingWorkspace(deps.prisma, context.actor, {
+      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(async ({ context }) => {
+        const workspace = await ensureRecruitingWorkspace(deps.prisma, context.actor, {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-        }),
-      ),
+        });
+        // The first message usually follows within seconds; have its tools listed by then.
+        void deps.jobs.enqueue(discoveryWarmJob(workspace.botId)).catch((error) => {
+          getLogger().warn("discovery.warm enqueue failed", { error: String(error) });
+        });
+        return workspace;
+      }),
       start: authed.onboarding.start.handler(async ({ context, input }) => {
         await startOnboarding(onboardingDeps, context.actor, input.botId);
         return { ok: true as const };

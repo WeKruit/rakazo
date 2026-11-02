@@ -24,10 +24,13 @@ function fakePrisma(input: {
   claimCount?: number;
   routine?: Record<string, unknown>;
   pages?: number;
+  credits?: { limit: number; spent: number };
 }) {
   const counts = { messages: 0, inbound: 0, recruiting: 0, ...input.counts };
   const updateMany = vi.fn(async () => ({ count: input.claimCount ?? 1 }));
   const prisma = {
+    $queryRaw: vi.fn(async () => (input.credits ? [input.credits] : [])),
+    user: { findUnique: vi.fn(async () => ({ email: "user@example.test", emailVerified: true })) },
     routine: {
       findUnique: vi.fn(async () => ({
         id: "routine-1",
@@ -222,6 +225,22 @@ describe("routine.wakeup precondition", () => {
         precondition: "new_activity",
       },
     });
+  });
+
+  it("skips scheduled work once the account's credits are used up", async () => {
+    const { prisma, updateMany } = fakePrisma({
+      prompt: "Triage.",
+      credits: { limit: 10_000, spent: 10_000 },
+    });
+    const { deps, wakeRoutine, append } = fakeDeps(prisma);
+    await createBackgroundJobHandlers(deps)["routine.wakeup"](payload);
+    expect(wakeRoutine).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ skipped: true, reason: "credits_exhausted" }),
+      }),
+    );
   });
 
   it("opens the run as before when something changed", async () => {

@@ -6,8 +6,13 @@ export function parseAllowlist(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+/**
+ * An allowlist entry is an address, an `@domain`, or `*` for anyone. A
+ * non-empty list, `*` included, still requires mailbox proof, so `*` opens
+ * signup to verified addresses only.
+ */
 export function emailAllowed(email: string, allowlist: string[]): boolean {
-  if (allowlist.length === 0) return true;
+  if (allowlist.length === 0 || allowlist.includes("*")) return true;
   const normalized = email.trim().toLowerCase();
   const domain = normalized.split("@")[1];
   return allowlist.some((entry) => {

@@ -5108,6 +5108,10 @@ msgstr "释放电脑"
 msgid "Release interrupted computer?"
 msgstr "释放中断的电脑？"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Remaining"
+msgstr "剩余"
+
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx

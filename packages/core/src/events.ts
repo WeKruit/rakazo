@@ -204,8 +204,11 @@ export function stripLiveStreamingProgress<
       next.push(message);
       continue;
     }
+    // A question being written is what the person waits for, not reply text.
     const blocks = message.blocks.filter(
-      (block) => block.kind !== "text" && (block.kind !== "progress" || block.activity === true),
+      (block) =>
+        block.kind !== "text" &&
+        (block.kind !== "progress" || block.activity === true || block.question === true),
     );
     if (blocks.length === message.blocks.length) {
       next.push(message);
@@ -277,6 +280,18 @@ export function reduceLiveMessageBlocks(
   update: LiveMessageUpdate,
 ): MessageBlock[] {
   const tail = blocks.at(-1);
+  // The question being written stays until its card replaces it; tool status does not cover it.
+  const question =
+    update.type === "progress"
+      ? update.payload?.question === true
+      : tail?.kind === "progress" && tail.question === true;
+  if (
+    tail?.kind === "progress" &&
+    tail.question === true &&
+    update.type === "progress" &&
+    update.payload?.activity === true
+  )
+    return [...blocks];
   const segments = tail?.kind === "progress" ? blocks.slice(0, -1) : blocks;
   const priorText = liveMessageText(blocks);
   const flushedLength =
@@ -323,7 +338,7 @@ export function reduceLiveMessageBlocks(
     typeof update.payload?.thinkingSince === "string"
       ? { thinkingSince: update.payload.thinkingSince }
       : {};
-  if (pendingToolNames.length > 0 && endsSentence(tailText)) {
+  if (pendingToolNames.length > 0 && endsSentence(tailText) && !question) {
     let next = activity ? [...segments] : appendTextSegment(segments, tailText);
     for (const call of pendingToolCalls) next = appendToolCallSegment(next, call.name, call);
     if (phase)
@@ -349,6 +364,7 @@ export function reduceLiveMessageBlocks(
       kind: "progress",
       text: tailText,
       ...(activity ? { activity: true as const } : {}),
+      ...(question ? { question: true as const } : {}),
       ...(pendingToolNames.length > 0 ? { pendingToolNames } : {}),
       ...(pendingToolCalls.length > 0 ? { pendingToolCalls } : {}),
       ...(phase

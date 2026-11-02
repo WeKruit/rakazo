@@ -42,6 +42,8 @@ export { createOwnerVouchedAccount, OwnerAccountError } from "./owner-account.js
 export interface AuthEnv {
   passwordAuth?: boolean;
   oidc?: OidcConfig;
+  /** Google sign-in for product accounts. Google proves the mailbox, so it doubles as signup. */
+  google?: { clientId: string; clientSecret: string };
   secret: string;
   baseURL: string;
   webOrigin: string;
@@ -272,6 +274,17 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     },
     rateLimit: authRateLimitOptions(),
     database: prismaAdapter(prisma, { provider: "postgresql" }),
+    ...(env.google
+      ? {
+          socialProviders: {
+            google: {
+              clientId: env.google.clientId,
+              clientSecret: env.google.clientSecret,
+              prompt: "select_account" as const,
+            },
+          },
+        }
+      : {}),
     advanced: { database: { joins: true } },
     emailAndPassword: {
       enabled: env.passwordAuth !== false,
@@ -306,6 +319,17 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     },
     user: {
       validateUserInfo: async ({ user, source }, ctx) => {
+        if (source.method === "oauth" && source.oauth?.providerId === "google") {
+          const email = String(user.email ?? "").toLowerCase();
+          if (isMessagingEmail(email)) return { error: "EMAIL_NOT_AVAILABLE" };
+          if (user.emailVerified !== true) return { error: "EMAIL_VERIFICATION_REQUIRED" };
+          if (source.action === "create-user") {
+            const policy = await resolveSignupPolicy(prisma, env);
+            if (!policy.enabled) return { error: "REGISTRATION_CLOSED" };
+            if (!emailAllowed(email, policy.allowlist)) return { error: "EMAIL_NOT_ALLOWED" };
+          }
+          return;
+        }
         if (source.method !== "oauth" || source.oauth?.providerId !== "oidc") return;
         const expectedUser = (await getOAuthState())?.serverContext?.reauthUserId;
         if (typeof expectedUser === "string" && user.id !== expectedUser)
@@ -598,9 +622,9 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
 export function verificationEmail(email: string, url: string): TransactionalEmail {
   return {
     to: email,
-    subject: "Verify your Rakazo email",
-    text: `Verify your email, then return to Rakazo to sign in:\n\n${url}\n\nThis link expires in one hour. If you did not register, ignore this email.`,
-    html: `<p><a href="${escapeHtml(url)}">Verify email</a>, then return to Rakazo to sign in.</p><p>This link expires in one hour. If you did not register, ignore this email.</p>`,
+    subject: "Verify your WeKruit Headhunter email",
+    text: `Verify your email, then return to WeKruit Headhunter to sign in:\n\n${url}\n\nThis link expires in one hour. If you did not register, ignore this email.`,
+    html: `<p><a href="${escapeHtml(url)}">Verify email</a>, then return to WeKruit Headhunter to sign in.</p><p>This link expires in one hour. If you did not register, ignore this email.</p>`,
   };
 }
 
@@ -613,16 +637,16 @@ export function passwordResetEmail(
   const safeUrl = escapeHtml(resetUrl);
   return {
     to: user.email,
-    subject: "Reset your Rakazo password",
+    subject: "Reset your WeKruit Headhunter password",
     text: [
       `Hi ${name},`,
       "",
-      "Reset your Rakazo password using this link:",
+      "Reset your WeKruit Headhunter password using this link:",
       resetUrl,
       "",
       "This link expires in one hour. If you did not request this, you can ignore this email.",
     ].join("\n"),
-    html: `<p>Hi ${safeName},</p><p>Reset your Rakazo password:</p><p><a href="${safeUrl}">Reset password</a></p><p>This link expires in one hour. If you did not request this, you can ignore this email.</p>`,
+    html: `<p>Hi ${safeName},</p><p>Reset your WeKruit Headhunter password:</p><p><a href="${safeUrl}">Reset password</a></p><p>This link expires in one hour. If you did not request this, you can ignore this email.</p>`,
   };
 }
 

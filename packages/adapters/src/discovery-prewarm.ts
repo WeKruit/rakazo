@@ -48,3 +48,30 @@ export async function prewarmToolDiscovery(
     ms: Math.round(performance.now() - startedAt),
   });
 }
+
+/**
+ * A new account's bots have never run, so the boot prewarm skips them and their first run
+ * listed every tool server itself (about 1 s). List one bot's tools as soon as it is
+ * provisioned. Scope comes from the bot row, never from the job.
+ */
+export async function warmBotDiscovery(
+  prisma: Pick<PrismaClient, "bot">,
+  connector: Pick<ConnectorProvider, "discoverTools">,
+  botId: string,
+): Promise<void> {
+  const bot = await prisma.bot.findFirst({
+    where: { id: botId, archivedAt: null },
+    select: { id: true, spaceId: true, userId: true },
+  });
+  if (!bot) return;
+  const startedAt = performance.now();
+  await connector.discoverTools({
+    operationId: DISCOVERY_REFRESH_OPERATION,
+    traceId: `discovery-warm:${bot.id}`,
+    spaceId: bot.spaceId,
+    userId: bot.userId,
+    botId: bot.id,
+    signal: AbortSignal.timeout(DISCOVERY_PREWARM_TIMEOUT_MS),
+  });
+  getLogger().info("discovery.warm", { ms: Math.round(performance.now() - startedAt) });
+}

@@ -1237,6 +1237,10 @@ msgstr "Continuer avec {0}"
 msgid "Continue with email"
 msgstr "Continuer avec l'e-mail"
 
+#: src/pages/Auth.tsx
+msgid "Continue with Google"
+msgstr "Continuer avec Google"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Conversation"
 msgstr ""
@@ -3402,6 +3406,10 @@ msgstr "Ouverture de votre espace…"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Opens"
 msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "or"
+msgstr "ou"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "OR"
@@ -5732,6 +5740,10 @@ msgstr "Vous"
 #: src/pages/Shell.tsx
 msgid "You have control"
 msgstr "Vous avez le contrôle"
+
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Contact us to add more."
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Your email address"

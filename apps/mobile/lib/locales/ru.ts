@@ -884,4 +884,5 @@ export const RU_MESSAGES: Record<string, string> = {
   Vote: "Голосовать",
   "Closes in {time}": "Закроется через {time}",
   "Could not record your vote": "Не удалось учесть ваш голос",
+  "{credits} remaining": "Осталось {credits}",
 };

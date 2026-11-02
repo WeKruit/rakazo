@@ -881,4 +881,5 @@ export const DE_MESSAGES: Record<string, string> = {
   Vote: "Abstimmen",
   "Closes in {time}": "Endet in {time}",
   "Could not record your vote": "Deine Stimme konnte nicht gespeichert werden",
+  "{credits} remaining": "{credits} übrig",
 };

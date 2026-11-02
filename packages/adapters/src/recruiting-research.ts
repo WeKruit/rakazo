@@ -25,6 +25,8 @@ export { mcpObject } from "@rakazo/core/node/approval-effect-key";
 
 /** Receipts read per page: each holds a full provider answer, so most callers stop early. */
 const RECEIPT_PAGE = 20;
+/** Contact lookup receipts are small (a few KB each) and every one is read. */
+const LOOKUP_RECEIPT_PAGE = 500;
 
 /**
  * This person's native creation receipts on one connection, newest first, read one page at a
@@ -35,10 +37,11 @@ async function* nativeMcpCreationReceipts(
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision">,
   toolName: string,
-  scope: { threadId?: string; since?: Date } = {},
+  scope: { threadId?: string; since?: Date; pageSize?: number } = {},
 ): AsyncGenerator<{ args: Record<string, unknown>; result: unknown }> {
+  const pageSize = scope.pageSize ?? RECEIPT_PAGE;
   // ponytail: inspect only native creation receipts, never full saved candidate outputs.
-  for (let skip = 0; ; skip += RECEIPT_PAGE) {
+  for (let skip = 0; ; skip += pageSize) {
     const page = await prisma.externalEffect.findMany({
       where: {
         spaceId: actor.spaceId,
@@ -61,7 +64,7 @@ async function* nativeMcpCreationReceipts(
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { request: true, result: true },
       skip,
-      take: RECEIPT_PAGE,
+      take: pageSize,
     });
     for (const effect of page) {
       const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
@@ -86,7 +89,7 @@ async function* nativeMcpCreationReceipts(
         result: record(effect.result)?.providerResult ?? effect.result,
       };
     }
-    if (page.length < RECEIPT_PAGE) return;
+    if (page.length < pageSize) return;
   }
 }
 
@@ -551,7 +554,10 @@ export async function savedContactLookups(
   toolName: string,
   into: SavedContactLookups = { emails: new Map(), searched: new Map() },
 ): Promise<SavedContactLookups> {
-  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
+  // Every receipt is read, so read them in few pages: each page scans the effects table.
+  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, toolName, {
+    pageSize: LOOKUP_RECEIPT_PAGE,
+  })) {
     const people = mcpObject(receipt.result)?.people;
     for (const person of Array.isArray(people) ? people : []) {
       const entry = record(person);
@@ -573,8 +579,28 @@ export async function savedContactLookups(
   return into;
 }
 
+/** Reads already running, so parallel candidate lists in one turn share one read. */
+const lookupsInFlight = new Map<string, Promise<SavedContactLookups>>();
+
 /** What this account's contact lookups did, across its lookup connections and every role. */
-export async function lookedUpContacts(
+export function lookedUpContacts(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+): Promise<SavedContactLookups> {
+  const key = `${actor.spaceId}\u0000${actor.userId}`;
+  let read = lookupsInFlight.get(key);
+  if (!read) {
+    read = readLookedUpContacts(prisma, actor).finally(() => lookupsInFlight.delete(key));
+    lookupsInFlight.set(key, read);
+  }
+  // Callers add to what they get, so each one gets its own copy.
+  return read.then(({ emails, searched }) => ({
+    emails: new Map(emails),
+    searched: new Map([...searched].map(([person, providers]) => [person, new Set(providers)])),
+  }));
+}
+
+async function readLookedUpContacts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
 ) {
