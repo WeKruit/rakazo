@@ -163,6 +163,11 @@ DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_inbox_initializations
 CREATE POLICY rakazo_actor_isolation ON recruiting_inbox_initializations FOR ALL
 USING (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
 WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
+ALTER TABLE recruiting_overview_snapshots ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_overview_snapshots;
+CREATE POLICY rakazo_actor_isolation ON recruiting_overview_snapshots FOR ALL
+USING (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), '') AND space_id = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 ALTER TABLE recruiting_inbox_cursors ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_inbox_cursors;
 CREATE POLICY rakazo_actor_isolation ON recruiting_inbox_cursors FOR ALL

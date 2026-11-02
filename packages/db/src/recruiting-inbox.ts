@@ -3,8 +3,9 @@ import type {
   ListRecruitingInboxInput,
   MarkRecruitingInboxInput,
   RecruitingInboxReadState,
+  RecruitingOverviewRole,
 } from "@rakazo/contracts";
-import { inboxThreadKey } from "@rakazo/contracts";
+import { inboxThreadKey, RecruitingOverviewRoleSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 
 export async function listRecruitingInbox(
@@ -57,4 +58,33 @@ export async function markRecruitingInbox(
       last_read_at = GREATEST(recruiting_inbox_cursors.last_read_at, EXCLUDED.last_read_at),
       unread = EXCLUDED.unread
   `;
+}
+
+/** The last finished Home overview for this account, or none. Roles that fail to parse are dropped. */
+export async function readRecruitingOverviewSnapshot(
+  prisma: PrismaClient,
+  actor: Actor,
+): Promise<RecruitingOverviewRole[]> {
+  const row = await prisma.recruitingOverviewSnapshot.findUnique({
+    where: { userId_spaceId: { userId: actor.userId, spaceId: actor.spaceId } },
+    select: { roles: true },
+  });
+  const roles = Array.isArray(row?.roles) ? row.roles : [];
+  return roles.flatMap((role) => {
+    const parsed = RecruitingOverviewRoleSchema.safeParse(role);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+export async function saveRecruitingOverviewSnapshot(
+  prisma: PrismaClient,
+  actor: Actor,
+  roles: RecruitingOverviewRole[],
+): Promise<void> {
+  const where = { userId: actor.userId, spaceId: actor.spaceId };
+  await prisma.recruitingOverviewSnapshot.upsert({
+    where: { userId_spaceId: where },
+    create: { ...where, roles },
+    update: { roles, savedAt: new Date() },
+  });
 }
