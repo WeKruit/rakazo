@@ -3189,6 +3189,8 @@ export type RecruitingCrmReadDeps = {
   signal?: AbortSignal;
   stillAuthorized?: () => Promise<boolean>;
   reauthorize: () => Promise<ThreadTarget>;
+  /** Keeps inbound mail attachments as saved files the inbox can open. */
+  artifacts?: ArtifactStore;
   /**
    * One request's CRM organization memberships, shared by its reads of several roles. Each read
    * still checks its own access to the membership tool before using them.
