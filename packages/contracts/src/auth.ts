@@ -8,6 +8,8 @@ export const authCapabilitiesSchema = z.object({
     })
     .nullable(),
   passwordAuth: z.boolean(),
+  // Older servers omit this field; clients treat omission as unavailable.
+  google: z.boolean().optional(),
   passwordReset: z.boolean(),
   resetUrl: z.string().url().nullable(),
   billing: z.boolean().optional(),

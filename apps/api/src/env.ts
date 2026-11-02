@@ -21,6 +21,8 @@ export { resolveCloudAgentProvider, resolveSandboxProvider } from "@rakazo/adapt
 export interface AppEnv {
   passwordAuth?: boolean;
   oidc?: OidcConfig;
+  /** Google sign-in for product accounts. */
+  google?: { clientId: string; clientSecret: string };
   nodeEnv: string;
   desktopStackToken?: string;
   databaseUrl: string;
@@ -143,8 +145,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       "ACTOR_DATABASE_URL must use the transaction pooler on port 6543 in production",
     );
   }
+  const googleClientId = optional(source.GOOGLE_CLIENT_ID);
+  const googleClientSecret = optional(source.GOOGLE_CLIENT_SECRET);
+  if (Boolean(googleClientId) !== Boolean(googleClientSecret))
+    throw new Error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together");
   return {
     passwordAuth,
+    google:
+      googleClientId && googleClientSecret
+        ? { clientId: googleClientId, clientSecret: googleClientSecret }
+        : undefined,
     oidc,
     firstPartyMcpUrl: trustedMcpEndpoint,
     firstPartySession: trustedMcpEndpoint

@@ -418,6 +418,15 @@ describe("identity trust through auth endpoints", () => {
     ).toMatchObject({ user: { emailVerified: true } });
   });
 
+  it("opens signup to any address with `*` but still requires mailbox proof", async () => {
+    const f = fixture({ allowlist: "*" });
+    const response = await f.signup("anyone@elsewhere.test");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ token: null, user: { emailVerified: false } });
+    expect(f.data.session).toHaveLength(0);
+    expect(bootstrapUserSpace).not.toHaveBeenCalled();
+  });
+
   it("rechecks policy before admitting a verified but unprovisioned signup", async () => {
     const f = fixture({ allowlist: "@example.test" });
     await f.signup();

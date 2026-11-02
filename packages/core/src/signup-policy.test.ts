@@ -35,6 +35,11 @@ describe("signup policy", () => {
     expect(emailAllowed("other@x.com", list)).toBe(false);
   });
 
+  it("lets `*` admit any address", () => {
+    expect(emailAllowed("anyone@x.com", parseAllowlist("*"))).toBe(true);
+    expect(emailAllowed("anyone@x.com", parseAllowlist("owner@y.com, *"))).toBe(true);
+  });
+
   it("honors SIGNUPS_ENABLED", () => {
     expect(signupsOpen(undefined)).toBe(true);
     expect(signupsOpen("false")).toBe(false);

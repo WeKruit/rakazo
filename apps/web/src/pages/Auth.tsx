@@ -126,6 +126,29 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
     }
   }
 
+  async function signInWithGoogle() {
+    setError(null);
+    clearSpaceSelection();
+    try {
+      const result = await runSsoFlow(
+        (disableRedirect, callbackURL) =>
+          authClient.signIn.social({
+            disableRedirect,
+            provider: "google",
+            newUserCallbackURL: callbackURL("/onboarding"),
+            callbackURL: callbackURL(
+              searchParams.get("next") === "/integrations/setup" ? "/integrations/setup" : "/app",
+            ),
+            errorCallbackURL: callbackURL(mode === "up" ? "/sign-up" : "/sign-in"),
+          }),
+        ["/app", "/onboarding", "/integrations/setup", "/sign-in", "/sign-up"],
+      );
+      if (result.error) setError(authErrorText(result.error, t`Could not continue`));
+    } catch {
+      setError(t`Could not continue`);
+    }
+  }
+
   async function signInWithSso() {
     setError(null);
     clearSpaceSelection();
@@ -191,6 +214,24 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
             <p role="alert" className="mt-3 text-sm text-destructive">
               {error}
             </p>
+          ) : null}
+          {reset?.google && mode !== "forgot" ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending}
+                className="h-12 w-full rounded-xl text-base"
+                onClick={() => void signInWithGoogle()}
+              >
+                <Trans>Continue with Google</Trans>
+              </Button>
+              {reset.passwordAuth ? (
+                <p className="my-4 text-sm text-muted-foreground">
+                  <Trans>or</Trans>
+                </p>
+              ) : null}
+            </>
           ) : null}
           {reset?.passwordAuth ? (
             <>

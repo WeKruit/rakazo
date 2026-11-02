@@ -1237,6 +1237,10 @@ msgstr "{0}(으)로 계속"
 msgid "Continue with email"
 msgstr "이메일로 계속하기"
 
+#: src/pages/Auth.tsx
+msgid "Continue with Google"
+msgstr "Google로 계속"
+
 #: src/pages/shell/ShellConversation.tsx
 msgid "Conversation"
 msgstr ""
@@ -3402,6 +3406,10 @@ msgstr "작업공간을 여는 중…"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Opens"
 msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "or"
+msgstr "또는"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "OR"
