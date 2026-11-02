@@ -514,20 +514,15 @@ describe("direct Instantly MCP email reads", () => {
         f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
         "instantlyCampaignScope",
       ).mockResolvedValue({ campaignIds: [email.campaign_id] });
-      Object.assign(f.prisma, {
-        externalEffect: {
-          findMany: vi.fn(async () => [
-            {
-              result: {
-                email: email.eaccount,
-                displayName: "Acme",
-                domain: "example.test",
-                emailProvider: 1,
-              },
-            },
-          ]),
+      const senderReceipt = vi.fn(async () => ({
+        result: {
+          email: email.eaccount,
+          displayName: "Acme",
+          domain: "example.test",
+          emailProvider: 1,
         },
-      });
+      }));
+      Object.assign(f.prisma, { externalEffect: { findUnique: senderReceipt } });
       f.callTool.mockResolvedValue({ structuredContent: email } as never);
       const events = await f.collect("reply_to_email", {
         reply_to_uuid: email.id,
@@ -538,6 +533,25 @@ describe("direct Instantly MCP email reads", () => {
         skip_validation: false,
       });
       expect(events).toMatchObject([{ type: mode === "active" ? "result" : "error" }]);
+      if (mode !== "active") {
+        expect(events).toMatchObject([
+          {
+            type: "error",
+            message: mode === "inactive" ? "sender_not_ready" : "sender_changed",
+          },
+        ]);
+        expect(events[0]).not.toHaveProperty("outcome");
+      }
+      expect(senderReceipt).toHaveBeenCalledWith({
+        where: {
+          idempotencyKey: `instantly-sender-mailbox:${email.eaccount.toLowerCase()}`,
+          spaceId: "space",
+          run: { userId: "owner", spaceId: "space" },
+          kind: "instantly_sender_account",
+          status: "completed",
+        },
+        select: { result: true },
+      });
       expect(fetch).toHaveBeenCalledOnce();
       expect(String(fetch.mock.calls[0]?.[0])).toContain(
         `/accounts/${encodeURIComponent(email.eaccount)}`,
@@ -550,7 +564,11 @@ describe("direct Instantly MCP email reads", () => {
   it("blocks a shared remote reply from a legacy mailbox without the account's confirmed sender receipt", async () => {
     vi.stubEnv("INSTANTLY_API_KEY", "synthetic-platform-mail-key");
     const f = scopedFixture();
-    Object.assign(f.prisma, { externalEffect: { findMany: vi.fn(async () => []) } });
+    Object.assign(f.prisma, { externalEffect: { findUnique: vi.fn(async () => null) } });
+    f.prisma.run.findFirst.mockResolvedValue({
+      threadId: "current-thread",
+      thread: { activeRecruitingRoleId: null },
+    } as never);
     f.callTool.mockResolvedValue({ structuredContent: email } as never);
     const events = await f.collect("reply_to_email", {
       reply_to_uuid: email.id,
@@ -561,6 +579,8 @@ describe("direct Instantly MCP email reads", () => {
       skip_validation: false,
     });
     expect(events).toMatchObject([{ type: "error" }]);
+    expect(events).toMatchObject([{ type: "error", message: "sender_unavailable" }]);
+    expect(events[0]).not.toHaveProperty("outcome");
     expect(f.callTool.mock.calls.map(([tool]) => tool)).toEqual(["get_email"]);
   });
   it("keeps the existing authorized personal connection reply behavior", async () => {

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import type { MailReplyErrorCode } from "@rakazo/contracts";
+import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -9,6 +11,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  confirmedSendingMailbox,
   confirmedSendingMailboxes,
   defaultSendingMailbox,
   EnsureSenderInput,
@@ -158,6 +161,12 @@ const AddShortlistLeadsInput = z.strictObject({
 });
 
 const EmailIdInput = z.strictObject({
+  check_sender: z
+    .boolean()
+    .optional()
+    .describe(
+      "Read-only check that this exact email can be replied to from its current sending mailbox.",
+    ),
   id: Uuid.describe(
     "Provider email id from list_mailbox_emails, search_contact_emails or get_thread_history.",
   ),
@@ -728,25 +737,30 @@ export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: Readon
 const mailboxKey = (email: string) => email.trim().toLowerCase();
 
 /**
- * Every campaign this mail connection's roles are bound to, and every sending mailbox it has
- * confirmed: one recorded as a sender for this connection, or one its own campaigns already use.
+ * This connection's bound campaigns and explicitly confirmed account senders.
+ * A campaign's existing mailbox authorizes its own reply thread only, not general sender access.
  */
 export async function ownedInstantly(
-  prisma: Pick<PrismaClient, "externalEffect">,
+  prisma: Pick<PrismaClient, "$queryRaw">,
   spaceId: string,
   serverId: string,
   userId: string,
 ): Promise<{ campaigns: string[]; mailboxes: string[] }> {
-  const effects = await prisma.externalEffect.findMany({
-    where: {
-      spaceId,
-      run: { userId, spaceId },
-      kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
-      status: "completed",
-      request: { path: ["serverId"], equals: serverId },
-    },
-    select: { kind: true, result: true },
-  });
+  // Run ownership is the indexed boundary; OFFSET 0 keeps each receipt lookup on (runId, status).
+  const effects = await prisma.$queryRaw<{ kind: string; result: unknown }[]>`
+    SELECT e.kind, e.result
+    FROM runs r
+    CROSS JOIN LATERAL (
+      SELECT e.kind, e.result
+      FROM external_effects e
+      WHERE e."runId" = r.id AND e."spaceId" = ${spaceId}
+        AND e.status = 'completed'
+        AND e.kind IN ('instantly_role_campaign', 'instantly_sender_account')
+        AND e.request->>'serverId' = ${serverId}
+      OFFSET 0
+    ) e
+    WHERE r."spaceId" = ${spaceId} AND r."userId" = ${userId}
+  `;
   const campaigns = new Set<string>();
   const mailboxes = new Set<string>();
   for (const { kind, result } of effects) {
@@ -1078,6 +1092,7 @@ export type InstantlyReplyDisplay = {
   inReplyTo: string | null;
   body: string;
   original?: Record<string, unknown>;
+  refusal?: MailReplyErrorCode;
 };
 /** Vendor-free facts for the reply confirmation card; the original is read with the native get_email tool. */
 export async function describeReplyToEmail(
@@ -1090,7 +1105,10 @@ export async function describeReplyToEmail(
   const input = ReplyToEmailInput.safeParse(args);
   const original =
     input.success && typeof args.reply_to_uuid === "string"
-      ? await read("native_instantly_get_email", { id: args.reply_to_uuid }).catch(() => undefined)
+      ? await read("native_instantly_get_email", {
+          id: args.reply_to_uuid,
+          check_sender: true,
+        }).catch(() => undefined)
       : undefined;
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
   const originalSubject = text(original?.subject);
@@ -1108,6 +1126,14 @@ export async function describeReplyToEmail(
       : null,
     body: input.success ? input.data.body.text : "",
     original,
+    ...((original?.replySenderCheck as { ready?: boolean } | undefined)?.ready === true
+      ? {}
+      : {
+          refusal:
+            MailReplyErrorCodeSchema.safeParse(
+              (original?.replySenderCheck as { error?: unknown } | undefined)?.error,
+            ).data ?? "sender_unavailable",
+        }),
   };
 }
 
@@ -1117,17 +1143,93 @@ async function readEmail(rest: InstantlyRest, id: string) {
   return email;
 }
 
+export class MailReplySendingError extends Error {
+  constructor(readonly code: MailReplyErrorCode) {
+    super(code);
+  }
+}
+
+/** An existing campaign authorizes only replying to its own email, never claiming a default sender. */
+export async function requireReplySendingMailboxReady(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  original: Record<string, unknown>,
+  email: string,
+) {
+  if (typeof original.eaccount !== "string" || !sameAddress(original.eaccount, email))
+    throw new MailReplySendingError("sender_unavailable");
+  if (await confirmedSendingMailbox(prisma, context, email)) {
+    try {
+      return await requireSendingMailboxReady(prisma, rest, context, email);
+    } catch (error) {
+      throw new MailReplySendingError(
+        error instanceof IsolationError
+          ? "sender_unavailable"
+          : error instanceof Error && error.message.includes("display name changed")
+            ? "sender_changed"
+            : error instanceof Error && error.message.includes("not active yet")
+              ? "sender_not_ready"
+              : "sender_unavailable",
+      );
+    }
+  }
+  const roleId = await activeRoleId(prisma, context);
+  if (
+    !roleId ||
+    typeof original.campaign_id !== "string" ||
+    !original.campaign_id.trim() ||
+    typeof original.thread_id !== "string" ||
+    !original.thread_id.trim()
+  )
+    throw new MailReplySendingError("sender_unavailable");
+  const key = bindingKey(serverId, roleId);
+  let owned: Partial<RoleBinding> | null = null;
+  // Existing native associations have unique keys; never scan unrelated effect history for proof.
+  for (const idempotencyKey of [key, `${key}:campaign:${original.campaign_id}`]) {
+    const binding = await prisma.externalEffect.findUnique({
+      where: {
+        idempotencyKey,
+        spaceId: context.spaceId,
+        run: { userId: context.userId, spaceId: context.spaceId },
+        kind: "instantly_role_campaign",
+        status: "completed",
+        AND: [
+          { request: { path: ["serverId"], equals: serverId } },
+          { request: { path: ["roleId"], equals: roleId } },
+          { result: { path: ["campaignId"], equals: original.campaign_id } },
+        ],
+      },
+      select: { result: true },
+    });
+    owned = binding?.result as Partial<RoleBinding> | null;
+    if (typeof owned?.eaccount === "string" && sameAddress(owned.eaccount, email)) break;
+  }
+  if (typeof owned?.eaccount !== "string" || !sameAddress(owned.eaccount, email))
+    throw new MailReplySendingError("sender_unavailable");
+  let state: Awaited<ReturnType<typeof sendingMailboxState>>;
+  try {
+    state = await sendingMailboxState(rest, email);
+  } catch {
+    throw new MailReplySendingError("sender_unavailable");
+  }
+  if (!state.usable) throw new MailReplySendingError("sender_not_ready");
+  await context.reauthorize?.();
+  return state;
+}
+
 async function replyToEmail(
   rest: InstantlyRest,
   input: z.output<typeof ReplyToEmailInput>,
-  ready?: (email: string) => Promise<unknown>,
+  ready?: (email: string, original: Record<string, unknown>) => Promise<unknown>,
 ) {
   const original = await readEmail(rest, input.reply_to_uuid);
   const eaccount =
     input.eaccount ?? (typeof original.eaccount === "string" ? original.eaccount : "");
   if (!eaccount) throw new Error("The original email names no mailbox; pass eaccount");
   await requireOwnMailbox(rest, eaccount);
-  await ready?.(eaccount);
+  await ready?.(eaccount, original);
   if (typeof original.eaccount === "string" && !sameAddress(original.eaccount, eaccount))
     throw new Error(`${input.reply_to_uuid} is not in the ${eaccount} mailbox`);
   const subject =
@@ -2582,16 +2684,55 @@ export async function runInstantlyWrite(
       );
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
-    case "native_instantly_get_email":
-      return readEmail(rest, EmailIdInput.parse(args).id);
-    case "native_instantly_reply_to_email":
-      return replyToEmail(
-        rest,
-        ReplyToEmailInput.parse(args),
-        owned
-          ? (email) => requireSendingMailboxReady(prisma, accountRest, context, email)
-          : undefined,
+    case "native_instantly_get_email": {
+      const input = EmailIdInput.parse(args);
+      const original = await readEmail(rest, input.id);
+      if (!input.check_sender) return original;
+      let error: MailReplyErrorCode | undefined;
+      if (owned) {
+        try {
+          await requireReplySendingMailboxReady(
+            prisma,
+            accountRest,
+            context,
+            serverId,
+            original,
+            String(original.eaccount ?? ""),
+          );
+        } catch (cause) {
+          error = cause instanceof MailReplySendingError ? cause.code : "sender_unavailable";
+        }
+      }
+      return { ...original, replySenderCheck: { ready: !error, ...(error ? { error } : {}) } };
+    }
+    case "native_instantly_reply_to_email": {
+      const input = ReplyToEmailInput.parse(args);
+      if (!owned) return replyToEmail(rest, input);
+      const original = await readEmail(rest, input.reply_to_uuid);
+      const mailbox = input.eaccount ?? String(original.eaccount ?? "");
+      await requireReplySendingMailboxReady(
+        prisma,
+        accountRest,
+        context,
+        serverId,
+        original,
+        mailbox,
       );
+      const scopedReply = ownedInstantlyRest(accountRest, {
+        campaigns: owned.campaigns,
+        mailboxes: new Set([...owned.mailboxes, mailboxKey(mailbox)]),
+      });
+      return replyToEmail(scopedReply, input, (email, currentOriginal) =>
+        requireReplySendingMailboxReady(
+          prisma,
+          accountRest,
+          context,
+          serverId,
+          currentOriginal,
+          email,
+        ),
+      );
+    }
     case "native_instantly_ensure_role_campaign":
       return ensureRoleCampaign(
         prisma,

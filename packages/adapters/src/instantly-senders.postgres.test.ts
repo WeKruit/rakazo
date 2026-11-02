@@ -5,6 +5,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { createDb, type Prisma } from "@rakazo/db";
 import { expect, it } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
+import { ownedInstantly, requireReplySendingMailboxReady } from "./instantly-native-writes.js";
 import { ensureSendingIdentity } from "./instantly-senders.js";
 
 const url = process.env.DATABASE_URL;
@@ -176,17 +177,134 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
         setup_pending: false,
         warmup_status: 1,
       });
+      await p.$transaction(async (tx) => {
+        await tx.recruitingRole.create({
+          data: {
+            id,
+            spaceId: id,
+            userId: id,
+            sourceThreadId: id,
+            title: "Reply proof",
+            revision: 1,
+            currentRevisionId: `${id}-revision`,
+          },
+        });
+        await tx.recruitingRoleRevision.create({
+          data: {
+            id: `${id}-revision`,
+            roleId: id,
+            revision: 1,
+            sourceRefs: [],
+            criteria: {},
+            preferences: {},
+            definitionQuestions: [],
+          },
+        });
+        await tx.thread.update({ where: { id }, data: { activeRecruitingRoleId: id } });
+      });
       await p.externalEffect.create({
         data: {
           spaceId: id,
           runId: contexts[0]!.runId!,
           kind: "instantly_role_campaign",
-          idempotencyKey: `${id}-legacy`,
+          idempotencyKey: `instantly-role-campaign:${id}:${id}`,
           status: "completed",
-          request: { serverId: id },
-          result: { eaccount: legacyEmail },
+          request: { serverId: id, roleId: id },
+          result: { eaccount: legacyEmail, campaignId: "campaign-proof" },
         },
       });
+      // Noise belongs to a different actor: history growth must not turn an owned reply into a table scan.
+      await p.run.create({
+        data: {
+          id: `${id}-noise-run`,
+          spaceId: id,
+          userId: `${id}-foreign`,
+          botId: id,
+          threadId: id,
+          taskId: id,
+          status: "completed",
+          trigger: "user",
+        },
+      });
+      await p.$executeRaw`
+        INSERT INTO external_effects (id, "spaceId", "runId", kind, "idempotencyKey", status, request, result, "updatedAt")
+        SELECT ${id} || '-noise-' || n, ${id}, ${`${id}-noise-run`}, 'instantly_role_campaign',
+          ${id} || '-noise-key-' || n, 'completed', jsonb_build_object('serverId', ${id}::text),
+          jsonb_build_object('campaignId', 'unrelated', 'padding', repeat('x', 256)), now()
+        FROM generate_series(1, 100000) n
+      `;
+      await p.$executeRawUnsafe("ANALYZE external_effects");
+      const plans = [
+        await p.$queryRawUnsafe<unknown[]>(
+          `
+          EXPLAIN (ANALYZE, FORMAT JSON) SELECT e.result FROM external_effects e JOIN runs r ON r.id=e."runId"
+          WHERE e."idempotencyKey"=$1 AND e."spaceId"=$2 AND r."userId"=$2 AND r."spaceId"=$2
+            AND e.kind='instantly_role_campaign' AND e.status='completed'
+            AND e.request->>'serverId'=$2 AND e.request->>'roleId'=$2 AND e.result->>'campaignId'='campaign-proof'
+        `,
+          `instantly-role-campaign:${id}:${id}`,
+          id,
+        ),
+        await p.$queryRawUnsafe<unknown[]>(
+          `
+          EXPLAIN (ANALYZE, FORMAT JSON) SELECT e.kind,e.result FROM runs r
+          CROSS JOIN LATERAL (
+            SELECT e.kind,e.result FROM external_effects e WHERE e."runId"=r.id AND e."spaceId"=$1
+              AND e.status='completed' AND e.kind IN ('instantly_role_campaign','instantly_sender_account')
+              AND e.request->>'serverId'=$1 OFFSET 0
+          ) e WHERE r."spaceId"=$1 AND r."userId"=$1
+        `,
+          id,
+        ),
+      ];
+      for (const rows of plans) {
+        const plan = (rows[0] as { "QUERY PLAN": { Plan: unknown; "Execution Time": number }[] })[
+          "QUERY PLAN"
+        ][0]!;
+        const text = JSON.stringify(plan.Plan);
+        expect(text).toContain("external_effects");
+        const check = (node: any) => {
+          if (node["Relation Name"] === "external_effects")
+            expect(node["Node Type"]).not.toBe("Seq Scan");
+          for (const child of node.Plans ?? []) check(child);
+        };
+        check(plan.Plan);
+        expect(plan["Execution Time"]).toBeLessThan(5_000);
+      }
+      const started = performance.now();
+      expect((await ownedInstantly(p, id, id, id)).campaigns).toContain("campaign-proof");
+      expect(performance.now() - started).toBeLessThan(5_000);
+      const original = {
+        eaccount: legacyEmail,
+        campaign_id: "campaign-proof",
+        thread_id: "provider-thread-proof",
+      };
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).resolves.toMatchObject({ usable: true });
+      await p.externalEffect.update({
+        where: { idempotencyKey: `instantly-role-campaign:${id}:${id}` },
+        data: { idempotencyKey: `instantly-role-campaign:${id}:${id}:campaign:campaign-proof` },
+      });
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).resolves.toMatchObject({ usable: true });
+      accounts.get(legacyEmail)!.status = 0;
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).rejects.toThrow("sender_not_ready");
+      accounts.get(legacyEmail)!.status = 1;
+      for (const [ctx, source, anchor, mailbox] of [
+        [{ ...contexts[1]!, userId: `${id}-foreign` }, id, original, legacyEmail],
+        [{ ...contexts[1]!, spaceId: `${id}-foreign` }, id, original, legacyEmail],
+        [contexts[1]!, `${id}-foreign`, original, legacyEmail],
+        [contexts[1]!, id, { ...original, campaign_id: "foreign-campaign" }, legacyEmail],
+        [contexts[1]!, id, { ...original, thread_id: undefined }, legacyEmail],
+        [contexts[1]!, id, original, "foreign@product.test"],
+      ] as const)
+        await expect(
+          requireReplySendingMailboxReady(p, rest, ctx, source, anchor, mailbox),
+        ).rejects.toThrow("sender_unavailable");
       expect(
         await ensureSendingIdentity(p, rest, contexts[0]!, id, {
           operation: "propose",
@@ -214,6 +332,9 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
           existing_email: legacyEmail,
         }),
       ).rejects.toThrow("exclusively owned");
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).rejects.toThrow("sender_unavailable");
       expect(patches).toBe(0);
     } finally {
       await p.space.deleteMany({ where: { id } });
@@ -223,5 +344,5 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
       await db.pool.end();
     }
   },
-  30_000,
+  60_000,
 );

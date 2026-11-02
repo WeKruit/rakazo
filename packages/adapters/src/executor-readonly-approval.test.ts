@@ -113,6 +113,7 @@ type Effect = {
   request: unknown;
   result?: unknown;
   reviewDecision?: string;
+  updatedAt?: Date;
   runId?: string;
 };
 
@@ -270,7 +271,7 @@ function fixture({
         ) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
-      const effect = { ...data, id: `effect-${effects.length + 1}` };
+      const effect = { ...data, updatedAt: new Date(), id: `effect-${effects.length + 1}` };
       effects.push(effect);
       return { ...effect };
     }),
@@ -320,9 +321,22 @@ function fixture({
     thread: {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })),
       findUnique: vi.fn(async () => ({ activeRecruitingRoleId: null as string | null })),
+      update: vi.fn(async () => ({ nextMessageSeq: 1, nextEventSeq: 1, userId: "user-1" })),
     },
-    message: { findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []) },
-    event: { findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []) },
+    message: {
+      findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "card-message",
+        ...data,
+      })),
+    },
+    event: {
+      findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "card-event",
+        ...data,
+      })),
+    },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
     connection: { findMany: vi.fn(async () => []) },
     botMcpServer: {
@@ -361,7 +375,20 @@ function fixture({
     return true;
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
-  const execute = vi.fn(async function* (call: ConnectorCall): AsyncGenerator<ConnectorEvent> {
+  const senderChecks = vi.fn(async function* (
+    _call: ConnectorCall,
+  ): AsyncGenerator<ConnectorEvent> {
+    yield {
+      type: "result",
+      data: connectorResults.native_instantly_get_email ?? {
+        structuredContent: { result: { ...replyAnchor, replySenderCheck: { ready: true } } },
+      },
+    };
+  });
+  const execute = vi.fn(async function* (
+    call: ConnectorCall,
+    _context?: unknown,
+  ): AsyncGenerator<ConnectorEvent> {
     if (transportUncertain) {
       yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
       return;
@@ -415,7 +442,10 @@ function fixture({
         catalog || call.route?.toolName === "__catalog_execute"
           ? resolveCatalogCall(call, catalogEntries(providerTools))
           : undefined,
-      execute,
+      execute: (call: ConnectorCall, context: never) =>
+        call.route?.toolName === "native_instantly_get_email" && call.args.check_sender === true
+          ? senderChecks(call)
+          : execute(call, context),
     },
     sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
     memory: {
@@ -439,7 +469,12 @@ function fixture({
       commit,
     },
     memoryProviders: { resolve: async () => null },
-    events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
+    events: {
+      append: vi.fn(async () => undefined),
+      notify: vi.fn(async () => undefined),
+      pauseRunForInput,
+      finalizeRun,
+    },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets,
     autoReview: autoReviewProvider,
@@ -450,6 +485,7 @@ function fixture({
     effects,
     results,
     execute,
+    senderChecks,
     commit,
     sharedMemoryState,
     pauseRunForInput,
@@ -2082,6 +2118,56 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     ue_type: 3,
   };
 
+  it("tells the agent that the existing card was discarded rather than never created", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      status: "discarded",
+      dispatched: false,
+      message: expect.stringContaining("already created"),
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.senderChecks).toHaveBeenCalledOnce();
+  });
+  it("keeps a blocked sender on the original card without offering Send or pausing for approval", async () => {
+    const f = replyFixture();
+    f.senderChecks.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        data: {
+          structuredContent: {
+            result: {
+              ...replyAnchor,
+              replySenderCheck: { ready: false, error: "sender_unavailable" },
+            },
+          },
+        },
+      };
+    });
+    await f.run();
+    expect(f.senderChecks).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.effects[0]).toMatchObject({
+      status: "completed",
+      result: {
+        dispatched: false,
+        error: "sender_unavailable",
+        mailReplyApproval: { status: "failed", error: "sender_unavailable", canAnswer: false },
+      },
+    });
+    const cards = f.prisma.message.create.mock.calls
+      .flatMap(([input]) => input.data.blocks as any[])
+      .filter((block) => block.kind === "ask");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      status: "answered",
+      actions: [],
+      mailReply: { status: "failed", error: "sender_unavailable", canAnswer: false },
+    });
+  });
   it("records a clicked reply as failed without dispatch when its original source is no longer authorized", async () => {
     const f = replyFixture();
     await f.run();

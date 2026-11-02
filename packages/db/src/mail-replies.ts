@@ -1,5 +1,9 @@
 import type { Actor, MailReply, MailReplySendAnswer, ThreadMessage } from "@rakazo/contracts";
-import { MailReplySendAnswerSchema, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import {
+  MailReplyErrorCodeSchema,
+  MailReplySendAnswerSchema,
+  MessageBlock as MessageBlockSchema,
+} from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
@@ -86,7 +90,7 @@ type Effect = {
   result: Prisma.JsonValue | null;
   updatedAt: Date;
 };
-function state(draft: MailReply, effect: Effect): MailReply {
+export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
   const result = object(effect.result);
   const provider = object(result?.providerResult) ?? result;
   const envelope =
@@ -145,21 +149,29 @@ function state(draft: MailReply, effect: Effect): MailReply {
     !error &&
     effect.status === "completed" &&
     (result?.status === "sent_recorded" || nativeReceipt || gmailReceipt);
+  const reason = MailReplyErrorCodeSchema.safeParse(provider?.error ?? envelope?.error).data;
   return {
     ...draft,
     body: edited,
+    ...(effect.status === "uncertain"
+      ? { error: "delivery_unconfirmed" }
+      : error
+        ? { error: reason ?? "send_failed" }
+        : {}),
     status:
       effect.status === "denied"
         ? "discarded"
-        : error
-          ? "failed"
-          : sent
-            ? "sent"
-            : effect.status === "uncertain" || effect.status === "completed"
-              ? "unknown"
-              : ["approved", "executing"].includes(effect.status)
-                ? "sending"
-                : "needs_approval",
+        : effect.status === "uncertain"
+          ? "unknown"
+          : error
+            ? "failed"
+            : sent
+              ? "sent"
+              : effect.status === "completed"
+                ? "unknown"
+                : ["approved", "executing"].includes(effect.status)
+                  ? "sending"
+                  : "needs_approval",
     sentAt: sent
       ? typeof payload?.timestamp_email === "string"
         ? payload.timestamp_email
@@ -215,7 +227,7 @@ export async function projectMailReplyCards<
         ? {
             ...block,
             mailReply: {
-              ...state(block.mailReply, effect),
+              ...mailReplyState(block.mailReply, effect),
               canAnswer:
                 block.status === "pending" &&
                 effect.status === "intended" &&
@@ -252,7 +264,7 @@ export async function publishMailReplyCard(prisma: PrismaClient, actor: Actor, e
     if (!message || !parsed.success) return null;
     const blocks = parsed.data.map((block) =>
       block.kind === "ask" && block.mailReply && block.approvalEffectId === effectId
-        ? { ...block, mailReply: { ...state(block.mailReply, effect), canAnswer: false } }
+        ? { ...block, mailReply: { ...mailReplyState(block.mailReply, effect), canAnswer: false } }
         : block,
     );
     await tx.message.update({ where: { id: message.id }, data: { blocks } });

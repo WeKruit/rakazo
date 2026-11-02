@@ -253,6 +253,14 @@ export const MailReplySendAnswerSchema = z.strictObject({
   cc: z.array(z.email()).max(100),
 });
 export type MailReplySendAnswer = z.infer<typeof MailReplySendAnswerSchema>;
+export const MailReplyErrorCodeSchema = z.enum([
+  "sender_unavailable",
+  "sender_not_ready",
+  "sender_changed",
+  "send_failed",
+  "delivery_unconfirmed",
+]);
+export type MailReplyErrorCode = z.infer<typeof MailReplyErrorCodeSchema>;
 export const MailReplySchema = z.strictObject({
   from: z.string().trim().toLowerCase().nullable(),
   to: z.array(z.string()),

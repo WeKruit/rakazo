@@ -1,6 +1,11 @@
 import type { AdapterContext, ConnectorEvent, ConnectorProvider } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
-import { gmailReplyRoute, mailReplyFromAnchor, readGmailReplyCard } from "./mail-reply.js";
+import {
+  gmailReplyRoute,
+  mailReplyFromAnchor,
+  mailReplyOutcomeInstruction,
+  readGmailReplyCard,
+} from "./mail-reply.js";
 
 const context = {
   userId: "owner",
@@ -124,4 +129,12 @@ describe("mail reply provenance", () => {
       },
     });
   });
+});
+
+it("reports the recorded card outcome rather than inventing missing or unconfirmed cards", () => {
+  expect(mailReplyOutcomeInstruction({ status: "discarded" })).toContain("reply card was created");
+  expect(mailReplyOutcomeInstruction({ status: "failed" })).toContain("definite send failure");
+  expect(mailReplyOutcomeInstruction({ status: "unknown" })).toContain(
+    "Do not claim it sent or that nothing was sent",
+  );
 });

@@ -6,6 +6,7 @@ import {
   nativeInstantlyWrites,
   ownedInstantly,
   ownedInstantlyRest,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 
@@ -358,17 +359,136 @@ describe("shared mail account isolation", () => {
       { kind: "instantly_role_campaign", result: null },
     ]);
     await expect(
-      ownedInstantly({ externalEffect: { findMany } } as never, "s", "server", "owner"),
+      ownedInstantly({ $queryRaw: findMany } as never, "s", "server", "owner"),
     ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["second@ours.test"] });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        spaceId: "s",
-        run: { userId: "owner", spaceId: "s" },
-        kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
-        status: "completed",
-        request: { path: ["serverId"], equals: "server" },
-      },
-      select: { kind: true, result: true },
-    });
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany.mock.calls[0]?.slice(1)).toEqual(["s", "server", "s", "owner"]);
   });
+});
+
+describe("reply sender checks before card creation", () => {
+  it("checks the exact existing campaign sender without provisioning or POSTing", async () => {
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.kind === "instantly_role_campaign"
+        ? {
+            result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" },
+          }
+        : null,
+    );
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: { findUnique },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          idempotencyKey: "instantly-role-campaign:source-proof:role-proof",
+          run: { userId: "u", spaceId: "s" },
+          status: "completed",
+          kind: "instantly_role_campaign",
+          AND: [
+            { request: { path: ["serverId"], equals: "source-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
+            { result: { path: ["campaignId"], equals: "campaign-proof" } },
+          ],
+        }),
+      }),
+    );
+    expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("returns a blocked sender check from the read-only email tool", async () => {
+    const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
+    const rest = vi.fn(async () => ORIGINAL);
+    const result = await runInstantlyWrite(
+      prisma as never,
+      rest as never,
+      context,
+      "source",
+      "native_instantly_get_email",
+      { id: ORIGINAL.id, check_sender: true },
+      { campaigns: new Set(), mailboxes: new Set() },
+    );
+    expect(result).toMatchObject({
+      replySenderCheck: { ready: false, error: "sender_unavailable" },
+    });
+    expect(rest.mock.calls).toHaveLength(1);
+  });
+});
+
+it.each([false, true])(
+  "rechecks the prior campaign's exact sender immediately before POST (anchor changed: %s)",
+  async (changed) => {
+    let reads = 0;
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: {
+        findMany: vi.fn(async () => []),
+        findUnique: vi.fn(async (input: any) =>
+          input.where.kind === "instantly_role_campaign" &&
+          input.where.AND[2].result.equals === "campaign-proof"
+            ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
+            : null,
+        ),
+      },
+    };
+    const rest = vi.fn(async (method: string, path: string) => {
+      if (path === `/emails/${ORIGINAL.id}`)
+        return {
+          ...original,
+          campaign_id: changed && ++reads > 1 ? "foreign-campaign" : original.campaign_id,
+        };
+      if (method === "GET" && path.startsWith("/accounts/"))
+        return { email: ORIGINAL.eaccount, status: 1, setup_pending: false };
+      if (method === "POST" && path === "/emails/reply") return { id: "sent-proof" };
+      throw new Error("Unexpected provider request");
+    });
+    const owned = { campaigns: new Set([original.campaign_id]), mailboxes: new Set<string>() };
+    const result = runInstantlyWrite(
+      prisma as never,
+      rest,
+      { spaceId: "s", userId: "u", runId: "run-proof" } as never,
+      "source-proof",
+      "native_instantly_reply_to_email",
+      { reply_to_uuid: ORIGINAL.id, body: { text: "Exact approved reply" } },
+      owned,
+    );
+    if (changed) await expect(result).rejects.toThrow("sender_unavailable");
+    else await expect(result).resolves.toEqual({ id: "sent-proof" });
+    expect(rest.mock.calls.filter((call) => call[0] === "POST")).toHaveLength(changed ? 0 : 1);
+    expect(owned.mailboxes.size).toBe(0);
+  },
+);
+
+it("requires positive read-only sender proof and does not echo an unsupported sender error", async () => {
+  const read = vi.fn(async () => ({
+    ...ORIGINAL,
+    replySenderCheck: { ready: false, error: "private-provider-id" },
+  }));
+  const result = await describeReplyToEmail(read, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(read).toHaveBeenCalledWith("native_instantly_get_email", {
+    id: ORIGINAL.id,
+    check_sender: true,
+  });
+  expect(result.refusal).toBe("sender_unavailable");
+  const missing = await describeReplyToEmail(async () => ORIGINAL, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(missing.refusal).toBe("sender_unavailable");
 });

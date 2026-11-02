@@ -250,6 +250,7 @@ import {
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
+  mailReplyState,
   Prisma,
   parseComputerMode,
   pollOf,
@@ -474,7 +475,12 @@ import {
   CATALOG_EXECUTE,
   uniquifyInstalledToolName,
 } from "./lazy-tool-catalog.js";
-import { gmailReplyRoute, mailReplyFromAnchor, readGmailReplyCard } from "./mail-reply.js";
+import {
+  gmailReplyRoute,
+  mailReplyFromAnchor,
+  mailReplyOutcomeInstruction,
+  readGmailReplyCard,
+} from "./mail-reply.js";
 import { requireMcpToolAssignment } from "./mcp-connector.js";
 import {
   buildMcpCredentialBlob,
@@ -9407,6 +9413,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : uncertainEffectResult(name);
               }
             }
+            if (replySelection)
+              approvalArgs = {
+                ...args,
+                role: replySelection.role.title,
+                candidateId:
+                  replySelection.candidateId ?? replySelection.crmImportReceipt?.candidate_id,
+              };
+            try {
+              await readReplyEvidence();
+            } catch (error) {
+              const result = replyProofError(error);
+              if (replyAdmission) return result;
+              return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                ? result
+                : uncertainEffectResult(name);
+            }
             let instantlyActivation:
               | Awaited<ReturnType<typeof describeCampaignActivation>>
               | undefined;
@@ -9414,7 +9436,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               approvalRoute?.connectorId === "mcp" &&
               (approvalRoute.toolName === "native_instantly_activate_campaign" ||
-                approvalRoute.toolName === "native_instantly_reply_to_email") &&
+                approvalRoute.toolName === "native_instantly_reply_to_email" ||
+                approvalRoute.toolName === "reply_to_email") &&
               approvalRoute.resourceId &&
               deps.connector
             ) {
@@ -9465,8 +9488,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
                 return undefined;
               };
-              if (approvalRoute.toolName === "native_instantly_reply_to_email")
-                instantlyReply = await describeReplyToEmail(read, args);
+              if (
+                ["native_instantly_reply_to_email", "reply_to_email"].includes(
+                  approvalRoute.toolName,
+                )
+              )
+                instantlyReply = await describeReplyToEmail(
+                  read,
+                  approvalRoute.toolName === "reply_to_email"
+                    ? {
+                        reply_to_uuid: args.reply_to_uuid,
+                        eaccount: args.eaccount,
+                        subject: args.subject,
+                        body: { text: args.body_text ?? args.body_html ?? "" },
+                        ...(args.cc_address_email_list
+                          ? { cc_address_email_list: args.cc_address_email_list }
+                          : {}),
+                      }
+                    : args,
+                );
               else
                 instantlyActivation = campaignId
                   ? await describeCampaignActivation(
@@ -9495,22 +9535,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? result
                   : uncertainEffectResult(name);
               }
-            }
-            if (replySelection)
-              approvalArgs = {
-                ...args,
-                role: replySelection.role.title,
-                candidateId:
-                  replySelection.candidateId ?? replySelection.crmImportReceipt?.candidate_id,
-              };
-            try {
-              await readReplyEvidence();
-            } catch (error) {
-              const result = replyProofError(error);
-              if (replyAdmission) return result;
-              return (await completeEffect(deps, applied!.effect.id, "intended", result))
-                ? result
-                : uncertainEffectResult(name);
             }
             if (name === "recruiting_crm_target" && args.operation === "bind") {
               try {
@@ -9655,6 +9679,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       );
                 if (thread.activeRecruitingRoleId)
                   approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                if (instantlyReply?.refusal) {
+                  approvalBlock.mailReply = {
+                    ...approvalBlock.mailReply,
+                    status: "failed",
+                    canAnswer: false,
+                    error: instantlyReply.refusal,
+                  };
+                  approvalBlock.status = "answered";
+                  approvalBlock.actions = [];
+                  const result = {
+                    status: "failed",
+                    error: instantlyReply.refusal,
+                    dispatched: false,
+                    mailReplyApproval: approvalBlock.mailReply,
+                    message:
+                      "The reply card was created, but its sender check refused sending before dispatch. Nothing was sent. Do not retry this card.",
+                  };
+                  if (!(await completeEffect(deps, applied!.effect.id, "intended", result)))
+                    return uncertainEffectResult(name);
+                  await publishMessage(deps, run, "bot", [approvalBlock]);
+                  return result;
+                }
                 approvalBlock.actions = [
                   { id: "allow", label: "Send" },
                   { id: "deny", label: "Discard" },
@@ -13407,7 +13453,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
-        const prompt = [
+        const promptParts = [
           replyContext,
           nativeSources?.currentAnswer
             ? [blocksToAgentHistoryText(turnBlocks ?? []), missingImagesInstruction]
@@ -13435,9 +13481,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
           // Per-turn, not in the system prompt: the timestamp changes every call and would break the cacheable prefix.
           formatCurrentTimeInstruction(),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+        ];
+        let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
@@ -13588,6 +13633,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ].includes(operation ?? "")
           )
             break;
+          const replyDraft = MailReplySchema.parse(result.mailReplyApproval);
           const name = catalog?.toolName ?? approvedEffectReplays.nextToolName()!;
           const effect = approvedEffects.find((effect) => effect.request === request)!;
           const outcome = await applyTool(
@@ -13621,23 +13667,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 payload: { effectId: effect.id, tool: name },
               });
           }
-          await publishMailReplyCard(
-            deps.prisma,
-            { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
-            effect.id,
-          )
-            .then(async (event) => {
-              if (event) await deps.events.notify?.(event.threadId, event.seq);
-            })
-            .catch((error) =>
-              getLogger().warn("mail.reply.card_publish_failed", {
-                effectId: effect.id,
-                error: String(error),
-              }),
+          // Remove the obsolete approval instruction even if publishing fails: never replay dispatch.
+          const currentReplyEffect = await deps.prisma.externalEffect.findFirst({
+            where: { id: effect.id, spaceId: run.spaceId, runId, run: { userId: run.userId } },
+          });
+          replyOutcome = mailReplyOutcomeInstruction(
+            currentReplyEffect
+              ? mailReplyState(replyDraft, currentReplyEffect)
+              : { status: "unknown" },
+          );
+          try {
+            const event = await publishMailReplyCard(
+              deps.prisma,
+              { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
+              effect.id,
             );
+            if (event) {
+              const blocks = MessageBlockSchema.array().safeParse(
+                (event.payload as { blocks?: unknown }).blocks,
+              );
+              const card = blocks.data?.find(
+                (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+              );
+              if (card?.kind === "ask" && card.mailReply)
+                replyOutcome = mailReplyOutcomeInstruction(card.mailReply);
+              await deps.events.notify?.(event.threadId, event.seq);
+            }
+          } catch (error) {
+            getLogger().warn("mail.reply.card_publish_failed", {
+              effectId: effect.id,
+              error: String(error),
+            });
+          }
           sentReplyDirectly = true;
         }
         if (sentReplyDirectly) probeFoundNothing = true;
+        const prompt = [
+          ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
+          replyOutcome,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
 
         // Stop during setup must not still open the model. A reclaimed lease can
         // leave status "running" under a new owner, and the stream loop only
