@@ -44,7 +44,7 @@ export function MailReplyAskContent({
         ? "sending"
         : "discarded"
       : reply.status;
-  const editable = canAnswer && status === "needs_approval";
+  const editable = canAnswer && reply.canAnswer !== false && status === "needs_approval";
   const localPreview = reply.status === "needs_approval" && submitted === "send";
   const displayedCc = localPreview
     ? cc
@@ -60,6 +60,26 @@ export function MailReplyAskContent({
     failed: t`Failed`,
     unknown: t`Delivery unconfirmed`,
   };
+  const errorMessages = new Map<string, string>([
+    ["sender_unavailable", t`This sending address is not available for this conversation.`],
+    ["sender_not_ready", t`This sending address is not ready to send yet.`],
+    ["sender_changed", t`The sending address changed. Prepare a new reply for review.`],
+    ["send_failed", t`This reply was not sent.`],
+    [
+      "delivery_unconfirmed",
+      t`Delivery is not confirmed. Check the conversation before trying again.`,
+    ],
+  ]);
+  const reportedError =
+    status === "needs_approval" || status === "failed" || status === "unknown"
+      ? (errorMessages.get(reply.error ?? "") ??
+        (status === "failed"
+          ? t`This reply could not be sent.`
+          : status === "unknown"
+            ? t`Delivery is not confirmed. Check the conversation before trying again.`
+            : undefined))
+      : undefined;
+  const visibleError = error ?? reportedError;
   const anchor = [reply.inReplyTo.subject, reply.inReplyTo.sender].filter(Boolean).join(" · ");
 
   async function submit(action: "send" | "discard") {
@@ -165,11 +185,16 @@ export function MailReplyAskContent({
               <Trans>To</Trans>
             </dt>
             <dd className="flex min-w-0 items-start justify-between gap-2">
-              <span className="break-words">
+              <span className="min-w-0 flex-1 break-words">
                 {reply.to.join(", ") || t`Recipients unavailable`}
               </span>
               {editable && !showCc ? (
-                <Button size="sm" variant="ghost" onClick={() => setShowCc(true)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => setShowCc(true)}
+                >
                   <Trans>Add Cc</Trans>
                 </Button>
               ) : null}
@@ -235,14 +260,14 @@ export function MailReplyAskContent({
             </Button>
           </div>
         </>
-      ) : status === "needs_approval" ? (
+      ) : status === "needs_approval" && !reportedError ? (
         <p className="text-sm text-muted-foreground">
           <Trans>No longer active</Trans>
         </p>
       ) : null}
-      {error ? (
+      {visibleError ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {visibleError}
         </p>
       ) : null}
     </div>

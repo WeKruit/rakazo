@@ -31,7 +31,9 @@ export function MailReplyAskContent({
     setBody(reply.body);
     setCc(reply.cc.join(", "));
   }, [reply.body, reply.cc.join(", ")]);
-  const editing = canAnswer && pending && reply.status === "needs_approval" && !submitting;
+  const answerable =
+    canAnswer && reply.canAnswer !== false && pending && reply.status === "needs_approval";
+  const editing = answerable && !submitting;
   const parsed = MailReplySendAnswerSchema.safeParse({
     action: "send",
     body,
@@ -70,6 +72,26 @@ export function MailReplyAskContent({
       setSubmitting(null);
     }
   }
+  const errorMessages = new Map<string, string>([
+    ["sender_unavailable", t("This sending address is not available for this conversation.")],
+    ["sender_not_ready", t("This sending address is not ready to send yet.")],
+    ["sender_changed", t("The sending address changed. Prepare a new reply for review.")],
+    ["send_failed", t("This reply was not sent.")],
+    [
+      "delivery_unconfirmed",
+      t("Delivery is not confirmed. Check the conversation before trying again."),
+    ],
+  ]);
+  const reportedError =
+    reply.status === "needs_approval" || reply.status === "failed" || reply.status === "unknown"
+      ? (errorMessages.get(reply.error ?? "") ??
+        (reply.status === "failed"
+          ? t("This reply could not be sent.")
+          : reply.status === "unknown"
+            ? t("Delivery is not confirmed. Check the conversation before trying again.")
+            : undefined))
+      : undefined;
+  const visibleError = error ?? reportedError;
   const sentAt =
     reply.status === "sent" && reply.sentAt
       ? new Date(reply.sentAt).toLocaleString(dateLocaleForUi(locale))
@@ -188,19 +210,12 @@ export function MailReplyAskContent({
           {t("Sent at {time}", { time: sentAt })}
         </Text>
       ) : null}
-      {reply.status === "failed" || reply.status === "unknown" ? (
-        <Text accessibilityLiveRegion="polite" style={{ color: tokens.destructive, fontSize: 13 }}>
-          {reply.status === "failed"
-            ? t("This reply could not be sent.")
-            : t("Delivery is not confirmed. Check the conversation before trying again.")}
-        </Text>
-      ) : null}
-      {error ? (
+      {visibleError ? (
         <Text accessibilityRole="alert" style={{ color: tokens.destructive, fontSize: 13 }}>
-          {error}
+          {visibleError}
         </Text>
       ) : null}
-      {canAnswer && pending && reply.status === "needs_approval" ? (
+      {answerable ? (
         <View style={styles.actions}>
           <NativeActionButton
             label={t("Discard")}

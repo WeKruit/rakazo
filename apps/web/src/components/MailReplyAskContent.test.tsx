@@ -180,3 +180,30 @@ it.each(["sent", "discarded", "failed", "unknown"] as const)(
     }
   },
 );
+
+it("shows a safe sender preflight reason and blocks Send on a non-answerable card", async () => {
+  const view = await mount({ ...reply, canAnswer: false, error: "sender_unavailable" });
+  try {
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+      "This sending address is not available for this conversation.",
+    );
+    expect(view.button("Send")).toBeUndefined();
+    expect(view.onAnswer).not.toHaveBeenCalled();
+  } finally {
+    await view.close();
+  }
+});
+
+it.each([
+  ["send_failed", "This reply was not sent."],
+  ["private-provider-tool-id", "This reply could not be sent."],
+] as const)("shows only safe failure reasons for %s", async (error, message) => {
+  const view = await mount({ ...reply, status: "failed", error });
+  try {
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(message);
+    expect(view.container.textContent).not.toContain("private-provider");
+    expect(view.button("Send")).toBeUndefined();
+  } finally {
+    await view.close();
+  }
+});

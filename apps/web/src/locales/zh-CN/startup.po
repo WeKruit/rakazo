@@ -1747,6 +1747,10 @@ msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr "发送时段和时区适用于整个邮件序列。"
 
 #: src/components/MailReplyAskContent.tsx
+msgid "Delivery is not confirmed. Check the conversation before trying again."
+msgstr "送达尚未确认。请先查看对话，再决定是否重试。"
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Delivery unconfirmed"
 msgstr "发送结果待确认"
 
@@ -3675,8 +3679,8 @@ msgid "Read the attached materials for this role."
 msgstr "阅读这个岗位的附件材料。"
 
 #: src/pages/shell/useShellRecruiting.ts
-msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
-msgstr "使用已保存的记录和邮箱，阅读这个人的原始邮件和完整对话。核实这个人和当前岗位，然后在这里准备一份回复供我修改。只写草稿，不要发送。"
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
+msgstr "使用已保存的记录和邮箱阅读此人的原邮件和完整对话。核实此人和当前职位，再准备包含发件人、原邮件、收件人、抄送和回复正文的可编辑回复卡片。只有在我点击卡片上的发送后才能发送。"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason"
@@ -5143,6 +5147,10 @@ msgstr "招聘团队尚未准备就绪。"
 msgid "The reply stopped. Try again."
 msgstr "回复已中断，请重试。"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "The sending address changed. Prepare a new reply for review."
+msgstr "发件地址已变更。请重新准备回复供确认。"
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
 msgstr "工作区已变更，请重新打开岗位。"
@@ -5187,6 +5195,14 @@ msgstr "此提供方必须先保存才能测试。"
 msgid "This provider is not connected yet."
 msgstr "此提供方尚未连接。"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply could not be sent."
+msgstr "此回复未能发送。"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply was not sent."
+msgstr "此回复未发送。"
+
 #: src/pages/Auth.tsx
 msgid "This reset link is invalid or expired"
 msgstr "此重置链接无效或已过期"
@@ -5194,6 +5210,14 @@ msgstr "此重置链接无效或已过期"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "This role changed. Select the candidate again."
 msgstr "这个岗位已变更，请重新选择候选人。"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not available for this conversation."
+msgstr "此发件地址无法用于当前对话。"
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not ready to send yet."
+msgstr "此发件地址尚未就绪。"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "This sequence is available for review only. Its saved draft is not linked to this role."

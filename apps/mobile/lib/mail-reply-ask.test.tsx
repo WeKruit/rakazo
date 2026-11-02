@@ -201,3 +201,26 @@ it("does not submit malformed Cc or a no-longer-answerable draft", async () => {
   expect(onAnswer).not.toHaveBeenCalled();
   await act(async () => root.unmount());
 });
+
+it("shows the safe sender reason without allowing a non-answerable reply", async () => {
+  const { host, root, onAnswer } = await fixture({
+    ...reply,
+    canAnswer: false,
+    error: "sender_unavailable",
+  });
+  expect(host.textContent).toContain(
+    "This sending address is not available for this conversation.",
+  );
+  expect(button(host, "Send")).toBeUndefined();
+  expect([...host.querySelectorAll("textarea")].every((input) => input.readOnly)).toBe(true);
+  expect(onAnswer).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+});
+
+it("keeps the definite failure reason visible in collapsed history", async () => {
+  const { host, root } = await fixture({ ...reply, status: "failed", error: "send_failed" });
+  expect(host.textContent).toContain("This reply was not sent.");
+  expect(host.querySelectorAll("textarea")).toHaveLength(0);
+  expect(button(host, "Send")).toBeUndefined();
+  await act(async () => root.unmount());
+});

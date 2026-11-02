@@ -1,4 +1,11 @@
 export const RU_MESSAGES: Record<string, string> = {
+  "This sending address is not available for this conversation.":
+    "Этот адрес отправителя недоступен для этой переписки.",
+  "This sending address is not ready to send yet.":
+    "Этот адрес отправителя ещё не готов к отправке.",
+  "The sending address changed. Prepare a new reply for review.":
+    "Адрес отправителя изменился. Подготовьте новый ответ для проверки.",
+  "This reply was not sent.": "Этот ответ не был отправлен.",
   "Create this sending address?": "Создать этот адрес отправителя?",
   "Use this sending address?": "Использовать этот адрес отправителя?",
   "Create address": "Создать адрес",
