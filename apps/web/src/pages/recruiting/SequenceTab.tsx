@@ -555,8 +555,7 @@ export function SequenceTab(
         </p>
       ) : null}
       {roleCampaign.loading ? <TabLoading /> : null}
-      {roleCampaign.failed ||
-      (roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired) ? (
+      {roleCampaign.failed ? (
         <TabNotice alert>
           <Trans>Could not read this sequence. Try refreshing.</Trans>
         </TabNotice>

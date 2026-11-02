@@ -174,3 +174,33 @@ for (const width of [1440, 390])
     await expect(main.getByRole("link", { name: "Saved campaign 1", exact: true })).toHaveCount(0);
     expect(fixture.unknown).toEqual([]);
   });
+
+test("a role keeps saved CRM sequences when live campaign access is unavailable", async ({
+  page,
+}) => {
+  const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
+  await page.route("**/rpc/recruiting/roleCampaign", (route) =>
+    route.fulfill({
+      json: { json: { status: "unavailable", serverId: null, campaign: null, leads: [] } },
+    }),
+  );
+  await page.goto(`/app/g/${appGroupId}?view=sequence`);
+  const sequence = page.getByRole("region", { name: "Sequence", exact: true });
+  await expect(sequence.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(
+    sequence.getByRole("button", { name: "Platform outreach", exact: true }),
+  ).toBeVisible();
+  await sequence.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect(
+    sequence.getByRole("button", { name: "Platform follow-up", exact: true }),
+  ).toBeVisible();
+  await expect(
+    sequence.getByText("Could not read this sequence. Try refreshing.", { exact: true }),
+  ).toHaveCount(0);
+  await expect(sequence.getByRole("button", { name: "New sequence", exact: true })).toBeDisabled();
+  await page.screenshot({
+    path: test.info().outputPath("saved-sequence-without-live-access.png"),
+    fullPage: true,
+  });
+  expect(fixture.unknown).toEqual([]);
+});

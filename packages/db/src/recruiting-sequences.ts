@@ -32,7 +32,8 @@ export async function readSavedRecruitingSequences(
   const order = Prisma.sql`${Prisma.raw(columns[sort])} ${Prisma.raw(sort === "name" || sort === "role" ? "ASC" : "DESC")} NULLS LAST,name,role_id,server_id,campaign_id`;
   const rows = await prisma.$queryRaw<{ data: unknown }[]>(Prisma.sql`
     WITH owned_roles AS MATERIALIZED (
-      SELECT r.id,r.title,r."sourceThreadId",r."playbookStage",r."crmBindingEffectId",t."groupId",t."botId"
+      SELECT r.id,r.title,r."sourceThreadId",r."playbookStage",r."crmBindingEffectId",t."groupId",t."botId",
+        (rev.brief IS NOT NULL AND rev.brief<>'null'::jsonb) has_brief
       FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId"
       LEFT JOIN chat_groups g ON g.id=t."groupId" LEFT JOIN bots b ON b.id=t."botId"
       LEFT JOIN recruiting_role_revisions rev ON rev.id=r."currentRevisionId"
@@ -40,7 +41,6 @@ export async function readSavedRecruitingSequences(
         AND t."userId"=${actor.userId} AND t."spaceId"=${actor.spaceId} AND t."activeRecruitingRoleId"=r.id
         AND ((g.id IS NOT NULL AND g."archivedAt" IS NULL AND g."userId"=${actor.userId} AND g."spaceId"=${actor.spaceId})
           OR (b.id IS NOT NULL AND b."archivedAt" IS NULL AND b."userId"=${actor.userId} AND b."spaceId"=${actor.spaceId}))
-        ${input.briefedOnly ? Prisma.sql`AND rev.brief IS NOT NULL AND rev.brief<>'null'::jsonb` : Prisma.empty}
     ), bindings AS MATERIALIZED (
       SELECT DISTINCT ON(r.id,s.id,e.result->>'campaignId') r.id role_id,s.id server_id,s.revision,e.result,e."updatedAt"
       FROM owned_roles r JOIN runs run ON run."threadId"=r."sourceThreadId"
@@ -148,6 +148,9 @@ export async function readSavedRecruitingSequences(
     ), campaigns AS (
       SELECT DISTINCT ON(role_id,server_id,campaign_id) * FROM (SELECT * FROM mirrored UNION ALL SELECT * FROM native) all_campaigns
       ORDER BY role_id,server_id,campaign_id,source_kind
+    ), visible_roles AS (
+      SELECT * FROM owned_roles r WHERE true
+        ${input.briefedOnly ? Prisma.sql`AND (r.has_brief OR EXISTS(SELECT 1 FROM campaigns c WHERE c.role_id=r.id))` : Prisma.empty}
     ), filtered AS MATERIALIZED (
       SELECT c.*,r.title,r."sourceThreadId",r."groupId",r."botId",r."playbookStage"
       FROM campaigns c JOIN owned_roles r ON r.id=c.role_id WHERE true
@@ -169,7 +172,7 @@ export async function readSavedRecruitingSequences(
     ), page AS (SELECT * FROM filtered ORDER BY ${order} LIMIT ${input.limit} OFFSET ${offset}),
     summary_campaigns AS (SELECT DISTINCT ON(server_id,organization_id,campaign_id) * FROM filtered ORDER BY server_id,organization_id,campaign_id,observed_at DESC NULLS LAST,role_id)
     SELECT jsonb_build_object(
-      'roles',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id',id,'title',title,'threadId',"sourceThreadId",'botId',"botId",'stage',"playbookStage")) || jsonb_build_object('groupId',"groupId") ORDER BY title,id) FROM owned_roles),'[]'::jsonb),
+      'roles',COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id',id,'title',title,'threadId',"sourceThreadId",'botId',"botId",'stage',"playbookStage")) || jsonb_build_object('groupId',"groupId") ORDER BY title,id) FROM visible_roles),'[]'::jsonb),
       'items',COALESCE((SELECT jsonb_agg(jsonb_build_object('roleId',role_id,'campaigns',jsonb_build_array(jsonb_build_object(
         'status','ready','sourceKind',source_kind,'serverId',server_id,'sourceRevision',source_revision,'campaignObservedAt',campaign_observed_at AT TIME ZONE 'UTC',
         'campaign',jsonb_build_object('id',campaign_id,'name',name,'eaccount',mailbox,'status',status,'stopOnReply',NULL,'createdAt',created),
