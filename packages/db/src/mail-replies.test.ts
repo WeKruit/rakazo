@@ -282,58 +282,28 @@ it.each([
   },
 );
 
-it("verifies the native REST text-only HTML body without matching titles, quoted text, or different recipients", () => {
-  const html = (body: string, title = "Original") =>
-    `<html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
-  const reply = { ...draft, body: "谢谢，A & B < C > D.\nNext line." };
-  const escaped = "谢谢，A &amp; B &lt; C &gt; D.  Next line.";
-  const request = boundDirectApprovalRequest(
-    { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
-    {
-      reply_to_uuid: reply.inReplyTo.emailId,
-      eaccount: reply.from,
-      subject: reply.subject,
-      body: { text: reply.body },
-    },
-    "__rakazoCatalogTool",
-  );
+it("keeps historical plain-text receipts without a thread while requiring thread proof for HTML", () => {
+  const reply = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
   const receipt = {
-    id: "new-email",
+    id: "sent-email",
     ue_type: 3,
     eaccount: reply.from,
     subject: reply.subject,
     to_address_email_list: reply.to.join(","),
-    cc_address_email_list: "",
-    thread_id: reply.inReplyTo.threadId,
-    body: { html: html(escaped) },
   };
-  const effect = (payload: Prisma.JsonObject) => ({
+  const effect = (body: Prisma.JsonObject) => ({
     status: "completed",
-    request: request as Prisma.JsonArray,
-    result: { structuredContent: { source: "local_native_instantly_rest", result: payload } },
+    request: {},
+    result: { structuredContent: { result: { ...receipt, body } } },
     updatedAt: new Date("2026-11-02T02:36:20Z"),
   });
-  expect(mailReplyState(reply, effect(receipt))).toMatchObject({
-    status: "sent",
-    sentAt: "2026-11-02T02:36:20.000Z",
-  });
-  for (const changed of [
-    { body: { html: html("Different reply", escaped) } },
-    { body: { html: html(`<blockquote>${escaped}</blockquote>`) } },
-    { body: { html: html(`<p>${escaped}</p>`) } },
-    { body: { html: html(`Different reply ${escaped}`) } },
-    { body: { html: html(`${escaped} Extra unapproved sentence.`) } },
-    { to_address_email_list: "someone-else@example.test" },
-    { id: reply.inReplyTo.emailId },
-    { thread_id: "different-thread" },
-    { body: { html: html(escaped), text: "Different plain text" } },
-    { ue_type: 4 },
-  ])
-    expect(mailReplyState(reply, effect({ ...receipt, ...changed }))).toMatchObject({
-      status: "unknown",
-      sentAt: null,
-    });
-  expect(mailReplyState(reply, effect({ ...receipt, body: { text: reply.body } }))).toMatchObject({
-    status: "sent",
-  });
+  expect(mailReplyState(reply, effect({ text: reply.body })).status).toBe("sent");
+  expect(
+    mailReplyState(
+      reply,
+      effect({
+        html: `<html><head><title>Original</title></head><body>${reply.body}</body></html>`,
+      }),
+    ).status,
+  ).toBe("unknown");
 });

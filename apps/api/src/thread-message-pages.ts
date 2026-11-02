@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { buildApprovalAskBlock } from "@rakazo/adapters";
+import { buildApprovalAskBlock, mailReplyEffectWithText } from "@rakazo/adapters";
 import type {
   Actor,
   MailReplyMessageFilter,
@@ -239,6 +239,17 @@ export async function projectRecruitingApprovalFiles<
       };
     });
   }
+  const replyEffects = effects.map((effect) => {
+    const card = clean
+      .filter((message) => message.runId === effect.runId)
+      .flatMap((message) => message.blocks)
+      .find(
+        (block) => block.kind === "ask" && block.approvalEffectId === effect.id && block.mailReply,
+      );
+    return card?.kind === "ask" && card.mailReply
+      ? mailReplyEffectWithText(effect, card.mailReply)
+      : effect;
+  });
   const approvals = effects.flatMap((effect) => {
     const parsed = RetainedRecruitingApprovalRequestSchema.safeParse(effect.request);
     return parsed.success ? [{ effect, input: parsed.data }] : [];
@@ -275,7 +286,7 @@ export async function projectRecruitingApprovalFiles<
       ? [{ effect, input: parsed.data }]
       : [];
   });
-  if (!documents.length) return projectMailReplyCards(prisma, actor, clean, effects);
+  if (!documents.length) return projectMailReplyCards(prisma, actor, clean, replyEffects);
   const artifactIds = [...new Set(documents.map(({ input }) => input.documents.jdText.artifactId))];
   const [artifacts, thread] = await Promise.all([
     prisma.artifact.findMany({
@@ -373,7 +384,7 @@ export async function projectRecruitingApprovalFiles<
         }),
       };
     }),
-    effects,
+    replyEffects,
   );
 }
 
