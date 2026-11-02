@@ -5791,6 +5791,57 @@ describe("native recruiting assessment effect delivery", () => {
     ]);
   });
 
+  it("reads a JD attached in Kruit's conversation once, before the model's first step", async () => {
+    const f = fixture("kruit-attached-jd");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    Object.assign(f.thread, { groupId: "recruiting-global-abc" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({
+          id: "recruiting-global-abc",
+          name: "Kruit",
+          members: [],
+        })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "kruit-attached-jd",
+        blocks: [
+          { kind: "text", text: "New role, let's find people" },
+          {
+            kind: "file",
+            artifactId: "jd-file",
+            name: "jd.docx",
+            mimeType: "application/msword",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Overseas Sales Manager. Grow the US market.",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Overseas Sales Manager. Grow the US market.");
+    expect(prompt).toContain("never read it again");
+    expect(prompt).not.toContain("read it and the intake skill");
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ artifactId: "jd-file", limit: 16_000 }),
+    );
+  });
+
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
     for (const key of [
       "linkedin:/in/stevenfeng7",

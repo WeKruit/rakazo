@@ -13022,6 +13022,67 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
           { exposedToolNames: new Set(tools.map((tool) => tool.name)) },
         );
+        // These calls run before the model's first step, so they report themselves like the
+        // model's own calls: the recruiter sees the file or link being read and the role saved.
+        const step = async (
+          name: string,
+          args: Record<string, unknown>,
+          executionId: string,
+        ): Promise<unknown> => {
+          const startedAt = Date.now();
+          const target = { spaceId: run!.spaceId, threadId: thread.id, botId: bot.id, runId };
+          await deps.events
+            .append({
+              ...target,
+              type: "agent.tool.called",
+              payload: {
+                name,
+                executionId,
+                startedAt: new Date(startedAt).toISOString(),
+                category: workActivityForTool(name, args),
+                ...stepDetail(name, args),
+                argsSummary: toolArgsSummary(args, runSecrets),
+              },
+            })
+            .catch(() => getLogger().warn("job step audit append failed", { name }));
+          const done = (completion: { result?: unknown; error?: unknown }) =>
+            appendToolCompletionAudit(
+              deps,
+              target,
+              { name, executionId, durationMs: Date.now() - startedAt, ...completion },
+              runSecrets,
+            );
+          try {
+            const result = await applyTool(name, args, executionId);
+            await done({ result });
+            return result;
+          } catch (error) {
+            await done({ error: String(error) });
+            throw error;
+          }
+        };
+        // A file the recruiter attaches in Kruit's conversation is read once here, before the
+        // model's first step, so opening a role from a JD needs no read step of the model's own.
+        async function globalFileNote() {
+          if (
+            !thread.groupId?.startsWith("recruiting-global-") ||
+            currentTurnMessage?.role !== "user" ||
+            !tools.some((tool) => tool.name === "artifact_read")
+          )
+            return undefined;
+          const file = currentTurnMessage.blocks.find(
+            (item): item is Extract<MessageBlock, { kind: "file" }> =>
+              item.kind === "file" && !/csv|sheet|excel/i.test(item.mimeType),
+          );
+          if (!file) return undefined;
+          const read = (await step(
+            "artifact_read",
+            { artifactId: file.artifactId, limit: 16_000 },
+            `${runId}:global-file`,
+          )) as { text?: unknown; hasMore?: unknown };
+          if (typeof read?.text !== "string" || !read.text.trim()) return undefined;
+          return `The recruiter's attached file (${file.name}) is already read; never read it again.${read.hasMore === true ? " Only its first part is below, which is enough to name a role." : ""} Its text:\n\n${read.text}`;
+        }
         async function startRoleFromJob() {
           if (
             thread.activeRecruitingRoleId ||
@@ -13055,45 +13116,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
-          // These calls run before the model's first step, so they report themselves like the
-          // model's own calls: the recruiter sees the file or link being read and the role saved.
-          const step = async (
-            name: string,
-            args: Record<string, unknown>,
-            executionId: string,
-          ): Promise<unknown> => {
-            const startedAt = Date.now();
-            const target = { spaceId: run!.spaceId, threadId: thread.id, botId: bot.id, runId };
-            await deps.events
-              .append({
-                ...target,
-                type: "agent.tool.called",
-                payload: {
-                  name,
-                  executionId,
-                  startedAt: new Date(startedAt).toISOString(),
-                  category: workActivityForTool(name, args),
-                  ...stepDetail(name, args),
-                  argsSummary: toolArgsSummary(args, runSecrets),
-                },
-              })
-              .catch(() => getLogger().warn("job step audit append failed", { name }));
-            const done = (completion: { result?: unknown; error?: unknown }) =>
-              appendToolCompletionAudit(
-                deps,
-                target,
-                { name, executionId, durationMs: Date.now() - startedAt, ...completion },
-                runSecrets,
-              );
-            try {
-              const result = await applyTool(name, args, executionId);
-              await done({ result });
-              return result;
-            } catch (error) {
-              await done({ error: String(error) });
-              throw error;
-            }
-          };
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -13386,7 +13408,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           historyMessages
             .find((message) => message.id === run.sourceMessageId)
             ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
-        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards] =
+        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, fileNote] =
           await ownTime(
             "turnNotes",
             Promise.all([
@@ -13422,6 +13444,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
                     .catch(() => [])
                 : [],
+              globalFileNote().catch((error) => {
+                getLogger().warn("attached file not read before the turn", {
+                  error: String(error),
+                });
+                return undefined;
+              }),
             ]),
           );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
@@ -13507,9 +13535,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
+          fileNote,
           dispatchNote,
           languageNote,
           !linkRole &&
+          !fileNote &&
+          !thread.groupId?.startsWith("recruiting-global-") &&
           !thread.activeRecruitingRoleId &&
           currentTurnMessage?.role === "user" &&
           currentTurnMessage.blocks.some((block) => block.kind === "file") &&
