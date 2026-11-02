@@ -508,6 +508,7 @@ function fixture({
     commit,
     sharedMemoryState,
     pauseRunForInput,
+    finalizeRun,
     runtimeRun,
     setCalls(next: typeof calls) {
       calls = next;
@@ -2342,6 +2343,12 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
       status: "completed",
       result: { status: "sent_recorded" },
     });
+    expect(f.finalizeRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [],
+      }),
+    );
   });
 
   it.each([
