@@ -2213,6 +2213,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
   }),
   z.object({
     operation: z.literal("roleCampaigns"),
+    campaignId: Id.optional(),
     ...crmBrowsePinned,
     ...crmBrowsePage,
     crmRoleId: z.uuid(),
@@ -2476,6 +2477,14 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     items: z.array(
       z.strictObject({
         id: Id,
+        person: z
+          .strictObject({
+            name: z.string(),
+            email: z.string().nullable(),
+            profileImageUrl: z.string().nullable(),
+          })
+          .nullable()
+          .optional(),
         candidateId: z.uuid().nullable(),
         status: z.number().int().nullable(),
         interestStatus: z.number().int().nullable(),

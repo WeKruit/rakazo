@@ -1598,6 +1598,7 @@ msgid "Contacted"
 msgstr "已联系"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Contacts"
 msgstr "联系人"
 
@@ -4356,6 +4357,10 @@ msgstr "未记录"
 msgid "Not recorded in this source"
 msgstr "此来源未记录"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Not reported"
+msgstr "未报告"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not returned"
 msgstr "未返回"
@@ -6619,6 +6624,10 @@ msgstr "这会从所有空间中移除这个连接。"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "This result cannot be displayed yet"
 msgstr "这个结果暂时无法显示"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "This sequence is not saved for this role."
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."

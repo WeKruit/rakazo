@@ -5587,6 +5587,14 @@ it.each(["normal", "retry", "switch", "missing-source"] as const)(
         },
       ],
     });
+    const drafts = [...container!.querySelectorAll<HTMLDetailsElement>("details")].find(
+      (node) => node.querySelector("summary")?.textContent === "Outreach drafts",
+    )!;
+    expect(props!).toBeUndefined();
+    await act(async () => {
+      drafts.open = true;
+      drafts.dispatchEvent(new Event("toggle"));
+    });
     const save = props!.onSaveDraft!;
     const input: RecruitingCorrespondenceModule.RecruitingSequenceSaveInput = {
       sourceArtifactId: "draft-original",
