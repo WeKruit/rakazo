@@ -21,6 +21,8 @@ for (const width of [1440, 390]) {
     const indexPage = (await (await inboxResponse).json()).json;
     const original = indexPage.items[0];
     const email = original.email;
+    if (width === 390)
+      email.sender = "a.person.with.a.long.email.address.for.recruiting@example.test";
     const botId = bootstrap.bots[0].id;
     const source: MailReply = {
       from: email.eaccount ?? "recruiter@example.test",
@@ -206,6 +208,13 @@ for (const width of [1440, 390]) {
     const card = page.getByTestId("mail-reply-card").first();
     await expect(card).toHaveAttribute("data-status", "needs_approval");
     await expect(card.getByText(source.from!, { exact: true }).first()).toBeVisible();
+    const addCc = card.getByRole("button", { name: "Add Cc", exact: true });
+    const cardBounds = await card.boundingBox();
+    const ccBounds = await addCc.boundingBox();
+    expect(ccBounds!.x + ccBounds!.width).toBeLessThanOrEqual(
+      cardBounds!.x + cardBounds!.width + 1,
+    );
+    expect(await card.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
     await captureScreenshot(page, info, `mail-pending-${width}`);
     await card
       .getByRole("textbox", { name: "Reply body", exact: true })
@@ -278,6 +287,26 @@ for (const width of [1440, 390]) {
       "discarded",
     );
     await captureScreenshot(page, info, `mail-inbox-history-${width}`);
+    expect(answers).toHaveLength(2);
+
+    addDraft("failed-mail-card");
+    const failed = latest.blocks[0];
+    if (failed?.kind !== "ask" || !failed.mailReply) throw new Error("Missing mail card");
+    failed.status = "answered";
+    failed.mailReply = {
+      ...failed.mailReply,
+      status: "failed",
+      error: "sender_unavailable",
+      canAnswer: false,
+    };
+    await page.goto(`/app/g/${appGroupId}?view=conversation`);
+    await page.reload();
+    const failedCard = page.getByTestId("mail-reply-card").nth(2);
+    await expect(failedCard.getByRole("alert")).toHaveText(
+      "This sending address is not available for this conversation.",
+    );
+    await expect(failedCard.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
+    await captureScreenshot(page, info, `mail-failure-reason-${width}`);
     expect(answers).toHaveLength(2);
   });
 }

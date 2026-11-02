@@ -798,6 +798,12 @@ it("keeps canonical mailbox, campaign and recorded thread selections exact in th
     }),
   );
   await view.click("Draft reply");
+  expect(view.conversation).toHaveBeenLastCalledWith(
+    expect.stringContaining("editable reply card"),
+  );
+  expect(view.conversation).toHaveBeenLastCalledWith(
+    expect.stringContaining("choose Send on the card"),
+  );
   expect(view.conversation).toHaveBeenLastCalledWith(expect.stringContaining("Do not send"));
   const choose = async (label: string, index: number) => {
     const select = view.container.querySelector<HTMLSelectElement>(

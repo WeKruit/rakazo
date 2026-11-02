@@ -1,4 +1,9 @@
 export const ZH_MESSAGES: Record<string, string> = {
+  "This sending address is not available for this conversation.": "此发件地址无法用于当前对话。",
+  "This sending address is not ready to send yet.": "此发件地址尚未就绪。",
+  "The sending address changed. Prepare a new reply for review.":
+    "发件地址已变更。请重新准备回复供确认。",
+  "This reply was not sent.": "此回复未发送。",
   "Create this sending address?": "创建此发送地址？",
   "Use this sending address?": "使用此发送地址？",
   "Create address": "创建地址",

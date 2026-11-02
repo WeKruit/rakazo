@@ -2552,10 +2552,6 @@ msgstr ""
 msgid "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-msgstr ""
-
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Draft an email sequence from this role's saved brief. Show all steps for review; do not add recipients or send."
 msgstr ""
@@ -4796,6 +4792,10 @@ msgstr ""
 #. placeholder {0}: live?.name
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Prepare adding contacts to the saved sequence \"{0}\" in this role. Show the exact recipients and saved emails before any send. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Prepare an editable reply card for the selected email. Read the original conversation and verify the candidate and role. Include the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx

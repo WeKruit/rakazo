@@ -2552,10 +2552,6 @@ msgstr "草稿"
 msgid "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
 msgstr "在选定的原始对话中起草一封提议面试时间的邮件供审核。先阅读原始对话，保留确切的回复收件人、邮箱、候选人和岗位。通过现有邮件草稿流程保存草稿。不要发送邮件、预约或创建日历事件。这些是同一场面试的备选时间，不是已确认的预约。"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-msgstr "请为选中的邮件起草回复供我审阅。阅读原始对话并核实候选人和岗位。不要发送。"
-
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Draft an email sequence from this role's saved brief. Show all steps for review; do not add recipients or send."
 msgstr "根据此岗位已保存的需求起草邮件序列。展示所有步骤供审核，不添加收件人或发送邮件。"
@@ -4798,6 +4794,10 @@ msgstr "优先满足的标准"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Prepare adding contacts to the saved sequence \"{0}\" in this role. Show the exact recipients and saved emails before any send. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
 msgstr "准备将联系人添加到此岗位已保存的邮件序列“{0}”。发送前展示确切的收件人及已保存的邮箱。如果无法唯一确定此邮件序列，请让我选择，不要替换为其他序列。"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Prepare an editable reply card for the selected email. Read the original conversation and verify the candidate and role. Include the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
+msgstr "为选中的邮件准备一张可编辑的回复卡片。阅读原始对话并核实候选人和职位，包含发件人、原邮件、收件人、抄送和回复正文。只有在我点击卡片上的发送后才能发送。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Prepare drafts"
