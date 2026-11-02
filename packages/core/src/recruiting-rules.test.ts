@@ -1069,6 +1069,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "In the global conversation Main asked which role a named person's interview belonged to instead of handing the booking to Scheduling.",
   },
   {
+    rule: "hand a booking to Scheduling before asking for an interviewer",
+    in: "Main",
+    phrase: "never ask for a role, an interviewer or anything else first",
+    why: "Main asked the recruiter who the interviewer was instead of handing a fully named booking to Scheduling.",
+  },
+  {
     rule: "book a named email without a role",
     in: "Scheduling",
     phrase: "book with that email even if the person is not a saved candidate in any role",
