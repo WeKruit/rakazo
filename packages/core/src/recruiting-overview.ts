@@ -13,10 +13,11 @@ import type {
 /** Roles read at once. Each role is a few database reads plus its CRM, campaign and calendar. */
 const OVERVIEW_CONCURRENCY = 8;
 /**
- * CRM, campaign and calendar reads in flight at once across all roles. They share connector
- * services with the rest of the app (the sidebar's CRM list), which must not be crowded out.
+ * CRM, campaign and calendar reads in flight at once across all roles. Each is mostly a chain of
+ * short database reads holding one pooled connection at a time, so this leaves room in the pool
+ * for the rest of the app (the sidebar's CRM list).
  */
-const EXTERNAL_CONCURRENCY = 4;
+const EXTERNAL_CONCURRENCY = 12;
 /** A role's optional sources (CRM, campaign, calendar) that take longer are reported partial. */
 export const OVERVIEW_SOURCE_MS = 8_000;
 
@@ -84,18 +85,20 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** At most `limit` tasks run at once; the rest wait their turn. */
+/** At most `limit` tasks run at once; the rest wait their turn, `later` ones after all others. */
 function limiter(limit: number) {
   let running = 0;
   const waiting: (() => void)[] = [];
-  return async <T>(task: () => Promise<T>): Promise<T> => {
-    if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+  const waitingLater: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>, later = false): Promise<T> => {
+    if (running >= limit)
+      await new Promise<void>((resolve) => (later ? waitingLater : waiting).push(resolve));
     running++;
     try {
       return await task();
     } finally {
       running--;
-      waiting.shift()?.();
+      (waiting.shift() ?? waitingLater.shift())?.();
     }
   };
 }
@@ -107,8 +110,9 @@ async function optional<T>(
   load: (signal: AbortSignal) => Promise<T>,
   signal: AbortSignal,
   ms: number,
+  later = false,
 ): Promise<T | undefined> {
-  return external(() => withBudget(load, signal, ms));
+  return external(() => withBudget(load, signal, ms), later);
 }
 
 async function withBudget<T>(
@@ -145,7 +149,29 @@ function savedRole(
   };
 }
 
-async function sourceRole(
+/** A role's reply and outreach numbers (CRM and campaign). */
+async function funnelRole(
+  base: RecruitingOverviewRole,
+  group: OverviewGroup,
+  reads: OverviewReads,
+  signal: AbortSignal,
+  sourceMs: number,
+  external: Limit,
+): Promise<RecruitingOverviewRole> {
+  const [candidates, campaign] = await Promise.all([
+    optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
+    optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
+  ]);
+  return {
+    ...base,
+    replied: crmReplied(candidates ?? null),
+    ...campaignStages(campaign ?? null),
+    incomplete: !candidates || !campaign,
+  };
+}
+
+/** A role's upcoming bookings. Read after every role's numbers, since only the bookings list uses it. */
+async function bookingsRole(
   base: RecruitingOverviewRole,
   group: OverviewGroup,
   reads: OverviewReads,
@@ -153,21 +179,19 @@ async function sourceRole(
   now: number,
   sourceMs: number,
   external: Limit,
-): Promise<RecruitingOverviewRole> {
-  const [candidates, campaign, calendar] = await Promise.all([
-    optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
-    optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
-    optional(external, (budget) => reads.calendar(group, budget), signal, sourceMs),
-  ]);
+): Promise<Pick<RecruitingOverviewRole, "bookings" | "bookingUnknown">> {
+  const calendar = await optional(
+    external,
+    (budget) => reads.calendar(group, budget),
+    signal,
+    sourceMs,
+    true,
+  );
   const calendarRead =
     calendar?.roleId === base.roleId && ["ready", "empty"].includes(calendar.status)
       ? calendar
       : undefined;
   return {
-    ...base,
-    replied: crmReplied(candidates ?? null),
-    ...campaignStages(campaign ?? null),
-    incomplete: !candidates || !campaign,
     bookings: (calendarRead?.events ?? []).filter(
       (event) =>
         event.kind === "event" &&
@@ -193,8 +217,9 @@ export async function* streamRecruitingOverview(
     ready.push(event);
     wake?.();
   };
-  // Saved numbers (database only) go out for every role first; each role's CRM, campaign and
-  // calendar read follows in the background and replaces that role's numbers when it answers.
+  // Saved numbers (database only) go out for every role first. Each role's CRM and campaign read
+  // follows in the background and replaces that role's numbers when it answers; calendar reads
+  // queue behind all of those and add the role's bookings last.
   const sources: Promise<void>[] = [];
   const run = mapWithConcurrency(groups, OVERVIEW_CONCURRENCY, async (group) => {
     try {
@@ -202,9 +227,15 @@ export async function* streamRecruitingOverview(
       if (!roleId) return;
       const base = savedRole(group, roleId, await reads.shortlist(roleId, signal));
       push({ kind: "role", role: base });
+      const funnel = funnelRole(base, group, reads, signal, sourceMs, external);
+      const bookings = bookingsRole(base, group, reads, signal, now, sourceMs, external);
       sources.push(
-        sourceRole(base, group, reads, signal, now, sourceMs, external).then(
+        funnel.then(
           (role) => push({ kind: "role", role }),
+          () => undefined,
+        ),
+        Promise.all([funnel, bookings]).then(
+          ([role, booked]) => push({ kind: "role", role: { ...role, ...booked } }),
           () => undefined,
         ),
       );

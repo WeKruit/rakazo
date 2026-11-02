@@ -272,7 +272,7 @@ describe("streamRecruitingOverview", () => {
     expect(seen.at(-1)).toEqual({ kind: "done" });
   });
 
-  it("keeps at most four CRM, campaign and calendar reads in flight across roles", async () => {
+  it("keeps at most twelve CRM, campaign and calendar reads in flight across roles", async () => {
     let running = 0;
     let peak = 0;
     const slow = async <T>(value: T) => {
@@ -283,7 +283,7 @@ describe("streamRecruitingOverview", () => {
       return value;
     };
     const base = reads();
-    const many = Array.from({ length: 6 }, (_, index) => ({
+    const many = Array.from({ length: 10 }, (_, index) => ({
       id: `g${index}`,
       threadId: `t${index}`,
     }));
@@ -297,8 +297,41 @@ describe("streamRecruitingOverview", () => {
       }),
       new AbortController().signal,
     );
-    expect(overview.roles).toHaveLength(6);
-    expect(peak).toBe(4);
+    expect(overview.roles).toHaveLength(10);
+    expect(peak).toBe(12);
+  });
+
+  it("reads every role's CRM and campaign before any waiting calendar read", async () => {
+    const order: string[] = [];
+    const slow = async <T>(label: string, value: T) => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      order.push(label);
+      return value;
+    };
+    const base = reads();
+    const many = Array.from({ length: 10 }, (_, index) => ({
+      id: `g${index}`,
+      threadId: `t${index}`,
+    }));
+    const overview = await getRecruitingOverview(
+      many,
+      reads({
+        roleId: async (group) => `role-${group.id}`,
+        candidates: (group, signal) =>
+          base.candidates(group, signal).then((value) => slow("crm", value)),
+        campaign: (group, signal) =>
+          base.campaign(group, signal).then((value) => slow("campaign", value)),
+        calendar: (group, signal) =>
+          base.calendar(group, signal).then((value) => slow("calendar", value)),
+      }),
+      new AbortController().signal,
+    );
+    expect(overview.roles.every((role) => role.bookings.length === 1)).toBe(true);
+    // Twelve run at once: the first wave has no calendar read; later calendar reads come last.
+    expect(order.slice(0, 20).filter((label) => label === "calendar").length).toBeLessThan(
+      order.slice(-10).filter((label) => label === "calendar").length,
+    );
+    expect(order.lastIndexOf("crm")).toBeLessThan(order.lastIndexOf("calendar"));
   });
 
   it("does not show another role's or a past calendar event as a booking", async () => {
