@@ -13,6 +13,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import {
   computerControlExpireJobKey,
+  discoveryWarmJob,
   messagingDeliverJob,
   pollCloseJob,
   routineJobKey,
@@ -5749,12 +5750,17 @@ export function createRouter(deps: RouterDeps) {
       },
     },
     onboarding: {
-      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
-        ensureRecruitingWorkspace(deps.prisma, context.actor, {
+      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(async ({ context }) => {
+        const workspace = await ensureRecruitingWorkspace(deps.prisma, context.actor, {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-        }),
-      ),
+        });
+        // The first message usually follows within seconds; have its tools listed by then.
+        void deps.jobs.enqueue(discoveryWarmJob(workspace.botId)).catch((error) => {
+          getLogger().warn("discovery.warm enqueue failed", { error: String(error) });
+        });
+        return workspace;
+      }),
       start: authed.onboarding.start.handler(async ({ context, input }) => {
         await startOnboarding(onboardingDeps, context.actor, input.botId);
         return { ok: true as const };

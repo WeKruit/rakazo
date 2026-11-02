@@ -796,6 +796,8 @@ export interface BackgroundJobPayloads {
   "notification.retry": { runId: string; message: NotificationMessage };
   /** Close a poll card at its deadline (or early once everyone voted) and wake its asker. */
   "poll.close": { messageId: string; pollId: string };
+  /** List a bot's tools ahead of its first run; scope is loaded from the database. */
+  "discovery.warm": { botId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

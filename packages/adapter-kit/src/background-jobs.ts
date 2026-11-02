@@ -69,6 +69,7 @@ const payloadSchemas = {
     }),
   }),
   "poll.close": z.object({ messageId: z.string().min(1), pollId: z.string().min(1) }),
+  "discovery.warm": z.object({ botId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -97,6 +98,16 @@ export function recruitingCandidateProfilesJob(pageEffectId: string): Background
     name: "recruiting_profile.project",
     payload: { pageEffectId },
     replaceKey: `recruiting_profile.project:${pageEffectId}`,
+    keepExisting: true,
+  };
+}
+
+/** List a new bot's tools before its first run, so that run does not wait on them. */
+export function discoveryWarmJob(botId: string): BackgroundJob {
+  return {
+    name: "discovery.warm",
+    payload: { botId },
+    replaceKey: `discovery.warm:${botId}`,
     keepExisting: true,
   };
 }

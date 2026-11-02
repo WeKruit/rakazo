@@ -1,6 +1,10 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { DISCOVERY_PREWARM_WINDOW_MS, prewarmToolDiscovery } from "./discovery-prewarm.js";
+import {
+  DISCOVERY_PREWARM_WINDOW_MS,
+  prewarmToolDiscovery,
+  warmBotDiscovery,
+} from "./discovery-prewarm.js";
 
 describe("prewarmToolDiscovery", () => {
   it("discovers each recently active bot's tools as that bot, without a run", async () => {
@@ -32,5 +36,35 @@ describe("prewarmToolDiscovery", () => {
       expect.objectContaining({ botId: "bot-2", spaceId: "space-2", userId: "user-2" }),
     ]);
     expect(discoverTools.mock.calls[0]?.[0]).not.toHaveProperty("runId");
+  });
+});
+
+describe("warmBotDiscovery", () => {
+  it("lists a new bot's tools as that bot, with scope from the bot row", async () => {
+    const findFirst = vi.fn(async () => ({ id: "bot-1", spaceId: "space-1", userId: "user-1" }));
+    const discoverTools = vi.fn(async () => []);
+
+    await warmBotDiscovery(
+      { bot: { findFirst } } as unknown as PrismaClient,
+      { discoverTools },
+      "bot-1",
+    );
+
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "bot-1", archivedAt: null } }),
+    );
+    expect(discoverTools).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: "bot-1", spaceId: "space-1", userId: "user-1" }),
+    );
+  });
+
+  it("does nothing for an archived or missing bot", async () => {
+    const discoverTools = vi.fn(async () => []);
+    await warmBotDiscovery(
+      { bot: { findFirst: vi.fn(async () => null) } } as unknown as PrismaClient,
+      { discoverTools },
+      "gone",
+    );
+    expect(discoverTools).not.toHaveBeenCalled();
   });
 });
