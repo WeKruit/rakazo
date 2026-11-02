@@ -417,7 +417,11 @@ export async function returnBotMessageOutcome(
     sender,
     {
       bot_id: source.fromBotId,
-      message: clampBotMessage(mail?.text ?? text),
+      message: clampBotMessage(
+        mail
+          ? `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`
+          : text,
+      ),
       intent,
       ...(source.returnThreadId
         ? {
@@ -496,7 +500,8 @@ export async function returnDelegatedTeamOutcome(
     if (reply) text = reply;
   }
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
-  if (mail) text = mail.text;
+  if (mail)
+    text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
   if (!text) return;
   const sent = await messageBot(
     deps,
