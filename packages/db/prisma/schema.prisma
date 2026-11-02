@@ -47,6 +47,8 @@ model User {
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
   avatarStyle                 String                       @default("organic")
+  /// Product credits this account may spend; null is unlimited. New accounts get $50 of cost.
+  usageCreditLimit            Float?
   sessions                    Session[]
   pushToken                   PushToken?
   accounts                    Account[]
@@ -1231,6 +1233,7 @@ model UsageRecord {
 
   @@index([spaceId, userId, createdAt])
   @@index([spaceId, userId, unit, createdAt])
+  @@index([userId])
   @@index([roleId, createdAt])
   @@index([unit, provider, createdAt])
   @@map("usage_records")

@@ -6,7 +6,7 @@ import {
   scheduleConditionVariables,
 } from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
-import { createThreadMessage } from "@rakazo/db";
+import { createThreadMessage, remainingUsageCredits } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 /**
@@ -71,7 +71,8 @@ export async function routinePreconditionMet(
 }
 
 /**
- * Before `routine.wakeup` opens a run: when the routine names a precondition and nothing changed,
+ * Before `routine.wakeup` opens a run: when the account is out of credits, or the routine names a
+ * precondition and nothing changed,
  * claim this due occurrence, advance the schedule without touching `lastRunAt`, record the skipped
  * trigger on the thread, and report true so the caller does not wake the model. Anything the
  * executor's own wake would reject (inactive, stale, future) is left to it.
@@ -86,7 +87,9 @@ export async function skipRoutineWithoutNewActivity(
   const routine = await deps.prisma.routine.findUnique({ where: { id: payload.routineId } });
   if (!routine?.active || routine.nextRunAt?.getTime() !== scheduledAt.getTime()) return false;
   const precondition = parseRoutinePrecondition(routine.prompt);
-  if (!precondition && !routine.condition && !routine.recordTrigger) return false;
+  // An account out of credits starts no scheduled work; the schedule keeps advancing.
+  const outOfCredits = (await remainingUsageCredits(deps.prisma, routine.userId)) === 0;
+  if (!outOfCredits && !precondition && !routine.condition && !routine.recordTrigger) return false;
   const bot = await deps.prisma.bot.findUnique({
     where: { id: routine.botId },
     select: { archivedAt: true, thread: { select: { id: true } } },
@@ -104,11 +107,13 @@ export async function skipRoutineWithoutNewActivity(
   const recordUnchanged = routine.recordTrigger
     ? !(await routineRecordChanged(deps.prisma, routine))
     : false;
-  const reason = recordUnchanged
-    ? "no_record_change"
-    : !conditionHolds.ok || conditionHolds.value
-      ? null
-      : "condition_false";
+  const reason = outOfCredits
+    ? "credits_exhausted"
+    : recordUnchanged
+      ? "no_record_change"
+      : !conditionHolds.ok || conditionHolds.value
+        ? null
+        : "condition_false";
   if (
     !reason &&
     (!precondition || (await routinePreconditionMet(deps.prisma, routine, precondition, threadId)))
@@ -125,7 +130,7 @@ export async function skipRoutineWithoutNewActivity(
   });
   // A lost claim means another worker took this occurrence; it decides, not us.
   if (claimed.count !== 1) return true;
-  if (threadId && !recordUnchanged) {
+  if (threadId && (outOfCredits || !recordUnchanged)) {
     try {
       await deps.events.append({
         spaceId: routine.spaceId,

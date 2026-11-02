@@ -5108,6 +5108,10 @@ msgstr "Release computer"
 msgid "Release interrupted computer?"
 msgstr "Release interrupted computer?"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Remaining"
+msgstr "Remaining"
+
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx

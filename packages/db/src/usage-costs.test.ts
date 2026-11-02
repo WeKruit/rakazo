@@ -62,6 +62,24 @@ describe("product credits and internal cost privacy", () => {
     expect(result).not.toHaveProperty("services");
     expect(JSON.stringify(result)).not.toMatch(/tokens|costUsd|estimatedUsd|vendor-a|model-a/);
   });
+  it("reports what is left of a new account's starting credits", async () => {
+    const { prisma, raw, group } = fixture();
+    raw.$queryRaw
+      .mockResolvedValueOnce([group])
+      .mockResolvedValueOnce([{ limit: 10_000, spent: 1.4 }]);
+    expect((await summarizeUsageCosts(prisma, actor)).remaining).toBe(9998.6);
+    raw.$queryRaw
+      .mockResolvedValueOnce([group])
+      .mockResolvedValueOnce([{ limit: 10_000, spent: 10_001 }]);
+    expect((await summarizeUsageCosts(prisma, actor)).remaining).toBe(0);
+  });
+  it("never limits verified staff accounts", async () => {
+    const { prisma, raw, group } = fixture(true);
+    raw.$queryRaw
+      .mockResolvedValueOnce([group])
+      .mockResolvedValueOnce([{ limit: 10_000, spent: 20_000 }]);
+    expect((await summarizeUsageCosts(prisma, actor)).remaining).toBeNull();
+  });
   it("keeps the ordinary Usage payload credit-only for staff too", async () => {
     const { prisma } = fixture(true);
     const result = await summarizeUsageCosts(prisma, actor);

@@ -265,6 +265,7 @@ import {
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
+  remainingUsageCredits,
   renameSpaceForMember,
   renewSpaceDeletionClaim,
   replaceSpaceBackupModels,
@@ -1112,8 +1113,9 @@ export function createRouter(deps: RouterDeps) {
         (value) => ({ value }),
         (error: unknown) => ({ error }),
       );
-    const [needsModel, resolvedTarget, teaching] = await Promise.all([
+    const [needsModel, remaining, resolvedTarget, teaching] = await Promise.all([
       sendNeedsModel(deps, actor),
+      remainingUsageCredits(deps.prisma, actor.userId),
       settled(resolveThreadTarget(deps.prisma, actor, input)),
       input.botId
         ? settled(assertTeachingSendAllowed(deps.prisma, actor.spaceId, input.botId))
@@ -1121,6 +1123,12 @@ export function createRouter(deps: RouterDeps) {
     ]);
     if (needsModel) {
       throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
+    }
+    if (remaining === 0) {
+      throw new ORPCError("CREDITS_EXHAUSTED", {
+        status: 402,
+        message: "Your credits are used up. Contact us to add more.",
+      });
     }
     if ("error" in resolvedTarget) throw resolvedTarget.error;
     if ("error" in teaching) throw teaching.error;

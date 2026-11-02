@@ -9,6 +9,7 @@ describe("customer credit contract", () => {
       days: [],
       roles: [],
       canViewInternalCosts: false,
+      remaining: null,
       services: [
         {
           service: "vendor/model",
@@ -26,6 +27,7 @@ describe("customer credit contract", () => {
       days: [],
       roles: [],
       canViewInternalCosts: false,
+      remaining: null,
     });
   });
 });

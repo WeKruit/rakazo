@@ -5733,6 +5733,10 @@ msgstr "你"
 msgid "You have control"
 msgstr "你已接管"
 
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Contact us to add more."
+msgstr "额度已用完，请联系我们充值。"
+
 #: src/pages/Auth.tsx
 msgid "Your email address"
 msgstr "你的邮箱"
