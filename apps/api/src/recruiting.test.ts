@@ -6798,6 +6798,128 @@ describe("live CRM browser reads", () => {
       },
     });
   });
+  it("reads an exact saved role campaign directly without walking remote pages", async () => {
+    const f = browserFixture();
+    const lookup = vi.fn(async ({ where }) =>
+      where.crmCampaignId === campaign.id
+        ? {
+            crmCampaignId: campaign.id,
+            name: campaign.name,
+            status: 2,
+            syncedAt: new Date(timestamp),
+          }
+        : null,
+    );
+    Object.assign(f.mockPrisma, { recruitingCrmCampaign: { findFirst: lookup } });
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "roleCampaigns",
+        ...pinned,
+        crmRoleId: roleId,
+        campaignId: campaign.id,
+      }),
+    ).toMatchObject({ items: [{ id: campaign.id, status: 2 }], offset: 0, nextOffset: null });
+    expect(lookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          mcpServerId: "crm",
+          organizationId: org,
+          crmRoleId: roleId,
+          crmCampaignId: campaign.id,
+          archivedAt: null,
+        },
+      }),
+    );
+    expect(f.execute.mock.calls.map(([call]) => call.route!.toolName)).toEqual([
+      "list_crm_memberships",
+    ]);
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "roleCampaigns",
+        ...pinned,
+        crmRoleId: roleId,
+        campaignId: "not-bound",
+      }),
+    ).toMatchObject({ items: [], nextOffset: null });
+  });
+
+  it("joins only the current saved lead page's owned source and organization contacts", async () => {
+    const f = browserFixture();
+    f.assignment.allowedTools.push("list_crm_campaigns");
+    const contacts = vi.fn(async () => [
+      {
+        crmCandidateId: candidateId,
+        name: "Saved name",
+        email: "saved@example.test",
+        profile: { profileImageUrl: "https://images.example.test/saved.png" },
+      },
+    ]);
+    Object.assign(f.mockPrisma, { recruitingCrmContact: { findMany: contacts } });
+    f.results.list_crm_campaigns = {
+      organization_id: org,
+      campaign_id: campaign.id,
+      pagination: "offset",
+      offset: 0,
+      next_offset: null,
+      leads: [
+        {
+          id: "saved-lead",
+          campaign_id: campaign.id,
+          candidate_id: candidateId,
+          status: 1,
+          interest_status: null,
+          email_open_count: 2,
+          email_reply_count: 1,
+          timestamp_last_contact: timestamp,
+          timestamp_last_reply: null,
+          synced_at: timestamp,
+        },
+      ],
+    };
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "campaignLeads",
+        ...pinned,
+        campaignId: campaign.id,
+      }),
+    ).toMatchObject({
+      items: [
+        {
+          person: { name: "Saved name", email: "saved@example.test" },
+          openCount: 2,
+          replyCount: 1,
+        },
+      ],
+    });
+    expect(contacts).toHaveBeenCalledOnce();
+    expect(contacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          mcpServerId: "crm",
+          organizationId: org,
+          archivedAt: null,
+          crmCandidateId: { in: [candidateId] },
+        },
+      }),
+    );
+    f.results.list_crm_campaigns = {
+      ...(f.results.list_crm_campaigns as object),
+      organization_id: clientId,
+    };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "campaignLeads",
+        ...pinned,
+        campaignId: campaign.id,
+      }),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(contacts).toHaveBeenCalledOnce();
+  });
+
   it("reads the exact role's stored campaign associations and raw status without sequence steps", async () => {
     const f = browserFixture();
     f.results.get_crm_role = {

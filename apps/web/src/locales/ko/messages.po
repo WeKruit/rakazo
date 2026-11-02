@@ -1598,6 +1598,7 @@ msgid "Contacted"
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Contacts"
 msgstr ""
 
@@ -4359,6 +4360,10 @@ msgstr ""
 msgid "Not recorded in this source"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Not reported"
+msgstr ""
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not returned"
 msgstr ""
@@ -6615,6 +6620,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "This result cannot be displayed yet"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "This sequence is not saved for this role."
 msgstr ""
 
 #: src/pages/shell/message-cards.tsx

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { appGroupId, mockRecruitingApp } from "./fixtures/recruiting-app-data";
+import { appGroupId, crmTarget, mockRecruitingApp } from "./fixtures/recruiting-app-data";
 
 for (const width of [1440, 390, 320])
   test(`actual global Sequence overview and native drilldown at ${width}`, async ({ page }) => {
@@ -204,3 +204,194 @@ test("a role keeps saved CRM sequences when live campaign access is unavailable"
   });
   expect(fixture.unknown).toEqual([]);
 });
+
+for (const selected of ["fixture-campaign", "fixture-second-campaign"]) {
+  test(`saved CRM deep link renders selected contacts and switches safely: ${selected}`, async ({
+    page,
+  }) => {
+    await mockRecruitingApp(page, { multipleCampaigns: true });
+    const ids = ["fixture-campaign", "fixture-second-campaign"];
+    const names = ["Platform outreach", "Platform follow-up"];
+    const requests: Record<string, unknown>[] = [];
+    const at = "2026-10-25T00:00:00Z";
+    await page.route("**/rpc/recruiting/accountView", (route) =>
+      route.fulfill({
+        json: {
+          json: {
+            roles: [
+              {
+                id: "fixture-role",
+                title: "Staff Platform Engineer",
+                threadId: "fixture-thread",
+                groupId: appGroupId,
+                stage: "outreach",
+              },
+            ],
+            items: ids.map((id, index) => ({
+              roleId: "fixture-role",
+              campaigns: [
+                {
+                  status: "ready",
+                  sourceKind: "crm",
+                  serverId: crmTarget.mcpServerId,
+                  campaign: {
+                    id,
+                    name: names[index],
+                    status: 2,
+                    eaccount: null,
+                    stopOnReply: null,
+                  },
+                  leads: [],
+                  leadsComplete: false,
+                },
+              ],
+            })),
+            total: 2,
+            nextCursor: null,
+          },
+        },
+      }),
+    );
+    await page.route("**/rpc/recruiting/roleCampaign", (route) =>
+      route.fulfill({
+        json: { json: { status: "unavailable", serverId: null, campaign: null, leads: [] } },
+      }),
+    );
+    await page.route("**/rpc/recruiting/crmData", async (route) => {
+      const input = route.request().postDataJSON().json;
+      if (!["roleCampaigns", "campaignLeads"].includes(input.operation)) return route.fallback();
+      requests.push(input);
+      expect(input).toMatchObject({
+        serverId: crmTarget.mcpServerId,
+        serverRevision: crmTarget.serverRevision,
+        organizationId: crmTarget.organizationId,
+      });
+      const base = {
+        operation: input.operation,
+        source: {
+          serverId: crmTarget.mcpServerId,
+          serverRevision: crmTarget.serverRevision,
+          organizationId: crmTarget.organizationId,
+          name: "CRM",
+        },
+        checkedAt: at,
+        offset: Number(input.offset ?? input.cursor ?? 0),
+        nextOffset: null,
+      };
+      if (input.operation === "roleCampaigns") {
+        const index = input.campaignId ? ids.indexOf(input.campaignId) : base.offset ? 1 : 0;
+        return route.fulfill({
+          json: {
+            json: {
+              ...base,
+              scope: "stored_role_campaigns",
+              crmRoleId: crmTarget.crmRoleId,
+              nextOffset: input.campaignId || base.offset ? null : 25,
+              items:
+                index < 0 ? [] : [{ id: ids[index], name: names[index], status: 2, syncedAt: at }],
+            },
+          },
+        });
+      }
+      const second = input.campaignId === ids[1];
+      const next = base.offset > 0;
+      return route.fulfill({
+        json: {
+          json: {
+            ...base,
+            campaignId: input.campaignId,
+            nextOffset: !second && !next ? 25 : null,
+            items: [
+              {
+                id: next ? "private-lead-2" : "private-lead-1",
+                candidateId: null,
+                person: {
+                  name: second ? "Saved Zoe" : next ? "Saved Blake" : "Saved Avery",
+                  email: second ? "zoe@example.test" : "avery@example.test",
+                  profileImageUrl: null,
+                },
+                status: next ? -1 : 1,
+                interestStatus: second ? null : 1,
+                openCount: 2,
+                replyCount: 1,
+                lastContactAt: at,
+                lastReplyAt: at,
+                syncedAt: at,
+              },
+              ...(!second && !next
+                ? [
+                    {
+                      id: "private-lead-unreported",
+                      candidateId: null,
+                      person: null,
+                      status: 2,
+                      interestStatus: null,
+                      openCount: null,
+                      replyCount: null,
+                      lastContactAt: null,
+                      lastReplyAt: null,
+                      syncedAt: at,
+                    },
+                  ]
+                : []),
+            ],
+          },
+        },
+      });
+    });
+    await page.goto("/app?view=sequence&role=all");
+    const main = page.getByTestId("account-sequences");
+    await main.getByRole("link", { name: names[ids.indexOf(selected)], exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`campaign=${selected}`));
+    expect(new URL(page.url()).searchParams.has("campaignServer")).toBe(false);
+    const sequence = page.getByRole("region", { name: "Sequence", exact: true });
+    await expect(
+      sequence.getByRole("heading", { name: names[ids.indexOf(selected)], exact: true }),
+    ).toBeVisible();
+    const contacts = sequence.getByRole("region", { name: "Contacts", exact: true });
+    await expect(
+      contacts.getByText(selected === ids[1] ? "Saved Zoe" : "Saved Avery", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      sequence.getByText("Select a saved sequence to view its contacts.", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sequence.getByRole("button", { name: "View sequence", exact: true }),
+    ).toBeDisabled();
+    await expect(contacts).not.toContainText("private-lead");
+    if (selected === ids[0]) {
+      await expect(contacts.getByText("Not reported", { exact: true })).toBeVisible();
+      await contacts.getByRole("button", { name: "Load more", exact: true }).click();
+      await expect(contacts.getByText("Saved Blake", { exact: true })).toBeVisible();
+      await expect(
+        sequence
+          .getByRole("button", { name: "Bounced", exact: true })
+          .locator("../..")
+          .locator("dd"),
+      ).toContainText("1");
+    } else {
+      await expect(
+        sequence
+          .getByRole("button", { name: "Interested", exact: true })
+          .locator("../..")
+          .locator("dd"),
+      ).toContainText("Not reported");
+      await sequence.getByRole("combobox", { name: "Campaign", exact: true }).selectOption(ids[0]);
+      await expect(sequence.getByRole("heading", { name: names[0], exact: true })).toBeVisible();
+      await expect(contacts.getByText("Saved Avery", { exact: true })).toBeVisible();
+      await expect(contacts.getByText("Saved Zoe", { exact: true })).toHaveCount(0);
+    }
+    await page.screenshot({
+      path: test.info().outputPath(`saved-sequence-detail-${selected}.png`),
+      fullPage: true,
+    });
+    const before = requests.filter((request) => request.operation === "campaignLeads").length;
+    await page.goto(`/app/g/${appGroupId}?view=sequence&campaign=not-authorized`);
+    await expect(
+      page.getByText("This sequence is not saved for this role.", { exact: true }),
+    ).toBeVisible();
+    expect(requests.filter((request) => request.operation === "campaignLeads").length).toBe(before);
+    await expect(page.getByText("Saved Zoe", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Saved Avery", { exact: true })).toHaveCount(0);
+  });
+}
