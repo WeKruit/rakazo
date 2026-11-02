@@ -43,7 +43,7 @@ describe("reply suggestion", () => {
       ...base,
       earlier: [
         { role: "user", text: "too old" },
-        ...Array.from({ length: 6 }, (_, index) => ({
+        ...Array.from({ length: 10 }, (_, index) => ({
           role: index % 2 ? ("assistant" as const) : ("user" as const),
           text: `turn ${index}`,
         })),
