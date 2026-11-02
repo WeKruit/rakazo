@@ -1075,6 +1075,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Main asked the recruiter who the interviewer was instead of handing a fully named booking to Scheduling.",
   },
   {
+    rule: "send to an email address the recruiter typed",
+    in: "Outreach",
+    phrase: "An email address the recruiter typed is a recipient, candidate or not.",
+    why: "Asked to email a typed address that was not a saved candidate, Outreach and Main asked for a LinkedIn profile or refused instead of showing the send card.",
+  },
+  {
     rule: "book a named email without a role",
     in: "Scheduling",
     phrase: "book with that email even if the person is not a saved candidate in any role",
