@@ -1081,6 +1081,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Asked to email a typed address that was not a saved candidate, Outreach and Main asked for a LinkedIn profile or refused instead of showing the send card.",
   },
   {
+    rule: "a confirmed send is sent",
+    in: "Outreach",
+    phrase:
+      "A confirmed send card means sent: never search mail to check it or call it unconfirmed",
+    why: "After a confirmed send, Outreach searched sent mail before delivery, found nothing and told the recruiter the send had no record.",
+  },
+  {
     rule: "book a named email without a role",
     in: "Scheduling",
     phrase: "book with that email even if the person is not a saved candidate in any role",

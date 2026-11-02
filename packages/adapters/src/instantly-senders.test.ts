@@ -7,6 +7,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
 import { InstantlyRestError, runInstantlyWrite } from "./instantly-native-writes.js";
 import {
+  adoptLegacySender,
   defaultSendingMailbox,
   ensureSendingIdentity,
   requireSendingMailboxReady,
@@ -571,6 +572,38 @@ it("attaches an exclusively proven owned legacy sender, changes its name and nev
   expect(f.rest.mock.calls.some(([, path]) => path.startsWith("/dfy-email-account-orders"))).toBe(
     false,
   );
+});
+it("keeps an account's exclusively used campaign mailbox as its sender without a card or rename", async () => {
+  const f = fixture();
+  const email = "legacy@product.test";
+  f.accounts.set(email, {
+    email,
+    first_name: "Previous",
+    last_name: "Sender",
+    setup_pending: false,
+    status: 1,
+    warmup_status: 1,
+  });
+  vi.mocked(f.prisma.$queryRaw)
+    .mockResolvedValueOnce([{ email }])
+    .mockResolvedValueOnce([{ owned: true, foreign: false }]);
+  expect(await adoptLegacySender(f.prisma, f.rest, context, "source")).toBe(email);
+  expect(await defaultSendingMailbox(f.prisma, context)).toBe(email);
+  expect(f.rows.find((row) => row.kind === "instantly_sender_account")?.result).toMatchObject({
+    email,
+    displayName: "Previous Sender",
+    attached: true,
+  });
+  expect(f.rest.mock.calls.every(([method]) => method === "GET")).toBe(true);
+  expect(await adoptLegacySender(f.prisma, f.rest, context, "source")).toBeNull();
+});
+it("never adopts a campaign mailbox another account also used", async () => {
+  const f = fixture();
+  vi.mocked(f.prisma.$queryRaw)
+    .mockResolvedValueOnce([{ email: "shared@product.test" }])
+    .mockResolvedValueOnce([{ owned: true, foreign: true }]);
+  expect(await adoptLegacySender(f.prisma, f.rest, context, "source")).toBeNull();
+  expect(f.rows.some((row) => row.kind === "instantly_sender_account")).toBe(false);
 });
 it("refuses a legacy sender shared with another owner before altering its display name", async () => {
   const f = fixture();

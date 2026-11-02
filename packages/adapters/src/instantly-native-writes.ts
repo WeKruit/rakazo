@@ -11,6 +11,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  adoptLegacySender,
   confirmedSendingMailbox,
   confirmedSendingMailboxes,
   defaultSendingMailbox,
@@ -2491,6 +2492,15 @@ export async function runInstantlyWrite(
 ): Promise<unknown> {
   if (owned && toolName === "native_instantly_create_campaign")
     throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  if (
+    owned &&
+    !owned.mailboxes.size &&
+    (toolName === "native_instantly_ensure_role_campaign" ||
+      toolName === "native_instantly_add_shortlist_leads")
+  ) {
+    const adopted = await adoptLegacySender(prisma, accountRest, context, serverId);
+    if (adopted) owned = { ...owned, mailboxes: new Set([mailboxKey(adopted)]) };
+  }
   const rest = owned ? ownedInstantlyRest(accountRest, owned) : accountRest;
   switch (toolName) {
     case "native_instantly_ensure_sender":
