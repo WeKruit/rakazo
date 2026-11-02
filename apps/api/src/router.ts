@@ -4003,7 +4003,13 @@ export function createRouter(deps: RouterDeps) {
       globalInbox: authed.recruiting.globalInbox.handler(async ({ context, input }) => {
         if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
         return getGlobalRecruitingInbox(
-          { prisma: deps.prisma, stillAuthorized: context.stillAuthorized },
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            jobs: deps.jobs,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+          },
           context.actor,
           input,
         );

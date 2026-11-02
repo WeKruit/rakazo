@@ -648,6 +648,8 @@ export function AccountInbox({
               ) : null}
               {(!serverThreads || conversationEmails.length > 0) && !detailFailed ? (
                 <EmailConversation
+                  spaceId={spaceId}
+                  roleId={selected.roleId}
                   key={selected.key}
                   artifactTarget={
                     roles.find((role) => role.id === selected.roleId)?.groupId

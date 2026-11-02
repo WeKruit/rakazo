@@ -1917,41 +1917,50 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     }),
   ),
   emails: z.array(
-    z.strictObject({
-      id: Id,
-      sourceName: z.string(),
-      ...CorrespondenceOriginFields,
-      /** Imported history is evidence, never authority to replay a provider operation. */
-      imported: z.literal(true).optional(),
-      candidateKey: RecruitingId.optional(),
-      attachments: z
-        .array(
-          z.strictObject({
-            id: Id,
-            name: z.string(),
-            mimeType: z.string(),
-            size: z.number().int().min(0),
-          }),
-        )
-        .optional(),
-      direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
-      /** Optional provider observations, never application viewed-by state or current totals. */
-      unread: z.boolean().nullable().optional(),
-      leadId: z.uuid().nullable().optional(),
-      /** Provider-supplied step text; not an inferred stable step ID. */
-      step: z.string().nullable().optional(),
-      observedAt: IsoDate.optional(),
-      crm: CorrespondenceCrmContext,
-      sender: z.string().nullable(),
-      recipients: z.array(z.string()),
-      cc: z.array(z.string()).optional(),
-      bcc: z.array(z.string()).optional(),
-      subject: z.string(),
-      body: z.string(),
-      snippet: z.boolean(),
-      date: IsoDate.nullable(),
-      url: z.httpUrl().nullable(),
-    }),
+    z
+      .strictObject({
+        id: Id,
+        sourceName: z.string(),
+        ...CorrespondenceOriginFields,
+        /** Imported history is evidence, never authority to replay a provider operation. */
+        imported: z.literal(true).optional(),
+        candidateKey: RecruitingId.optional(),
+        attachments: z
+          .array(
+            z.strictObject({
+              id: Id,
+              name: z.string(),
+              mimeType: z.string(),
+              size: z.number().int().min(0),
+            }),
+          )
+          .optional(),
+        direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
+        /** Optional provider observations, never application viewed-by state or current totals. */
+        unread: z.boolean().nullable().optional(),
+        leadId: z.uuid().nullable().optional(),
+        /** Provider-supplied step text; not an inferred stable step ID. */
+        step: z.string().nullable().optional(),
+        observedAt: IsoDate.optional(),
+        crm: CorrespondenceCrmContext,
+        sender: z.string().nullable(),
+        recipients: z.array(z.string()),
+        cc: z.array(z.string()).optional(),
+        bcc: z.array(z.string()).optional(),
+        subject: z.string(),
+        body: z.string(),
+        snippet: z.boolean(),
+        date: IsoDate.nullable(),
+        url: z.httpUrl().nullable(),
+      })
+      .transform((email) => {
+        // Provider list previews carry an agent instruction; presentation keeps only the preview fact.
+        const body = email.body.replace(
+          /\[truncated — use get_email for full content\](\s*)$/u,
+          "$1",
+        );
+        return body === email.body ? email : { ...email, body, snippet: true };
+      }),
   ),
   events: z.array(
     z.strictObject({

@@ -47,6 +47,7 @@ export async function refreshRecruitingCorrespondence(
     roleId: string;
     view: "inbox" | "interview" | "contacts";
     pageEnd?: number;
+    message?: RecruitingCorrespondence["emails"][number];
     contactEmails?: readonly string[];
   },
   sources: Source[],
@@ -59,7 +60,9 @@ export async function refreshRecruitingCorrespondence(
         (source) =>
           source.enabled &&
           source.provider?.kind === "instantly" &&
-          source.assignments.some((permission) => allows(permission, "list_emails")),
+          source.assignments.some((permission) =>
+            allows(permission, scope.message ? "get_email" : "list_emails"),
+          ),
       ))
   )
     return;
@@ -69,7 +72,8 @@ export async function refreshRecruitingCorrespondence(
     args: Record<string, unknown>,
     onStart?: (startedAt: string, botId: string, operationId: string) => void,
   ) => {
-    const permission = source.assignments.find((permission) => allows(permission, tool));
+    const assignedTool = tool === "native_instantly_get_email" ? "get_email" : tool;
+    const permission = source.assignments.find((permission) => allows(permission, assignedTool));
     if (!permission || !source.enabled) return undefined;
     const fence = async () => {
       if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
@@ -88,7 +92,7 @@ export async function refreshRecruitingCorrespondence(
         },
         select: { botId: true, allowAllTools: true, allowedTools: true },
       });
-      if (!assignment || !allows(assignment, tool)) throw new IsolationError();
+      if (!assignment || !allows(assignment, assignedTool)) throw new IsolationError();
       const thread = await deps.prisma.thread.findFirst({
         where: {
           id: scope.threadId,
@@ -249,7 +253,9 @@ export async function refreshRecruitingCorrespondence(
             ? "list_events"
             : null
         : source.provider?.kind === "instantly"
-          ? "list_emails"
+          ? scope.message
+            ? "get_email"
+            : "list_emails"
           : null;
     // A source without a credential is not connected yet; reading it only fails unauthenticated.
     if (
@@ -271,7 +277,11 @@ export async function refreshRecruitingCorrespondence(
           if (binding.idempotencyKey !== `instantly-role-campaign:${source.id}:${scope.roleId}`)
             continue;
           const campaignId = record(binding.result)?.campaignId;
-          if (typeof campaignId !== "string") continue;
+          if (
+            typeof campaignId !== "string" ||
+            (scope.message && campaignId !== scope.message.campaignId)
+          )
+            continue;
           let cursor: string | undefined;
           let fetched = 0;
           const seenCursors = new Set<string>();
@@ -280,28 +290,40 @@ export async function refreshRecruitingCorrespondence(
             const body = record(
               await execute(
                 source,
-                tool,
-                {
-                  campaign_id: campaignId,
-                  limit: 100,
-                  ...(cursor ? { starting_after: cursor } : {}),
-                },
+                scope.message ? "native_instantly_get_email" : tool,
+                scope.message
+                  ? { id: scope.message.providerMessageId }
+                  : {
+                      campaign_id: campaignId,
+                      limit: 100,
+                      ...(cursor ? { starting_after: cursor } : {}),
+                    },
                 (observedAt, botId, operationId) => {
                   read.value = { observedAt, botId, operationId };
                 },
               ),
             );
-            if (!Array.isArray(body?.items)) throw new Error("Invalid mail page");
-            fetched += body.items.length;
+            const values = scope.message ? [body] : body?.items;
+            if (!Array.isArray(values)) throw new Error("Invalid mail page");
+            fetched += values.length;
             const observed: RecruitingCorrespondence["emails"] = [];
-            for (const value of body.items) {
+            for (const value of values) {
               const email = readInstantlyEmail(value);
-              if (!email || email.campaign_id !== campaignId) {
+              if (
+                !email ||
+                email.campaign_id !== campaignId ||
+                (scope.message &&
+                  (email.id !== scope.message.providerMessageId ||
+                    email.thread_id !== scope.message.providerThreadId ||
+                    !email.eaccount ||
+                    email.eaccount.trim().toLowerCase() !==
+                      scope.message.eaccount?.trim().toLowerCase()))
+              ) {
                 output.partial = true;
                 continue;
               }
               const text =
-                email.body.text ??
+                email.body.text ||
                 (email.body.html
                   ? htmlToPlainText(email.body.html)
                   : (email.content_preview ?? ""));
@@ -318,11 +340,15 @@ export async function refreshRecruitingCorrespondence(
                 sender: email.from_address_email ?? null,
                 recipients: [email.to_address_email_list],
                 subject: email.subject,
-                body: text.slice(0, 50000),
-                snippet: !!email.body_fallback_reason,
+                body: text,
+                snippet:
+                  !!email.body_fallback_reason ||
+                  !(email.body.text || email.body.html) ||
+                  (!scope.message && text.length > 50000),
                 date: email.timestamp_email,
                 url: null,
               });
+              if (!scope.message) row.body = row.body.slice(0, 50000);
               emails.set(row.id, row);
               observed.push(row);
             }
@@ -355,9 +381,11 @@ export async function refreshRecruitingCorrespondence(
                   );
             }
             cursor =
-              typeof body.next_starting_after === "string" ? body.next_starting_after : undefined;
+              !scope.message && typeof body?.next_starting_after === "string"
+                ? body.next_starting_after
+                : undefined;
             if (cursor) {
-              if (!body.items.length || seenCursors.has(cursor))
+              if (!values.length || seenCursors.has(cursor))
                 throw new Error("Invalid mail continuation");
               seenCursors.add(cursor);
             }

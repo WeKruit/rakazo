@@ -12,6 +12,9 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+const globalInbox = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/rpc", () => ({ rpc: { recruiting: { globalInbox } } }));
+
 import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
 
@@ -366,4 +369,70 @@ it("reads only the incoming timestamp when a thread is visible and preserves exp
   );
   await act(async () => callbacks.at(-1)!([{ isIntersecting: true }]));
   expect(mark).toHaveBeenLastCalledWith(expect.anything(), incoming.date, false);
+});
+
+it("loads only the opened preview's real body, retains it on reselection, and retries a failed body read", async () => {
+  const first = {
+    ...current,
+    partial: true,
+    sourceId: "source",
+    providerMessageId: "provider-1",
+    threadId: "thread",
+    organizationId: null,
+    campaignId: "campaign",
+    eaccount: "mailbox@example.test",
+    body: "Preview",
+  };
+  const second = {
+    ...first,
+    id: "received-2",
+    providerMessageId: "provider-2",
+    body: "Second preview",
+  };
+  const complete = {
+    ...first,
+    body: "Actual full body that was absent from the preview.",
+    snippet: false,
+  };
+  globalInbox
+    .mockReset()
+    .mockRejectedValueOnce(new Error("Unavailable"))
+    .mockResolvedValue({ items: [{ email: complete }] });
+  const select = vi.fn();
+  const node = (id: string) => (
+    <EmailConversation
+      spaceId="space"
+      roleId="role"
+      items={[first, second]}
+      selectedId={id}
+      onSelect={select}
+    />
+  );
+  const { view, render } = await mount(node(first.id));
+  expect(globalInbox).toHaveBeenCalledTimes(1);
+  expect(globalInbox.mock.calls[0]![0]).toMatchObject({
+    limit: 1,
+    thread: { roleId: "role", emailId: "provider-1" },
+  });
+  expect(view.textContent).not.toContain("get_email");
+  expect(view.textContent).toContain("Could not load the complete message.");
+  expect(view.querySelector("article")?.textContent).toContain("Preview");
+  expect(view.querySelector("summary")).not.toBeNull();
+  await act(async () => button(view, "Retry").click());
+  expect(view.querySelector("article")?.textContent).toContain(complete.body);
+  expect(view.querySelector("article")?.textContent).not.toContain("Preview only");
+  expect(globalInbox).toHaveBeenCalledTimes(2);
+  await render(
+    <EmailConversation
+      spaceId="space"
+      roleId="role"
+      items={[first, { ...second, partial: false }]}
+      selectedId={second.id}
+      onSelect={select}
+    />,
+  );
+  expect(globalInbox).toHaveBeenCalledTimes(2);
+  await render(node(first.id));
+  expect(globalInbox).toHaveBeenCalledTimes(2);
+  expect(view.querySelector("article")?.textContent).toContain(complete.body);
 });
