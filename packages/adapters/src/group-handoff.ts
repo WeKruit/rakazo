@@ -21,6 +21,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
+import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { declinedRunId } from "./turn-end-guard.js";
@@ -312,8 +313,10 @@ export async function reportGroupHandoffOutcome(
       if (!member) return undefined;
       const hop = nextBotMessageHop(asked.hop);
       if (botMessageHopExhausted(hop)) return undefined;
-      const report =
-        outcome.status === "completed"
+      const mail = await readMailReplyOutcomeReport(tx, run);
+      const report = mail
+        ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
+        : outcome.status === "completed"
           ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
           : outcome.watch
             ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`

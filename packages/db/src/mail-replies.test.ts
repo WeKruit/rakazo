@@ -282,28 +282,71 @@ it.each([
   },
 );
 
-it("keeps historical plain-text receipts without a thread while requiring thread proof for HTML", () => {
-  const reply = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
+it("uses only the same native POST identity for Sent and displays its actual receipt body", () => {
+  const request = boundDirectApprovalRequest(
+    { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
+    {
+      reply_to_uuid: "anchor",
+      eaccount: draft.from,
+      body: { text: "First\n\nSecond" },
+      subject: draft.subject,
+    },
+    "__rakazoCatalogTool",
+  );
   const receipt = {
-    id: "sent-email",
+    id: "new-email",
     ue_type: 3,
-    eaccount: reply.from,
-    subject: reply.subject,
-    to_address_email_list: reply.to.join(","),
+    thread_id: "thread",
+    eaccount: draft.from,
+    subject: draft.subject,
+    to_address_email_list: draft.to.join(","),
+    cc_address_email_list: "",
+    body: { html: "<html><head><title>Not body</title></head><body>First Second</body></html>" },
   };
-  const effect = (body: Prisma.JsonObject) => ({
+  const effect = (payload: Prisma.JsonObject, source = "local_native_instantly_rest") => ({
     status: "completed",
-    request: {},
-    result: { structuredContent: { result: { ...receipt, body } } },
-    updatedAt: new Date("2026-11-02T02:36:20Z"),
+    request: request as Prisma.JsonArray,
+    result: { structuredContent: { source, result: payload } },
+    updatedAt: new Date("2026-11-02T04:32:00Z"),
   });
-  expect(mailReplyState(reply, effect({ text: reply.body })).status).toBe("sent");
+  for (const [body, expected] of [
+    [{ html: "<p>First Second</p>" }, "First Second"],
+    [{ html: "<p>First<br><br>Second</p>" }, "First\n\nSecond"],
+    [{ html: "<p>First Second</p>", text: "First\n\nSecond" }, "First Second"],
+    [
+      { html: "<p>Actual 中文 &amp; &lt;text&gt;</p><script>globalThis.ran = true</script>" },
+      "Actual 中文 & <text>",
+    ],
+    [{ text: "Actual plain body" }, "Actual plain body"],
+    [{}, ""],
+  ] as const) {
+    const state = mailReplyState(draft, effect({ ...receipt, body }));
+    expect(state).toMatchObject({
+      status: "sent",
+      body: expected,
+      sentAt: "2026-11-02T04:32:00.000Z",
+    });
+    expect(state.error).toBeUndefined();
+    expect((globalThis as Record<string, unknown>).ran).toBeUndefined();
+  }
+  for (const changed of [
+    { id: "anchor" },
+    { ue_type: 4 },
+    { thread_id: "foreign" },
+    { thread_id: null },
+    { eaccount: "foreign@example.test" },
+    { to_address_email_list: "foreign@example.test" },
+    { cc_address_email_list: "foreign@example.test" },
+    { subject: "foreign" },
+  ])
+    expect(mailReplyState(draft, effect({ ...receipt, ...changed })).status).toBe("unknown");
+  expect(mailReplyState(draft, effect(receipt, "untrusted-source")).status).toBe("unknown");
+  const { thread_id: _, ...missingThread } = receipt;
+  expect(mailReplyState(draft, effect(missingThread)).status).toBe("unknown");
+  const withoutThread = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
+  for (const payload of [receipt, missingThread])
+    expect(mailReplyState(withoutThread, effect(payload)).status).toBe("sent");
   expect(
-    mailReplyState(
-      reply,
-      effect({
-        html: `<html><head><title>Original</title></head><body>${reply.body}</body></html>`,
-      }),
-    ).status,
+    mailReplyState(withoutThread, effect({ ...receipt, eaccount: "foreign@example.test" })).status,
   ).toBe("unknown");
 });

@@ -1,3 +1,5 @@
+import { boundDirectApprovalRequest } from "@rakazo/core";
+import { mailReplyState, type Prisma } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   describeCampaignActivation,
@@ -9,6 +11,7 @@ import {
   requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import { mailReplyFromAnchor } from "./mail-reply.js";
 
 const ORIGINAL = {
   id: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
@@ -20,6 +23,69 @@ const ORIGINAL = {
   thread_id: "thread-1",
 };
 const context = { spaceId: "s", userId: "u", botId: "b" } as never;
+
+it.each(["preserved", "flattened", "conflicting-fallback"])(
+  "sends approved paragraph HTML and verifies the real rendered receipt: %s",
+  async (mode) => {
+    const text =
+      'Hi Noah,\r\n\r\nThanks for "A&B" <机会>.\r\n\r\nBest,\r\nRecruiting Team\r\n\r\nP.S. I\'m ready.';
+    const html =
+      '<p>Hi Noah,<br /><br />Thanks for "A&amp;B" &lt;机会&gt;.<br /><br />Best,<br />Recruiting Team<br /><br />P.S. I\'m ready.</p>';
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server",
+      toolName: "native_instantly_reply_to_email",
+    };
+    const args = {
+      reply_to_uuid: ORIGINAL.id,
+      subject: "Re: Founding Engineer",
+      body: { text, html: "<p>Not approved</p>" },
+    };
+    let raw: Record<string, unknown> = {};
+    const rest = vi.fn(async (method: string, path: string, payload?: unknown) => {
+      if (path === `/emails/${ORIGINAL.id}`) return ORIGINAL;
+      if (path === "/accounts/team%40example.test") return { email: ORIGINAL.eaccount };
+      if (method !== "POST" || path !== "/emails/reply")
+        throw new Error("Unexpected synthetic call");
+      expect(payload).toMatchObject({ body: { text: text.replace(/\r\n/g, "\n"), html } });
+      const returned = mode === "preserved" ? html : html.replaceAll("<br />", " ");
+      raw = {
+        ...ORIGINAL,
+        id: "new-reply",
+        ue_type: 3,
+        to_address_email_list: ORIGINAL.from_address_email,
+        subject: args.subject,
+        body: {
+          html: `<html><head><title>Ignore this title</title></head><body>${returned}</body></html>`,
+          ...(mode === "conflicting-fallback" ? { text } : {}),
+        },
+      };
+      return raw;
+    });
+    const result = await runInstantlyWrite(
+      {} as never,
+      rest as never,
+      context,
+      "server",
+      route.toolName,
+      args,
+    );
+    expect(result).toEqual(raw); // Raw provider fields are retained, not filled from approval text.
+    expect(rest.mock.calls.filter(([method]) => method === "POST")).toHaveLength(1);
+    const reply = mailReplyFromAnchor(route, args, ORIGINAL);
+    const projected = mailReplyState(reply, {
+      status: "completed",
+      request: boundDirectApprovalRequest(route, args, "__rakazoCatalogTool") as Prisma.JsonArray,
+      result: {
+        structuredContent: { source: "local_native_instantly_rest", result: raw },
+      } as Prisma.JsonObject,
+      updatedAt: new Date("2026-11-02T04:32:00Z"),
+    });
+    expect(projected.status).toBe("sent");
+    expect(projected.error).toBeUndefined();
+    expect(projected.body.includes("\n")).toBe(mode === "preserved");
+  },
+);
 
 describe("native reply_to_email", () => {
   it("is a registered sending write", () => {
@@ -56,7 +122,7 @@ describe("native reply_to_email", () => {
       reply_to_uuid: ORIGINAL.id,
       eaccount: "team@example.test",
       subject: "Re: Founding Engineer",
-      body: { text: "收到，谢谢" },
+      body: { text: "收到，谢谢", html: "<p>收到，谢谢</p>" },
       cc_address_email_list: "copy@example.test",
     });
   });

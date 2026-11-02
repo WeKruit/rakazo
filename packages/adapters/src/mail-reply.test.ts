@@ -1,13 +1,11 @@
 import type { AdapterContext, ConnectorEvent, ConnectorProvider } from "@rakazo/adapter-kit";
-import { boundDirectApprovalRequest } from "@rakazo/core";
-import type { Prisma } from "@rakazo/db";
-import { mailReplyState } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   gmailReplyRoute,
   mailReplyFromAnchor,
   mailReplyOutcomeInstruction,
   readGmailReplyCard,
+  readMailReplyOutcomeReport,
 } from "./mail-reply.js";
 
 const context = {
@@ -142,90 +140,164 @@ it("reports the recorded card outcome rather than inventing missing or unconfirm
   );
 });
 
-import { mailReplyEffectWithText, nativeReplyBodyWithText } from "./mail-reply.js";
-
-it("verifies the native REST text-only HTML body without matching titles, quoted text, or different recipients", () => {
-  const draft = mailReplyFromAnchor(
-    { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
-    { eaccount: "sender@example.test", body: { text: "Draft" }, subject: "Re: Original" },
-    {
-      id: "anchor",
-      thread_id: "thread",
-      eaccount: "sender@example.test",
-      from_address_email: "candidate@example.test",
-      subject: "Original",
+describe("verified reply outcome handoff", () => {
+  const child = {
+    id: "child",
+    botId: "outreach",
+    sourceMessage: {
+      id: "request",
+      seq: 10,
+      role: "bot",
+      botId: "main",
+      runId: "parent",
+      threadId: "thread",
+      blocks: [],
     },
-  );
-  const html = (body: string, title = "Original") =>
-    `<html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
-  const reply = { ...draft, body: "谢谢，A & B < C > D.\nNext line." };
-  const escaped = "谢谢，A &amp; B &lt; C &gt; D.  Next line.";
-  const request = boundDirectApprovalRequest(
-    { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
-    {
-      reply_to_uuid: reply.inReplyTo.emailId,
-      eaccount: reply.from,
-      subject: reply.subject,
-      body: { text: reply.body },
-    },
-    "__rakazoCatalogTool",
-  );
-  const receipt = {
-    id: "new-email",
-    ue_type: 3,
-    eaccount: reply.from,
-    subject: reply.subject,
-    to_address_email_list: reply.to.join(","),
-    cc_address_email_list: "",
-    thread_id: reply.inReplyTo.threadId,
-    body: { html: html(escaped) },
   };
-  const effect = (payload: Prisma.JsonObject) =>
-    mailReplyEffectWithText(
-      {
-        status: "completed",
-        request: request as Prisma.JsonArray,
-        result: { structuredContent: { source: "local_native_instantly_rest", result: payload } },
-        updatedAt: new Date("2026-11-02T02:36:20Z"),
-      },
-      reply,
-    );
-  expect(mailReplyState(reply, effect(receipt))).toMatchObject({
-    status: "sent",
-    sentAt: "2026-11-02T02:36:20.000Z",
-  });
-  for (const changed of [
-    { body: { html: html("Different reply", escaped) } },
-    { body: { html: html(`<blockquote>${escaped}</blockquote>`) } },
-    { body: { html: html(`<div class="gmail_quote">${escaped}</div>`) } },
-    { body: { html: html(`<script>${escaped}</script>`) } },
-    { body: { html: html(`<span>${escaped}</span>`) } },
-    { body: { html: html(`Different reply ${escaped}`) } },
-    { body: { html: html(`${escaped} Extra unapproved sentence.`) } },
-    { to_address_email_list: "someone-else@example.test" },
-    { id: reply.inReplyTo.emailId },
-    { thread_id: "different-thread" },
-    { body: { html: html(escaped), text: "Different plain text" } },
-    { ue_type: 4 },
-  ])
-    expect(mailReplyState(reply, effect({ ...receipt, ...changed }))).toMatchObject({
-      status: "unknown",
+  const current = {
+    id: "report-run",
+    userId: "owner",
+    spaceId: "space",
+    threadId: "thread",
+    botId: "main",
+  };
+  const report = {
+    kind: "handoff",
+    fromBotId: "outreach",
+    toBotId: "main",
+    hop: 2,
+    text: "Progress above",
+    report: "completed",
+  };
+  function setup(change = {}) {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: current.id,
+        botId: current.botId,
+        sourceMessage: {
+          id: "report",
+          seq: 13,
+          role: "bot",
+          botId: "outreach",
+          runId: child.id,
+          threadId: "thread",
+          blocks: [report],
+          ...change,
+        },
+      })
+      .mockResolvedValueOnce(child);
+    const mailReply = {
+      from: "mailbox@example.test",
+      to: ["candidate@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Re: Original",
+      body: "Draft",
+      status: "needs_approval",
       sentAt: null,
-    });
-  for (const markup of [
-    html(`<p>${escaped}</p>`),
-    html(escaped.replace("  Next", "<br>Next")),
-    html(`<div>${escaped}</div>`),
-  ])
-    expect(mailReplyState(reply, effect({ ...receipt, body: { html: markup } })).status).toBe(
-      "sent",
+      inReplyTo: {
+        sourceId: "source",
+        emailId: "anchor",
+        threadId: "mail-thread",
+        subject: "Original",
+        sender: "candidate@example.test",
+      },
+    };
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "card",
+        runId: child.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Reply",
+            approvalEffectId: "private-effect",
+            status: "answered",
+            actions: [
+              { id: "allow", label: "Send" },
+              { id: "deny", label: "Discard" },
+            ],
+            mailReply,
+          },
+        ],
+      },
+    ]);
+    const effects = vi.fn().mockResolvedValue([
+      {
+        id: "private-effect",
+        runId: child.id,
+        status: "completed",
+        request: {},
+        result: { status: "sent_recorded" },
+        updatedAt: new Date(),
+        run: { status: "completed" },
+      },
+    ]);
+    return {
+      db: { run: { findFirst }, message: { findMany }, externalEffect: { findMany: effects } },
+      findFirst,
+      findMany,
+      effects,
+    };
+  }
+  it("reports the real owned card receipt instead of progress, in one effect batch", async () => {
+    const h = setup();
+    const result = await readMailReplyOutcomeReport(h.db as never, current);
+    expect(result?.facts).toEqual([
+      { effectId: "private-effect", status: "sent", sentAt: expect.any(String), error: undefined },
+    ]);
+    expect(result?.text).toContain("verified sent receipt");
+    expect(result?.text).not.toMatch(/private-effect|instantly|provider|Progress above/);
+    expect(h.findFirst).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          id: child.id,
+          botId: child.botId,
+          spaceId: "space",
+          userId: "owner",
+          threadId: "thread",
+        },
+      }),
     );
-  const entities = nativeReplyBodyWithText(
-    { ...receipt, body: { html: html("&quot;A&quot; &#39;B&#39; &nbsp; &#x43; &#68;") } },
-    reply.inReplyTo,
-  );
-  expect((entities.body as { text?: string }).text?.replace(/\s+/gu, " ")).toBe("\"A\" 'B' C D");
-  expect(mailReplyState(reply, effect({ ...receipt, body: { text: reply.body } }))).toMatchObject({
-    status: "sent",
+    expect(h.findMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          runId: child.id,
+          botId: child.botId,
+          threadId: "thread",
+          thread: { spaceId: "space", userId: "owner" },
+          seq: { gt: 10 },
+        }),
+      }),
+    );
+    expect(h.effects).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: ["private-effect"] },
+          runId: child.id,
+          spaceId: "space",
+          run: { spaceId: "space", userId: "owner", threadId: "thread", botId: child.botId },
+        }),
+      }),
+    );
+  });
+  it.each([
+    { role: "user" },
+    { botId: "foreign" },
+    { runId: null },
+    { threadId: "foreign" },
+    { blocks: [{ ...report, toBotId: "foreign" }] },
+  ])("rejects an unproven report source %j", async (change) => {
+    const h = setup(change);
+    expect(await readMailReplyOutcomeReport(h.db as never, current)).toBeUndefined();
+    expect(h.findMany).not.toHaveBeenCalled();
+    expect(h.effects).not.toHaveBeenCalled();
+  });
+  it("does not promote a cached card without an owned receipt", async () => {
+    const h = setup();
+    h.effects.mockResolvedValue([]);
+    expect(await readMailReplyOutcomeReport(h.db as never, current)).toBeUndefined();
   });
 });

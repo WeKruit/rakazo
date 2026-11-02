@@ -10,6 +10,7 @@ import {
   catalogApprovalDetails,
   catalogApprovalRequest,
 } from "@rakazo/core";
+import { htmlToPlainText } from "@rakazo/core/node/html-text";
 import type { Prisma, PrismaClient } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 import { IsolationError } from "./scope.js";
@@ -138,19 +139,18 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         .sort()
         .join("\n");
   const nativeBody = object(payload?.body);
-  const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
-  const bodyMatches =
-    typeof nativeBody?.text === "string" &&
-    (nativeBody.text === edited ||
-      (typeof nativeBody.html === "string" && normalize(nativeBody.text) === normalize(edited)));
   const nativeReceipt =
+    route?.connectorId === "mcp" &&
+    route.toolName === "native_instantly_reply_to_email" &&
+    object(provider?.structuredContent)?.source === "local_native_instantly_rest" &&
     payload?.ue_type === 3 &&
-    typeof payload?.id === "string" &&
-    payload?.eaccount === draft.from &&
-    sameAddresses(payload?.to_address_email_list, draft.to) &&
-    payload?.subject === draft.subject &&
-    bodyMatches &&
-    sameAddresses(payload?.cc_address_email_list ?? "", draft.cc);
+    typeof payload.id === "string" &&
+    payload.id !== draft.inReplyTo.emailId &&
+    (draft.inReplyTo.threadId === null || payload.thread_id === draft.inReplyTo.threadId) &&
+    payload.eaccount === draft.from &&
+    sameAddresses(payload.to_address_email_list, draft.to) &&
+    sameAddresses(payload.cc_address_email_list ?? "", draft.cc) &&
+    payload.subject === draft.subject;
   const sent =
     !error &&
     effect.status === "completed" &&
@@ -158,7 +158,14 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
   const reason = MailReplyErrorCodeSchema.safeParse(provider?.error ?? envelope?.error).data;
   return {
     ...draft,
-    body: edited,
+    body:
+      sent && nativeReceipt
+        ? typeof nativeBody?.html === "string"
+          ? htmlToPlainText(nativeBody.html)
+          : typeof nativeBody?.text === "string"
+            ? nativeBody.text
+            : ""
+        : edited,
     ...(effect.status === "uncertain"
       ? { error: "delivery_unconfirmed" }
       : error

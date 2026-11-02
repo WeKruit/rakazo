@@ -9,6 +9,7 @@ import {
   returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
+import * as mailReplies from "./mail-reply.js";
 
 const run = {
   id: "run-1",
@@ -76,7 +77,10 @@ function deps(
         ),
     },
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
-    run: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    run: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     thread: { findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null) },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => {
       transactionAttempts += 1;
@@ -537,6 +541,27 @@ describe("delegating to a role team in another conversation", () => {
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
   });
 
+  it("retains earlier team progress as context beneath the authoritative card outcome", async () => {
+    const text = "I am drafting the reply now.";
+    const h = team({ later: [said(text)] });
+    const outcome = mailReplies.mailReplyOutcomeInstruction({ status: "discarded" });
+    const read = vi
+      .spyOn(mailReplies, "readMailReplyOutcomeReport")
+      .mockResolvedValue({ facts: [], text: outcome });
+    try {
+      await returnDelegatedTeamOutcome(h.deps, roleRun);
+      const delivered = JSON.stringify(returnedTo(h));
+      expect(delivered).toContain(outcome);
+      expect(delivered).toContain(
+        "Additional child output (may include earlier progress; the mail status above is authoritative)",
+      );
+      expect(delivered).toContain(text);
+      expect(delivered.indexOf(outcome)).toBeLessThan(delivered.indexOf(text));
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("returns the team's final result once the conversation is quiet, named after the role", async () => {
     const harness = team({
       later: [
@@ -800,6 +825,46 @@ describe("hardening", () => {
 });
 
 describe("automatic outcome return", () => {
+  it.each(["Research found three qualified people.", "I am drafting the reply now."])(
+    "keeps additional child text separate from verified mail facts: %s",
+    async (text) => {
+      const h = deps({
+        hopBlocks: [
+          {
+            kind: "bot_message_received",
+            fromBotId: "bot-target",
+            fromBotName: "Coordinator",
+            text: "research this",
+            hop: 1,
+            intent: "request",
+            returnToMessageId: "message-request",
+          },
+        ],
+      });
+      const outcome = mailReplies.mailReplyOutcomeInstruction({ status: "sent" });
+      const read = vi
+        .spyOn(mailReplies, "readMailReplyOutcomeReport")
+        .mockResolvedValue({ facts: [], text: outcome });
+      try {
+        await returnBotMessageOutcome(
+          h.deps,
+          { ...run, sourceMessageId: "message-source" },
+          sender,
+          text,
+        );
+        const delivered = JSON.stringify(h.tx.message.create.mock.calls);
+        expect(delivered).toContain(outcome);
+        expect(delivered).toContain(
+          "Additional child output (may include earlier progress; the mail status above is authoritative)",
+        );
+        expect(delivered).toContain(text);
+        expect(delivered.indexOf(outcome)).toBeLessThan(delivered.indexOf(text));
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
+
   it("routes a delegated run's final text back to its coordinator", async () => {
     const harness = deps({
       hopBlocks: [

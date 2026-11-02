@@ -353,6 +353,81 @@ describe("group handoff report back", () => {
     );
   });
 
+  it("returns a verified discarded card even when the child has no final text", async () => {
+    const h = harness([asked]);
+    h.tx.run.findFirst.mockResolvedValue({
+      id: worker.id,
+      botId: worker.botId,
+      sourceMessage: {
+        id: "request",
+        seq: 10,
+        threadId: worker.threadId,
+        role: "bot",
+        botId: "bot-a",
+        runId: "run-a",
+        blocks: [asked],
+      },
+    } as never);
+    h.tx.message.findMany.mockResolvedValue([
+      {
+        id: "card",
+        runId: worker.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Draft",
+            status: "answered",
+            actions: [
+              { id: "allow", label: "Send" },
+              { id: "deny", label: "Discard" },
+            ],
+            approvalEffectId: "private-effect",
+            mailReply: {
+              from: "sender@example.test",
+              to: ["candidate@example.test"],
+              cc: [],
+              bcc: [],
+              subject: "Re: Original",
+              body: "Draft",
+              status: "needs_approval",
+              sentAt: null,
+              inReplyTo: {
+                sourceId: "source",
+                emailId: "anchor",
+                threadId: "mail-thread",
+                subject: "Original",
+                sender: "candidate@example.test",
+              },
+            },
+          },
+        ],
+      } as never,
+    ]);
+    Object.assign(h.tx, {
+      externalEffect: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            {
+              id: "private-effect",
+              runId: worker.id,
+              status: "denied",
+              request: {},
+              result: null,
+              updatedAt: new Date(),
+              run: { status: "completed" },
+            },
+          ]),
+      },
+    });
+    await reportGroupHandoffOutcome(h.deps as never, worker, "group-1", { status: "completed" });
+    const message = JSON.stringify(h.messageCreate.mock.calls);
+    const task = JSON.stringify(h.taskCreate.mock.calls);
+    expect(message).toContain("user explicitly discarded");
+    expect(task).toContain("user explicitly discarded");
+    expect(message + task).not.toMatch(/private-effect|my result is my last message/);
+  });
+
   it.each([
     ["completed", undefined, "Finished the stage"],
     ["failed", "provider down", "Could not finish the stage you handed me: provider down"],

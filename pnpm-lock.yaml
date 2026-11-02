@@ -812,6 +812,9 @@ importers:
       hast-util-to-text:
         specifier: 4.0.2
         version: 4.0.2
+      jsdom:
+        specifier: 30.0.1
+        version: 30.0.1(@noble/hashes@2.3.0)
       mdast-util-to-hast:
         specifier: 13.2.1
         version: 13.2.1
@@ -828,6 +831,9 @@ importers:
       '@types/d3-dsv':
         specifier: 3.0.7
         version: 3.0.7
+      '@types/jsdom':
+        specifier: 30.0.0
+        version: 30.0.0
       fast-check:
         specifier: 4.10.0
         version: 4.10.0
