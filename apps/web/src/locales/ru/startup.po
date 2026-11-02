@@ -1747,6 +1747,10 @@ msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr ""
 
 #: src/components/MailReplyAskContent.tsx
+msgid "Delivery is not confirmed. Check the conversation before trying again."
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Delivery unconfirmed"
 msgstr ""
 
@@ -3675,7 +3679,7 @@ msgid "Read the attached materials for this role."
 msgstr ""
 
 #: src/pages/shell/useShellRecruiting.ts
-msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
 msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -5143,6 +5147,10 @@ msgstr ""
 msgid "The reply stopped. Try again."
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "The sending address changed. Prepare a new reply for review."
+msgstr "Адрес отправителя изменился. Подготовьте новый ответ для проверки."
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
 msgstr ""
@@ -5187,6 +5195,14 @@ msgstr "Этого поставщика нельзя проверить без �
 msgid "This provider is not connected yet."
 msgstr "Этот поставщик еще не подключен."
 
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply could not be sent."
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply was not sent."
+msgstr "Этот ответ не был отправлен."
+
 #: src/pages/Auth.tsx
 msgid "This reset link is invalid or expired"
 msgstr "Эта ссылка для сброса недействительна или срок ее действия истек."
@@ -5194,6 +5210,14 @@ msgstr "Эта ссылка для сброса недействительна �
 #: src/pages/shell/useShellRecruiting.ts
 msgid "This role changed. Select the candidate again."
 msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not available for this conversation."
+msgstr "Этот адрес отправителя недоступен для этой переписки."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not ready to send yet."
+msgstr "Этот адрес отправителя ещё не готов к отправке."
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "This sequence is available for review only. Its saved draft is not linked to this role."

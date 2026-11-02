@@ -1032,6 +1032,8 @@ it("drafts from the canonical Inbox without sending or replacing an existing com
   type(draft, "Keep my separate draft");
   await view.click("Draft reply");
   expect(draft.value).toContain("Keep my separate draft");
+  expect(draft.value).toContain("editable reply card");
+  expect(draft.value).toContain("choose Send on the card");
   expect(draft.value).toContain("Do not send");
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(shellApi.followUp).not.toHaveBeenCalled();
@@ -5584,6 +5586,14 @@ it.each(["normal", "retry", "switch", "missing-source"] as const)(
           ],
         },
       ],
+    });
+    const drafts = [...container!.querySelectorAll<HTMLDetailsElement>("details")].find(
+      (node) => node.querySelector("summary")?.textContent === "Outreach drafts",
+    )!;
+    expect(props!).toBeUndefined();
+    await act(async () => {
+      drafts.open = true;
+      drafts.dispatchEvent(new Event("toggle"));
     });
     const save = props!.onSaveDraft!;
     const input: RecruitingCorrespondenceModule.RecruitingSequenceSaveInput = {

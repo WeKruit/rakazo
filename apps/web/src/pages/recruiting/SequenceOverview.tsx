@@ -57,7 +57,7 @@ export function SequenceOverview({
   overviewCounts?: Record<
     "contacted" | "active" | "opened" | "clicked" | "replied" | "interested",
     number | null
-  >;
+  > & { bounced?: number | null };
   campaign?: RecruitingRoleCampaign;
   replied: number | null;
   sendDates?: readonly string[] | null;
@@ -118,8 +118,12 @@ export function SequenceOverview({
       ? [
           {
             label: t`Bounced`,
-            value: allTime ? count(-1) : null,
-            observed: observed.partial,
+            value: allTime
+              ? overviewCounts?.bounced !== undefined
+                ? overviewCounts.bounced
+                : count(-1)
+              : null,
+            observed: overviewCounts?.bounced !== undefined ? overviewPartial : observed.partial,
             filter: "bounced" as const,
           },
         ]
