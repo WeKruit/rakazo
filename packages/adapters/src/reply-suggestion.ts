@@ -37,7 +37,7 @@ export function cleanSuggestion(raw: string): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_SUGGESTION_CHARS) return null;
-  if (/^(?:I hit a problem:|Unknown model )/i.test(line)) return null;
+  if (/^(?:I hit a problem:|Unknown model |No response\. Try again\.)/i.test(line)) return null;
   return line;
 }
 
@@ -85,6 +85,8 @@ export async function suggestNextMessage(input: {
       instructions: INSTRUCTIONS,
       history: [],
       tools: [],
+      // "Reply with nothing" is a valid answer: no runtime filler text in the composer.
+      allowSilentEmpty: true,
       model: { ...input.model, thinkingLevel: "off", firstStepThinkingLevel: undefined },
     },
     {
