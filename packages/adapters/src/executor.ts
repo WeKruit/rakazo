@@ -477,6 +477,7 @@ import {
 } from "./lazy-tool-catalog.js";
 import {
   gmailReplyRoute,
+  mailReplyEffectWithText,
   mailReplyFromAnchor,
   mailReplyOutcomeInstruction,
   readGmailReplyCard,
@@ -5585,11 +5586,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
-        const approvedEffects = await deps.prisma.externalEffect.findMany({
-          where: { runId, status: "approved" },
+        const continuationEffects = await deps.prisma.externalEffect.findMany({
+          where: { runId, status: { in: ["approved", "denied"] } },
           orderBy: APPROVED_EFFECT_REPLAY_ORDER,
-          select: { id: true, kind: true, request: true, result: true },
+          select: { id: true, kind: true, status: true, request: true, result: true },
         });
+        const approvedEffects = continuationEffects.filter(
+          (effect) => effect.status === "approved",
+        );
+        const discardedReplies = continuationEffects.flatMap((effect) => {
+          if (effect.status !== "denied") return [];
+          const retained =
+            effect.result && typeof effect.result === "object" && !Array.isArray(effect.result)
+              ? effect.result.mailReplyApproval
+              : undefined;
+          const reply = MailReplySchema.safeParse(retained);
+          return reply.success ? [reply.data] : [];
+        });
+        // ponytail: this continuation's decision stops replacements, until a new human message arrives.
+        let replyDiscardActive = true;
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
         const legacyCalibrations = approvedEffects.flatMap((effect) => {
           if (effect.kind !== "recruiting_request_approval") return [];
@@ -9679,6 +9694,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       );
                 if (thread.activeRecruitingRoleId)
                   approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                const proposed = approvalBlock.mailReply;
+                if (
+                  replyDiscardActive &&
+                  discardedReplies.some(
+                    (discarded) =>
+                      (discarded.from?.toLowerCase() ?? null) ===
+                        (proposed.from?.toLowerCase() ?? null) &&
+                      discarded.inReplyTo.sourceId === proposed.inReplyTo.sourceId &&
+                      (discarded.inReplyTo.roleId ?? null) ===
+                        (proposed.inReplyTo.roleId ?? null) &&
+                      discarded.inReplyTo.threadId === proposed.inReplyTo.threadId &&
+                      discarded.inReplyTo.emailId === proposed.inReplyTo.emailId,
+                  )
+                ) {
+                  const result = {
+                    status: "discarded",
+                    dispatched: false,
+                    message: mailReplyOutcomeInstruction({ status: "discarded" }),
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
                 if (instantlyReply?.refusal) {
                   approvalBlock.mailReply = {
                     ...approvalBlock.mailReply,
@@ -13476,6 +13514,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           handedIn ? HANDOFF_OPENING_NOTE : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
+          discardedReplies
+            .map(
+              (reply) =>
+                `${mailReplyOutcomeInstruction({ status: "discarded" })}\nDiscarded reply scope: ${JSON.stringify({ from: reply.from, ...reply.inReplyTo })}`,
+            )
+            .join("\n\n"),
           waitingCardsNote && `${waitingCardsNote} ${WAITING_CARDS_NEW_MESSAGE_NOTE}`,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
           voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
@@ -13673,7 +13717,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           replyOutcome = mailReplyOutcomeInstruction(
             currentReplyEffect
-              ? mailReplyState(replyDraft, currentReplyEffect)
+              ? mailReplyState(replyDraft, mailReplyEffectWithText(currentReplyEffect, replyDraft))
               : { status: "unknown" },
           );
           try {
@@ -14214,7 +14258,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                               ["text", "file", "image"].includes(block.kind),
                             ),
                         );
-                        if (humanSteering) recruitingSourceMessageId = humanSteering.messageId;
+                        if (humanSteering) {
+                          recruitingSourceMessageId = humanSteering.messageId;
+                          replyDiscardActive = false;
+                        }
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun

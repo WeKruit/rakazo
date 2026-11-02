@@ -1,6 +1,8 @@
 import type { AdapterContext, ConnectorProvider, ConnectorRoute } from "@rakazo/adapter-kit";
 import type { MailReply } from "@rakazo/contracts";
 import { inboxThreadKey, MailReplySchema } from "@rakazo/contracts";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import { JSDOM } from "jsdom";
 import addressparser from "nodemailer/lib/addressparser";
 import { htmlToPlainText } from "./keyless-http-web.js";
 
@@ -8,6 +10,67 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+/** Derive only the actual rendered body; never substitute approved text for a provider receipt. */
+export function nativeReplyBodyWithText<T extends Record<string, unknown>>(
+  email: T,
+  anchor: Pick<MailReply["inReplyTo"], "emailId" | "threadId">,
+): T {
+  const body = object(email.body);
+  if (
+    typeof body?.text === "string" ||
+    typeof body?.html !== "string" ||
+    email.ue_type !== 3 ||
+    typeof email.id !== "string" ||
+    email.id === anchor.emailId ||
+    !anchor.threadId ||
+    email.thread_id !== anchor.threadId
+  )
+    return email;
+  const dom = new JSDOM(body.html);
+  try {
+    const document = dom.window.document;
+    // ponytail: only plain text/paragraph/line-break markup is proven; quotes and richer mail stay unconfirmed.
+    if (
+      document.body.attributes.length ||
+      document.querySelector("script,style") ||
+      [...document.body.querySelectorAll("*")].some(
+        (node) => !["BR", "P", "DIV"].includes(node.tagName) || node.attributes.length,
+      )
+    )
+      return email;
+    return { ...email, body: { ...body, text: htmlToPlainText(document.body.innerHTML) } };
+  } finally {
+    dom.window.close();
+  }
+}
+
+/** The same native receipt boundary is used for new sends and saved-card reads. */
+export function mailReplyEffectWithText<T extends { request: unknown; result: unknown }>(
+  effect: T,
+  draft: MailReply,
+): T {
+  const route =
+    boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool")?.route ??
+    catalogApprovalDetails(effect.request, "__rakazoCatalogTool")?.route;
+  const result = object(effect.result);
+  const content = object(result?.structuredContent);
+  const email = object(content?.result);
+  if (
+    route?.connectorId !== "mcp" ||
+    route.toolName !== "native_instantly_reply_to_email" ||
+    content?.source !== "local_native_instantly_rest" ||
+    !email
+  )
+    return effect;
+  return {
+    ...effect,
+    result: {
+      ...result,
+      structuredContent: { ...content, result: nativeReplyBodyWithText(email, draft.inReplyTo) },
+    },
+  };
+}
+
 export const replyAddresses = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.flatMap(replyAddresses)
@@ -193,7 +256,7 @@ export async function readGmailReplyCard(
 export function mailReplyOutcomeInstruction(reply: Pick<MailReply, "status">) {
   const outcome = {
     discarded:
-      "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Do not claim that card creation failed or retry it.",
+      "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Stop working on this reply. Do not claim that card creation failed, retry it, or create a replacement card using another tool or route. Only a new explicit recruiter request may restart it.",
     failed:
       "The already-created reply card recorded a definite send failure. It was not a successful send and is not merely an unknown delivery result. Explain the card's safe reason; do not retry automatically.",
     unknown:

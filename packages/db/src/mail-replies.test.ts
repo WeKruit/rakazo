@@ -7,7 +7,8 @@ import {
   catalogApprovalRequest,
 } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
-import { editMailReplyRequest, projectMailReplyCards } from "./mail-replies.js";
+import type { Prisma } from "./client.js";
+import { editMailReplyRequest, mailReplyState, projectMailReplyCards } from "./mail-replies.js";
 
 const actor = {
   userId: "owner",
@@ -280,3 +281,29 @@ it.each([
     expect(JSON.stringify(rows)).not.toContain("private-provider-tool-id");
   },
 );
+
+it("keeps historical plain-text receipts without a thread while requiring thread proof for HTML", () => {
+  const reply = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
+  const receipt = {
+    id: "sent-email",
+    ue_type: 3,
+    eaccount: reply.from,
+    subject: reply.subject,
+    to_address_email_list: reply.to.join(","),
+  };
+  const effect = (body: Prisma.JsonObject) => ({
+    status: "completed",
+    request: {},
+    result: { structuredContent: { result: { ...receipt, body } } },
+    updatedAt: new Date("2026-11-02T02:36:20Z"),
+  });
+  expect(mailReplyState(reply, effect({ text: reply.body })).status).toBe("sent");
+  expect(
+    mailReplyState(
+      reply,
+      effect({
+        html: `<html><head><title>Original</title></head><body>${reply.body}</body></html>`,
+      }),
+    ).status,
+  ).toBe("unknown");
+});

@@ -137,13 +137,19 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         .map((item) => item.toLowerCase())
         .sort()
         .join("\n");
+  const nativeBody = object(payload?.body);
+  const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const bodyMatches =
+    typeof nativeBody?.text === "string" &&
+    (nativeBody.text === edited ||
+      (typeof nativeBody.html === "string" && normalize(nativeBody.text) === normalize(edited)));
   const nativeReceipt =
     payload?.ue_type === 3 &&
     typeof payload?.id === "string" &&
     payload?.eaccount === draft.from &&
     sameAddresses(payload?.to_address_email_list, draft.to) &&
     payload?.subject === draft.subject &&
-    object(payload?.body)?.text === edited &&
+    bodyMatches &&
     sameAddresses(payload?.cc_address_email_list ?? "", draft.cc);
   const sent =
     !error &&

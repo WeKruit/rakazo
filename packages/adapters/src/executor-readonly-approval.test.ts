@@ -254,10 +254,16 @@ function fixture({
       async ({
         where,
       }: {
-        where?: { id?: string; runId?: string; status?: string; kind?: string };
+        where?: { id?: string; runId?: string; status?: string | { in: string[] }; kind?: string };
       } = {}) =>
         effects.filter((effect) => {
-          if (where?.status && effect.status !== where.status) return false;
+          if (
+            where?.status &&
+            !(typeof where.status === "string"
+              ? effect.status === where.status
+              : where.status.in.includes(effect.status))
+          )
+            return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
@@ -324,6 +330,7 @@ function fixture({
       update: vi.fn(async () => ({ nextMessageSeq: 1, nextEventSeq: 1, userId: "user-1" })),
     },
     message: {
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         id: "card-message",
@@ -402,6 +409,15 @@ function fixture({
   let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
   ];
+  const claimSteering = vi.fn(
+    async () =>
+      [] as Array<{
+        id: string;
+        messageId: string;
+        text: string;
+        blocks: Array<{ kind: "text"; text: string }>;
+      }>,
+  );
   const runtimeRun = vi.fn(async function* (
     request: AgentRunRequest,
   ): AsyncGenerator<AgentRuntimeEvent> {
@@ -472,6 +488,7 @@ function fixture({
     events: {
       append: vi.fn(async () => undefined),
       notify: vi.fn(async () => undefined),
+      claimSteering,
       pauseRunForInput,
       finalizeRun,
     },
@@ -482,10 +499,12 @@ function fixture({
   } as unknown as Parameters<typeof createRunExecutor>[0]);
   return {
     prisma,
+    providerTools,
     effects,
     results,
     execute,
     senderChecks,
+    claimSteering,
     commit,
     sharedMemoryState,
     pauseRunForInput,
@@ -2131,6 +2150,66 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.senderChecks).toHaveBeenCalledOnce();
   });
+  it("puts the existing discard decision in the continuation before any replacement tool call", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.setCalls([]);
+    f.runtimeRun.mockClear();
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("user explicitly discarded");
+    expect(prompt).toContain("Stop working on this reply");
+    expect(prompt).toContain(replyArgs.reply_to_uuid);
+    expect(prompt).toContain("resource-1");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+  });
+  it("does not replace a discarded card with a new draft for the same source and anchor", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.providerTools[0]!.name = "replacement_reply";
+    f.setCalls([
+      {
+        ...(catalog ? {} : { name: "replacement_reply" }),
+        args: { ...replyArgs, body_text: "A replacement draft" },
+        executionId: "replacement",
+      },
+    ]);
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({ status: "discarded", dispatched: false });
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("allows a new pending draft after a new human request arrives in the same run", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.setCalls([
+      { args: { ...replyArgs, body_text: "A newly requested draft" }, executionId: "new-request" },
+    ]);
+    f.claimSteering.mockResolvedValueOnce([
+      {
+        id: "steering",
+        messageId: "new-human",
+        text: "Please draft a new reply",
+        blocks: [{ kind: "text", text: "Please draft a new reply" }],
+      },
+    ]);
+    const model = f.runtimeRun.getMockImplementation()!;
+    f.runtimeRun.mockImplementationOnce(async function* (request) {
+      await request.claimSteering?.([]);
+      yield* model(request);
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledTimes(2);
+    expect(f.effects[1]).toMatchObject({
+      status: "intended",
+      result: { mailReplyApproval: { body: "A newly requested draft" } },
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
   it("keeps a blocked sender on the original card without offering Send or pausing for approval", async () => {
     const f = replyFixture();
     f.senderChecks.mockImplementation(async function* () {
@@ -3297,7 +3376,12 @@ describe("candidate-linked native reply", () => {
     await f.run();
     f.effects[0]!.status = "approved";
     f.prisma.externalEffect.findMany.mockImplementation(async ({ where } = {}) =>
-      where?.status === "approved" ? [] : f.effects,
+      where?.status &&
+      (typeof where.status === "string"
+        ? where.status === "approved"
+        : where.status.in.includes("approved"))
+        ? []
+        : f.effects,
     );
     f.execute.mockImplementation(async function* () {
       yield {
