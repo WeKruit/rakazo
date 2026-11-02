@@ -3761,6 +3761,45 @@ export async function getRecruitingCrmData(
     if (input.operation === "roleCampaigns") {
       const offset = pageOffset(input);
       const limit = input.limit ?? 25;
+      if (input.campaignId) {
+        if (offset !== 0)
+          throw new ORPCError("BAD_REQUEST", {
+            message: "An exact campaign does not accept an offset.",
+          });
+        await sourceFence(server, "get_crm_role");
+        const campaign = await deps.prisma.recruitingCrmCampaign.findFirst({
+          where: {
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            mcpServerId: server.id,
+            organizationId: input.organizationId,
+            crmRoleId: input.crmRoleId,
+            crmCampaignId: input.campaignId,
+            archivedAt: null,
+          },
+          select: { crmCampaignId: true, name: true, status: true, syncedAt: true },
+        });
+        invalidateFences();
+        await sourceFence(server, "get_crm_role");
+        return finish({
+          operation: input.operation,
+          scope: "stored_role_campaigns",
+          crmRoleId: input.crmRoleId,
+          items: campaign
+            ? [
+                {
+                  id: campaign.crmCampaignId,
+                  name: campaign.name,
+                  status: campaign.status,
+                  syncedAt: campaign.syncedAt.toISOString(),
+                },
+              ]
+            : [],
+          offset: 0,
+          nextOffset: null,
+        });
+      }
+
       const page = parse(
         RecruitingCrmRoleCampaignsReadSchema,
         await read(server, "get_crm_role", {
@@ -3932,19 +3971,46 @@ export async function getRecruitingCrmData(
           new Set(page.leads.map((row) => row.id)).size !== page.leads.length
         )
           throw unavailable();
+        const ids = page.leads.flatMap((row) => (row.candidate_id ? [row.candidate_id] : []));
+        const contacts = ids.length
+          ? await deps.prisma.recruitingCrmContact.findMany({
+              where: {
+                userId: actor.userId,
+                spaceId: actor.spaceId,
+                mcpServerId: server.id,
+                organizationId: input.organizationId,
+                archivedAt: null,
+                crmCandidateId: { in: ids },
+              },
+              select: { crmCandidateId: true, name: true, email: true, profile: true },
+            })
+          : [];
+        const people = new Map(contacts.map((contact) => [contact.crmCandidateId, contact]));
+        invalidateFences();
         await sourceFence(server, "list_crm_campaigns");
         return done(
-          page.leads.map((row) => ({
-            id: row.id,
-            candidateId: row.candidate_id,
-            status: row.status,
-            interestStatus: row.interest_status,
-            openCount: row.email_open_count,
-            replyCount: row.email_reply_count,
-            lastContactAt: row.timestamp_last_contact,
-            lastReplyAt: row.timestamp_last_reply,
-            syncedAt: row.synced_at,
-          })),
+          page.leads.map((row) => {
+            const contact = row.candidate_id ? people.get(row.candidate_id) : undefined;
+            const image = correspondenceRecord(contact?.profile)?.profileImageUrl;
+            return {
+              id: row.id,
+              person: contact
+                ? {
+                    name: contact.name,
+                    email: contact.email,
+                    profileImageUrl: typeof image === "string" ? image : null,
+                  }
+                : null,
+              candidateId: row.candidate_id,
+              status: row.status,
+              interestStatus: row.interest_status,
+              openCount: row.email_open_count,
+              replyCount: row.email_reply_count,
+              lastContactAt: row.timestamp_last_contact,
+              lastReplyAt: row.timestamp_last_reply,
+              syncedAt: row.synced_at,
+            };
+          }),
           page.next_offset,
         );
       }

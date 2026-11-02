@@ -1598,6 +1598,7 @@ msgid "Contacted"
 msgstr "Contacted"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Contacts"
 msgstr "Contacts"
 
@@ -4360,6 +4361,10 @@ msgstr "Not recorded"
 msgid "Not recorded in this source"
 msgstr "Not recorded in this source"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Not reported"
+msgstr "Not reported"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not returned"
 msgstr "Not returned"
@@ -6619,6 +6624,10 @@ msgstr "This removes the connection from every space."
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "This result cannot be displayed yet"
 msgstr "This result cannot be displayed yet"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "This sequence is not saved for this role."
+msgstr "This sequence is not saved for this role."
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."

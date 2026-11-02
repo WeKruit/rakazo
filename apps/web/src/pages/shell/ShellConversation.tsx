@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentProps, CSSProperties } from "react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { MessageSkeleton } from "../../components/ai/primitives";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
@@ -90,6 +90,7 @@ export function ShellConversation({
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
+  const [outreachDraftThread, setOutreachDraftThread] = useState<string>();
   const { setReplyTarget, setReplyQuote, peopleAdded, workEstimate } = model;
   // Stable handlers keep the memoized transcript from re-rendering when a panel changes.
   const replyTo = useCallback(
@@ -423,11 +424,20 @@ export function ShellConversation({
                     readCache={recruitingReadCache.current}
                     readCacheScope={recruitingCacheScope}
                   />
-                  <details className="mt-6">
+                  <details
+                    key={activeSnapshot.threadId}
+                    className="mt-6"
+                    open={outreachDraftThread === activeSnapshot.threadId}
+                    onToggle={(event) =>
+                      setOutreachDraftThread(
+                        event.currentTarget.open ? activeSnapshot.threadId : undefined,
+                      )
+                    }
+                  >
                     <summary>
                       <Trans>Outreach drafts</Trans>
                     </summary>
-                    {nativeCorrespondence}
+                    {outreachDraftThread === activeSnapshot.threadId ? nativeCorrespondence : null}
                   </details>
                 </>
               ) : (
