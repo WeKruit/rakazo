@@ -21,7 +21,11 @@ import type {
   ThreadMessagePage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
-import { GROUP_MEMBER_MIN, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import {
+  EffortModeSchema,
+  GROUP_MEMBER_MIN,
+  MessageBlock as MessageBlockSchema,
+} from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
   AUTOMATION_RUN_TRIGGERS,
@@ -60,6 +64,7 @@ import {
   QueuedMessageError,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   STOPPED_TURN,
+  seesOperatorSpend,
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
@@ -583,9 +588,32 @@ export async function threadSnapshot(
   deps: { prisma: PrismaClient },
   target: ThreadTarget,
 ): Promise<ThreadSnapshot> {
-  const snapshot = await readThreadSnapshot(deps, target);
+  const [snapshot, effortMode] = await Promise.all([
+    readThreadSnapshot(deps, target),
+    threadEffortMode(deps.prisma, target.threadId),
+  ]);
   const suggestion = await latestReplySuggestion(deps.prisma, snapshot.messages);
-  return suggestion ? { ...snapshot, suggestion } : snapshot;
+  return {
+    ...snapshot,
+    ...(suggestion ? { suggestion } : {}),
+    ...(effortMode ? { effortMode } : {}),
+  };
+}
+
+/** The chat's effort mode when its owner may choose one; undefined otherwise or on a read error. */
+async function threadEffortMode(prisma: PrismaClient, threadId: string) {
+  try {
+    const thread = await prisma.thread.findUnique({
+      where: { id: threadId },
+      select: { effortMode: true, userId: true },
+    });
+    if (!thread || !(await seesOperatorSpend(prisma, thread.userId))) return undefined;
+    return EffortModeSchema.catch("fast").parse(thread.effortMode ?? "fast");
+  } catch (error) {
+    // The picker is optional; opening the chat must not fail on it.
+    getLogger().warn("thread effort mode read failed", { threadId, error });
+    return undefined;
+  }
 }
 
 async function readThreadSnapshot(
