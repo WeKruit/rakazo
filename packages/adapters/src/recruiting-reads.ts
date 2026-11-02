@@ -1285,6 +1285,8 @@ export async function getRecruitingCorrespondence(
   page: {
     limit?: number;
     cursor?: string;
+    /** Server-selected owned stored row, never an unverified provider ID from the UI. */
+    message?: RecruitingCorrespondence["emails"][number];
     savedReceipts?: {
       /** Worker-only exact receipt selection; the canonical owner/thread fences still apply. */
       effectId?: string;
@@ -1381,6 +1383,24 @@ export async function getRecruitingCorrespondence(
       ),
     };
     timer?.mark("mailConnectionsMs");
+    if (page.message) {
+      if (!workspace || !crmReads || page.message.crm) throw new ORPCError("NOT_FOUND");
+      await refreshRecruitingCorrespondence(
+        { prisma, ...crmReads },
+        actor,
+        {
+          threadId: target.threadId,
+          roleId: workspace.role.id,
+          view: "inbox",
+          message: page.message,
+        },
+        sourceRows.filter((source) => source.id === page.message!.sourceId),
+        output,
+      );
+      if (output.emails.length !== 1 || output.emails[0]!.snippet)
+        throw new ORPCError("SERVICE_UNAVAILABLE");
+      return output;
+    }
     let assertCalendarLineageCurrent: (() => Promise<void>) | undefined;
     const finish = async () => {
       timer?.mark("mailSavedReadsMs");

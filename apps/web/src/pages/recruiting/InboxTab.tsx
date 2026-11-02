@@ -533,6 +533,8 @@ export function InboxTab({
             {selected ? (
               <>
                 <EmailConversation
+                  spaceId={props.spaceId}
+                  roleId={props.roleId}
                   readState={inboxReadState}
                   key={selectedCandidateId}
                   items={conversationItems}
