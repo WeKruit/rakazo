@@ -812,6 +812,9 @@ importers:
       hast-util-to-text:
         specifier: 4.0.2
         version: 4.0.2
+      jsdom:
+        specifier: 30.0.1
+        version: 30.0.1(@noble/hashes@2.3.0)
       mdast-util-to-hast:
         specifier: 13.2.1
         version: 13.2.1
@@ -828,6 +831,9 @@ importers:
       '@types/d3-dsv':
         specifier: 3.0.7
         version: 3.0.7
+      '@types/jsdom':
+        specifier: 30.0.0
+        version: 30.0.0
       fast-check:
         specifier: 4.10.0
         version: 4.10.0
@@ -861,16 +867,10 @@ importers:
       dotenv:
         specifier: 17.4.2
         version: 17.4.2
-      jsdom:
-        specifier: 30.0.1
-        version: 30.0.1(@noble/hashes@2.3.0)
       pg:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
-      '@types/jsdom':
-        specifier: 30.0.0
-        version: 30.0.0
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
@@ -19785,13 +19785,6 @@ snapshots:
 
   smol-toml@1.8.0: {}
 
-  sonner@2.0.8(@types/react@19.2.18)(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
-    dependencies:
-      react: 19.2.3
-      react-dom: 19.2.3(react@19.2.3)
-    optionalDependencies:
-      '@types/react': 19.2.18
-
   socket.io-client@4.8.3:
     dependencies:
       '@socket.io/component-emitter': 3.1.2
@@ -19809,6 +19802,13 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  sonner@2.0.8(@types/react@19.2.18)(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+    dependencies:
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
+    optionalDependencies:
+      '@types/react': 19.2.18
 
   source-map-js@1.2.1: {}
 

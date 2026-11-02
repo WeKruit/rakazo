@@ -24,7 +24,7 @@ const ORIGINAL = {
 };
 const context = { spaceId: "s", userId: "u", botId: "b" } as never;
 
-it.each(["preserved", "flattened", "raw-newlines", "conflicting-fallback"])(
+it.each(["preserved", "flattened", "conflicting-fallback"])(
   "sends approved paragraph HTML and verifies the real rendered receipt: %s",
   async (mode) => {
     const text =
@@ -48,10 +48,7 @@ it.each(["preserved", "flattened", "raw-newlines", "conflicting-fallback"])(
       if (method !== "POST" || path !== "/emails/reply")
         throw new Error("Unexpected synthetic call");
       expect(payload).toMatchObject({ body: { text: text.replace(/\r\n/g, "\n"), html } });
-      const returned =
-        mode === "preserved"
-          ? html
-          : html.replaceAll("<br />", mode === "raw-newlines" ? "\n" : " ");
+      const returned = mode === "preserved" ? html : html.replaceAll("<br />", " ");
       raw = {
         ...ORIGINAL,
         id: "new-reply",
@@ -85,7 +82,7 @@ it.each(["preserved", "flattened", "raw-newlines", "conflicting-fallback"])(
       updatedAt: new Date("2026-11-02T04:32:00Z"),
     });
     expect(projected.status).toBe("sent");
-    expect(projected.error).toBe(mode === "preserved" ? undefined : "formatting_changed");
+    expect(projected.error).toBeUndefined();
     expect(projected.body.includes("\n")).toBe(mode === "preserved");
   },
 );

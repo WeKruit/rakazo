@@ -308,11 +308,7 @@ export async function readGmailReplyCard(
 }
 
 /** The recorded card outcome is business state, not an instruction to repeat the original tool. */
-export function mailReplyOutcomeInstruction(
-  reply: Pick<MailReply, "status"> & Pick<Partial<MailReply>, "error">,
-) {
-  if (reply.status === "sent" && reply.error === "formatting_changed")
-    return "The already-created reply card has a verified sent receipt, but the sent message has different line or paragraph formatting. It was sent; the card shows the actual sent body. Explain this formatting difference and never resend or recreate it automatically.";
+export function mailReplyOutcomeInstruction(reply: Pick<MailReply, "status">) {
   const outcome = {
     discarded:
       "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Stop working on this reply. Do not claim that card creation failed, retry it, or create a replacement card using another tool or route. Only a new explicit recruiter request may restart it.",

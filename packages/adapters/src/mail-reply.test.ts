@@ -135,12 +135,6 @@ describe("mail reply provenance", () => {
 it("reports the recorded card outcome rather than inventing missing or unconfirmed cards", () => {
   expect(mailReplyOutcomeInstruction({ status: "discarded" })).toContain("reply card was created");
   expect(mailReplyOutcomeInstruction({ status: "failed" })).toContain("definite send failure");
-  expect(mailReplyOutcomeInstruction({ status: "sent", error: "formatting_changed" })).toContain(
-    "different line or paragraph formatting",
-  );
-  expect(mailReplyOutcomeInstruction({ status: "sent", error: "formatting_changed" })).toContain(
-    "never resend",
-  );
   expect(mailReplyOutcomeInstruction({ status: "unknown" })).toContain(
     "Do not claim it sent or that nothing was sent",
   );

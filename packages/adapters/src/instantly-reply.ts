@@ -1,4 +1,3 @@
-import { mailReplyBodyMatches } from "@rakazo/db";
 import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 
@@ -187,9 +186,6 @@ export function classifyInstantlyReplyReceipt(
     email.body_fallback_reason != null ||
     email.subject !== args.subject ||
     (args.body_text !== undefined && email.body.text !== args.body_text) ||
-    (args.body_text?.trim() &&
-      email.body.html !== undefined &&
-      !mailReplyBodyMatches(args.body_text, email.body)) ||
     (args.body_html !== undefined && email.body.html !== args.body_html) ||
     (email.ue_type !== 3 && email.ue_type !== 4)
   )

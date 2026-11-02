@@ -44,23 +44,6 @@ const outgoing = {
   ue_type: 3,
 };
 
-it.each([
-  ["<p>First</p><p>Second</p>", "sent_recorded"],
-  ["<p>First Second</p>", "unknown"],
-  ["<p>First\n\nSecond</p>", "unknown"],
-] as const)(
-  "checks remote rendered paragraphs without changing its wire contract: %s",
-  (html, status) => {
-    const body_text = "First\n\nSecond";
-    expect(
-      classifyInstantlyReplyReceipt({ ...request, body_text }, anchor, {
-        ...outgoing,
-        body: { text: body_text, html },
-      }).status,
-    ).toBe(status);
-  },
-);
-
 describe("Instantly reply payload contract", () => {
   it("preserves approved argument values and known optional fields", () => {
     const args = {
@@ -252,7 +235,7 @@ describe("Instantly existing-thread reply proof", () => {
   it("matches canonical recipient sets without using display names or list order", () => {
     const args = {
       ...request,
-      body_html: "<p>Thank you.<br />Here are the details. </p>",
+      body_html: "<p>Thank you.</p>",
       cc_address_email_list: "First <one@EXAMPLE.com>, two@example.com",
       bcc_address_email_list: "audit@example.com",
     };

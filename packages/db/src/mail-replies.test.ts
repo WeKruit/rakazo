@@ -8,12 +8,7 @@ import {
 } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "./client.js";
-import {
-  editMailReplyRequest,
-  mailReplyBodyMatches,
-  mailReplyState,
-  projectMailReplyCards,
-} from "./mail-replies.js";
+import { editMailReplyRequest, mailReplyState, projectMailReplyCards } from "./mail-replies.js";
 
 const actor = {
   userId: "owner",
@@ -287,125 +282,65 @@ it.each([
   },
 );
 
-it("keeps historical plain-text receipts without a thread while requiring thread proof for HTML", () => {
-  const reply = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
-  const receipt = {
-    id: "sent-email",
-    ue_type: 3,
-    eaccount: reply.from,
-    subject: reply.subject,
-    to_address_email_list: reply.to.join(","),
-  };
-  const effect = (body: Prisma.JsonObject) => ({
-    status: "completed",
-    request: {},
-    result: { structuredContent: { result: { ...receipt, body } } },
-    updatedAt: new Date("2026-11-02T02:36:20Z"),
-  });
-  expect(mailReplyState(reply, effect({ text: reply.body })).status).toBe("sent");
-  expect(
-    mailReplyState(
-      reply,
-      effect({
-        html: `<html><head><title>Original</title></head><body>${reply.body}</body></html>`,
-      }),
-    ).status,
-  ).toBe("unknown");
-});
-
-it("verifies the native REST text-only HTML body without matching titles, quoted text, or different recipients", () => {
-  const html = (body: string, title = "Original") =>
-    `<html><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
-  const reply = { ...draft, body: "谢谢，A & B < C > D.\nNext line." };
-  const escaped = "谢谢，A &amp; B &lt; C &gt; D.<br>Next line.";
+it("uses only the same native POST identity for Sent and displays its actual receipt body", () => {
   const request = boundDirectApprovalRequest(
     { connectorId: "mcp", resourceId: "source", toolName: "native_instantly_reply_to_email" },
     {
-      reply_to_uuid: reply.inReplyTo.emailId,
-      eaccount: reply.from,
-      subject: reply.subject,
-      body: { text: reply.body },
+      reply_to_uuid: "anchor",
+      eaccount: draft.from,
+      body: { text: "First\n\nSecond" },
+      subject: draft.subject,
     },
     "__rakazoCatalogTool",
   );
   const receipt = {
     id: "new-email",
     ue_type: 3,
-    eaccount: reply.from,
-    subject: reply.subject,
-    to_address_email_list: reply.to.join(","),
+    thread_id: "thread",
+    eaccount: draft.from,
+    subject: draft.subject,
+    to_address_email_list: draft.to.join(","),
     cc_address_email_list: "",
-    thread_id: reply.inReplyTo.threadId,
-    body: { html: html(escaped) },
+    body: { html: "<html><head><title>Not body</title></head><body>First Second</body></html>" },
   };
-  const effect = (payload: Prisma.JsonObject) => ({
+  const effect = (payload: Prisma.JsonObject, source = "local_native_instantly_rest") => ({
     status: "completed",
     request: request as Prisma.JsonArray,
-    result: { structuredContent: { source: "local_native_instantly_rest", result: payload } },
-    updatedAt: new Date("2026-11-02T02:36:20Z"),
+    result: { structuredContent: { source, result: payload } },
+    updatedAt: new Date("2026-11-02T04:32:00Z"),
   });
-  expect(mailReplyState(reply, effect(receipt))).toMatchObject({
-    status: "sent",
-    sentAt: "2026-11-02T02:36:20.000Z",
-  });
-  for (const separator of [" ", "\n"]) {
-    const flat = { ...receipt, body: { html: html(escaped.replaceAll("<br>", separator)) } };
-    expect(mailReplyState(reply, effect(flat))).toMatchObject({
+  for (const [body, expected] of [
+    [{ html: "<p>First Second</p>" }, "First Second"],
+    [{ html: "<p>First<br><br>Second</p>" }, "First\n\nSecond"],
+    [{ html: "<p>First Second</p>", text: "First\n\nSecond" }, "First Second"],
+    [
+      { html: "<p>Actual 中文 &amp; &lt;text&gt;</p><script>globalThis.ran = true</script>" },
+      "Actual 中文 & <text>",
+    ],
+    [{ text: "Actual plain body" }, "Actual plain body"],
+  ] as const) {
+    const state = mailReplyState(draft, effect({ ...receipt, body }));
+    expect(state).toMatchObject({
       status: "sent",
-      error: "formatting_changed",
-      body: "谢谢，A & B < C > D. Next line.",
-      sentAt: expect.any(String),
+      body: expected,
+      sentAt: "2026-11-02T04:32:00.000Z",
     });
-    for (const changed of [
-      { to_address_email_list: "foreign@example.test" },
-      { eaccount: "foreign@example.test" },
-      { thread_id: "foreign" },
-      { subject: "foreign" },
-      { id: reply.inReplyTo.emailId },
-      { cc_address_email_list: "foreign@example.test" },
-    ])
-      expect(mailReplyState(reply, effect({ ...flat, ...changed })).status).toBe("unknown");
+    expect(state.error).toBeUndefined();
+    expect((globalThis as Record<string, unknown>).ran).toBeUndefined();
   }
   for (const changed of [
-    { body: { html: html("Different reply", escaped) } },
-    { body: { html: html(`<blockquote>${escaped}</blockquote>`) } },
-    { body: { html: html(`<div class="gmail_quote">${escaped}</div>`) } },
-    { body: { html: html(`<script>${escaped}</script>`) } },
-    { body: { html: html(`<span>${escaped}</span>`) } },
-    { body: { html: html(`Different reply ${escaped}`) } },
-    { body: { html: html(`${escaped} Extra unapproved sentence.`) } },
-    { to_address_email_list: "someone-else@example.test" },
-    { id: reply.inReplyTo.emailId },
-    { thread_id: "different-thread" },
-    { body: { html: html(escaped), text: "Different plain text" } },
+    { id: "anchor" },
     { ue_type: 4 },
+    { thread_id: "foreign" },
+    { eaccount: "foreign@example.test" },
+    { to_address_email_list: "foreign@example.test" },
+    { cc_address_email_list: "foreign@example.test" },
+    { subject: "foreign" },
   ])
-    expect(mailReplyState(reply, effect({ ...receipt, ...changed }))).toMatchObject({
-      status: "unknown",
-      sentAt: null,
-    });
-  for (const markup of [
-    html(`<p>${escaped}</p>`),
-    html(escaped.replace("  Next", "<br>Next")),
-    html(`<div>${escaped}</div>`),
-  ])
-    expect(mailReplyState(reply, effect({ ...receipt, body: { html: markup } })).status).toBe(
-      "sent",
-    );
-  expect(mailReplyState(reply, effect({ ...receipt, body: { text: reply.body } }))).toMatchObject({
-    status: "sent",
-  });
-});
-
-it("normalizes only line-internal HTML whitespace and decodes standard entities", () => {
-  for (const text of ["A  B\n\nC", " A\tB\n\n  C", "A B\r\n\r\nC"]) {
-    expect(mailReplyBodyMatches(text, { html: "<p>A B</p><p>C</p>" })).toBe(true);
-    expect(mailReplyBodyMatches(text, { html: "<p>A B C</p>" })).toBe(false);
-    expect(mailReplyBodyMatches(text, { html: "<p>A B\n\nC</p>" })).toBe(false);
-  }
+    expect(mailReplyState(draft, effect({ ...receipt, ...changed })).status).toBe("unknown");
+  expect(mailReplyState(draft, effect(receipt, "untrusted-source")).status).toBe("unknown");
   expect(
-    mailReplyBodyMatches("中文 \"A&B\" <C> 'D'", {
-      html: "<p>中文 &quot;A&amp;B&quot; &lt;C&gt; &#39;D&#39;</p>",
-    }),
-  ).toBe(true);
+    mailReplyState({ ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } }, effect(receipt))
+      .status,
+  ).toBe("unknown");
 });
