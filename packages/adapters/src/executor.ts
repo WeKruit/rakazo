@@ -1229,6 +1229,9 @@ const YEARS_OPEN_NOTE =
   "The JD states no years of experience: one of your clarifying questions before the search is the years range, offering two or three ranges that fit the pay.";
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
+const ROLE_NOT_SAVED_NOTE =
+  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
+
 const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
@@ -5959,6 +5962,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
+        // The model saved the recruiter's described role in this turn, so its first question plans searches.
+        let roleCreatedInTurn = false;
         // After the ten are shown the server saves the recruiter's intake answers as the brief, so
         // the role always has one; the model's own brief save then replaces it. The next-step card
         // waits for that save, so the pause never cuts it off.
@@ -12697,7 +12702,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             // A new role's first question is the coordinator's own: a handoff first costs the
             // recruiter a second agent's start-up before anything appears.
-            if (linkRole && !intakeHandoffRefused && recruitingBotKey(bot) === "main") {
+            if (
+              (linkRole || roleCreatedInTurn) &&
+              !intakeHandoffRefused &&
+              recruitingBotKey(bot) === "main"
+            ) {
               intakeHandoffRefused = true;
               return finish({ error: INTAKE_ASK_FIRST });
             }
@@ -13023,6 +13032,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
           );
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
+          if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
           savesInFlight.add(settled);
           void settled.then(() => savesInFlight.delete(settled));
@@ -13205,8 +13215,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : currentTurnMessage.blocks.find(
                 (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
               );
-          // A role team opened without a JD ("new grads from USC, CS") still gets its role saved
-          // now, under a working title, so every later step has a role to save to.
+          // A role team opened without a JD gets its role saved now when the message names it
+          // (a Kruit-opened role, or a title line above the requirements).
           const request =
             !block && !file && thread.groupId && recruitingBotKey(bot)
               ? texts
@@ -13246,9 +13256,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 )?.name.trim()
               : undefined;
             const title =
-              named && named !== NEW_ROLE_TITLE
-                ? named.slice(0, 120)
-                : (requestTitle(request) ?? NEW_ROLE_TITLE);
+              named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : requestTitle(request);
+            // A greeting or a question is not a role: the model saves one only once the recruiter
+            // has described it, so no empty role appears and no search runs for it.
+            if (!title) return undefined;
             return {
               saving: create(title, [], request),
               note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
@@ -13382,6 +13393,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .map((turn) => turn.receiptSeq);
           if (!plan || !planned.success || plan.seq <= Math.max(0, ...answeredBefore))
             return undefined;
+          // A placeholder role was never described, so its plan searches for nobody in particular.
+          const role = await deps.prisma.recruitingRole.findUnique({
+            where: { id: thread.activeRecruitingRoleId ?? "" },
+            select: { title: true },
+          });
+          if (!role || role.title === NEW_ROLE_TITLE) return undefined;
           const startedAt = Date.now();
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
@@ -13669,6 +13686,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
           currentTurnMessage.blocks.some((block) => block.kind === "file") &&
           tools.some((tool) => tool.name === "recruiting_role")
             ? FILE_JOB_NOTE
+            : undefined,
+          !linkRole &&
+          !fileNote &&
+          thread.groupId &&
+          !thread.groupId.startsWith("recruiting-global-") &&
+          !thread.activeRecruitingRoleId &&
+          currentTurnMessage?.role === "user" &&
+          !currentTurnMessage.blocks.some((block) => block.kind === "file") &&
+          recruitingBotKey(bot) &&
+          tools.some((tool) => tool.name === "recruiting_role")
+            ? ROLE_NOT_SAVED_NOTE
             : undefined,
           intakeNote,
           plannedNote,
@@ -14372,14 +14400,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // planned with it; without four of them the answer turn waits on its own searches.
                     // An explicit [] is the recruiter's own-list-only instruction.
                     if (
-                      (firstRoundPending || linkRole || attachedJob) &&
+                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
                       (plannedSearches === undefined ||
                         (plannedSearches.length > 0 && plannedSearches.length < 4))
                     )
                       return { instead: PLANNED_SEARCHES_MISSING };
                     // An empty plan once skipped the planned searches for a role with no own-list rule.
                     if (
-                      (firstRoundPending || linkRole || attachedJob) &&
+                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
                       plannedSearches?.length === 0 &&
                       !emptySearchesBounced
                     ) {
@@ -14674,7 +14702,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
-              if (event.plannedSearches?.length && (firstRoundPending || linkRole || attachedJob))
+              if (
+                event.plannedSearches?.length &&
+                (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn)
+              )
                 await deps.events
                   .append({
                     spaceId: run.spaceId,
