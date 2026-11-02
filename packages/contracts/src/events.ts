@@ -605,6 +605,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     text: z.string(),
     /** Provider-generated tool status rather than assistant-authored narration. */
     activity: z.literal(true).optional(),
+    /** A question to the person being written; shown even when reply streaming is off. */
+    question: z.literal(true).optional(),
     pendingToolNames: z.array(z.string()).optional(),
     pendingToolCalls: z
       .array(

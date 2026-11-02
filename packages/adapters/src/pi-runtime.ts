@@ -4238,6 +4238,11 @@ export function reliableStreamOptions(
           promptCacheKey: key,
           systemSha: digest(first),
           systemChars: JSON.stringify(first ?? null).length,
+          // Where two accounts' system prompts part ways when a shared key still misses.
+          systemPrefixShas: [2_000, 8_000, 16_000, 24_000].map((chars) =>
+            digest(JSON.stringify(first ?? null).slice(0, chars)).slice(0, 6),
+          ),
+          toolsSha: digest(body.tools),
           inputItems: Array.isArray(body.input) ? body.input.length : null,
         });
         return { ...body, prompt_cache_key: key };

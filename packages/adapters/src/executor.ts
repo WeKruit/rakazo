@@ -6126,6 +6126,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 payload: {
                   text: visible(redactSecrets(text, runSecrets)),
                   streaming: true,
+                  question: true,
                   ...runTiming,
                 },
               }),
