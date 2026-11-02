@@ -28,6 +28,7 @@ import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { startRecruitingGrading } from "./recruiting-grading.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
+import { projectRecruitingInboxJob } from "./recruiting-reads.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import { checkThreadReplied } from "./reply-check.js";
 import {
@@ -172,6 +173,9 @@ export function createBackgroundJobHandlers(deps: {
     },
     "recruiting_grade.start": async (payload) => {
       await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+    },
+    "recruiting_inbox.project": async (payload) => {
+      await projectRecruitingInboxJob({ prisma: deps.prisma, events: deps.events }, payload);
     },
     "recruiting_profile.project": async (payload) => {
       await projectRecruitingCandidateProfiles(

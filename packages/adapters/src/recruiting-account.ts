@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import type { ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
+import type { ArtifactStore, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingAccountViewInput,
@@ -38,6 +38,7 @@ export type RecruitingAccountReadDeps = {
   prisma: PrismaClient;
   artifacts: ArtifactStore;
   connectors: Pick<ConnectorProvider, "execute">;
+  jobs?: JobPublisher;
   firstPartyMcpUrl?: string;
   signal?: AbortSignal;
   stillAuthorized?: () => Promise<boolean>;

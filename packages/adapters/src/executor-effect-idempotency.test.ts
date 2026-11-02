@@ -523,6 +523,51 @@ function fixture(
   };
 }
 
+describe("asynchronous mailbox receipt projection", () => {
+  it("publishes only after canonical completion and does not hold the tool while the display queue is pending", async () => {
+    const f = fixture("mail-receipt-projection");
+    const tool = {
+      name: "mcp__mail__get_email",
+      description: "Read email",
+      readOnly: true,
+      inputSchema: { type: "object" },
+      route: { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "get_email" },
+    };
+    f.connector.discoverTools.mockResolvedValue([tool]);
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "result" as const, data: { structuredContent: { id: "saved-email" } } };
+    });
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
+    ]);
+    const pending: Array<() => void> = [];
+    const enqueue = vi.fn((job: { name: string; payload: { effectId?: string } }) => {
+      if (job.name !== "recruiting_inbox.project") return Promise.resolve();
+      expect(f.effects.find((effect) => effect.id === job.payload.effectId)?.status).toBe(
+        "completed",
+      );
+      return new Promise<void>((resolve) => pending.push(resolve));
+    });
+    f.executorDeps.jobs.enqueue = enqueue as never;
+    f.setCalls([{ name: tool.name, args: { id: "saved-email" }, executionId: "read-email" }]);
+    await f.run();
+    expect(f.connector.execute).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith({
+      name: "recruiting_inbox.project",
+      payload: { effectId: f.effects[0]!.id },
+      replaceKey: `recruiting_inbox.project:${f.effects[0]!.id}`,
+      keepExisting: true,
+    });
+    f.setCalls([{ name: tool.name, args: { id: "saved-email" }, executionId: "replayed-email" }]);
+    await f.run();
+    expect(f.connector.execute).toHaveBeenCalledOnce();
+    expect(
+      enqueue.mock.calls.filter(([job]) => job.name === "recruiting_inbox.project"),
+    ).toHaveLength(2);
+    for (const resolve of pending) resolve();
+  });
+});
+
 describe("native Cal.com booking approvals", () => {
   it.each(
     (["direct", "catalog"] as const).flatMap((mode) =>

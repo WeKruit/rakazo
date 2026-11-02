@@ -378,3 +378,89 @@ describe("live role correspondence", () => {
     expect(output.status).not.toBe("failed");
   });
 });
+
+it.each(["pending", "failed"])(
+  "queues the actual live page without awaiting %s persistence or re-dating cached rows",
+  async (publisher) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    const { prisma } = fixture();
+    const finishes: Array<() => void> = [];
+    const enqueue = vi.fn((_job: unknown) =>
+      publisher === "failed"
+        ? Promise.reject(new Error("private test publisher failure"))
+        : new Promise<void>((resolve) => finishes.push(resolve)),
+    );
+    const execute = vi.fn(async function* () {
+      vi.advanceTimersByTime(5000);
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            items: [
+              {
+                id: "00000000-0000-4000-8000-000000000003",
+                campaign_id: campaignId,
+                timestamp_created: "2026-10-30T10:00:00Z",
+                timestamp_email: "2026-10-30T10:00:00Z",
+                message_id: "message-3",
+                subject: "Actual provider reply",
+                from_address_email: "candidate@example.test",
+                to_address_email_list: "recruiter@example.test",
+                body: { text: "Interested" },
+                organization_id: "00000000-0000-4000-8000-000000000002",
+                eaccount: "recruiter@example.test",
+                ue_type: 2,
+              },
+            ],
+          },
+        },
+      };
+    });
+    const output = empty();
+    output.emails = [
+      {
+        id: "old",
+        sourceId: "old-source",
+        sourceName: "old",
+        providerMessageId: "old",
+        savedRead: null,
+        sender: null,
+        recipients: [],
+        subject: "old",
+        body: "Cached older body",
+        snippet: false,
+        date: null,
+        url: null,
+      },
+    ];
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute }, jobs: { enqueue } as never },
+      actor,
+      { roleId: "role", threadId: "thread", view: "inbox" },
+      [source("instantly")],
+      output,
+    );
+    expect(output.emails).toHaveLength(2);
+    expect(output.status).toBe("ready");
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(enqueue.mock.calls[0]![0]).toMatchObject({
+      name: "recruiting_inbox.project",
+      payload: {
+        observation: {
+          threadId: "thread",
+          roleId: "role",
+          sourceId: "instantly",
+          sourceRevision: 1,
+          botId: "main",
+          campaignId,
+          observedAt: "2026-10-30T12:00:00.000Z",
+          emails: [
+            expect.objectContaining({ body: "Interested", eaccount: "recruiter@example.test" }),
+          ],
+        },
+      },
+    });
+    for (const finish of finishes) finish();
+  },
+);

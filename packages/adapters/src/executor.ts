@@ -566,6 +566,7 @@ import {
   linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
+import { deferRecruitingInboxReceipt } from "./recruiting-reads.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -9232,6 +9233,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (current) {
               const retryGate = resolveDuplicateEffectGate(current, name);
               if (retryGate.action === "return") {
+                if (current.status === "completed")
+                  deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, current.id);
                 if (
                   name === "recruiting_assess" &&
                   current.status === "completed" &&
@@ -9727,6 +9730,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (applied?.duplicate) {
             const gate = resolveDuplicateEffectGate(applied.effect, name);
             if (gate.action === "return") {
+              if (applied.effect.status === "completed")
+                deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, applied.effect.id);
               if (
                 name === "recruiting_assess" &&
                 applied.effect.status === "completed" &&
@@ -9835,8 +9840,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   result,
                 )
               : Promise.resolve(true);
-          const finish = async (result: unknown) =>
-            (await persistEffectResult(result)) ? result : uncertainEffectResult(name);
+          const finish = async (result: unknown) => {
+            if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
+            if (applied && toolResultError(result) === undefined)
+              deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, applied.effect.id);
+            return result;
+          };
           // A people search reaches Results the moment it returns: the server saves it as its
           // own page and the agent gets the saved rows, so no save step sits before the panel.
           const savePeopleSearchAsItReturns = async (returned: unknown) => {

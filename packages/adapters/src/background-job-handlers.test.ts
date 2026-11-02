@@ -13,8 +13,13 @@ import { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { projectRecruitingCandidateProfiles } from "./recruiting-profiles.js";
+import { projectRecruitingInboxJob } from "./recruiting-reads.js";
 import type { EncryptedSecretStore } from "./secrets.js";
 
+vi.mock("./recruiting-reads.js", async (original) => ({
+  ...(await original<typeof import("./recruiting-reads.js")>()),
+  projectRecruitingInboxJob: vi.fn(async () => undefined),
+}));
 vi.mock("./history-compaction.js", () => ({ compactHistory: vi.fn(async () => undefined) }));
 vi.mock("./recruiting-profiles.js", () => ({
   projectRecruitingCandidateProfiles: vi.fn(async () => undefined),
@@ -25,6 +30,18 @@ vi.mock("./messaging-delivery.js", () => ({
 }));
 
 describe("createBackgroundJobHandlers", () => {
+  it("registers canonical inbox projection and retains Graphile retry on a transient failure", async () => {
+    const deps = { prisma: {}, events: {} } as Parameters<typeof createBackgroundJobHandlers>[0];
+    const handlers = createBackgroundJobHandlers(deps);
+    const payload = { effectId: "mail-receipt" };
+    await handlers["recruiting_inbox.project"](payload);
+    expect(projectRecruitingInboxJob).toHaveBeenCalledWith(
+      { prisma: deps.prisma, events: deps.events },
+      payload,
+    );
+    vi.mocked(projectRecruitingInboxJob).mockRejectedValueOnce(new Error("database busy"));
+    await expect(handlers["recruiting_inbox.project"](payload)).rejects.toThrow("database busy");
+  });
   it("registers saved-profile projection with the existing worker and lets queue failures retry", async () => {
     const deps = { prisma: {}, events: {} } as Parameters<typeof createBackgroundJobHandlers>[0];
     const handlers = createBackgroundJobHandlers(deps);

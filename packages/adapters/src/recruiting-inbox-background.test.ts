@@ -2,7 +2,11 @@ import type { Actor } from "@rakazo/contracts";
 import * as db from "@rakazo/db";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { classifyInstantlyReplyReceipt } from "./instantly-reply.js";
-import { indexSavedRecruitingInbox } from "./recruiting-reads.js";
+import {
+  deferRecruitingInboxReceipt,
+  indexSavedRecruitingInbox,
+  projectRecruitingInboxJob,
+} from "./recruiting-reads.js";
 
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
@@ -11,6 +15,16 @@ vi.mock("@rakazo/db", async (original) => ({
   readRecruitingImportedCorrespondence: vi.fn(),
   projectRecruitingInboxMessages: vi.fn(),
   requireMembership: vi.fn(),
+  createRepos: vi.fn(() => ({
+    getBot: vi.fn(async () => ({ id: "main", thread: { id: "thread" } })),
+  })),
+  createGroupRepos: vi.fn(() => ({
+    getGroupTarget: vi.fn(async () => ({
+      id: "group",
+      thread: { id: "thread" },
+      members: [{ bot: { id: "main" } }],
+    })),
+  })),
 }));
 const actor = {
   userId: "owner",
@@ -56,7 +70,7 @@ function fixture() {
   const prisma = {
     $queryRaw: vi.fn(async () => [{ id: "role", sourceThreadId: "thread" }]),
     $executeRaw: vi.fn(),
-    thread: { findFirst: vi.fn(async () => ({ id: "thread" })) },
+    thread: { findFirst: vi.fn(async (_query: unknown) => ({ id: "thread" })) },
     mcpServer: {
       findMany: vi.fn(async (_query: unknown) => [{ ...server, assignments: [grant] }]),
     },
@@ -337,5 +351,377 @@ it("enumerates only active owned current roles and continues to a later eligible
   expect(f.updates).toHaveBeenLastCalledWith(
     expect.objectContaining({ data: { nativeCursor: { roleId: "role", done: true } } }),
   );
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("queues only resolved native mailbox reads without awaiting the queue or retaining mail contents", async () => {
+  let finish!: () => void;
+  const enqueue = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const route = {
+    connectorId: "mcp",
+    resourceId: "mail",
+    resourceRevision: 1,
+    toolName: "native_instantly_get_email",
+  };
+  expect(deferRecruitingInboxReceipt({ enqueue } as never, route, "receipt-1")).toBeUndefined();
+  expect(enqueue).toHaveBeenCalledWith({
+    name: "recruiting_inbox.project",
+    payload: { effectId: "receipt-1" },
+    replaceKey: "recruiting_inbox.project:receipt-1",
+    keepExisting: true,
+  });
+  deferRecruitingInboxReceipt(
+    { enqueue } as never,
+    { ...route, connectorId: "other" },
+    "receipt-other",
+  );
+  deferRecruitingInboxReceipt(
+    { enqueue } as never,
+    { ...route, toolName: "get_campaign" },
+    "receipt-campaign",
+  );
+  expect(enqueue).toHaveBeenCalledTimes(1);
+  finish();
+  await Promise.resolve();
+});
+
+function receiptFixture() {
+  const f = fixture();
+  const effect = {
+    id: "receipt-1",
+    status: "completed",
+    spaceId: "space",
+    request: request("get_email", { id: uuid(1) }),
+    updatedAt: new Date("2026-10-23T00:00:00Z"),
+    run: {
+      id: "run",
+      userId: "owner",
+      spaceId: "space",
+      botId: "main",
+      threadId: "thread",
+      initialRecruitingRoleRevision: { roleId: "role" },
+      thread: {
+        id: "thread",
+        userId: "owner",
+        spaceId: "space",
+        groupId: null,
+        botId: "main",
+        activeRecruitingRoleId: "role",
+      },
+    },
+  };
+  const prisma = {
+    ...f.prisma,
+    externalEffect: Object.assign(f.prisma.externalEffect, {
+      findUnique: vi.fn(async () => effect),
+    }),
+  };
+  f.prisma.externalEffect.findMany.mockImplementation(async (query) =>
+    "result" in (query as { select: object }).select
+      ? [{ id: effect.id, result: { structuredContent: email(1) } }]
+      : [{ ...effect, run: { id: "run", botId: "main", sourceMessageId: null } }],
+  );
+  const events = { append: vi.fn(async (_event: unknown) => ({})) };
+  return {
+    ...f,
+    prisma,
+    effect,
+    events,
+    project: () =>
+      projectRecruitingInboxJob(
+        { prisma: prisma as never, events: events as never },
+        { effectId: effect.id },
+      ),
+  };
+}
+
+it("projects one canonical receipt within its owner/Space/current role without touching the full-pass cursor", async () => {
+  const f = receiptFixture();
+  await f.project();
+  const query = f.prisma.externalEffect.findMany.mock.calls[0]![0] as {
+    where: Record<string, unknown>;
+  };
+  expect(query.where.id).toBe("receipt-1");
+  expect(query.where).toMatchObject({
+    spaceId: "space",
+    run: { userId: "owner", spaceId: "space", threadId: "thread" },
+  });
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalledWith(
+    f.prisma,
+    actor,
+    expect.objectContaining({
+      roleId: "role",
+      observedAt: f.effect.updatedAt,
+      emails: [expect.objectContaining({ providerMessageId: uuid(1), body: "Original 1" })],
+    }),
+    expect.any(Function),
+  );
+  expect(f.prisma.recruitingInboxIndexProgress.findUnique).not.toHaveBeenCalled();
+  expect(f.updates).not.toHaveBeenCalled();
+  expect(f.prisma.$executeRaw).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(["owner", "space", "role", "status", "source"])(
+  "does not project a retired canonical %s scope",
+  async (kind) => {
+    const f = receiptFixture();
+    if (kind === "owner") f.effect.run.thread.userId = "other";
+    if (kind === "space") f.effect.run.spaceId = "other-space";
+    if (kind === "role") f.effect.run.thread.activeRecruitingRoleId = "other-role";
+    if (kind === "status") f.effect.status = "executing";
+    if (kind === "source") f.effect.request = request("get_campaign", {});
+    await f.project();
+    expect(db.projectRecruitingInboxMessages).not.toHaveBeenCalled();
+  },
+);
+
+it("lets projection failures reach Graphile retry and succeeds when the same canonical receipt is replayed", async () => {
+  const f = receiptFixture();
+  vi.mocked(db.projectRecruitingInboxMessages).mockRejectedValueOnce(new Error("database busy"));
+  await expect(f.project()).rejects.toThrow("database busy");
+  await f.project();
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalledTimes(2);
+});
+
+it("does not make the tool fail when asynchronous queue publication fails", async () => {
+  const enqueue = vi.fn(async () => {
+    throw new Error("database busy");
+  });
+  expect(
+    deferRecruitingInboxReceipt(
+      { enqueue } as never,
+      { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "get_email" },
+      "receipt",
+    ),
+  ).toBeUndefined();
+  await Promise.resolve();
+});
+
+it("revalidates membership and exact current source before committing the projection", async () => {
+  const f = receiptFixture();
+  let reads = 0;
+  f.prisma.mcpServer.findMany.mockImplementation(async () =>
+    ++reads < 3 ? [{ ...server, assignments: [grant] }] : [],
+  );
+  await f.project();
+  expect(reads).toBe(3);
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalledOnce();
+  expect(f.updates).not.toHaveBeenCalled();
+});
+
+it("wakes only the current role and that owner's existing global workspace after commit", async () => {
+  const f = receiptFixture();
+  let committed = false;
+  vi.mocked(db.projectRecruitingInboxMessages).mockImplementation(
+    async (_prisma, _actor, _input, authorize) => {
+      await authorize?.();
+      committed = true;
+    },
+  );
+  f.prisma.thread.findFirst.mockImplementation(async (query: unknown) => {
+    const where = (query as { where: Record<string, unknown> }).where;
+    if (where.groupId) {
+      expect(where).toMatchObject({
+        userId: "owner",
+        spaceId: "space",
+        groupId: db.recruitingGlobalGroupId(actor),
+        group: { userId: "owner", spaceId: "space", archivedAt: null },
+      });
+      return { id: "global-thread", group: { members: [{ botId: "global-main" }] } };
+    }
+    return { id: "thread" };
+  });
+  const append = vi.fn(async (_event: unknown) => {
+    expect(committed).toBe(true);
+  });
+  await projectRecruitingInboxJob(
+    { prisma: f.prisma as never, events: { append } as never },
+    { effectId: "receipt-1" },
+  );
+  expect(append.mock.calls.map(([event]) => (event as { threadId: string }).threadId)).toEqual([
+    "thread",
+    "global-thread",
+  ]);
+  expect(append).toHaveBeenCalledWith(
+    expect.objectContaining({
+      spaceId: "space",
+      threadId: "global-thread",
+      botId: "global-main",
+      type: "recruiting.changed",
+      payload: { roleId: "role" },
+    }),
+  );
+  expect(f.prisma.$executeRaw).not.toHaveBeenCalled();
+});
+
+it("retries a missed post-commit signal using the same receipt without replacing observed mail", async () => {
+  const f = receiptFixture();
+  const append = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("notify busy"))
+    .mockResolvedValue(undefined);
+  const project = () =>
+    projectRecruitingInboxJob(
+      { prisma: f.prisma as never, events: { append } as never },
+      { effectId: "receipt-1" },
+    );
+  await expect(project()).rejects.toThrow("notify busy");
+  await project();
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalledTimes(2);
+  expect(
+    vi.mocked(db.projectRecruitingInboxMessages).mock.calls.map(([, , input]) => input.observedAt),
+  ).toEqual([f.effect.updatedAt, f.effect.updatedAt]);
+});
+
+it.each(["endpoint", "revision", "grant", "transport", "disabled"])(
+  "rejects a changed canonical mailbox %s",
+  async (kind) => {
+    const f = receiptFixture();
+    const changed = { ...server, assignments: [grant] };
+    if (kind === "endpoint") changed.endpoint = "https://other.example.test/mcp";
+    if (kind === "revision") changed.revision = 2;
+    if (kind === "grant")
+      changed.assignments = [{ ...grant, allowAllTools: false, allowedTools: [] }];
+    if (kind === "transport") changed.transport = "stdio";
+    if (kind === "disabled") changed.enabled = false;
+    f.prisma.mcpServer.findMany.mockResolvedValue([changed]);
+    await f.project();
+    expect(db.projectRecruitingInboxMessages).not.toHaveBeenCalled();
+  },
+);
+
+function liveFixture() {
+  const f = receiptFixture();
+  const observation = {
+    threadId: "thread",
+    roleId: "role",
+    sourceId: "mail",
+    sourceRevision: 1,
+    botId: "main",
+    campaignId: uuid(1000),
+    observedAt: "2026-10-23T00:00:00.000Z",
+    emails: [
+      {
+        id: `mail:${uuid(1)}`,
+        sourceName: "Instantly",
+        sourceId: "mail",
+        providerMessageId: uuid(1),
+        savedRead: null,
+        campaignId: uuid(1000),
+        eaccount: "owner@example.test",
+        sender: "person@example.test",
+        recipients: ["owner@example.test"],
+        subject: "Live reply",
+        body: "Verified live observation",
+        snippet: false,
+        date: "2026-10-22T12:00:00.000Z",
+        url: null,
+      },
+    ],
+  };
+  const binding = {
+    kind: "instantly_role_campaign",
+    status: "completed",
+    spaceId: "space",
+    request: { roleId: "role", serverId: "mail" },
+    result: { campaignId: uuid(1000), eaccount: "owner@example.test" },
+    run: { userId: "owner", spaceId: "space", threadId: "thread" },
+  };
+  Object.assign(f.prisma.thread, { findUnique: vi.fn(async () => f.effect.run.thread) });
+  f.prisma.externalEffect.findUnique.mockImplementation(async () => binding as never);
+  return {
+    ...f,
+    observation,
+    binding,
+    projectLive: () =>
+      projectRecruitingInboxJob({ prisma: f.prisma as never, events: f.events as never }, {
+        observation,
+      } as never),
+  };
+}
+it("projects a server-verified live observation at its GET start without re-reading providers or replaying receipt history", async () => {
+  const f = liveFixture();
+  await f.projectLive();
+  expect(db.projectRecruitingInboxMessages).toHaveBeenCalledWith(
+    f.prisma,
+    actor,
+    expect.objectContaining({
+      roleId: "role",
+      observedAt: new Date(f.observation.observedAt),
+      emails: [expect.objectContaining({ body: "Verified live observation" })],
+    }),
+    expect.any(Function),
+  );
+  expect(f.prisma.externalEffect.findMany).not.toHaveBeenCalled();
+  expect(f.updates).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it.each(["campaign", "mailbox", "owner", "role", "source"])(
+  "rejects changed live observation %s before indexing",
+  async (kind) => {
+    const f = liveFixture();
+    if (kind === "campaign") f.binding.result.campaignId = uuid(1001);
+    if (kind === "mailbox") f.binding.result.eaccount = "other@example.test";
+    if (kind === "owner") f.binding.run.userId = "other";
+    if (kind === "role") f.effect.run.thread.activeRecruitingRoleId = "other-role";
+    if (kind === "source") f.binding.request.serverId = "other-source";
+    await f.projectLive();
+    expect(db.projectRecruitingInboxMessages).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps source observation order when newer and then older live reads finish out of order", async () => {
+  const f = liveFixture();
+  f.observation.observedAt = "2026-10-24T00:00:00.000Z";
+  await f.projectLive();
+  f.observation.observedAt = "2026-10-23T00:00:00.000Z";
+  await f.projectLive();
+  expect(
+    vi
+      .mocked(db.projectRecruitingInboxMessages)
+      .mock.calls.map(([, , input]) => input.observedAt.toISOString()),
+  ).toEqual(["2026-10-24T00:00:00.000Z", "2026-10-23T00:00:00.000Z"]);
+});
+it("rolls back a live projection when its mailbox binding changes before commit", async () => {
+  const f = liveFixture();
+  let reads = 0;
+  f.prisma.externalEffect.findUnique.mockImplementation(async () =>
+    ++reads === 1
+      ? (f.binding as never)
+      : ({
+          ...f.binding,
+          result: { ...f.binding.result, eaccount: "other@example.test" },
+        } as never),
+  );
+  let committed = false;
+  vi.mocked(db.projectRecruitingInboxMessages).mockImplementation(
+    async (_prisma, _actor, _input, authorize) => {
+      await authorize?.();
+      committed = true;
+    },
+  );
+  await f.projectLive();
+  expect(committed).toBe(false);
+  expect(f.events.append).not.toHaveBeenCalled();
+});
+
+it("a live observation invalidates only the existing global stored view, never its own live reader", async () => {
+  const f = liveFixture();
+  f.prisma.thread.findFirst.mockImplementation(async (query: unknown) =>
+    (query as { where: { groupId?: string } }).where.groupId
+      ? { id: "global-thread", group: { members: [{ botId: "global-main" }] } }
+      : { id: "thread" },
+  );
+  await f.projectLive();
+  expect(
+    f.events.append.mock.calls.map(([event]) => (event as { threadId: string }).threadId),
+  ).toEqual(["global-thread"]);
+  expect(f.events.append).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
   expect(fetch).not.toHaveBeenCalled();
 });

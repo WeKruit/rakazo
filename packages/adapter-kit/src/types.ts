@@ -2,6 +2,7 @@ import type {
   AskRequestedSchema,
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  RecruitingCorrespondence,
   RecruitingPreferenceFeedbackInput,
   SandboxKind,
   UsageRecordedPayload,
@@ -754,6 +755,18 @@ export interface VoiceTranscribeRequest {
   signal?: AbortSignal;
 }
 
+/** Server-normalized rows from one authorized live mailbox GET, never raw provider output. */
+export interface RecruitingInboxObservation {
+  threadId: string;
+  roleId: string;
+  sourceId: string;
+  sourceRevision: number;
+  botId: string;
+  campaignId: string;
+  observedAt: string;
+  emails: RecruitingCorrespondence["emails"];
+}
+
 export interface BackgroundJobPayloads {
   "run.continue": { runId: string };
   "routine.wakeup": { routineId: string; scheduledFor: string };
@@ -775,6 +788,8 @@ export interface BackgroundJobPayloads {
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
   /** Project facts from one newly saved candidate page; authorization is re-read by the worker. */
   "recruiting_profile.project": { pageEffectId: string };
+  /** Normalize a canonical native mailbox receipt without blocking its caller. */
+  "recruiting_inbox.project": { effectId: string } | { observation: RecruitingInboxObservation };
   /** After a conversation goes quiet, make sure the person's newest message got a reply. */
   "thread.reply_check": { threadId: string };
   /** Deliver a run notification whose first push failed; the queue retries with backoff. */
