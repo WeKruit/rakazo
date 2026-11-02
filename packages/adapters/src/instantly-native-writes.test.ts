@@ -6,6 +6,7 @@ import {
   nativeInstantlyWrites,
   ownedInstantly,
   ownedInstantlyRest,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 
@@ -372,3 +373,103 @@ describe("shared mail account isolation", () => {
     });
   });
 });
+
+describe("reply sender checks before card creation", () => {
+  it("checks the exact existing campaign sender without provisioning or POSTing", async () => {
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const findFirst = vi.fn(async () => ({
+      result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" },
+    }));
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: { findMany: vi.fn(async () => []), findFirst },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          run: { userId: "u", spaceId: "s" },
+          status: "completed",
+          kind: "instantly_role_campaign",
+          AND: [
+            { request: { path: ["serverId"], equals: "source-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
+            { result: { path: ["campaignId"], equals: "campaign-proof" } },
+          ],
+        }),
+      }),
+    );
+    expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("returns a blocked sender check from the read-only email tool", async () => {
+    const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
+    const rest = vi.fn(async () => ORIGINAL);
+    const result = await runInstantlyWrite(
+      prisma as never,
+      rest as never,
+      context,
+      "source",
+      "native_instantly_get_email",
+      { id: ORIGINAL.id, check_sender: true },
+      { campaigns: new Set(), mailboxes: new Set() },
+    );
+    expect(result).toMatchObject({
+      replySenderCheck: { ready: false, error: "sender_unavailable" },
+    });
+    expect(rest.mock.calls).toHaveLength(1);
+  });
+});
+
+it.each([false, true])(
+  "rechecks the prior campaign's exact sender immediately before POST (anchor changed: %s)",
+  async (changed) => {
+    let reads = 0;
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: {
+        findMany: vi.fn(async () => []),
+        findFirst: vi.fn(async (input: any) =>
+          input.where.AND[2].result.equals === "campaign-proof"
+            ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
+            : null,
+        ),
+      },
+    };
+    const rest = vi.fn(async (method: string, path: string) => {
+      if (path === `/emails/${ORIGINAL.id}`)
+        return {
+          ...original,
+          campaign_id: changed && ++reads > 1 ? "foreign-campaign" : original.campaign_id,
+        };
+      if (method === "GET" && path.startsWith("/accounts/"))
+        return { email: ORIGINAL.eaccount, status: 1, setup_pending: false };
+      if (method === "POST" && path === "/emails/reply") return { id: "sent-proof" };
+      throw new Error("Unexpected provider request");
+    });
+    const owned = { campaigns: new Set([original.campaign_id]), mailboxes: new Set<string>() };
+    const result = runInstantlyWrite(
+      prisma as never,
+      rest,
+      { spaceId: "s", userId: "u", runId: "run-proof" } as never,
+      "source-proof",
+      "native_instantly_reply_to_email",
+      { reply_to_uuid: ORIGINAL.id, body: { text: "Exact approved reply" } },
+      owned,
+    );
+    if (changed) await expect(result).rejects.toThrow("sender_unavailable");
+    else await expect(result).resolves.toEqual({ id: "sent-proof" });
+    expect(rest.mock.calls.filter((call) => call[0] === "POST")).toHaveLength(changed ? 0 : 1);
+    expect(owned.mailboxes.size).toBe(0);
+  },
+);

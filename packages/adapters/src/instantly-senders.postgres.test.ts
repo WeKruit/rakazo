@@ -5,6 +5,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { createDb, type Prisma } from "@rakazo/db";
 import { expect, it } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
+import { requireReplySendingMailboxReady } from "./instantly-native-writes.js";
 import { ensureSendingIdentity } from "./instantly-senders.js";
 
 const url = process.env.DATABASE_URL;
@@ -176,6 +177,31 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
         setup_pending: false,
         warmup_status: 1,
       });
+      await p.$transaction(async (tx) => {
+        await tx.recruitingRole.create({
+          data: {
+            id,
+            spaceId: id,
+            userId: id,
+            sourceThreadId: id,
+            title: "Reply proof",
+            revision: 1,
+            currentRevisionId: `${id}-revision`,
+          },
+        });
+        await tx.recruitingRoleRevision.create({
+          data: {
+            id: `${id}-revision`,
+            roleId: id,
+            revision: 1,
+            sourceRefs: [],
+            criteria: {},
+            preferences: {},
+            definitionQuestions: [],
+          },
+        });
+        await tx.thread.update({ where: { id }, data: { activeRecruitingRoleId: id } });
+      });
       await p.externalEffect.create({
         data: {
           spaceId: id,
@@ -183,10 +209,29 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
           kind: "instantly_role_campaign",
           idempotencyKey: `${id}-legacy`,
           status: "completed",
-          request: { serverId: id },
-          result: { eaccount: legacyEmail },
+          request: { serverId: id, roleId: id },
+          result: { eaccount: legacyEmail, campaignId: "campaign-proof" },
         },
       });
+      const original = {
+        eaccount: legacyEmail,
+        campaign_id: "campaign-proof",
+        thread_id: "provider-thread-proof",
+      };
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).resolves.toMatchObject({ usable: true });
+      for (const [ctx, source, anchor, mailbox] of [
+        [{ ...contexts[1]!, userId: `${id}-foreign` }, id, original, legacyEmail],
+        [{ ...contexts[1]!, spaceId: `${id}-foreign` }, id, original, legacyEmail],
+        [contexts[1]!, `${id}-foreign`, original, legacyEmail],
+        [contexts[1]!, id, { ...original, campaign_id: "foreign-campaign" }, legacyEmail],
+        [contexts[1]!, id, { ...original, thread_id: undefined }, legacyEmail],
+        [contexts[1]!, id, original, "foreign@product.test"],
+      ] as const)
+        await expect(
+          requireReplySendingMailboxReady(p, rest, ctx, source, anchor, mailbox),
+        ).rejects.toThrow("sender_unavailable");
       expect(
         await ensureSendingIdentity(p, rest, contexts[0]!, id, {
           operation: "propose",
@@ -214,6 +259,9 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !url)(
           existing_email: legacyEmail,
         }),
       ).rejects.toThrow("exclusively owned");
+      await expect(
+        requireReplySendingMailboxReady(p, rest, contexts[1]!, id, original, legacyEmail),
+      ).rejects.toThrow("sender_unavailable");
       expect(patches).toBe(0);
     } finally {
       await p.space.deleteMany({ where: { id } });

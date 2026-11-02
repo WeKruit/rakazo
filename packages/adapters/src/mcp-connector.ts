@@ -50,9 +50,11 @@ import {
   InstantlyRestError,
   instantlyRest,
   isNativeInstantlyWrite,
+  MailReplySendingError,
   nativeInstantlyWrites,
   ownedInstantly,
   readRoleCampaignBinding,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -60,7 +62,6 @@ import {
   readInstantlyEmailPage,
   sameInstantlyAddresses,
 } from "./instantly-reply.js";
-import { requireSendingMailboxReady } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -1179,6 +1180,7 @@ export class McpConnector implements ConnectorProvider {
       }
 
       let replyMailbox: string | undefined;
+      let replyOriginal: Record<string, unknown> | undefined;
       if (emailScope && call.route.toolName === "reply_to_email") {
         await requireMcpToolAssignment(this.prisma, context, call.route, "get_email");
         if (typeof args.reply_to_uuid !== "string" || !UUID.test(args.reply_to_uuid))
@@ -1200,6 +1202,7 @@ export class McpConnector implements ConnectorProvider {
             "Reply anchor does not belong to the current role campaign and mailbox",
           );
         replyMailbox = email.eaccount;
+        replyOriginal = email as unknown as Record<string, unknown>;
       }
 
       if (crmTarget) {
@@ -1264,7 +1267,14 @@ export class McpConnector implements ConnectorProvider {
           credential.key,
           context.signal,
         );
-        await requireSendingMailboxReady(this.prisma, rest, context, replyMailbox);
+        await requireReplySendingMailboxReady(
+          this.prisma,
+          rest,
+          context,
+          assignment.server.id,
+          replyOriginal!,
+          replyMailbox,
+        );
         await context.reauthorize?.();
         await this.assertInstantlyScope(context, assignment.server.id, emailScope);
         const current = await this.authorizeInstantlyRest(call, context, []);
@@ -1654,7 +1664,10 @@ export class McpConnector implements ConnectorProvider {
               : " Check the current assigned connection and requested scope.";
       yield {
         type: "error",
-        message: `Instantly ${call.route!.toolName} failed.${detail}`,
+        message:
+          error instanceof MailReplySendingError
+            ? error.code
+            : `Instantly ${call.route!.toolName} failed.${detail}`,
         // A network failure mid-request may still have reached the provider.
         ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
       };

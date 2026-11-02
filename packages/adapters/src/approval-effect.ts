@@ -1,4 +1,5 @@
 import type { AgentToolExecutionResult } from "@rakazo/adapter-kit";
+import { MailReplySchema } from "@rakazo/contracts";
 import type { BoundApprovalRoute } from "@rakazo/core";
 import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 
@@ -265,6 +266,20 @@ export function resolveDuplicateEffectGate(
     return { action: "return", result: effect.result ?? { duplicate: true } };
   }
   if (effect.status === "denied") {
+    const retained =
+      effect.result && typeof effect.result === "object" && !Array.isArray(effect.result)
+        ? (effect.result as { mailReplyApproval?: unknown }).mailReplyApproval
+        : undefined;
+    if (MailReplySchema.safeParse(retained).success)
+      return {
+        action: "return",
+        result: {
+          status: "discarded",
+          dispatched: false,
+          message:
+            "The reply card was already created and the user discarded it. Nothing was sent. Do not claim card creation failed and do not retry.",
+        },
+      };
     return {
       action: "return",
       result: {

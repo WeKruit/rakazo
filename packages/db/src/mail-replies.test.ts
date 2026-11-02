@@ -234,3 +234,49 @@ describe("the existing reply approval", () => {
     },
   );
 });
+
+it.each([
+  ["completed", "sender_unavailable", "failed", "sender_unavailable"],
+  ["completed", "private-provider-tool-id", "failed", "send_failed"],
+  ["uncertain", "private-provider-tool-id", "unknown", "delivery_unconfirmed"],
+] as const)(
+  "projects safe reply failure %s/%s",
+  async (status, error, expectedStatus, expectedError) => {
+    const message = {
+      id: "message",
+      runId: "run",
+      blocks: [
+        {
+          kind: "ask",
+          approvalEffectId: "effect",
+          text: "Mail",
+          status: "answered",
+          mailReply: draft,
+        },
+      ],
+    } as ThreadMessage;
+    const rows = await projectMailReplyCards(
+      {
+        externalEffect: {
+          findMany: vi.fn(async () => [
+            {
+              id: "effect",
+              runId: "run",
+              status,
+              request: args,
+              result: { error },
+              updatedAt: new Date(),
+              run: { status: "completed" },
+            },
+          ]),
+        },
+      } as never,
+      actor,
+      [message],
+    );
+    expect(rows[0]!.blocks[0]).toMatchObject({
+      mailReply: { status: expectedStatus, error: expectedError, canAnswer: false },
+    });
+    expect(JSON.stringify(rows)).not.toContain("private-provider-tool-id");
+  },
+);

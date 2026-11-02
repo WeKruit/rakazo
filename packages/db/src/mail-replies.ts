@@ -1,5 +1,9 @@
 import type { Actor, MailReply, MailReplySendAnswer, ThreadMessage } from "@rakazo/contracts";
-import { MailReplySendAnswerSchema, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import {
+  MailReplyErrorCodeSchema,
+  MailReplySendAnswerSchema,
+  MessageBlock as MessageBlockSchema,
+} from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
@@ -145,21 +149,29 @@ function state(draft: MailReply, effect: Effect): MailReply {
     !error &&
     effect.status === "completed" &&
     (result?.status === "sent_recorded" || nativeReceipt || gmailReceipt);
+  const reason = MailReplyErrorCodeSchema.safeParse(provider?.error ?? envelope?.error).data;
   return {
     ...draft,
     body: edited,
+    ...(effect.status === "uncertain"
+      ? { error: "delivery_unconfirmed" }
+      : error
+        ? { error: reason ?? "send_failed" }
+        : {}),
     status:
       effect.status === "denied"
         ? "discarded"
-        : error
-          ? "failed"
-          : sent
-            ? "sent"
-            : effect.status === "uncertain" || effect.status === "completed"
-              ? "unknown"
-              : ["approved", "executing"].includes(effect.status)
-                ? "sending"
-                : "needs_approval",
+        : effect.status === "uncertain"
+          ? "unknown"
+          : error
+            ? "failed"
+            : sent
+              ? "sent"
+              : effect.status === "uncertain" || effect.status === "completed"
+                ? "unknown"
+                : ["approved", "executing"].includes(effect.status)
+                  ? "sending"
+                  : "needs_approval",
     sentAt: sent
       ? typeof payload?.timestamp_email === "string"
         ? payload.timestamp_email
