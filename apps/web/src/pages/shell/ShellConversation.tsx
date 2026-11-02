@@ -90,7 +90,7 @@ export function ShellConversation({
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
-  const [outreachDraftThread, setOutreachDraftThread] = useState<string>();
+  const [mountedOutreachThread, setMountedOutreachThread] = useState<string>();
   const { setReplyTarget, setReplyQuote, peopleAdded, workEstimate } = model;
   // Stable handlers keep the memoized transcript from re-rendering when a panel changes.
   const replyTo = useCallback(
@@ -427,17 +427,17 @@ export function ShellConversation({
                   <details
                     key={activeSnapshot.threadId}
                     className="mt-6"
-                    open={outreachDraftThread === activeSnapshot.threadId}
-                    onToggle={(event) =>
-                      setOutreachDraftThread(
-                        event.currentTarget.open ? activeSnapshot.threadId : undefined,
-                      )
-                    }
+                    onToggle={(event) => {
+                      if (event.currentTarget.open)
+                        setMountedOutreachThread(activeSnapshot.threadId);
+                    }}
                   >
                     <summary>
                       <Trans>Outreach drafts</Trans>
                     </summary>
-                    {outreachDraftThread === activeSnapshot.threadId ? nativeCorrespondence : null}
+                    {mountedOutreachThread === activeSnapshot.threadId
+                      ? nativeCorrespondence
+                      : null}
                   </details>
                 </>
               ) : (

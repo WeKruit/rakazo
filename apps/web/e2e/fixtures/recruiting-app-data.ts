@@ -375,10 +375,35 @@ export async function mockRecruitingApp(
     emptyCalendar?: boolean;
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
+    sequenceDraft?: boolean;
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
   } = {},
 ) {
+  const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
+    ? {
+        ...snapshot,
+        cursor: 1,
+        messages: [
+          {
+            id: "fixture-draft-message",
+            threadId: snapshot.threadId,
+            seq: 1,
+            role: "user",
+            createdAt: checkedAt,
+            blocks: [
+              {
+                kind: "file",
+                artifactId: "fixture-sequence-draft",
+                name: "sequence.json",
+                mimeType: "application/json",
+                size: 1,
+              },
+            ],
+          },
+        ],
+      }
+    : snapshot;
   const plans: RecruitingSchedulingPlan[] = [];
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
@@ -520,6 +545,17 @@ export async function mockRecruitingApp(
     let method = url.pathname.slice(5);
     let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
+    const requestedSnapshot =
+      options.sequenceDraft && (input.botId === bot.id || input.threadId === bot.threadId)
+        ? {
+            threadId: bot.threadId!,
+            botId: bot.id,
+            cursor: 0,
+            messages: [],
+            olderCursor: null,
+            run: null,
+          }
+        : initialSnapshot;
     if (method === "recruiting/overview") {
       const role = accountRolesData()[0]!;
       return route.fulfill({
@@ -703,7 +739,7 @@ export async function mockRecruitingApp(
           },
         };
       } else value = { roles, items, nextCursor: null };
-    } else if (method === "bootstrap") value = bootstrap;
+    } else if (method === "bootstrap") value = { ...bootstrap, thread: initialSnapshot };
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };
     else if (method === "links/companySites")
@@ -722,11 +758,34 @@ export async function mockRecruitingApp(
           botSections: [],
         },
       };
-    else if (method === "threads/get") value = snapshot;
-    else if (method === "threads/head") value = { threadId: snapshot.threadId, cursor: 0 };
+    else if (method === "threads/get") value = requestedSnapshot;
+    else if (method === "threads/head")
+      value = { threadId: requestedSnapshot.threadId, cursor: requestedSnapshot.cursor };
     else if (method === "threads/messages")
-      value = { threadId: snapshot.threadId, messages: [], olderCursor: null };
+      value = {
+        threadId: snapshot.threadId,
+        messages: initialSnapshot.messages,
+        olderCursor: null,
+      };
     else if (method === "threads/markRead") value = { ok: true };
+    else if (method === "artifacts/get" && options.sequenceDraft)
+      value = {
+        contentBase64: Buffer.from(
+          JSON.stringify({
+            kind: "wekruit.outreach-sequence",
+            version: 1,
+            roleTitle: "Platform Engineer",
+            recipients: [
+              {
+                name: "Avery",
+                email: "avery@example.test",
+                linkedinUrl: null,
+                steps: [{ dayOffset: 0, subject: "A role", body: "Original saved draft" }],
+              },
+            ],
+          }),
+        ).toString("base64"),
+      };
     else if (
       [
         "agentSkills/list",
