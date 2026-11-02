@@ -1,4 +1,4 @@
-import type { MessageBlock, ReplyPreview } from "@rakazo/contracts";
+import type { MessageBlock, ReplyPreview, RunStatus } from "@rakazo/contracts";
 import { RUN_TRIGGERS } from "@rakazo/contracts";
 import {
   appendToolCallSegment,
@@ -12,7 +12,7 @@ import {
 } from "./events.js";
 import { upsertMessageById } from "./message-pages.js";
 import { replyMetadata } from "./message-replies.js";
-import { isBackgroundRunTrigger } from "./run-state.js";
+import { isActive, isAutomationRunTrigger, isBackgroundRunTrigger } from "./run-state.js";
 import { takeLiveMessage, updateCloudAgentMessages } from "./thread-message-updates.js";
 
 /**
@@ -138,11 +138,28 @@ export function eventNeedsSnapshotRead(event: { type: string }): boolean {
   return !SELF_CONTAINED_EVENT_TYPES.has(event.type);
 }
 
-/** The suggestion to show, when the thread's newest message is still the reply it follows. */
-export function currentSuggestion(thread: Pick<LiveThread, "messages" | "suggestion">) {
+/**
+ * The suggestion to show, when the thread's newest message is still the reply it follows and no
+ * reply is being written. Background work (a running search) and its live progress don't hide it.
+ */
+export function currentSuggestion(
+  thread: Pick<LiveThread, "messages" | "suggestion">,
+  activeRuns: ReadonlyArray<{ status: string; trigger?: string | null }> = [],
+) {
   const suggestion = thread.suggestion;
   if (!suggestion) return null;
-  const last = thread.messages.findLast((message) => !message.internal);
+  if (
+    activeRuns.some(
+      (run) => isActive(run.status as RunStatus) && !isAutomationRunTrigger(run.trigger),
+    )
+  )
+    return null;
+  const last = thread.messages.findLast(
+    (message) =>
+      !message.internal &&
+      (message.role === "user" || message.role === "bot") &&
+      !message.id.startsWith("progress:"),
+  );
   return last?.role === "bot" && last.runId === suggestion.runId ? suggestion.text : null;
 }
 

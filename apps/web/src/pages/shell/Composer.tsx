@@ -533,7 +533,7 @@ export const Composer = memo(function Composer({
   const draftHasUrl = URL_IN_TEXT.test(draft);
   const highlightRef = useRef<HTMLDivElement>(null);
   const showSuggestion = Boolean(
-    suggestion && !running && !disabled && showComposerPlaceholder && !replyTarget,
+    suggestion && !disabled && showComposerPlaceholder && !replyTarget,
   );
   const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
   const replyNameRef = useRef(replyName);

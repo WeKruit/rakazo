@@ -4995,10 +4995,6 @@ describe("Composer", () => {
     expect(onSend.mock.calls[0]?.[0]).toBe("see https://example.com/jobs/1 please");
   });
 
-  it("hides the suggestion while a reply is running", () => {
-    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
-    expect(textarea.placeholder).not.toBe("Find 20 more");
-  });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend);
