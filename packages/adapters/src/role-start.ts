@@ -56,8 +56,11 @@ export async function startRoleFromRecruiterMessage(
     .map((message) => (message.externalTranscriptFor ? undefined : recruiterBlocks(message)))
     .find(Boolean);
   if (!blocks) return false;
+  // A JD sent only as a file still starts the role; its team reads the file.
   const text = blocks
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .flatMap((block) =>
+      block.kind === "text" ? [block.text] : block.kind === "file" ? [block.name] : [],
+    )
     .join("\n")
     .trim();
   if (!text) return false;

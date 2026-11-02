@@ -12341,7 +12341,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "start_role") {
             const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
             const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
-            if (!title || !request) return finish({ error: "title and message are required" });
+            if (!title) return finish({ error: "title is required" });
+            if (!request && !run.sourceMessageId)
+              return finish({ error: "message is required: the recruiter's requirements." });
             if (!thread.groupId?.startsWith("recruiting-global-"))
               return finish({ error: "start_role works only in the global conversation." });
             const team = await deps.prisma.chatGroupMember.findMany({
@@ -12373,6 +12375,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deliveryKey: effectKey,
             });
             if (!started) {
+              if (!request)
+                return finish({
+                  error:
+                    "The recruiter's latest message has no request to hand over: pass message with their requirements in their own words.",
+                });
               const sent = await messageBot(
                 deps,
                 { ...run, sourceMessageId: run.sourceMessageId },
