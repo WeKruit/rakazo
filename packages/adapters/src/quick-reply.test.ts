@@ -1,6 +1,6 @@
 import type { AgentRunRequest, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
-import { describe, expect, it } from "vitest";
-import { cleanQuickReply, quickReply } from "./quick-reply.js";
+import { describe, expect, it, vi } from "vitest";
+import { cleanQuickReply, firstSentence, quickReply } from "./quick-reply.js";
 
 function runtimeReplying(text: string, seen: AgentRunRequest[] = []): AgentRuntime {
   return {
@@ -61,5 +61,42 @@ describe("quick reply", () => {
     expect(cleanQuickReply("On it, checking your roles now.")).toBe(
       "On it, checking your roles now.",
     );
+  });
+
+  it("keeps only the first sentence", () => {
+    expect(cleanQuickReply("我来看看你的职位。目前看不到任何职位。")).toBe("我来看看你的职位。");
+    expect(cleanQuickReply("On it. Checking now.")).toBe("On it.");
+    expect(firstSentence("我来看看")).toBeUndefined();
+    expect(firstSentence("Version 2.5 is out")).toBeUndefined();
+  });
+
+  it("resolves at the first sentence and still reads the call to its usage", async () => {
+    const usage: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runtime = {
+      describe: () => ({}) as ReturnType<AgentRuntime["describe"]>,
+      async *run() {
+        yield { type: "text", text: "好的，我来" } satisfies AgentRuntimeEvent;
+        yield { type: "text", text: "写这封邮件。然后" } satisfies AgentRuntimeEvent;
+        await gate;
+        yield { type: "usage", accounted: false } as unknown as AgentRuntimeEvent;
+        yield {
+          type: "done",
+          text: "好的，我来写这封邮件。然后再说。",
+        } satisfies AgentRuntimeEvent;
+      },
+    } as unknown as AgentRuntime;
+    const line = await quickReply({
+      ...base,
+      runtime,
+      onUsage: async (event) => usage.push(event),
+    });
+    expect(line).toBe("好的，我来写这封邮件。");
+    expect(usage).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(usage).toHaveLength(1));
   });
 });
