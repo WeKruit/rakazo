@@ -15,6 +15,7 @@ import {
   workProgressLabel,
   workSessionElapsedMs,
   workSessionStages,
+  workSessionSteps,
   workTimeline,
 } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
@@ -62,6 +63,29 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     writing: t`Writing to you`,
     thinking: t`Deciding the next step`,
     working: t`Running a step`,
+  };
+}
+
+/** Steps that produced something for the recruiter, named after the work folds. */
+const DELIVERED = new Set<WorkActivity>([
+  "research",
+  "candidate_lookup",
+  "assess",
+  "profiles_save",
+  "drafting",
+  "interview",
+  "role_save",
+  "feedback",
+]);
+
+/** What the finished turn delivered: up to two kinds of work, and people found with email. */
+export function workHighlights(steps: readonly WorkStep[]) {
+  const done = steps.filter((step) => !step.status);
+  return {
+    activities: [
+      ...new Set(done.filter((step) => DELIVERED.has(step.activity)).map((s) => s.activity)),
+    ].slice(0, 2),
+    withEmail: done.reduce((total, step) => total + (step.peopleWithEmail ?? 0), 0),
   };
 }
 
@@ -442,10 +466,33 @@ export function LiveWork({
   }
   if (!session?.endedAt) return null;
   const duration = formatWorkDuration(workSessionElapsedMs(session, Date.now()));
+  const highlights = workHighlights(showSteps ? workSessionSteps(session) : []);
+  const summary = (
+    <>
+      {chinese ? `用时 ${duration}` : <Trans>Worked for {duration}</Trans>}
+      {highlights.activities.length
+        ? ` · ${highlights.activities.map((activity) => labels[activity]).join(chinese ? "、" : ", ")}`
+        : null}
+      {highlights.withEmail ? (
+        <>
+          {" · "}
+          {chinese ? (
+            `${highlights.withEmail} 人有邮箱`
+          ) : (
+            <Plural
+              value={highlights.withEmail}
+              one="# person with email"
+              other="# people with email"
+            />
+          )}
+        </>
+      ) : null}
+    </>
+  );
   if (!steps.length && !stages)
     return (
       <div data-testid="work-summary" className="text-[13px] text-muted-foreground">
-        {chinese ? `用时 ${duration}` : <Trans>Worked for {duration}</Trans>}
+        {summary}
       </div>
     );
   return (
@@ -457,7 +504,7 @@ export function LiveWork({
           strokeWidth={1.8}
           className="transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
         />
-        {chinese ? `用时 ${duration}` : <Trans>Worked for {duration}</Trans>}
+        {summary}
       </summary>
       <div className="ms-[7px] mt-0.5 border-s border-border ps-3">
         {steps.length ? <ToolSteps steps={steps} /> : null}
