@@ -1567,7 +1567,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "start_role",
     description:
-      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's requirements, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet (check recruiting_candidates operation roles first). Pass a short title and everything the recruiter said about the role, in their own words (JD text, must-haves, preferences and what is only preferred). The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
+      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet; when they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. Leave message out when the request is in the recruiter's latest message (never retype a JD); pass it only for requirements they gave elsewhere, in their own words. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1577,10 +1577,11 @@ export const builtinAgentTools: ConnectorTool[] = [
         },
         message: {
           type: "string",
-          description: "The recruiter's requirements and JD, in their own words.",
+          description:
+            "Only for requirements that are not in the recruiter's latest message, in their own words.",
         },
       },
-      required: ["title", "message"],
+      required: ["title"],
     },
   },
   {

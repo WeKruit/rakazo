@@ -23,6 +23,9 @@
 //            --hiring-company <name>          flag people who work there now
 //            --keep                           keep the test copy in the sidebar (it is archived by default)
 //            --question-only                  time the first question, leave it unanswered (no paid search)
+//            --kruit-new-role                 with --jd-file: send the JD in Kruit's conversation and time
+//                                             the role card and the role's first question (no paid search);
+//                                             flags a second file read or a slow card
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
@@ -892,6 +895,77 @@ async function archiveCopy() {
     await rpc("groups/archive", { groupId: report.groupId });
 }
 
+// Opening a role from Kruit: one server-side read of the attached JD, then the role card.
+const KRUIT_CARD_LIMIT_S = 20;
+async function kruitNewRole() {
+  const file = option("--jd-file");
+  if (!file) fail("--kruit-new-role needs --jd-file");
+  let kruit = null;
+  for (let offset = 0; offset !== null && !kruit; ) {
+    const page = await rpc("groups/page", { offset, archived: false });
+    kruit = page.items.find((group) => group.id.startsWith("recruiting-global-")) ?? null;
+    offset = page.nextOffset ?? null;
+  }
+  if (!kruit) fail("The account has no Kruit conversation");
+  const before = new Set((await readMessages(kruit.id)).map((message) => message.id));
+  const artifactId = (
+    await rpc("artifacts/create", {
+      groupId: kruit.id,
+      name: file.split("/").pop(),
+      mimeType: ATTACHMENT_TYPES[file.split(".").pop()?.toLowerCase()] ?? "text/plain",
+      contentBase64: fs.readFileSync(file).toString("base64"),
+    })
+  ).id;
+  const sentAt = elapsed();
+  mark("send_called");
+  await rpc("threads/followUp", {
+    groupId: kruit.id,
+    text: "这是一个新的岗位，我们来找一下候选人",
+    artifactIds: [artifactId],
+  });
+  let card = null;
+  let steps = null;
+  const until = Date.now() + 120_000;
+  while (Date.now() < until && !(card && steps)) {
+    await sleep(500);
+    const fresh = (await readMessages(kruit.id)).filter((message) => !before.has(message.id));
+    const blocks = fresh.filter((m) => m.role !== "user").flatMap((m) => m.blocks);
+    if (!card && (card = blocks.find((block) => block.kind === "role_link") ?? null))
+      mark("kruit_role_card", { afterSendS: Math.round((elapsed() - sentAt) * 10) / 10 });
+    steps ??= blocks.find((block) => block.kind === "steps") ?? null;
+  }
+  if (!card) {
+    violation("kruit_no_role_card", "no role card within 120 s");
+    report.result = "no_role_card";
+    save();
+    process.exit(1);
+  }
+  const reads = (steps?.steps ?? [])
+    .filter((step) => step.activity === "files")
+    .reduce((total, step) => total + (step.count ?? 1), 0);
+  report.kruitFileReads = reads;
+  if (reads > 1) violation("kruit_file_read_twice", `${reads} file reads before the role card`);
+  const cardS = report.milestones.kruit_role_card.afterSendS;
+  if (cardS > KRUIT_CARD_LIMIT_S)
+    violation("kruit_slow_role_card", `role card after ${cardS} s (limit ${KRUIT_CARD_LIMIT_S} s)`);
+  // The role's own first question, left unanswered so no paid search runs.
+  report.groupId = card.groupId;
+  const questionUntil = Date.now() + 90_000;
+  while (Date.now() < questionUntil) {
+    const role = await readMessages(card.groupId);
+    if (role.some((m) => m.role !== "user" && m.blocks.some((block) => block.kind === "ask"))) {
+      mark("role_first_question", { afterSendS: Math.round((elapsed() - sentAt) * 10) / 10 });
+      break;
+    }
+    await sleep(500);
+  }
+  report.result = report.violations.length ? "violations" : "ok";
+  save();
+  if (!flag("--keep")) await rpc("groups/archive", { groupId: card.groupId });
+  log(`result ${report.result}`);
+  process.exit(report.violations.length ? 1 : 0);
+}
+
 async function main() {
   await signIn();
   // The API does not publish its source revision; the runner passes the released SHA.
@@ -901,6 +975,7 @@ async function main() {
   // Bootstrap provisions the recruiting crew for a fresh account, as the web app does.
   await rpc("bootstrap", {});
 
+  if (flag("--kruit-new-role")) await kruitNewRole();
   let groupId = option("--group");
   if (!groupId) {
     // The account's recruiting crew, provisioned on first use exactly as the web onboarding does.

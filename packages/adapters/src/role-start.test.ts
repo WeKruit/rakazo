@@ -66,6 +66,28 @@ describe("startRoleFromRecruiterMessage", () => {
     expect(d.jobs.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("starts the role from a JD sent only as a file", async () => {
+    const { deps: d, tx } = deps({
+      role: "user",
+      botId: null,
+      clientNonce: null,
+      externalTranscriptFor: null,
+      blocks: [
+        {
+          kind: "file",
+          name: "jd.docx",
+          size: 10,
+          mimeType: "application/msword",
+          artifactId: "a1",
+        },
+      ],
+    });
+    expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(true);
+    expect(tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ prompt: "jd.docx" }) }),
+    );
+  });
+
   it("does not start twice for the same call", async () => {
     const { deps: d, tx } = deps(
       {

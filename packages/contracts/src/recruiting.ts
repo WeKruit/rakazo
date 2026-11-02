@@ -1582,7 +1582,8 @@ const RecruitingAccountToolReadSchema = z.strictObject({
   campaignId: RecruitingId.optional(),
   campaignServerId: RecruitingId.optional(),
   campaignLeadCursor: Text.max(10000).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  // Pages hold at most 50; a larger ask reads the first 50 and pages on, instead of failing.
+  limit: z.number().int().min(1).max(100).optional(),
 });
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
   // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
