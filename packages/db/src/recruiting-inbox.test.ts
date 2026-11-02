@@ -1,7 +1,12 @@
 import type { Actor } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
-import { listRecruitingInbox, markRecruitingInbox } from "./recruiting-inbox.js";
+import {
+  listRecruitingInbox,
+  markRecruitingInbox,
+  readRecruitingOverviewSnapshot,
+  saveRecruitingOverviewSnapshot,
+} from "./recruiting-inbox.js";
 
 const actor = { userId: "reader", spaceId: "space" } as Actor;
 const thread = {
@@ -74,5 +79,44 @@ describe("personal inbox cursors", () => {
     expect(cursor).toBe(Date.parse("2026-10-03T00:00:00Z"));
     await expect(mark("2999-01-01T00:00:00Z")).rejects.toThrow("Invalid incoming timestamp");
     expect(execute).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("Home overview snapshot", () => {
+  const role = {
+    groupId: "g1",
+    roleId: "r1",
+    shortlisted: 1,
+    shortlistedDates: [null],
+    replied: 2,
+    contacted: null,
+    interested: null,
+    interestedPartial: false,
+    incomplete: false,
+    bookings: [],
+    bookingUnknown: false,
+  };
+  it("reads only the current user's space and drops roles that no longer parse", async () => {
+    const findUnique = vi.fn().mockResolvedValue({ roles: [role, { groupId: "broken" }] });
+    const prisma = { recruitingOverviewSnapshot: { findUnique } } as unknown as PrismaClient;
+    expect(await readRecruitingOverviewSnapshot(prisma, actor)).toEqual([role]);
+    expect(findUnique.mock.calls[0]![0].where).toEqual({
+      userId_spaceId: { userId: "reader", spaceId: "space" },
+    });
+  });
+  it("reads nothing when no overview was saved", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const prisma = { recruitingOverviewSnapshot: { findUnique } } as unknown as PrismaClient;
+    expect(await readRecruitingOverviewSnapshot(prisma, actor)).toEqual([]);
+  });
+  it("replaces the current user's saved overview", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = { recruitingOverviewSnapshot: { upsert } } as unknown as PrismaClient;
+    await saveRecruitingOverviewSnapshot(prisma, actor, [role]);
+    expect(upsert.mock.calls[0]![0]).toMatchObject({
+      where: { userId_spaceId: { userId: "reader", spaceId: "space" } },
+      create: { userId: "reader", spaceId: "space", roles: [role] },
+      update: { roles: [role] },
+    });
   });
 });

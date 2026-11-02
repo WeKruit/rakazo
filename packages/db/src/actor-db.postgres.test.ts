@@ -55,6 +55,18 @@ suite("first-batch RLS with a real restricted role", () => {
         "utf8",
       ),
     );
+    // The snapshot table's own migration installs the same policy on a protected database.
+    await sql.query("DROP POLICY rakazo_actor_isolation ON recruiting_overview_snapshots");
+    await sql.query("ALTER TABLE recruiting_overview_snapshots DISABLE ROW LEVEL SECURITY");
+    await sql.query(
+      await readFile(
+        new URL(
+          "../prisma/migrations/20261102233000_recruiting_overview_snapshot/migration.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ).then((migration) => migration.slice(migration.indexOf("DO $rls$"))),
+    );
     await sql.query("DROP POLICY rakazo_actor_isolation ON recruiting_inbox_messages");
     await sql.query("ALTER TABLE recruiting_inbox_messages DISABLE ROW LEVEL SECURITY");
     const projectionMigration = await readFile(
@@ -174,6 +186,7 @@ suite("first-batch RLS with a real restricted role", () => {
         await db.recruitingInboxIndexProgress.create({ data: { userId: id, spaceId } });
         await db.$executeRaw`INSERT INTO recruiting_inbox_initializations (user_id, space_id) VALUES (${id}, ${spaceId})`;
         await db.$executeRaw`INSERT INTO recruiting_inbox_cursors (user_id, space_id, thread_key) VALUES (${id}, ${spaceId}, 'synthetic')`;
+        await db.$executeRaw`INSERT INTO recruiting_overview_snapshots (user_id, space_id, roles) VALUES (${id}, ${spaceId}, '[]'::jsonb)`;
         await db.$executeRaw`INSERT INTO recruiting_inbox_messages (id,user_id,space_id,role_id,origin_key,dedupe_key,source_id,source_kind,observed_at,search_text,email) VALUES (${id},${id},${spaceId},${id},'synthetic','synthetic','synthetic','observed',CURRENT_TIMESTAMP,'synthetic','{}'::jsonb)`;
         await db.task.create({
           data: { id, ...owner, botId: id, threadId: id, prompt: "Synthetic", status: "completed" },

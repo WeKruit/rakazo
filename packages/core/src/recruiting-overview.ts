@@ -128,24 +128,30 @@ async function withBudget<T>(
   ]).catch(() => undefined);
 }
 
-/** A role's saved numbers, sent before its slower sources (CRM, campaign, calendar) answer. */
+/**
+ * A role's saved numbers, sent before its slower sources (CRM, campaign, calendar) answer. The
+ * last finished overview's numbers for the same role stand in until those sources answer.
+ */
 function savedRole(
   group: OverviewGroup,
   roleId: string,
   list: { total: number; dates: (string | null)[] },
+  last: RecruitingOverviewRole | undefined,
+  now: number,
 ): RecruitingOverviewRole {
+  const previous = last?.roleId === roleId ? last : undefined;
   return {
     groupId: group.id,
     roleId,
     shortlisted: list.total,
     shortlistedDates: list.dates,
-    replied: null,
-    contacted: null,
-    interested: null,
-    interestedPartial: false,
+    replied: previous?.replied ?? null,
+    contacted: previous?.contacted ?? null,
+    interested: previous?.interested ?? null,
+    interestedPartial: previous?.interestedPartial ?? false,
     incomplete: true,
-    bookings: [],
-    bookingUnknown: true,
+    bookings: (previous?.bookings ?? []).filter((event) => Date.parse(event.start) > now),
+    bookingUnknown: previous?.bookingUnknown ?? true,
   };
 }
 
@@ -162,10 +168,14 @@ async function funnelRole(
     optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
     optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
   ]);
+  // A source that did not answer keeps the last finished overview's numbers, marked incomplete.
+  const stages = campaign ? campaignStages(campaign) : base;
   return {
     ...base,
-    replied: crmReplied(candidates ?? null),
-    ...campaignStages(campaign ?? null),
+    replied: candidates ? crmReplied(candidates) : base.replied,
+    contacted: stages.contacted,
+    interested: stages.interested,
+    interestedPartial: stages.interestedPartial,
     incomplete: !candidates || !campaign,
   };
 }
@@ -191,6 +201,7 @@ async function bookingsRole(
     calendar?.roleId === base.roleId && ["ready", "empty"].includes(calendar.status)
       ? calendar
       : undefined;
+  if (!calendar) return { bookings: base.bookings, bookingUnknown: base.bookingUnknown };
   return {
     bookings: (calendarRead?.events ?? []).filter(
       (event) =>
@@ -207,8 +218,13 @@ export async function* streamRecruitingOverview(
   groups: readonly OverviewGroup[],
   reads: OverviewReads,
   signal: AbortSignal,
-  { now = Date.now(), sourceMs = OVERVIEW_SOURCE_MS } = {},
+  {
+    now = Date.now(),
+    sourceMs = OVERVIEW_SOURCE_MS,
+    last = [],
+  }: { now?: number; sourceMs?: number; last?: readonly RecruitingOverviewRole[] } = {},
 ): AsyncGenerator<RecruitingOverviewEvent> {
+  const lastRoles = new Map(last.map((role) => [role.groupId, role]));
   const external = limiter(EXTERNAL_CONCURRENCY);
   const ready: RecruitingOverviewEvent[] = [];
   let wake: (() => void) | undefined;
@@ -225,7 +241,8 @@ export async function* streamRecruitingOverview(
     try {
       const roleId = await reads.roleId(group, signal);
       if (!roleId) return;
-      const base = savedRole(group, roleId, await reads.shortlist(roleId, signal));
+      const list = await reads.shortlist(roleId, signal);
+      const base = savedRole(group, roleId, list, lastRoles.get(group.id), now);
       push({ kind: "role", role: base });
       const funnel = funnelRole(base, group, reads, signal, sourceMs, external);
       const bookings = bookingsRole(base, group, reads, signal, now, sourceMs, external);

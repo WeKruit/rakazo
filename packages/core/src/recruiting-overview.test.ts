@@ -334,6 +334,75 @@ describe("streamRecruitingOverview", () => {
     expect(order.lastIndexOf("crm")).toBeLessThan(order.lastIndexOf("calendar"));
   });
 
+  it("starts from the last finished overview and replaces it with live numbers", async () => {
+    const last = {
+      groupId: "g1",
+      roleId: "role-g1",
+      shortlisted: 9,
+      shortlistedDates: [],
+      replied: 7,
+      contacted: 5,
+      interested: 3,
+      interestedPartial: false,
+      incomplete: false,
+      bookings: [],
+      bookingUnknown: false,
+    };
+    const seen = [];
+    for await (const event of streamRecruitingOverview(
+      groups.slice(0, 1),
+      reads(),
+      new AbortController().signal,
+      { last: [last] },
+    ))
+      if (event.kind === "role") seen.push(event.role);
+    // Saved: today's shortlist with the last numbers, marked incomplete until live reads land.
+    expect(seen[0]).toMatchObject({ shortlisted: 2, replied: 7, contacted: 5, incomplete: true });
+    expect(seen.at(-1)).toMatchObject({ replied: 1, contacted: null, incomplete: false });
+  });
+
+  it("keeps the last numbers for a source that does not answer, and ignores another role's", async () => {
+    const last = (roleId: string) => ({
+      groupId: "g1",
+      roleId,
+      shortlisted: 9,
+      shortlistedDates: [],
+      replied: 7,
+      contacted: null,
+      interested: 3,
+      interestedPartial: false,
+      incomplete: false,
+      bookings: [],
+      bookingUnknown: false,
+    });
+    const silent = reads({
+      candidates: (_group, signal) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason)),
+        ),
+    });
+    const kept = await getRecruitingOverview(
+      groups.slice(0, 1),
+      silent,
+      new AbortController().signal,
+      {
+        sourceMs: 20,
+        last: [last("role-g1")],
+      },
+    );
+    expect(kept.roles[0]).toMatchObject({ replied: 7, incomplete: true });
+    const other = await getRecruitingOverview(
+      groups.slice(0, 1),
+      silent,
+      new AbortController().signal,
+      {
+        sourceMs: 20,
+        last: [last("role-other")],
+      },
+    );
+    expect(other.roles[0]).toMatchObject({ replied: null, interested: null, incomplete: true });
+  });
+
   it("does not show another role's or a past calendar event as a booking", async () => {
     const overview = await getRecruitingOverview(
       groups.slice(0, 2),
