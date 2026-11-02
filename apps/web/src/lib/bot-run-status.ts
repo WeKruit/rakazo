@@ -1,4 +1,4 @@
-import type { Bot, ProductEvent } from "@rakazo/contracts";
+import type { Bot, Group, ProductEvent } from "@rakazo/contracts";
 import { isBackgroundRunTrigger, isRunTerminalEvent } from "@rakazo/core";
 
 /** The sidebar status a run event implies, or null when the event says nothing about it. */
@@ -26,6 +26,33 @@ export function applyBotStatus<T extends Pick<Bot, "id" | "status">>(
   const bot = bots.find((candidate) => candidate.id === botId);
   if (!bot || bot.status === status) return bots;
   return bots.map((candidate) => (candidate.id === botId ? { ...candidate, status } : candidate));
+}
+
+const WORKING_STATUSES = new Set(["queued", "leased", "running"]);
+
+/** A role team member is on a foreground run that is not waiting on the user. */
+export function groupIsWorking(group: Pick<Group, "members">) {
+  return group.members.some((member) => WORKING_STATUSES.has(member.status ?? "idle"));
+}
+
+export function applyGroupMemberStatus<T extends Pick<Group, "members">>(
+  groups: T[],
+  botId: string,
+  status: string,
+): T[] {
+  let changed = false;
+  const next = groups.map((group) => {
+    if (!group.members.some((member) => member.botId === botId && member.status !== status))
+      return group;
+    changed = true;
+    return {
+      ...group,
+      members: group.members.map((member) =>
+        member.botId === botId ? { ...member, status } : member,
+      ),
+    };
+  });
+  return changed ? next : groups;
 }
 
 export type BotStatusMessage = { botId: string; status: string };

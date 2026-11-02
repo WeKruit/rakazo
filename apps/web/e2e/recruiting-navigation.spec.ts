@@ -127,3 +127,17 @@ test("Work and Role details preserve the original actions on a compact screen", 
   await expect(page).toHaveURL(new RegExp(`/app/g/${appGroupId}\\?view=brief$`));
   expect(fixture.unknown).toEqual([]);
 });
+
+test("a role whose team is working shows it in the role list", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = await mockRecruitingApp(page, { memberStatus: "running" });
+  await page.goto(`/app/g/${appGroupId}?view=contacts`);
+  const roles = page.getByRole("navigation", { name: "Role conversations", exact: true });
+  await expect(roles.getByTestId("role-working")).toHaveCount(1);
+  await expect(roles.getByTestId("role-working")).toHaveAttribute("title", "Working…");
+  await test.info().attach("role-working-1440", {
+    body: await page.screenshot({ path: info.outputPath("role-working-1440.png") }),
+    contentType: "image/png",
+  });
+  expect(fixture.unknown).toEqual([]);
+});

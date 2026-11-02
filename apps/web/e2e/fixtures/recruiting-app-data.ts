@@ -378,8 +378,17 @@ export async function mockRecruitingApp(
     sequenceDraft?: boolean;
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
+    memberStatus?: string;
   } = {},
 ) {
+  const status = options.memberStatus;
+  const groups = status
+    ? bootstrap.groups.map((item) => ({
+        ...item,
+        members: item.members.map((member) => ({ ...member, status })),
+      }))
+    : bootstrap.groups;
+  const spaces = bootstrap.spaces.map((space) => ({ ...space, groups }));
   const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
     ? {
         ...snapshot,
@@ -739,7 +748,8 @@ export async function mockRecruitingApp(
           },
         };
       } else value = { roles, items, nextCursor: null };
-    } else if (method === "bootstrap") value = { ...bootstrap, thread: initialSnapshot };
+    } else if (method === "bootstrap")
+      value = { ...bootstrap, groups, spaces, thread: initialSnapshot };
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };
     else if (method === "links/companySites")
@@ -747,14 +757,14 @@ export async function mockRecruitingApp(
     else if (method === "bots/page")
       value = { items: input.archived ? [] : bootstrap.bots, nextOffset: null };
     else if (method === "groups/page")
-      value = { items: input.archived ? [] : bootstrap.groups, nextOffset: null };
+      value = { items: input.archived ? [] : groups, nextOffset: null };
     else if (method === "spaces/list")
       value = {
-        spaces: bootstrap.spaces,
+        spaces,
         current: {
           id: "fixture-space",
           bots: bootstrap.bots,
-          groups: bootstrap.groups,
+          groups,
           botSections: [],
         },
       };
