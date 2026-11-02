@@ -1,15 +1,16 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
+import { getLogger } from "@rakazo/logging";
 
 const TIMEOUT_MS = 4_000;
 const MAX_USER_CHARS = 1_500;
 const MAX_EARLIER_CHARS = 400;
 const EARLIER_TURNS = 4;
-const MAX_REPLY_CHARS = 100;
+const MAX_REPLY_CHARS = 160;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
 const INSTRUCTIONS = [
   "You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that shows you understood what they asked and says what you are working on now.",
-  "At most 20 words, in the language of the person's latest message, in the assistant's own voice.",
+  "One sentence of at most 20 words (at most 30 characters in Chinese), in the language of the person's latest message, in the assistant's own voice.",
   "Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
 ].join(" ");
@@ -88,5 +89,12 @@ export async function quickReply(input: {
     if (event.type === "usage" && !event.accounted) await input.onUsage?.(event);
     if (event.type === "done" && event.text) text = event.text;
   }
-  return cleanQuickReply(text);
+  const line = cleanQuickReply(text);
+  if (!line)
+    getLogger().info("quick_reply.dropped", {
+      runId: input.runId,
+      chars: text.trim().length,
+      question: /[?？]\s*$/.test(text.trim()),
+    });
+  return line;
 }
