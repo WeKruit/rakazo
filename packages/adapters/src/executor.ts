@@ -16904,8 +16904,8 @@ type LaneRun = {
 async function threadLaneAncestors(
   tx: Pick<PrismaClient, "message" | "run">,
   run: LaneRun,
-): Promise<string[]> {
-  const ancestors: string[] = [];
+): Promise<Array<{ id: string; status: string }>> {
+  const ancestors: Array<{ id: string; status: string }> = [];
   let current = run;
   const select = {
     blocks: true,
@@ -16974,10 +16974,16 @@ async function threadLaneAncestors(
               userId: true,
               botId: true,
               sourceMessageId: true,
+              status: true,
             },
           })
         : null;
-    if (owner && (owner.id === current.id || owner.id === run.id || ancestors.includes(owner.id)))
+    if (
+      owner &&
+      (owner.id === current.id ||
+        owner.id === run.id ||
+        ancestors.some((ancestor) => ancestor.id === owner.id))
+    )
       return [];
     if (
       !owner ||
@@ -16987,7 +16993,7 @@ async function threadLaneAncestors(
       owner.botId !== parent.botId
     )
       break;
-    ancestors.push(owner.id);
+    ancestors.push({ id: owner.id, status: owner.status });
     current = owner;
   }
   return ancestors;
@@ -17003,11 +17009,16 @@ async function threadLaneBusy(
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
-      id: { notIn: [run.id, ...ancestors] },
+      id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
       OR: [
         { status: { in: ["leased", "running"] } },
-        { status: "queued", createdAt: { lt: run.createdAt } },
-        { status: "queued", createdAt: run.createdAt, id: { lt: run.id } },
+        // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.
+        ...(ancestors.some((ancestor) => ["leased", "running"].includes(ancestor.status))
+          ? []
+          : [
+              { status: "queued", createdAt: { lt: run.createdAt } },
+              { status: "queued", createdAt: run.createdAt, id: { lt: run.id } },
+            ]),
       ],
     },
   });
