@@ -5881,7 +5881,7 @@ describe("native recruiting assessment effect delivery", () => {
     await f.run();
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Must have shipped robotics firmware.");
-    expect(prompt).toContain("(notes.pdf) is already read; never read it again.");
+    expect(prompt).toContain("(notes.pdf) is already read for this turn");
     expect(prompt).toContain("read on from offset 16000");
     // A candidate list stays with the model, which parses it as CSV.
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
@@ -5938,18 +5938,19 @@ describe("native recruiting assessment effect delivery", () => {
     f.setCalls([]);
     await f.run();
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
-    expect(prompt).toContain("(availability.txt) is already read; never read it again.");
+    expect(prompt).toContain("(availability.txt) is already read for this turn");
     expect(prompt).toContain("Tuesday 2-4pm Pacific");
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
   });
 
   it("reads the recruiter's attached file again for a harness continuation of their turn", async () => {
     const f = fixture("continued-attached-file");
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "continue-1" });
     vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
       {
         id: "continue-1",
         seq: 3,
-        role: "user",
+        role: "system",
         botId: null,
         runId: "continued-attached-file",
         clientNonce: "autocontinue:abc",
@@ -5981,7 +5982,7 @@ describe("native recruiting assessment effect delivery", () => {
     f.setCalls([]);
     await f.run();
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
-    expect(prompt).toContain("(notes.txt) is already read; never read it again.");
+    expect(prompt).toContain("(notes.txt) is already read for this turn");
     expect(prompt).toContain("Code word: blue whale");
   });
 
