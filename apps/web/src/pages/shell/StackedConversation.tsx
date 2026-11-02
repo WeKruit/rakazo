@@ -1,16 +1,20 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
-import { answerableAskMessageIds, userVisibleMessages } from "@rakazo/core";
+import { answerableAskMessageIds, threadTailPhase, userVisibleMessages } from "@rakazo/core";
 import { Button, Textarea } from "@rakazo/ui-web";
 import { ArrowLeft, Maximize2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LoadingState, Shimmer } from "../../components/ai/primitives";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { isRunPhase, threadTailLabel } from "../../lib/roster-status";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 
 const MessageView = lazyPanel(() => import("../ShellMessage").then((module) => module.MessageView));
 
 const REFRESH_MS = 3000;
+/** How long a sent answer shows as starting while the run has not been seen yet. */
+const PENDING_MS = 30_000;
 const noop = () => undefined;
 const asyncNoop = async () => undefined;
 
@@ -38,7 +42,12 @@ export function StackedConversation({
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
   const [focused, setFocused] = useState(messageId);
   const [around, setAround] = useState<ThreadSnapshot["messages"] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // A failed refresh clears on the next good one; a failed send or answer stays until retried.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? loadError;
+  // From a send or answer until its run shows, so the recruiter sees it was taken.
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -47,7 +56,11 @@ export function StackedConversation({
 
   const load = useCallback(async () => {
     const next = await rpc.threads.get({ groupId });
-    if (current.current === groupId) setSnapshot(next);
+    if (current.current !== groupId) return;
+    setSnapshot(next);
+    setLoadError(null);
+    const phase = threadTailPhase(next);
+    if (isRunPhase(phase)) setPendingSince(null);
   }, [groupId]);
 
   useEffect(() => {
@@ -59,7 +72,7 @@ export function StackedConversation({
         if (alive) setAround(page.messages);
       })
       .catch((err: unknown) => {
-        if (alive) setError(errorText(err, t`Could not load this conversation`));
+        if (alive) setLoadError(errorText(err, t`Could not load this conversation`));
       });
     return () => {
       alive = false;
@@ -75,11 +88,12 @@ export function StackedConversation({
 
   useEffect(() => {
     setSnapshot(null);
-    setError(null);
+    setLoadError(null);
+    setActionError(null);
     let alive = true;
     const tick = () =>
       load().catch((err: unknown) => {
-        if (alive) setError(errorText(err, t`Could not load this conversation`));
+        if (alive) setLoadError(errorText(err, t`Could not load this conversation`));
       });
     void tick();
     const timer = setInterval(tick, REFRESH_MS);
@@ -107,20 +121,27 @@ export function StackedConversation({
   }, [onBack]);
 
   const answerable = answerableAskMessageIds(snapshot);
+  const pending = pendingSince !== null && Date.now() - pendingSince < PENDING_MS;
+  const phase = snapshot ? threadTailPhase(snapshot, { sending: sending || pending }) : null;
+  const workingLabel =
+    isRunPhase(phase) || phase === "compacting" || phase === "retrying"
+      ? threadTailLabel(phase)
+      : null;
   const botName = (botId: string | undefined) => bots.find((bot) => bot.id === botId)?.name;
 
   async function send() {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
-    setError(null);
+    setActionError(null);
     try {
       await rpc.threads.send({ groupId, text });
       setDraft("");
       setFocused(undefined);
-      await load();
+      setPendingSince(Date.now());
+      await load().catch(noop);
     } catch (err) {
-      setError(errorText(err, t`Could not send`));
+      setActionError(errorText(err, t`Could not send`));
     } finally {
       setSending(false);
     }
@@ -172,7 +193,8 @@ export function StackedConversation({
                   answer,
                   ...(username ? { username } : {}),
                 });
-                await load();
+                setPendingSince(Date.now());
+                await load().catch(noop);
               }}
               onOpenBot={noop}
               onOpenPeerMessages={noop}
@@ -192,6 +214,16 @@ export function StackedConversation({
             />
           </div>
         ))}
+        {workingLabel && !focused ? (
+          <LoadingState
+            label={workingLabel}
+            indicator={
+              <span aria-hidden>
+                <Shimmer>{workingLabel}</Shimmer>
+              </span>
+            }
+          />
+        ) : null}
       </div>
       {error ? (
         <p role="alert" className="px-4 pb-2 text-sm text-destructive">
