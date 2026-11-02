@@ -1055,6 +1055,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Scheduling refused to book a candidate who had not been emailed or agreed yet.",
   },
   {
+    rule: "hand a named booking to Scheduling without a role",
+    in: "Main",
+    phrase: "or as the recruiter named them, even when no role is linked",
+    why: "Main asked which role a person was in before handing over an interview the recruiter had fully specified.",
+  },
+  {
     rule: "book a named email without a role",
     in: "Scheduling",
     phrase: "book with that email even if the person is not a saved candidate in any role",
