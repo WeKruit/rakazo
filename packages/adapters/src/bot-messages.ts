@@ -17,6 +17,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
 /**
@@ -409,13 +410,14 @@ export async function returnBotMessageOutcome(
         select: { group: { select: { name: true } } },
       })
     : null;
+  const mail = intent === "result" ? await readMailReplyOutcomeReport(deps.prisma, run) : undefined;
   const outcome = await messageBot(
     deps,
     run,
     sender,
     {
       bot_id: source.fromBotId,
-      message: clampBotMessage(text),
+      message: clampBotMessage(mail?.text ?? text),
       intent,
       ...(source.returnThreadId
         ? {
@@ -493,6 +495,8 @@ export async function returnDelegatedTeamOutcome(
       .trim();
     if (reply) text = reply;
   }
+  const mail = await readMailReplyOutcomeReport(deps.prisma, run);
+  if (mail) text = mail.text;
   if (!text) return;
   const sent = await messageBot(
     deps,

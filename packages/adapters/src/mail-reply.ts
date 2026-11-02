@@ -1,6 +1,11 @@
 import type { AdapterContext, ConnectorProvider, ConnectorRoute } from "@rakazo/adapter-kit";
 import type { MailReply } from "@rakazo/contracts";
-import { inboxThreadKey, MailReplySchema } from "@rakazo/contracts";
+import {
+  inboxThreadKey,
+  MailReplySchema,
+  MessageBlock as MessageBlockSchema,
+} from "@rakazo/contracts";
+import { type PrismaClient, projectMailReplyCards } from "@rakazo/db";
 import addressparser from "nodemailer/lib/addressparser";
 import { htmlToPlainText } from "./keyless-http-web.js";
 
@@ -8,6 +13,119 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+
+/** Read the owned child card and its real receipt, not its last progress sentence. */
+export async function readMailReplyOutcomeReport(
+  prisma: Pick<PrismaClient, "run" | "message" | "externalEffect">,
+  run: { id: string; spaceId: string; userId: string; threadId: string; botId: string },
+) {
+  const sourceSelect = {
+    id: true,
+    seq: true,
+    role: true,
+    botId: true,
+    runId: true,
+    threadId: true,
+    blocks: true,
+  } as const;
+  const select = { id: true, botId: true, sourceMessage: { select: sourceSelect } } as const;
+  const where = { spaceId: run.spaceId, userId: run.userId, threadId: run.threadId };
+  let owner = await prisma.run.findFirst({
+    where: { ...where, id: run.id, botId: run.botId },
+    select,
+  });
+  if (!owner || owner.id !== run.id || !owner.sourceMessage) return undefined;
+  const source = owner.sourceMessage;
+  const parsed = MessageBlockSchema.array().safeParse(source.blocks);
+  const report = parsed.success && parsed.data.length === 1 ? parsed.data[0] : undefined;
+  if (source.threadId !== run.threadId) return undefined;
+  if (report?.kind === "handoff" && report.report) {
+    if (
+      report.toBotId !== run.botId ||
+      source.role !== "bot" ||
+      source.botId !== report.fromBotId ||
+      !source.runId
+    )
+      return undefined;
+    owner = await prisma.run.findFirst({
+      where: { ...where, id: source.runId, botId: report.fromBotId },
+      select,
+    });
+    if (!owner?.sourceMessage || owner.sourceMessage.threadId !== run.threadId) return undefined;
+  }
+  // The thread/sequence index starts at this exact delegated request, not the whole conversation history.
+  const rows = await prisma.message.findMany({
+    where: {
+      threadId: run.threadId,
+      thread: { spaceId: run.spaceId, userId: run.userId },
+      runId: owner.id,
+      botId: owner.botId,
+      role: "bot",
+      seq: { gt: owner.sourceMessage.seq },
+      blocks: { array_contains: [{ kind: "ask" }] },
+    },
+    orderBy: { seq: "asc" },
+    select: { id: true, runId: true, blocks: true },
+  });
+  const cards = rows.flatMap((row) => {
+    const blocks = MessageBlockSchema.array().safeParse(row.blocks);
+    return blocks.success ? [{ ...row, runId: row.runId ?? undefined, blocks: blocks.data }] : [];
+  });
+  const ids = cards.flatMap((message) =>
+    message.blocks.flatMap((block) =>
+      block.kind === "ask" && block.mailReply && block.approvalEffectId
+        ? [block.approvalEffectId]
+        : [],
+    ),
+  );
+  if (!ids.length) return undefined;
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      id: { in: ids },
+      spaceId: run.spaceId,
+      runId: owner.id,
+      run: { ...where, botId: owner.botId },
+    },
+    select: {
+      id: true,
+      runId: true,
+      status: true,
+      request: true,
+      result: true,
+      updatedAt: true,
+      run: { select: { status: true } },
+    },
+  });
+  const verified = new Set(effects.map((effect) => effect.id));
+  const projected = await projectMailReplyCards(
+    prisma,
+    { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
+    cards,
+    effects,
+  );
+  const facts = projected.flatMap((message) =>
+    message.blocks.flatMap((block) =>
+      block.kind === "ask" &&
+      block.approvalEffectId &&
+      verified.has(block.approvalEffectId) &&
+      block.mailReply
+        ? [
+            {
+              effectId: block.approvalEffectId,
+              status: block.mailReply.status,
+              sentAt: block.mailReply.sentAt,
+              error: block.mailReply.error,
+            },
+          ]
+        : [],
+    ),
+  );
+  if (!facts.length) return undefined;
+  return {
+    facts,
+    text: [...new Set(facts.map((fact) => mailReplyOutcomeInstruction(fact)))].join("\n"),
+  };
+}
 export const replyAddresses = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.flatMap(replyAddresses)
@@ -190,7 +308,11 @@ export async function readGmailReplyCard(
 }
 
 /** The recorded card outcome is business state, not an instruction to repeat the original tool. */
-export function mailReplyOutcomeInstruction(reply: Pick<MailReply, "status">) {
+export function mailReplyOutcomeInstruction(
+  reply: Pick<MailReply, "status"> & Pick<Partial<MailReply>, "error">,
+) {
+  if (reply.status === "sent" && reply.error === "formatting_changed")
+    return "The already-created reply card has a verified sent receipt, but the sent message has different line or paragraph formatting. It was sent; the card shows the actual sent body. Explain this formatting difference and never resend or recreate it automatically.";
   const outcome = {
     discarded:
       "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Stop working on this reply. Do not claim that card creation failed, retry it, or create a replacement card using another tool or route. Only a new explicit recruiter request may restart it.",

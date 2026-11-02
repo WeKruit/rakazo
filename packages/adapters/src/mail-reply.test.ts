@@ -5,6 +5,7 @@ import {
   mailReplyFromAnchor,
   mailReplyOutcomeInstruction,
   readGmailReplyCard,
+  readMailReplyOutcomeReport,
 } from "./mail-reply.js";
 
 const context = {
@@ -137,4 +138,168 @@ it("reports the recorded card outcome rather than inventing missing or unconfirm
   expect(mailReplyOutcomeInstruction({ status: "unknown" })).toContain(
     "Do not claim it sent or that nothing was sent",
   );
+});
+
+describe("verified reply outcome handoff", () => {
+  const child = {
+    id: "child",
+    botId: "outreach",
+    sourceMessage: {
+      id: "request",
+      seq: 10,
+      role: "bot",
+      botId: "main",
+      runId: "parent",
+      threadId: "thread",
+      blocks: [],
+    },
+  };
+  const current = {
+    id: "report-run",
+    userId: "owner",
+    spaceId: "space",
+    threadId: "thread",
+    botId: "main",
+  };
+  const report = {
+    kind: "handoff",
+    fromBotId: "outreach",
+    toBotId: "main",
+    hop: 2,
+    text: "Progress above",
+    report: "completed",
+  };
+  function setup(change = {}) {
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: current.id,
+        botId: current.botId,
+        sourceMessage: {
+          id: "report",
+          seq: 13,
+          role: "bot",
+          botId: "outreach",
+          runId: child.id,
+          threadId: "thread",
+          blocks: [report],
+          ...change,
+        },
+      })
+      .mockResolvedValueOnce(child);
+    const mailReply = {
+      from: "mailbox@example.test",
+      to: ["candidate@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Re: Original",
+      body: "Draft",
+      status: "needs_approval",
+      sentAt: null,
+      inReplyTo: {
+        sourceId: "source",
+        emailId: "anchor",
+        threadId: "mail-thread",
+        subject: "Original",
+        sender: "candidate@example.test",
+      },
+    };
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "card",
+        runId: child.id,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Reply",
+            approvalEffectId: "private-effect",
+            status: "answered",
+            actions: [
+              { id: "allow", label: "Send" },
+              { id: "deny", label: "Discard" },
+            ],
+            mailReply,
+          },
+        ],
+      },
+    ]);
+    const effects = vi
+      .fn()
+      .mockResolvedValue([
+        {
+          id: "private-effect",
+          runId: child.id,
+          status: "completed",
+          request: {},
+          result: { status: "sent_recorded" },
+          updatedAt: new Date(),
+          run: { status: "completed" },
+        },
+      ]);
+    return {
+      db: { run: { findFirst }, message: { findMany }, externalEffect: { findMany: effects } },
+      findFirst,
+      findMany,
+      effects,
+    };
+  }
+  it("reports the real owned card receipt instead of progress, in one effect batch", async () => {
+    const h = setup();
+    const result = await readMailReplyOutcomeReport(h.db as never, current);
+    expect(result?.facts).toEqual([
+      { effectId: "private-effect", status: "sent", sentAt: expect.any(String), error: undefined },
+    ]);
+    expect(result?.text).toContain("verified sent receipt");
+    expect(result?.text).not.toMatch(/private-effect|instantly|provider|Progress above/);
+    expect(h.findFirst).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          id: child.id,
+          botId: child.botId,
+          spaceId: "space",
+          userId: "owner",
+          threadId: "thread",
+        },
+      }),
+    );
+    expect(h.findMany).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          runId: child.id,
+          botId: child.botId,
+          threadId: "thread",
+          thread: { spaceId: "space", userId: "owner" },
+          seq: { gt: 10 },
+        }),
+      }),
+    );
+    expect(h.effects).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: ["private-effect"] },
+          runId: child.id,
+          spaceId: "space",
+          run: { spaceId: "space", userId: "owner", threadId: "thread", botId: child.botId },
+        }),
+      }),
+    );
+  });
+  it.each([
+    { role: "user" },
+    { botId: "foreign" },
+    { runId: null },
+    { threadId: "foreign" },
+    { blocks: [{ ...report, toBotId: "foreign" }] },
+  ])("rejects an unproven report source %j", async (change) => {
+    const h = setup(change);
+    expect(await readMailReplyOutcomeReport(h.db as never, current)).toBeUndefined();
+    expect(h.findMany).not.toHaveBeenCalled();
+    expect(h.effects).not.toHaveBeenCalled();
+  });
+  it("does not promote a cached card without an owned receipt", async () => {
+    const h = setup();
+    h.effects.mockResolvedValue([]);
+    expect(await readMailReplyOutcomeReport(h.db as never, current)).toBeUndefined();
+  });
 });

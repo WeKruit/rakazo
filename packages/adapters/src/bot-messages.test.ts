@@ -76,7 +76,10 @@ function deps(
         ),
     },
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
-    run: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    run: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     thread: { findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null) },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => {
       transactionAttempts += 1;
