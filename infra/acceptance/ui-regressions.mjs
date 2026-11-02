@@ -6,6 +6,8 @@
 //              internal tool names.
 //   multi      A multi-select question card from Kruit takes several picks before it is sent.
 //   people     Kruit lists people in the LinkedIn format the role teams use.
+//   aftercard  A request typed right after answering a card is answered too, not skipped or
+//              called "already listed".
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
@@ -234,6 +236,68 @@ try {
       failures.push(
         `Kruit's answer lists ${linked(replies)} LinkedIn profiles, not 3: "${replies.map(textOf).join(" ").slice(0, 160)}"`,
       );
+  });
+
+  await check("aftercard", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    if (!fixtureRole) return failures.push(`no ${FIXTURE_MARK}role on this account`);
+    // An earlier card still waiting would take this check's messages as its answer.
+    await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+    const cardTag = `${tag}c`;
+    const replies = await ask(
+      kruit.id,
+      `测试 ${cardTag}：请只发一张单选问题卡片问我测试岗位 ${cardTag} 在哪个城市，问题里写上 ${cardTag}，选项 Atlanta、Dallas。不要做别的事。`,
+      (items) => items.some((message) => message.blocks?.some((block) => block.kind === "ask")),
+      2 * 60_000,
+    );
+    if (!replies.some((message) => message.blocks?.some((block) => block.kind === "ask")))
+      return failures.push("Kruit sent no question card within 2 min");
+    await page.goto(`${ORIGIN}/app/g/${kruit.id}`);
+    const dallas = page
+      .locator("div")
+      .filter({ has: page.getByRole("button", { name: "Dallas", exact: true }) })
+      .filter({ hasText: cardTag })
+      .last()
+      .getByRole("button", { name: "Dallas", exact: true });
+    if (
+      !(await dallas.waitFor({ timeout: 30_000 }).then(
+        () => true,
+        () => false,
+      ))
+    ) {
+      await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+      return failures.push("the question card did not show on the page within 30 s");
+    }
+    const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
+    await composer.waitFor({ timeout: 20_000 });
+    // The request goes in while the card answer's reply is still being written.
+    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    await dallas.click();
+    // Once the answer is in; a message sent before it would answer the card instead.
+    await dallas.waitFor({ state: "detached", timeout: 10_000 }).catch(() => {});
+    await composer.fill(request);
+    await composer.press("Enter");
+    let after = [];
+    for (let end = Date.now() + 3 * 60_000; Date.now() < end; await sleep(3_000)) {
+      const all = await messages(kruit.id).catch(() => []);
+      const sent = all.findLast(
+        (message) => message.role === "user" && textOf(message) === request,
+      );
+      after = sent
+        ? all.filter((message) => message.role !== "user" && message.seq > sent.seq)
+        : [];
+      const links = after.reduce(
+        (n, message) => n + (textOf(message).match(/linkedin\.com\/in\//g)?.length ?? 0),
+        0,
+      );
+      if (links >= 3) break;
+    }
+    const text = after.map(textOf).join(" ");
+    if ((text.match(/linkedin\.com\/in\//g)?.length ?? 0) < 3)
+      failures.push(
+        `the request sent right after the card was not answered: "${text.slice(0, 160)}"`,
+      );
+    await page.screenshot({ path: path.join(OUT, "aftercard.png") }).catch(() => {});
   });
 
   await check("title", async (page, failures) => {
