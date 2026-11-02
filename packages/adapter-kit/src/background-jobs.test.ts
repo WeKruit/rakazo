@@ -32,6 +32,7 @@ function handlers(): BackgroundJobHandlers {
     "thread.reply_check": vi.fn(async () => undefined),
     "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
+    "discovery.warm": vi.fn(async () => undefined),
   };
 }
 
