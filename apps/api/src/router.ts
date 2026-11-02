@@ -177,6 +177,7 @@ import {
   appContract,
   BotSecretAuth,
   ComputerCommandSchema,
+  EffortModeSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
   MailReplySendAnswerSchema,
@@ -1096,6 +1097,21 @@ export function createRouter(deps: RouterDeps) {
         groupId: target.groupId,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+  /** The chat's effort mode for an operator account; undefined for everyone else or on a read error. */
+  async function threadEffortMode(userId: string, threadId: string) {
+    try {
+      if (!(await seesOperatorSpend(deps.prisma, userId))) return undefined;
+      const thread = await deps.prisma.thread.findUnique({
+        where: { id: threadId },
+        select: { effortMode: true },
+      });
+      return EffortModeSchema.catch("fast").parse(thread?.effortMode ?? "fast");
+    } catch (error) {
+      // The picker is optional; opening the chat must not fail on it.
+      getLogger().warn("thread effort mode read failed", { threadId, error });
+      return undefined;
     }
   }
   /** One admission path for a composer message and for an answer that starts work again. */
@@ -2669,7 +2685,10 @@ export function createRouter(deps: RouterDeps) {
         });
         if (target.kind === "group") await attachMissingCrmRole(context, target);
         const resolvedAt = performance.now();
-        const snapshot = await threadSnapshot(deps, target);
+        const [snapshot, effortMode] = await Promise.all([
+          threadSnapshot(deps, target),
+          threadEffortMode(context.actor.userId, target.threadId),
+        ]);
         const snapshotAt = performance.now();
         const messages = await projectRecruitingApprovalFiles(
           deps.prisma,
@@ -2688,7 +2707,17 @@ export function createRouter(deps: RouterDeps) {
           projectMs: Math.round(finishedAt - snapshotAt),
           totalMs: Math.round(finishedAt - startedAt),
         });
-        return { ...snapshot, messages };
+        return { ...snapshot, messages, ...(effortMode ? { effortMode } : {}) };
+      }),
+      setEffort: authed.threads.setEffort.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
+        await deps.prisma.thread.update({
+          where: { id: target.threadId },
+          data: { effortMode: input.mode === "fast" ? null : input.mode },
+        });
+        return { ok: true as const };
       }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {

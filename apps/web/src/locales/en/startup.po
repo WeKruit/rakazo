@@ -706,6 +706,10 @@ msgstr "Background task"
 msgid "Background tasks"
 msgstr "Background tasks"
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Balanced"
+msgstr "Balanced"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "Base URL"
@@ -1421,6 +1425,10 @@ msgstr "Could not load search results"
 msgid "Could not load sign-in options"
 msgstr "Could not load sign-in options"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Could not load the complete message."
+msgstr "Could not load the complete message."
+
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Could not load the complete shortlist"
 msgstr "Could not load the complete shortlist"
@@ -1693,6 +1701,10 @@ msgstr "Day delay"
 msgid "Days unavailable."
 msgstr "Days unavailable."
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Deep"
+msgstr "Deep"
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "Default"
@@ -1900,6 +1912,11 @@ msgstr "Edit"
 msgid "Education"
 msgstr "Education"
 
+#. placeholder {0}: labels[selected]
+#: src/pages/shell/effort-picker.tsx
+msgid "Effort: {0}"
+msgstr "Effort: {0}"
+
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
@@ -2091,6 +2108,10 @@ msgstr "Failed."
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "Failure handling"
+
+#: src/pages/shell/effort-picker.tsx
+msgid "Fast"
+msgstr "Fast"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Feedback sent"
@@ -3605,8 +3626,8 @@ msgid "Preview only · variables remain unfilled"
 msgstr "Preview only · variables remain unfilled"
 
 #: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr "Preview only. Ask for the complete message to read the full body."
+msgid "Preview only. The complete message has not loaded."
+msgstr "Preview only. The complete message has not loaded."
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"

@@ -42,6 +42,10 @@ export const ThinkingLevelSchema = z.enum([
 ]);
 export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 
+/** How hard a conversation's replies think: fast (the default) answers soonest, deep thinks most. */
+export const EffortModeSchema = z.enum(["fast", "balanced", "deep"]);
+export type EffortMode = z.infer<typeof EffortModeSchema>;
+
 export { AGENT_SECRET_NAME_PATTERN };
 
 export const AgentSecretSchema = z.object({
@@ -1207,6 +1211,8 @@ export const ThreadSnapshotSchema = z.object({
   computer: ComputerStatusSchema.optional(),
   /** Guessed next user message after the newest reply, while that reply is still the newest. */
   suggestion: z.object({ runId: Id, text: z.string() }).optional(),
+  /** This chat's effort mode; present only for accounts that may change it. */
+  effortMode: EffortModeSchema.optional(),
 });
 export type ThreadSnapshot = z.infer<typeof ThreadSnapshotSchema>;
 
