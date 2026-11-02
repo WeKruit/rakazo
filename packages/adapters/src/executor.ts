@@ -13089,12 +13089,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!tools.some((tool) => tool.name === "artifact_read")) return [];
           // A specialist handed the work, or a harness continuation of the recruiter's turn, reads
           // the recruiter's latest message, not the handoff or the continuation prompt.
+          // A continuation prompt is stored as an internal system message, so it is never the
+          // turn's user message; its source message says it is one.
           const continuation =
-            currentTurnMessage !== undefined &&
-            "internal" in currentTurnMessage &&
-            currentTurnMessage.internal;
+            Boolean(run!.sourceMessageId) &&
+            historyMessages.find((message) => message.id === run!.sourceMessageId)?.internal ===
+              true;
           const source =
-            currentTurnMessage?.role === "user" && !continuation
+            currentTurnMessage?.role === "user"
               ? currentTurnMessage
               : handedIn || continuation
                 ? historyMessages.find((message) => message.role === "user" && !message.internal)
@@ -13487,7 +13489,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
             .map(
               ({ file, read }) =>
-                `The recruiter's attached file (${file.name}) is already read; never read it again.${read.hasMore === true ? " Only its first part is below; read on from offset 16000 only if your next step needs the rest." : ""} Its text:\n\n${String(read.text)}`,
+                `The recruiter's attached file (${file.name}) is already read for this turn with artifact_read, and that read is your file read; never read it again.${read.hasMore === true ? " Only its first part is below; read on from offset 16000 only if your next step needs the rest." : ""} Its text:\n\n${String(read.text)}`,
             )
             .join("\n\n") || undefined;
         // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
