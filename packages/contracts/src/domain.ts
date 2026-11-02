@@ -944,6 +944,8 @@ export type UsageAmounts = z.infer<typeof UsageAmountsSchema>;
 
 export const UsageCostsSchema = z.object({
   canViewInternalCosts: z.boolean(),
+  /** Credits left from the account's grant; null when the account is not limited. */
+  remaining: z.number().nonnegative().nullable(),
   total: UsageAmountsSchema,
   month: UsageAmountsSchema,
   days: z.array(UsageAmountsSchema.extend({ day: z.string() })),

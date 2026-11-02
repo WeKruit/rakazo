@@ -579,14 +579,17 @@ describe("model setup gate", () => {
     deploymentModelConfigured?: boolean;
     deploymentModelHostCredentials?: boolean;
     deploymentModelCredentialCipher?: string;
+    credits?: { limit: number; spent: number };
   }) {
     const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue(options.credits ? [options.credits] : []),
       user: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           email: "user@rakazo.test",
           name: "Test User",
           avatarStyle: "robot",
         }),
+        findUnique: vi.fn().mockResolvedValue({ email: "user@rakazo.test", emailVerified: true }),
       },
       spaceModelPreference: { findFirst: vi.fn().mockResolvedValue(null) },
       deploymentSettings: {
@@ -648,6 +651,21 @@ describe("model setup gate", () => {
         code: "BAD_REQUEST",
         message: "Connect a model to start a run.",
       }),
+    });
+  });
+
+  it("refuses to start a run once the account's credits are used up", async () => {
+    const { actor, handler } = modelGateDeps({
+      agentRuntime: "pi",
+      deploymentModelConfigured: true,
+      credits: { limit: 10_000, spent: 10_000.5 },
+    });
+
+    const response = await call(handler, actor, "threads/send", { botId: "bot-1", text: "hi" });
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toEqual({
+      json: expect.objectContaining({ code: "CREDITS_EXHAUSTED" }),
     });
   });
 

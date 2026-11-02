@@ -288,6 +288,7 @@ it("shows only product credits in usage for both customer and staff accounts", a
   const amounts = { credits: 150.1256, pending: true };
   const usage = {
     canViewInternalCosts: false,
+    remaining: 9_771.5,
     total: amounts,
     month: amounts,
     days: [{ day: "2026-10-25", ...amounts }],
@@ -308,6 +309,7 @@ it("shows only product credits in usage for both customer and staff accounts", a
       expect(container.textContent).toContain("Quality manager");
       expect(container.textContent).toContain("Credits");
       expect(container.textContent).toContain("150.1256");
+      expect(container.textContent).toContain("Remaining");
       expect(container.textContent).toContain("Pending usage");
       for (const hidden of [
         "Search credits",

@@ -4,6 +4,8 @@ import { authErrorMessage, userErrorMessage } from "@rakazo/core";
 
 /** Text for a failure: human messages pass through; network and implementation detail become copy. */
 export function errorText(error: unknown, fallback = t`Something went wrong. Try again.`): string {
+  if (error && typeof error === "object" && "code" in error && error.code === "CREDITS_EXHAUSTED")
+    return t`Your credits are used up. Contact us to add more.`;
   return userErrorMessage(error, { fallback, offline: t`Could not reach the server` });
 }
 

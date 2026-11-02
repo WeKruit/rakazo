@@ -5733,6 +5733,10 @@ msgstr "You"
 msgid "You have control"
 msgstr "You have control"
 
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Contact us to add more."
+msgstr "Your credits are used up. Contact us to add more."
+
 #: src/pages/Auth.tsx
 msgid "Your email address"
 msgstr "Your email address"

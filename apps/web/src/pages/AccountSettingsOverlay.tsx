@@ -336,6 +336,15 @@ export function UsageSettingsPanel({
           <UsageTable
             label={t`Usage totals`}
             rows={[
+              ...(usage.remaining == null
+                ? []
+                : [
+                    {
+                      key: "remaining",
+                      name: t`Remaining`,
+                      value: { credits: usage.remaining, pending: false },
+                    },
+                  ]),
               { key: "month", name: t`This month`, value: usage.month },
               { key: "total", name: t`All time`, value: usage.total },
             ]}

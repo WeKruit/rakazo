@@ -14,6 +14,7 @@ test("usage shows spend per role and calibration round", async ({ page }, testIn
       json: {
         json: {
           canViewInternalCosts: false,
+          remaining: 9_772,
           total: amounts,
           month: amounts,
           days: [{ day: "2026-10-25", ...amounts }],

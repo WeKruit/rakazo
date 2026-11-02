@@ -182,6 +182,8 @@ describePostgres("usage ledger (PostgreSQL)", () => {
 
     const costs = await db.summarizeUsageCosts(prisma, actor);
     expect(costs.total).toEqual({ credits: 257.8, pending: true });
+    // A new account starts with $50 of cost at the default 200 credits per dollar.
+    expect(costs.remaining).toBe(10_000 - 257.8);
     expect(costs.canViewInternalCosts).toBe(false);
     expect(JSON.stringify(costs)).not.toMatch(/costUsd|tokens|services|accounts/);
     const [role] = costs.roles;
@@ -207,6 +209,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       where: { id: userId },
       data: { email: `${userId}@WeKruit.com`, emailVerified: true },
     });
+    expect(await db.remainingUsageCredits(prisma, userId)).toBeNull();
     // An enrichment job reports its credits once finished; reading it again is not new spend.
     const finished = {
       content: [
