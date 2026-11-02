@@ -1,3 +1,8 @@
+-- ADD COLUMN, the trigger and the index each need a strong lock on a hot table. Fail the deploy
+-- promptly under contention instead of queueing every sign-in and message behind this migration.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+
 -- NULL keeps existing accounts unlimited. Each new account starts with $50 of service cost,
 -- converted to product credits at the deployment rate in effect when it signs up.
 ALTER TABLE "user" ADD COLUMN "usageCreditLimit" DOUBLE PRECISION;
@@ -15,3 +20,5 @@ FOR EACH ROW EXECUTE FUNCTION "user_starting_credits"();
 
 -- The balance check sums one account's spend across its spaces before each new run.
 CREATE INDEX "usage_records_userId_idx" ON "usage_records" ("userId");
+
+COMMIT;
