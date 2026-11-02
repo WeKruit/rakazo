@@ -272,16 +272,30 @@ try {
     await composer.waitFor({ timeout: 20_000 });
     // The request goes in while the card answer's reply is still being written.
     const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    // The thread finishes painting first; a click on a card that is re-rendering is lost.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(2_000);
+    const lastSeq = Math.max(0, ...(await messages(kruit.id)).map((message) => message.seq));
     await dallas.click();
     // Once the answer is in; a message sent before it would answer the card instead.
-    await dallas.waitFor({ state: "detached", timeout: 10_000 }).catch(() => {});
+    if (
+      !(await dallas.waitFor({ state: "detached", timeout: 10_000 }).then(
+        () => true,
+        () => false,
+      ))
+    ) {
+      await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+      return failures.push("clicking the card's answer did not send it within 10 s");
+    }
     await composer.fill(request);
     await composer.press("Enter");
     let after = [];
     for (let end = Date.now() + 3 * 60_000; Date.now() < end; await sleep(3_000)) {
       const all = await messages(kruit.id).catch(() => []);
-      const sent = all.findLast(
-        (message) => message.role === "user" && textOf(message) === request,
+      // This run's request, not the same words from an earlier run.
+      const sent = all.find(
+        (message) =>
+          message.seq > lastSeq && message.role === "user" && textOf(message) === request,
       );
       after = sent
         ? all.filter((message) => message.role !== "user" && message.seq > sent.seq)
@@ -292,6 +306,10 @@ try {
       );
       if (links >= 3) break;
     }
+    const answered = (await messages(kruit.id)).some(
+      (message) => message.seq > lastSeq && message.role === "user" && textOf(message) === "Dallas",
+    );
+    if (!answered) failures.push("the card answer was not recorded before the request");
     const text = after.map(textOf).join(" ");
     if ((text.match(/linkedin\.com\/in\//g)?.length ?? 0) < 3)
       failures.push(
