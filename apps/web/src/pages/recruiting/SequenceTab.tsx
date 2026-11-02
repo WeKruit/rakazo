@@ -294,7 +294,10 @@ export function SequenceTab(
   const savedCounts =
     savedCampaign && savedLeads.data
       ? {
-          contacted: savedRows.length,
+          contacted:
+            page === "detail"
+              ? savedRows.length
+              : savedRows.filter((row) => row.lastContactAt !== null).length,
           active: savedRows.some((row) => row.status !== null)
             ? savedRows.filter((row) => row.status === 1).length
             : null,
@@ -445,7 +448,7 @@ export function SequenceTab(
     );
   const choose = (id: string) => {
     const offset = campaigns.itemOffsets.get(id);
-    const native = nativeDrafts.data?.campaigns?.some((row) => row.id === id);
+    const native = live?.id === id || nativeDrafts.data?.campaigns?.some((row) => row.id === id);
     setChosenCampaign(
       native && draftServerId
         ? { scope: campaignScope, campaignId: id, serverId: draftServerId }
@@ -631,7 +634,9 @@ export function SequenceTab(
             onChange={(event) => {
               const campaignId = event.target.value;
               const campaignOffset = campaigns.itemOffsets.get(campaignId);
-              const native = nativeDrafts.data?.campaigns?.some((row) => row.id === campaignId);
+              const native =
+                live?.id === campaignId ||
+                nativeDrafts.data?.campaigns?.some((row) => row.id === campaignId);
               setChosenCampaign(
                 native && draftServerId
                   ? { scope: campaignScope, campaignId, serverId: draftServerId }
@@ -670,7 +675,7 @@ export function SequenceTab(
         detail={page === "detail"}
         onMetric={page === "detail" ? setRunFilter : undefined}
         sendDates={null}
-        overviewCounts={!live && page === "detail" ? savedCounts : undefined}
+        overviewCounts={!live ? savedCounts : undefined}
         overviewPartial={
           !live &&
           (savedLeads.hasMore ||

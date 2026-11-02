@@ -4363,7 +4363,7 @@ msgstr "此来源未记录"
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Not reported"
-msgstr ""
+msgstr "未报告"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not returned"
