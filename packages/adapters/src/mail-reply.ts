@@ -256,7 +256,7 @@ export async function readGmailReplyCard(
 export function mailReplyOutcomeInstruction(reply: Pick<MailReply, "status">) {
   const outcome = {
     discarded:
-      "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Do not claim that card creation failed or retry it.",
+      "The reply card was created and the user explicitly discarded it. Nothing was sent from this card. Stop working on this reply. Do not claim that card creation failed, retry it, or create a replacement card using another tool or route. Only a new explicit recruiter request may restart it.",
     failed:
       "The already-created reply card recorded a definite send failure. It was not a successful send and is not merely an unknown delivery result. Explain the card's safe reason; do not retry automatically.",
     unknown:
