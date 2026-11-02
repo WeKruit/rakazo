@@ -2070,6 +2070,37 @@ async function reserveSequenceEffect(
   };
 }
 
+/** Retain verified readback in the write receipt already being committed; no extra query. */
+function savedSequenceObservation(
+  context: AdapterContext,
+  serverId: string,
+  observedAt: string,
+  campaign: Record<string, unknown>,
+) {
+  return context.recruitingCampaignSourceRevision === undefined
+    ? {}
+    : {
+        __rakazoSequenceObservation: {
+          version: 1,
+          serverId,
+          sourceRevision: context.recruitingCampaignSourceRevision,
+          observedAt,
+          campaign: {
+            id: String(campaign.id),
+            name: String(campaign.name),
+            status: typeof campaign.status === "number" ? campaign.status : null,
+            eaccount: typeof campaign.eaccount === "string" ? campaign.eaccount : null,
+            stopOnReply:
+              typeof campaign.stopOnReply === "boolean"
+                ? campaign.stopOnReply
+                : typeof campaign.stop_on_reply === "boolean"
+                  ? campaign.stop_on_reply
+                  : null,
+          },
+        },
+      };
+}
+
 /** No network call runs under a database lock. Unknown delivery consumes the nonce. */
 async function createAssociatedDraft(
   prisma: PrismaClient,
@@ -2144,6 +2175,7 @@ async function createAssociatedDraft(
     });
     // Receipt and exact role association survive revocation after the provider accepted creation.
     await context.reauthorize?.();
+    const observedAt = new Date().toISOString();
     const saved = await rest("GET", `/campaigns/${id}`);
     const people = await rest("POST", "/leads/list", { campaign: id, limit: 1 });
     if (saved.status !== DRAFT || !Array.isArray(people.items) || people.items.length !== 0)
@@ -2151,7 +2183,13 @@ async function createAssociatedDraft(
     requireSavedConfiguration(saved, expected);
     await prisma.externalEffect.updateMany({
       where: { idempotencyKey: key },
-      data: { status: "completed", result: { campaignId: id } },
+      data: {
+        status: "completed",
+        result: {
+          campaignId: id,
+          ...savedSequenceObservation(context, serverId, observedAt, saved),
+        },
+      },
     });
     return roleDraft(
       prisma,
@@ -2201,6 +2239,13 @@ async function roleDraft(
   const existing = await roleDraftBinding(prisma, context, serverId, role.id, args.campaign_id);
   if (args.campaign_id && args.campaign_id !== existing?.binding.campaignId)
     throw new IsolationError();
+  const observedAt = new Date().toISOString();
+  if (existing)
+    context.onRecruitingCampaignRead?.({
+      roleId: role.id,
+      campaignId: existing.binding.campaignId,
+      observedAt,
+    });
   const campaign = existing ? await rest("GET", `/campaigns/${existing.binding.campaignId}`) : null;
   if (expected && campaign) requireSavedConfiguration(campaign, expected);
   const accounts = await rest("GET", "/accounts?limit=100");
@@ -2243,7 +2288,18 @@ async function roleDraft(
       associations.flatMap((effect) => {
         const binding = effect.result as Partial<RoleBinding> | null;
         return typeof binding?.campaignId === "string" && typeof binding.campaignName === "string"
-          ? [[binding.campaignId, { id: binding.campaignId, name: binding.campaignName }] as const]
+          ? [
+              [
+                binding.campaignId,
+                {
+                  id: binding.campaignId,
+                  name:
+                    campaign?.id === binding.campaignId && typeof campaign.name === "string"
+                      ? campaign.name
+                      : binding.campaignName,
+                },
+              ] as const,
+            ]
           : [];
       }),
     ).values(),
@@ -2271,6 +2327,8 @@ async function roleDraft(
   return {
     roleId: role.id,
     roleTitle: role.title,
+    sourceRevision: context.recruitingCampaignSourceRevision,
+    observedAt,
     mailboxes,
     campaigns,
     unconfirmedDrafts,
@@ -2431,10 +2489,19 @@ export async function runInstantlyWrite(
         };
         await rest("PATCH", `/campaigns/${input.campaign_id}`, expected);
         await context.reauthorize?.();
+        const observedAt = new Date().toISOString();
         const output = await roleDraft(prisma, rest, context, serverId, input, expected, effectKey);
         await prisma.externalEffect.updateMany({
           where: { idempotencyKey: effectKey },
-          data: { status: "completed", result: { campaignId: input.campaign_id } },
+          data: {
+            status: "completed",
+            result: {
+              campaignId: input.campaign_id,
+              ...(output.campaign
+                ? savedSequenceObservation(context, serverId, observedAt, output.campaign)
+                : {}),
+            },
+          },
         });
         await context.reauthorize?.();
         return output;
@@ -2467,12 +2534,18 @@ export async function runInstantlyWrite(
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
     }
-    case "native_instantly_get_campaign_analytics":
-      return rest(
-        "GET",
-        `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
-      );
+    case "native_instantly_get_campaign_analytics": {
+      const observedAt = new Date().toISOString();
+      return {
+        ...(await rest(
+          "GET",
+          `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
+        )),
+        observedAt,
+      };
+    }
     case "native_instantly_get_campaign": {
+      const observedAt = new Date().toISOString();
       const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
       const senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
       const binding =
@@ -2484,6 +2557,7 @@ export async function runInstantlyWrite(
         owned && mailbox ? await sendingMailboxState(accountRest, mailbox) : undefined;
       return {
         id: campaign.id,
+        observedAt,
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,

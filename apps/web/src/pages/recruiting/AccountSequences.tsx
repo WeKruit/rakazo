@@ -3,6 +3,7 @@ import type {
   RecruitingAccountViewInput,
   RecruitingAccountViewOutput,
   RecruitingRoleCampaign,
+  RecruitingSequenceOutput,
 } from "@rakazo/contracts";
 import {
   Button,
@@ -15,12 +16,14 @@ import {
   NativeSelectOption,
 } from "@rakazo/ui-web";
 import { ArrowUpRight, MoreHorizontal, PanelLeftOpen, Plus, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { DeferredPopover } from "../../components/DeferredPopover";
+import { retryTransientRead } from "../../lib/read-retry";
 import { rpc } from "../../lib/rpc";
 import { SequenceOverview, sequenceObservations } from "./SequenceOverview";
 import { campaignName } from "./SequenceTab";
+import { RecruitingReadCacheContext } from "./shared";
 
 type Role = RecruitingAccountViewOutput["roles"][number];
 type Row = { role: Role; campaign: RecruitingRoleCampaign };
@@ -69,7 +72,7 @@ function rowCount(
       : source.leads.filter((lead) => lead.status === -1).length;
   return source.leadsComplete ? count : count || null;
 }
-/** Exhaust server role cursors before describing account totals or a search as complete. */
+/** A saved campaign page renders independently of the number of recruiting roles. */
 export function AccountSequences({
   accountKey,
   refreshSignal,
@@ -85,18 +88,24 @@ export function AccountSequences({
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const cache = useContext(RecruitingReadCacheContext);
   const [params, setParams] = useSearchParams();
   const role = params.get("role") ?? "all";
   const [data, setData] = useState<{
     key: string;
+    accountKey: string;
     roles: Role[];
     rows: Row[];
-    complete: boolean;
-    unreadable: number;
+    nextCursor: string | null;
+    total: number;
+    summary: RecruitingAccountViewOutput["sequenceSummary"];
+    pending: boolean;
+    changes: Row[];
   }>();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState(initialQuery);
+  const [search, setSearch] = useState(initialQuery.trim());
   const [contactQuery, setContactQuery] = useState("");
   const [contactSearch, setContactSearch] = useState("");
   useEffect(() => {
@@ -104,6 +113,10 @@ export function AccountSequences({
     return () => clearTimeout(timeout);
   }, [contactQuery]);
   useEffect(() => setQuery(initialQuery), [initialQuery]);
+  useEffect(() => {
+    const timeout = setTimeout(() => setSearch(query.trim()), 250);
+    return () => clearTimeout(timeout);
+  }, [query]);
   const [actions, setActions] = useState<string>();
   const [status, setStatus] = useState("all");
   const [newOpen, setNewOpen] = useState(false);
@@ -119,129 +132,184 @@ export function AccountSequences({
     | "bounced"
     | "created"
   >("name");
-  const [metricPeriod, setMetricPeriod] = useState<"all" | "30" | "90">("all");
-  const key = JSON.stringify([accountKey, refreshSignal, retry, contactSearch]);
+  const [, refreshObservations] = useState(0);
+  const scopePrefix = accountKey.endsWith("]") ? `${accountKey.slice(0, -1)},` : undefined;
+  useEffect(
+    () =>
+      cache?.client.getQueryCache().subscribe((event) => {
+        const key = event.query.queryKey[1];
+        if (
+          scopePrefix &&
+          typeof key === "string" &&
+          key.startsWith(scopePrefix) &&
+          key.includes(":sequence-observation:")
+        )
+          refreshObservations((value) => value + 1);
+      }),
+    [cache, scopePrefix],
+  );
+  const observations: {
+    key: NonNullable<RecruitingAccountViewInput["sequenceObservations"]>[number];
+    value: RecruitingSequenceOutput;
+  }[] = [];
+  if (cache && scopePrefix)
+    for (const query of cache.client.getQueryCache().getAll()) {
+      const key = query.queryKey[1];
+      if (
+        typeof key !== "string" ||
+        !key.startsWith(scopePrefix) ||
+        !key.includes(":sequence-observation:")
+      )
+        continue;
+      try {
+        const [roleId, serverId, campaignId] = JSON.parse(key.split(":sequence-observation:")[1]!);
+        const value = query.state.data as RecruitingSequenceOutput | undefined;
+        if (
+          !value ||
+          typeof roleId !== "string" ||
+          typeof serverId !== "string" ||
+          typeof campaignId !== "string" ||
+          value.roleId !== roleId ||
+          value.campaign?.id !== campaignId ||
+          value.sourceRevision === undefined ||
+          !value.observedAt ||
+          (role !== "all" && role !== roleId)
+        )
+          continue;
+        observations.push({
+          key: {
+            roleId,
+            serverId,
+            campaignId,
+            sourceRevision: value.sourceRevision,
+            observedAt: value.observedAt,
+          },
+          value,
+        });
+      } catch {
+        /* An unrelated cache entry is not sequence evidence. */
+      }
+    }
+  observations.sort((a, b) => b.key.observedAt.localeCompare(a.key.observedAt));
+  observations.splice(50);
+  const filterKey = JSON.stringify([
+    accountKey,
+    refreshSignal,
+    contactSearch,
+    search,
+    role,
+    status,
+    sort,
+    observations.map((entry) => entry.key),
+  ]);
+  const [pagination, setPagination] = useState<{ key: string; page: number }>();
+  const pageIndex = pagination?.key === filterKey ? pagination.page : 0;
+  const key = JSON.stringify([filterKey, pageIndex]);
   const current = data?.key === key ? data : undefined;
-  const complete = current?.complete === true;
+  const complete = Boolean(current);
   useEffect(() => {
     const abort = new AbortController();
     setFailed(false);
-    setData({ key, roles: [], rows: [], complete: false, unreadable: 0 });
-    void (async () => {
-      let cursor: string | undefined;
-      const seen = new Set<string>();
-      let roles: Role[] = [];
-      let rows: Row[] = [];
-      let unreadable = 0;
-      do {
-        const page = await read(
-          {
-            view: "sequence",
-            sequenceSummary: true,
-            briefedOnly: true,
-            ...(contactSearch ? { sequenceContactQuery: contactSearch } : {}),
-            limit: 5,
-            ...(cursor ? { cursor } : {}),
+    void retryTransientRead(async () => {
+      const page = await read(
+        {
+          view: "sequence",
+          sequenceSummary: true,
+          briefedOnly: true,
+          limit: 25,
+          ...(pageIndex ? { cursor: String(pageIndex * 25) } : {}),
+          ...(role !== "all" ? { roleId: role } : {}),
+          ...(search ? { sequenceQuery: search } : {}),
+          ...(status !== "all" ? { sequenceStatus: Number(status) } : {}),
+          sequenceSort: sort,
+          ...(observations.length
+            ? { sequenceObservations: observations.map((entry) => entry.key) }
+            : {}),
+          ...(contactSearch ? { sequenceContactQuery: contactSearch } : {}),
+        },
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      const rows: Row[] = page.items.flatMap((item) => {
+        const role = page.roles.find((role) => role.id === item.roleId);
+        return role
+          ? (item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : [])).flatMap(
+              (campaign) => (campaign.campaign ? [{ role, campaign }] : []),
+            )
+          : [];
+      });
+      const pendingKeys = page.sequencePendingObservations ?? [];
+      const changes: Row[] = [];
+      for (const pending of pendingKeys) {
+        const observed = observations.find(
+          (entry) =>
+            entry.key.roleId === pending.roleId &&
+            entry.key.serverId === pending.serverId &&
+            entry.key.campaignId === pending.campaignId &&
+            entry.key.sourceRevision === pending.sourceRevision &&
+            entry.key.observedAt === pending.observedAt,
+        )?.value;
+        const role = page.roles.find((role) => role.id === pending.roleId);
+        if (!observed?.campaign || !role) continue;
+        const row: Row = {
+          role,
+          campaign: {
+            status: "ready",
+            sourceKind: "native",
+            serverId: pending.serverId,
+            sourceRevision: pending.sourceRevision,
+            campaignObservedAt: pending.observedAt,
+            campaign: { ...observed.campaign, stopOnReply: observed.campaign.stopOnReply ?? null },
+            leads: [],
+            leadsComplete: false,
           },
-          abort.signal,
+        };
+        changes.push(row);
+        const existing = rows.find(
+          (item) =>
+            item.role.id === role.id &&
+            item.campaign.serverId === pending.serverId &&
+            item.campaign.campaign?.id === pending.campaignId,
         );
-        if (abort.signal.aborted) return;
-        roles = [...new Map([...roles, ...page.roles].map((role) => [role.id, role])).values()];
-        for (const item of page.items) {
-          if (
-            item.campaign?.status === "unavailable" ||
-            item.campaigns?.some((source) => source.status === "unavailable")
+        if (existing)
+          existing.campaign = {
+            ...existing.campaign,
+            campaign: row.campaign.campaign,
+            campaignObservedAt: pending.observedAt,
+          };
+        else if (!contactSearch) rows.push(row);
+      }
+      const visibleRows = pendingKeys.length
+        ? rows.filter(
+            (row) =>
+              (status === "all" || row.campaign.campaign?.status === Number(status)) &&
+              (!search ||
+                [row.campaign.campaign!.name, row.role.title].some((value) =>
+                  value.toLowerCase().includes(search.toLowerCase()),
+                )),
           )
-            unreadable++;
-          const role = roles.find((role) => role.id === item.roleId);
-          if (!role) continue;
-          for (const campaign of item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : []))
-            if (campaign.campaign) rows.push({ role, campaign });
-        }
-        rows = [
-          ...new Map(
-            rows.map((row) => [
-              JSON.stringify([row.role.id, row.campaign.serverId, row.campaign.campaign!.id]),
-              row,
-            ]),
-          ).values(),
-        ];
-        cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) throw new Error("Repeated sequence page");
-        if (cursor) seen.add(cursor);
-        setData({ key, roles: [...roles], rows: [...rows], complete: !cursor, unreadable });
-      } while (cursor);
-    })().catch(() => {
+        : rows;
+      setData({
+        key,
+        accountKey,
+        roles: page.roles,
+        rows: visibleRows,
+        pending: pendingKeys.length > 0,
+        changes,
+        nextCursor: page.nextCursor,
+        total: page.total ?? rows.length,
+        summary: page.sequenceSummary,
+      });
+      if (pendingKeys.length) throw new Error("Saved sequence observations are updating");
+    }, abort.signal).catch(() => {
       if (!abort.signal.aborted) setFailed(true);
     });
     return () => abort.abort();
-  }, [key, read]);
-  const rows = current?.rows ?? [];
-  const roles = current?.roles ?? [];
-  const selected = rows.filter((row) => role === "all" || row.role.id === role);
-  const unique = [
-    ...new Map(
-      selected.map((row) => [
-        JSON.stringify([row.campaign.serverId, row.campaign.campaign!.id]),
-        row,
-      ]),
-    ).values(),
-  ];
-  const total = (kind: Parameters<typeof rowCount>[1]) => {
-    const values = unique.map((row) =>
-      !["opened", "replied"].includes(kind) &&
-      !row.campaign.leadsComplete &&
-      !row.campaign.observations
-        ? null
-        : rowCount(row, kind),
-    );
-    return complete &&
-      !current?.unreadable &&
-      values.length > 0 &&
-      values.every((value) => value !== null)
-      ? values.reduce<number>((sum, value) => sum + value!, 0)
-      : null;
-  };
-  const active = total("active"),
-    interested = total("interested");
-  const sourceSends = unique.map((row) => row.campaign.stats?.sent);
-  const sentTotal =
-    complete && sourceSends.length > 0 && sourceSends.every((value) => value != null)
-      ? sourceSends.reduce<number>((sum, value) => sum + value!, 0)
-      : null;
-  const filtered = selected
-    .filter(
-      (row) =>
-        (!query.trim() ||
-          [row.campaign.campaign!.name, row.role.title].some((value) =>
-            value.toLowerCase().includes(query.trim().toLowerCase()),
-          )) &&
-        (status === "all" || String(row.campaign.campaign!.status) === status),
-    )
-    .sort((a, b) => {
-      const tie = () =>
-        a.campaign.campaign!.name.localeCompare(b.campaign.campaign!.name) ||
-        a.role.id.localeCompare(b.role.id) ||
-        String(a.campaign.serverId).localeCompare(String(b.campaign.serverId)) ||
-        a.campaign.campaign!.id.localeCompare(b.campaign.campaign!.id);
-      if (sort === "role") return a.role.title.localeCompare(b.role.title) || tie();
-      if (sort === "name") return tie();
-      const value = (row: Row) =>
-        sort === "created"
-          ? row.campaign.campaign!.createdAt
-            ? Date.parse(row.campaign.campaign!.createdAt)
-            : null
-          : rowCount(row, sort);
-      const left = value(a),
-        right = value(b);
-      return left === null
-        ? right === null
-          ? tie()
-          : 1
-        : right === null
-          ? -1
-          : right - left || tie();
-    });
+  }, [key, read, retry]);
+  const filtered = current?.rows ?? [];
+  const roles = data?.accountKey === accountKey ? data.roles : [];
+  const summary = current?.summary;
+  const sentTotal = summary?.sent ?? null;
   const count = (value: number | null, partial = false) =>
     value === null ? "—" : `${partial ? "≥ " : ""}${value.toLocaleString()}`;
   return (
@@ -256,7 +324,7 @@ export function AccountSequences({
           aria-label={t`Show navigation`}
           onClick={onOpenNavigation}
         >
-          <PanelLeftOpen size={18} />
+          <PanelLeftOpen size={18} aria-hidden />
         </Button>
         <h1 className="flex-1 text-2xl font-semibold">{t`Sequence`}</h1>
         <Button
@@ -265,45 +333,44 @@ export function AccountSequences({
           render={<Link to={`/app?${new URLSearchParams({ view: "analytics", role })}`} />}
         >
           {t`View analytics`}
-          <ArrowUpRight size={14} />
+          <ArrowUpRight size={14} aria-hidden />
         </Button>
         <Button onClick={() => setNewOpen(true)}>
-          <Plus size={15} />
+          <Plus size={15} aria-hidden />
           {t`New sequence`}
         </Button>
       </header>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold">{t`Overview`}</h2>
-        <NativeSelect
-          aria-label={t`Sequence date range`}
-          value={metricPeriod}
-          onChange={(event) => setMetricPeriod(event.target.value as "all" | "30" | "90")}
-        >
-          <NativeSelectOption value="all">{t`All time`}</NativeSelectOption>
-          <NativeSelectOption value="30">{t`Last 30 days`}</NativeSelectOption>
-          <NativeSelectOption value="90">{t`Last 90 days`}</NativeSelectOption>
-        </NativeSelect>
+        <span className="text-xs text-muted-foreground">{t`All time`}</span>
       </div>
-      <SequenceOverview
-        sendContext={sentTotal !== null ? t`Sent (all time): ${sentTotal}` : undefined}
-        period={metricPeriod}
-        replied={total("replied")}
-        overviewCounts={{
-          contacted: total("contacted"),
-          active,
-          opened: total("opened"),
-          clicked: total("clicked"),
-          replied: total("replied"),
-          interested,
-        }}
-        overviewPartial={unique.some((row) => Boolean(row.campaign.observations))}
-      />
+      {current && !current.pending ? (
+        <SequenceOverview
+          sendContext={sentTotal !== null ? t`Sent (all time): ${sentTotal}` : undefined}
+          replied={summary?.replied ?? null}
+          overviewCounts={{
+            contacted: summary?.contacted ?? null,
+            active: summary?.active ?? null,
+            opened: summary?.opened ?? null,
+            clicked: summary?.clicked ?? null,
+            replied: summary?.replied ?? null,
+            interested: summary?.interested ?? null,
+          }}
+          overviewPartial={summary?.partial ?? true}
+        />
+      ) : null}
       <section className="mt-7 min-w-0" aria-label={t`All sequences`}>
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <div className="relative min-w-44 flex-1 sm:max-w-72">
-            <Search className="absolute start-3 top-2.5 text-muted-foreground" size={15} />
+            <Search
+              aria-hidden
+              className="absolute start-3 top-2.5 text-muted-foreground"
+              size={15}
+            />
             <Input
               className="ps-9"
+              name="sequenceQuery"
+              autoComplete="off"
               aria-label={t`Search sequences`}
               placeholder={t`Search sequences…`}
               value={query}
@@ -312,6 +379,8 @@ export function AccountSequences({
           </div>
           <Input
             className="min-w-40 sm:max-w-56"
+            name="sequenceContactQuery"
+            autoComplete="off"
             aria-label={t`Filter by saved contact`}
             placeholder={t`Filter by saved contact…`}
             maxLength={200}
@@ -363,16 +432,34 @@ export function AccountSequences({
             <NativeSelectOption value="created">{t`Created`}</NativeSelectOption>
           </NativeSelect>
         </div>
+        {current?.pending ? (
+          <div role="status" className="mb-3 space-y-1 text-sm text-muted-foreground">
+            <p>{t`Updating saved sequence records…`}</p>
+            {current.changes.map((row) => (
+              <Link
+                className="block truncate underline"
+                key={JSON.stringify([
+                  row.role.id,
+                  row.campaign.serverId,
+                  row.campaign.campaign!.id,
+                ])}
+                to={sequenceDestination(row.role, row.campaign)}
+              >
+                {row.campaign.campaign!.name}
+              </Link>
+            ))}
+          </div>
+        ) : null}
         {!complete && !failed ? (
           <p
             role="status"
             className="mb-3 text-xs text-muted-foreground"
           >{t`Loading sequences…`}</p>
         ) : null}
-        {failed || current?.unreadable ? (
+        {failed ? (
           <div role="alert" className="mb-3 flex items-center gap-3 text-sm">
-            {current?.unreadable
-              ? t`Could not read this campaign. Results are incomplete.`
+            {current?.pending
+              ? t`Saved sequence updates are still pending. Retry.`
               : t`Some sequences could not be read. Results are incomplete.`}
             <Button
               variant="outline"
@@ -511,7 +598,7 @@ export function AccountSequences({
               ))}
             </tbody>
           </table>
-          {complete && !failed && !current?.unreadable && !filtered.length ? (
+          {complete && !failed && !current?.pending && !filtered.length ? (
             <p role="status" className="p-10 text-center text-sm text-muted-foreground">
               {contactSearch
                 ? t`No matching saved contact memberships.`
@@ -521,8 +608,24 @@ export function AccountSequences({
             </p>
           ) : null}
         </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">
+            {current && !current.pending ? t`${current.total} sequences` : null}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={!pageIndex || !current}
+              onClick={() => setPagination({ key: filterKey, page: pageIndex - 1 })}
+            >{t`Previous`}</Button>
+            <Button
+              variant="outline"
+              disabled={!current?.nextCursor || current.pending}
+              onClick={() => setPagination({ key: filterKey, page: pageIndex + 1 })}
+            >{t`Next`}</Button>
+          </div>
+        </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          {complete ? t`${filtered.length} sequences` : t`${filtered.length} sequences loaded`} ·{" "}
           {contactSearch
             ? t`Saved contact membership only; coverage may be incomplete.`
             : t`≥ Saved minimum · — Not reported`}

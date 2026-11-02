@@ -114,15 +114,10 @@ msgstr "已选 {0} 人"
 msgid "{0} sequence contacts"
 msgstr "{0} 位邮件序列联系人"
 
-#. placeholder {0}: filtered.length
+#. placeholder {0}: current.total
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "{0} sequences"
 msgstr "{0} 个邮件序列"
-
-#. placeholder {0}: filtered.length
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "{0} sequences loaded"
-msgstr "已加载 {0} 个邮件序列"
 
 #. placeholder {0}: people.length
 #: src/pages/recruiting/TalentInsights.tsx
@@ -1488,10 +1483,6 @@ msgstr "无法连接服务器"
 msgid "Could not read candidate records."
 msgstr "无法读取候选人记录。"
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Could not read this campaign. Results are incomplete."
-msgstr "无法读取此邮件序列，结果不完整。"
-
 #: src/pages/recruiting/AnalyticsPeopleDialog.tsx
 msgid "Could not read this cohort."
 msgstr "无法读取此统计群体。"
@@ -2520,14 +2511,6 @@ msgstr "最近 {0} 天"
 msgid "Last {count} days"
 msgstr "最近 {count} 天"
 
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 30 days"
-msgstr "最近 30 天"
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Last 90 days"
-msgstr "最近 90 天"
-
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Last contacted"
@@ -2959,6 +2942,7 @@ msgstr "新岗位"
 msgid "New sequence"
 msgstr "新建邮件序列"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Next"
 msgstr "下一步"
@@ -3131,6 +3115,10 @@ msgstr "没有匹配的职位。"
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "No roles yet."
 msgstr "还没有职位。"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No saved activity metrics are available for these sequences."
+msgstr "这些序列暂无已保存的活动指标。"
 
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
@@ -3620,6 +3608,7 @@ msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
 msgid "Preview steps"
 msgstr "预览步骤"
 
+#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
 msgid "Previous"
 msgstr "上一步"
@@ -4320,6 +4309,10 @@ msgstr "已保存的结果"
 msgid "Saved role summary"
 msgstr "已保存的岗位摘要"
 
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Saved sequence updates are still pending. Retry."
+msgstr "已保存序列的更新仍在处理中，请重试。"
+
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "Saved sequences"
 msgstr "已保存的邮件序列"
@@ -4604,10 +4597,6 @@ msgstr "邮件序列"
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Sequence contacts"
 msgstr "邮件序列联系人"
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "Sequence date range"
-msgstr "邮件序列日期范围"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Sequence draft"
@@ -5461,6 +5450,10 @@ msgstr "更新待确认。请刷新查看。"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Updated"
 msgstr "已更新"
+
+#: src/pages/recruiting/AccountSequences.tsx
+msgid "Updating saved sequence records…"
+msgstr "正在更新已保存的序列记录…"
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/SoftwareUpdateSection.tsx

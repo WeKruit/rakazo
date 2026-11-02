@@ -7208,6 +7208,8 @@ describe("role campaign read", () => {
       ["native_instantly_get_campaign_analytics", { campaign_id: CAMPAIGN }],
     ]);
     expect(output).toEqual({
+      sourceRevision: 4,
+      campaignObservedAt: expect.any(String),
       status: "ready",
       stats: { sent: null, opened: null, replied: null },
       leadsComplete: true,

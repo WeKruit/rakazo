@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
 import type { ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
 import type {
@@ -21,6 +20,7 @@ import {
   listRecruitingSchedulingPlans,
   listRoutinesDto,
   Prisma,
+  readSavedRecruitingSequences,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
@@ -171,6 +171,11 @@ export async function readRecruitingAccountView(
       }))
     )
       throw new ORPCError("NOT_FOUND");
+    if (input.view === "sequence" && input.sequenceSummary) {
+      const page = await readSavedRecruitingSequences(deps.prisma, actor, input);
+      await guard();
+      return page;
+    }
     if (
       (input.itemCursor && !input.roleId) ||
       (input.cursor && input.roleId && input.view !== "routines") ||
@@ -303,231 +308,6 @@ export async function readRecruitingAccountView(
       });
       timer.mark("workspaceMs");
       if (workspace?.role.id !== row.id) throw new ORPCError("NOT_FOUND");
-      if (input.view === "sequence" && input.sequenceSummary) {
-        // Stored overview only: opening all roles must not fan out into candidate or provider reads.
-        const bound = workspace.crmTarget?.target;
-        const contactQuery = input.sequenceContactQuery?.toLowerCase();
-        const contacts =
-          bound && contactQuery
-            ? await deps.prisma.recruitingCrmContact.findMany({
-                where: {
-                  userId: actor.userId,
-                  spaceId: actor.spaceId,
-                  mcpServerId: bound.mcpServerId,
-                  organizationId: bound.organizationId,
-                  archivedAt: null,
-                  OR: [
-                    { name: { contains: contactQuery, mode: "insensitive" } },
-                    { email: { contains: contactQuery, mode: "insensitive" } },
-                  ],
-                },
-                select: { crmCandidateId: true, email: true },
-              })
-            : [];
-        const nativeContacts = contactQuery
-          ? await deps.prisma.recruitingCandidate.findMany({
-              where: {
-                roleId: row.id,
-                role: { userId: actor.userId, spaceId: actor.spaceId },
-                occurrences: { some: { name: { contains: contactQuery, mode: "insensitive" } } },
-              },
-              select: { candidateKey: true },
-            })
-          : [];
-        const matchingNativeKeys = new Set(nativeContacts.map((contact) => contact.candidateKey));
-        const matchingCandidates = new Set(contacts.map((contact) => contact.crmCandidateId));
-        const matchingEmails = new Set(
-          contacts.flatMap((contact) => (contact.email ? [contact.email.toLowerCase()] : [])),
-        );
-        const mirrors = bound
-          ? await deps.prisma.recruitingCrmCampaign.findMany({
-              where: {
-                userId: actor.userId,
-                spaceId: actor.spaceId,
-                mcpServerId: bound.mcpServerId,
-                organizationId: bound.organizationId,
-                crmRoleId: bound.crmRoleId,
-                archivedAt: null,
-                mcpServer: {
-                  userId: actor.userId,
-                  spaceId: actor.spaceId,
-                  enabled: true,
-                  revision: bound.serverRevision,
-                },
-              },
-              orderBy: { crmCampaignId: "asc" },
-            })
-          : [];
-        const leads =
-          bound && mirrors.length
-            ? await deps.prisma.recruitingCrmLead.findMany({
-                where: {
-                  userId: actor.userId,
-                  spaceId: actor.spaceId,
-                  mcpServerId: bound.mcpServerId,
-                  organizationId: bound.organizationId,
-                  crmCampaignId: { in: mirrors.map((campaign) => campaign.crmCampaignId) },
-                  archivedAt: null,
-                },
-                select: {
-                  crmCampaignId: true,
-                  crmCandidateId: true,
-                  status: true,
-                  interestStatus: true,
-                  openCount: true,
-                  replyCount: true,
-                  lastContactAt: true,
-                },
-              })
-            : [];
-        const leadsByCampaign = new Map<string, typeof leads>();
-        for (const lead of leads)
-          if (lead.crmCampaignId) {
-            const group = leadsByCampaign.get(lead.crmCampaignId) ?? [];
-            group.push(lead);
-            leadsByCampaign.set(lead.crmCampaignId, group);
-          }
-        const campaigns: NonNullable<RecruitingAccountViewOutput["items"][number]["campaigns"]> =
-          mirrors
-            .filter(
-              (campaign) =>
-                !contactQuery ||
-                (leadsByCampaign.get(campaign.crmCampaignId) ?? []).some(
-                  (lead) => lead.crmCandidateId && matchingCandidates.has(lead.crmCandidateId),
-                ),
-            )
-            .map((campaign) => {
-              const rows = leadsByCampaign.get(campaign.crmCampaignId) ?? [];
-              return {
-                status: "ready",
-                sourceKind: "crm",
-                serverId: campaign.mcpServerId,
-                campaign: {
-                  id: campaign.crmCampaignId,
-                  name: campaign.name,
-                  eaccount: null,
-                  status: campaign.status,
-                  stopOnReply: null,
-                  createdAt: campaign.campaignCreatedAt?.toISOString() ?? null,
-                },
-                leads: [],
-                leadsComplete: false,
-                observations: {
-                  total: rows.length,
-                  contacted: rows.filter((lead) => lead.lastContactAt !== null).length,
-                  active: rows.filter((lead) => lead.status === 1).length,
-                  opened: rows.some((lead) => lead.openCount !== null)
-                    ? rows.filter((lead) => (lead.openCount ?? 0) > 0).length
-                    : null,
-                  replied: rows.some((lead) => lead.replyCount !== null)
-                    ? rows.filter((lead) => (lead.replyCount ?? 0) > 0).length
-                    : null,
-                  interested: rows.filter(
-                    (lead) =>
-                      lead.interestStatus !== null && [1, 2, 3, 4].includes(lead.interestStatus),
-                  ).length,
-                  bounced: rows.filter((lead) => lead.status === -1).length,
-                },
-              };
-            });
-        const bindings = await deps.prisma.externalEffect.findMany({
-          where: {
-            spaceId: actor.spaceId,
-            kind: "instantly_role_campaign",
-            status: "completed",
-            run: {
-              userId: actor.userId,
-              spaceId: actor.spaceId,
-              threadId: thread.id,
-              bot: { userId: actor.userId, spaceId: actor.spaceId },
-            },
-            request: { path: ["roleId"], equals: row.id },
-          },
-          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-          select: { request: true, result: true },
-        });
-        const ownedServers = await deps.prisma.mcpServer.findMany({
-          where: { userId: actor.userId, spaceId: actor.spaceId, enabled: true },
-          select: { id: true },
-        });
-        const seenBindings = new Set<string>();
-        for (const binding of bindings) {
-          const request = binding.request as { roleId?: unknown; serverId?: unknown } | null;
-          const result = binding.result as {
-            campaignId?: unknown;
-            campaignName?: unknown;
-            leads?: unknown;
-          } | null;
-          if (
-            request?.roleId !== row.id ||
-            typeof request.serverId !== "string" ||
-            !ownedServers.some((server) => server.id === request.serverId) ||
-            typeof result?.campaignId !== "string" ||
-            typeof result.campaignName !== "string"
-          )
-            continue;
-          const key = JSON.stringify([request.serverId, result.campaignId]);
-          if (seenBindings.has(key)) continue;
-          seenBindings.add(key);
-          if (contactQuery) {
-            const leads =
-              result.leads && typeof result.leads === "object" && !Array.isArray(result.leads)
-                ? Object.entries(result.leads)
-                : [];
-            if (
-              !leads.some(
-                ([candidateKey, lead]) =>
-                  lead &&
-                  typeof lead === "object" &&
-                  "email" in lead &&
-                  "leadId" in lead &&
-                  typeof lead.leadId === "string" &&
-                  typeof lead.email === "string" &&
-                  (matchingNativeKeys.has(candidateKey) ||
-                    lead.email.toLowerCase().includes(contactQuery) ||
-                    matchingEmails.has(lead.email.toLowerCase())),
-              )
-            )
-              continue;
-          }
-          if (
-            !campaigns.some(
-              (campaign) =>
-                campaign.serverId === request.serverId &&
-                campaign.campaign?.id === result.campaignId,
-            )
-          )
-            campaigns.push({
-              status: "ready",
-              sourceKind: "native",
-              serverId: request.serverId,
-              campaign: {
-                id: result.campaignId,
-                name: result.campaignName,
-                eaccount: null,
-                status: null,
-                stopOnReply: null,
-              },
-              leads: [],
-              leadsComplete: false,
-            });
-        }
-        await authorize();
-        const currentWorkspace = await getRecruitingWorkspace(deps.prisma, actor, {
-          threadId: thread.id,
-        });
-        if (
-          currentWorkspace?.role.id !== row.id ||
-          !isDeepStrictEqual(currentWorkspace.crmTarget, workspace.crmTarget)
-        )
-          throw new ORPCError("NOT_FOUND");
-        await guard();
-        return {
-          roleId: row.id,
-          campaigns,
-          ...(contactQuery ? { sequenceContactPartial: true } : {}),
-        };
-      }
       const bound = workspace.crmTarget?.target;
       const crmServer =
         !deps.firstPartyMcpUrl && bound

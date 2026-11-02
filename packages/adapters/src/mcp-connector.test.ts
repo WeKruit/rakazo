@@ -3831,7 +3831,7 @@ describe("local native Instantly campaign and lead tools", () => {
     resourceRevision: 1,
     toolName: `native_instantly_${name}`,
   });
-  function fixture() {
+  function fixture(deferSequenceObservation?: (work: () => Promise<void>) => void) {
     const context = {
       userId: "u1",
       spaceId: "w1",
@@ -3839,6 +3839,7 @@ describe("local native Instantly campaign and lead tools", () => {
       runId: "run-1",
       signal: new AbortController().signal,
       reauthorize: undefined as (() => Promise<void>) | undefined,
+      onRecruitingCampaignRead: undefined as AdapterContext["onRecruitingCampaignRead"],
     };
     const server = {
       ...SERVER,
@@ -3887,7 +3888,9 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       run: {
         findFirst: vi.fn(async ({ where }) =>
-          where.id === "run-1" ? { thread: { activeRecruitingRoleId: state.activeRoleId } } : null,
+          where.id === "run-1"
+            ? { threadId: "thread-1", thread: { activeRecruitingRoleId: state.activeRoleId } }
+            : null,
         ),
       },
       recruitingRole: {
@@ -4029,6 +4032,7 @@ describe("local native Instantly campaign and lead tools", () => {
     );
     const connector = new McpConnector(prisma as never, secrets as never, {
       network: TEST_NETWORK,
+      deferSequenceObservation,
     });
     const run = async (name: string, args: Record<string, unknown>) => {
       const events = [];
@@ -4044,6 +4048,50 @@ describe("local native Instantly campaign and lead tools", () => {
         .structuredContent.result;
     return { state, run, result, prisma, context };
   }
+
+  it("defers native agent readback propagation with the verified read time and scoped run", async () => {
+    const writes = vi
+      .spyOn(schedulingDb, "rememberRecruitingSequenceObservation")
+      .mockResolvedValue(1);
+    const jobs: (() => Promise<void>)[] = [];
+    const f = fixture((work) => jobs.push(work));
+    f.state.campaign.name = "Renamed by agent";
+    f.state.effects.set(`instantly-role-campaign:${SERVER.id}:role-1`, {
+      spaceId: "w1",
+      status: "completed",
+      result: { campaignId: CAMPAIGN, campaignName: "Old name" },
+    });
+    try {
+      const events = await f.run("get_role_draft", {
+        role_id: "role-1",
+        campaign_id: CAMPAIGN,
+      });
+      expect(events).toMatchObject([{ type: "result" }]);
+      const result = f.result(events);
+      expect(result.observedAt).toEqual(expect.any(String));
+      expect(writes).not.toHaveBeenCalled();
+      expect(jobs).toHaveLength(1);
+      f.context.onRecruitingCampaignRead = vi.fn();
+      await f.run("get_role_draft", { role_id: "role-1", campaign_id: CAMPAIGN });
+      expect(f.context.onRecruitingCampaignRead).toHaveBeenCalledOnce();
+      expect(jobs).toHaveLength(1);
+      await jobs[0]!();
+      expect(writes).toHaveBeenCalledWith(
+        f.prisma,
+        { userId: "u1", spaceId: "w1" },
+        expect.objectContaining({
+          roleId: "role-1",
+          threadId: "thread-1",
+          serverId: SERVER.id,
+          sourceRevision: 1,
+          observedAt: result.observedAt,
+          campaign: expect.objectContaining({ name: "Renamed by agent" }),
+        }),
+      );
+    } finally {
+      writes.mockRestore();
+    }
+  });
 
   it.each(["assignment", "credential"])(
     "refuses a native draft write when %s changes during its mailbox read",
@@ -4294,6 +4342,12 @@ describe("local native Instantly campaign and lead tools", () => {
       body: { name: "Founding Engineer", stop_on_reply: true, email_list: ["team@example.test"] },
     });
     expect(JSON.stringify(create.body)).not.toContain("[role");
+    const binding = [...f.state.effects.values()].find(
+      (effect) => effect.kind === "instantly_role_campaign",
+    )!;
+    Object.assign(binding.result as object, {
+      __rakazoSequenceObservation: { internal: "derived-cache-only" },
+    });
     f.state.requests.length = 0;
     const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(second).toMatchObject({
@@ -4301,6 +4355,7 @@ describe("local native Instantly campaign and lead tools", () => {
       campaignId: CAMPAIGN,
       stopOnReplyPatched: false,
     });
+    expect(second).not.toHaveProperty("__rakazoSequenceObservation");
     // An empty mapped campaign with no same-title alternative stays mapped; nothing is created.
     expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([
       { method: "POST", path: "/api/v2/leads/list", body: { campaign: CAMPAIGN, limit: 1 } },

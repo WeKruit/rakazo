@@ -22,6 +22,33 @@ for (const width of [1440, 390]) {
           json: {
             roles,
             items: selected.map((role) => item(role, roles.indexOf(role))),
+            ...(input.sequenceSummary
+              ? {
+                  total: selected.length,
+                  sequenceSummary: {
+                    contacted: null,
+                    active: null,
+                    clicked: null,
+                    interested: null,
+                    sent: selected.reduce(
+                      (sum, role) =>
+                        sum + (item(role, roles.indexOf(role)).campaign?.stats?.sent ?? 0),
+                      0,
+                    ),
+                    opened: selected.reduce(
+                      (sum, role) =>
+                        sum + (item(role, roles.indexOf(role)).campaign?.stats?.opened ?? 0),
+                      0,
+                    ),
+                    replied: selected.reduce(
+                      (sum, role) =>
+                        sum + (item(role, roles.indexOf(role)).campaign?.stats?.replied ?? 0),
+                      0,
+                    ),
+                    partial: true,
+                  },
+                }
+              : {}),
             nextCursor: null,
           },
         },

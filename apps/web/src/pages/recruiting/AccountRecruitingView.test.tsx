@@ -392,17 +392,8 @@ it("keeps the Inbox loading through a failed read right after a deploy, then sho
 });
 
 it("reports an unavailable campaign read without claiming that there is no campaign", async () => {
-  read.mockResolvedValue({
-    roles,
-    items: [
-      {
-        roleId: "one",
-        campaign: { status: "unavailable", serverId: "mail-source", campaign: null, leads: [] },
-        campaigns: [],
-      },
-    ],
-    nextCursor: null,
-  });
+  vi.useFakeTimers();
+  read.mockRejectedValue(new Error("Saved campaign page unavailable"));
   const container = document.createElement("div");
   const pageRoot = createRoot(container);
   try {
@@ -421,10 +412,13 @@ it("reports an unavailable campaign read without claiming that there is no campa
         </MemoryRouter>,
       ),
     );
-    expect(container.textContent).toContain("Could not read this campaign.");
+    await act(async () => vi.advanceTimersByTimeAsync(122_000));
+    expect(container.textContent).toContain("Some sequences could not be read.");
+    expect(container.textContent).not.toContain("No sequences yet.");
     expect(container.textContent).not.toContain("No campaign yet.");
   } finally {
     await act(async () => pageRoot.unmount());
+    vi.useRealTimers();
   }
 });
 
