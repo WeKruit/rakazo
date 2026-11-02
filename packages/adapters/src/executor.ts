@@ -14964,11 +14964,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
 
           flushPendingTools();
-          // Only routine runs and check-in answers are instructed to emit NO_RESPONSE. Other
-          // allowSilentEmpty wakes (FYI, messaging) may finish truly empty.
-          let silentReply = quietRun
-            ? stripNoResponseReply(assembled, messageSegments)
-            : { assembled, blocks: messageSegments };
+          // The server's no-model completion uses the same silent token as quiet model replies.
+          let silentReply =
+            quietRun || probeFoundNothing
+              ? stripNoResponseReply(assembled, messageSegments)
+              : { assembled, blocks: messageSegments };
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -14988,7 +14988,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // only progress was posted, result when a final reply exists). Exact
             // NO_RESPONSE finals are treated as empty before this fallback runs.
             completionBlocks = completionMessageSegments(completionBlocks, {
-              allowSilentEmpty: allowSilentEmptyRun || publishedMidTurnUserMessage,
+              allowSilentEmpty:
+                allowSilentEmptyRun || probeFoundNothing || publishedMidTurnUserMessage,
               emptyResponseText,
               suppressOutput: handedOff || isBackgroundRunTrigger(run.trigger),
               skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
