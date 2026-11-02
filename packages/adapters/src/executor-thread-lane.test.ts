@@ -6,6 +6,8 @@ import { createRunExecutor } from "./executor.js";
 type Row = {
   id: string;
   spaceId: string;
+  userId: string;
+  sourceMessageId: string | null;
   taskId: string;
   threadId: string;
   botId: string;
@@ -34,6 +36,7 @@ function matches(row: Row, where: Where): boolean {
       return compare(value) === compare(condition);
     const filter = condition as Record<string, unknown>;
     if ("in" in filter && !(filter.in as unknown[]).includes(value)) return false;
+    if ("notIn" in filter && (filter.notIn as unknown[]).includes(value)) return false;
     if ("not" in filter && value === filter.not) return false;
     if ("gte" in filter && !(value !== null && compare(value) >= compare(filter.gte))) return false;
     if ("lt" in filter && !(value !== null && compare(value) < compare(filter.lt))) return false;
@@ -48,6 +51,8 @@ const CLAIMED = "claimed: the run left the queue";
 function lane(seed: Array<Partial<Row> & Pick<Row, "id" | "trigger" | "status">>) {
   const rows: Row[] = seed.map((row, index) => ({
     spaceId: "space-1",
+    userId: "user-1",
+    sourceMessageId: null,
     taskId: `task-${row.id}`,
     threadId: "thread-1",
     botId: "bot-1",

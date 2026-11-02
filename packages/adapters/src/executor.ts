@@ -94,6 +94,7 @@ import {
   assertTransition,
   attachmentExtensionForMimeType,
   BLOCKED_TOOL_REFUSAL,
+  BOT_MESSAGE_MAX_HOPS,
   blockedToolEffect,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
@@ -16851,14 +16852,120 @@ const THREAD_LANE_RETRY_MS = 5_000;
  * Runs waiting for a person (an ask or a takeover) do not hold the turn, so automations
  * keep running while nobody answers.
  */
+type LaneRun = {
+  id: string;
+  threadId: string;
+  spaceId: string;
+  userId: string;
+  botId: string;
+  sourceMessageId: string | null;
+};
+
+/** Only server-authored delegation messages can release this child's exact ancestor turns. */
+async function threadLaneAncestors(
+  tx: Pick<PrismaClient, "message" | "run">,
+  run: LaneRun,
+): Promise<string[]> {
+  const ancestors: string[] = [];
+  let current = run;
+  const select = {
+    blocks: true,
+    role: true,
+    botId: true,
+    runId: true,
+  } as const;
+  // ponytail: follow at most the platform's existing bot-message hop limit; unknown/cyclic chains stay blocked.
+  for (let hop = 0; hop < BOT_MESSAGE_MAX_HOPS && current.sourceMessageId; hop++) {
+    const where = {
+      id: current.sourceMessageId,
+      threadId: run.threadId,
+      thread: { spaceId: run.spaceId, userId: run.userId },
+    };
+    const source = await tx.message.findFirst({ where, select });
+    const parsed = MessageBlockSchema.array().safeParse(source?.blocks);
+    if (!source || !parsed.success || parsed.data.length !== 1) break;
+    const block = parsed.data[0]!;
+    let parent = source;
+    if (block.kind === "handoff") {
+      if (
+        source.role !== "bot" ||
+        source.botId !== block.fromBotId ||
+        block.toBotId !== current.botId ||
+        block.report
+      )
+        break;
+    } else if (block.kind === "bot_message_received") {
+      if (
+        source.role !== "user" ||
+        source.runId !== current.id ||
+        !block.returnToMessageId ||
+        !["request", "question"].includes(block.intent ?? "request")
+      )
+        break;
+      const outbound = await tx.message.findFirst({
+        where: { ...where, id: block.returnToMessageId, role: "bot", botId: block.fromBotId },
+        select,
+      });
+      const echoed = MessageBlockSchema.array().safeParse(outbound?.blocks);
+      const sent = echoed.success && echoed.data.length === 1 ? echoed.data[0] : undefined;
+      if (
+        !outbound ||
+        sent?.kind !== "bot_message_sent" ||
+        sent.toBotId !== current.botId ||
+        sent.text !== block.text ||
+        (sent.intent ?? "request") !== (block.intent ?? "request")
+      )
+        break;
+      parent = outbound;
+    } else break;
+    const owner =
+      parent.runId && parent.botId
+        ? await tx.run.findFirst({
+            where: {
+              id: parent.runId,
+              threadId: run.threadId,
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: parent.botId,
+            },
+            select: {
+              id: true,
+              threadId: true,
+              spaceId: true,
+              userId: true,
+              botId: true,
+              sourceMessageId: true,
+            },
+          })
+        : null;
+    if (
+      !owner ||
+      owner.id === current.id ||
+      owner.id === run.id ||
+      ancestors.includes(owner.id) ||
+      owner.threadId !== run.threadId ||
+      owner.spaceId !== run.spaceId ||
+      owner.userId !== run.userId ||
+      owner.botId !== parent.botId
+    )
+      break;
+    ancestors.push(owner.id);
+    current = owner;
+  }
+  return ancestors;
+}
+
 async function threadLaneBusy(
-  tx: Pick<PrismaClient, "run">,
-  run: { id: string; threadId: string; createdAt: Date },
+  tx: Pick<PrismaClient, "run" | "message">,
+  run: LaneRun & { createdAt: Date; trigger: string },
 ): Promise<boolean> {
+  const ancestors = ["bot_message", "tool_background"].includes(run.trigger)
+    ? await threadLaneAncestors(tx, run)
+    : [];
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
-      id: { not: run.id },
+      id: { notIn: [run.id, ...ancestors] },
       OR: [
         { status: { in: ["leased", "running"] } },
         { status: "queued", createdAt: { lt: run.createdAt } },
