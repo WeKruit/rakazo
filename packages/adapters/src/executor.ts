@@ -13086,11 +13086,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const filesInNotes = new Set<string>();
         async function attachedFileReads() {
           if (!tools.some((tool) => tool.name === "artifact_read")) return [];
-          // A specialist handed the work reads the recruiter's latest message, not the handoff.
+          // A specialist handed the work, or a harness continuation of the recruiter's turn, reads
+          // the recruiter's latest message, not the handoff or the continuation prompt.
+          const continuation =
+            currentTurnMessage !== undefined &&
+            "internal" in currentTurnMessage &&
+            currentTurnMessage.internal;
           const source =
-            currentTurnMessage?.role === "user"
+            currentTurnMessage?.role === "user" && !continuation
               ? currentTurnMessage
-              : handedIn
+              : handedIn || continuation
                 ? historyMessages.find((message) => message.role === "user" && !message.internal)
                 : undefined;
           const files = (source?.blocks ?? [])

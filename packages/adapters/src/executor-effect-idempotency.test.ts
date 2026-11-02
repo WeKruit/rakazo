@@ -5943,6 +5943,48 @@ describe("native recruiting assessment effect delivery", () => {
     expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
   });
 
+  it("reads the recruiter's attached file again for a harness continuation of their turn", async () => {
+    const f = fixture("continued-attached-file");
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "continue-1",
+        seq: 3,
+        role: "user",
+        botId: null,
+        runId: "continued-attached-file",
+        clientNonce: "autocontinue:abc",
+        blocks: [{ kind: "text", text: "Continue with the next step." }],
+        createdAt: new Date(3),
+      },
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "first-run",
+        blocks: [
+          {
+            kind: "file",
+            artifactId: "notes-file",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(1),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Code word: blue whale",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("(notes.txt) is already read; never read it again.");
+    expect(prompt).toContain("Code word: blue whale");
+  });
+
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
     for (const key of [
       "linkedin:/in/stevenfeng7",
