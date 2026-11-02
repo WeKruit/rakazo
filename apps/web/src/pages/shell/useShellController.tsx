@@ -721,6 +721,7 @@ export function useShellController() {
     inGroup,
     snapshot,
     groupId,
+    routeBotId: botId,
     active,
     threadSnapshotCache,
     searchParams,
