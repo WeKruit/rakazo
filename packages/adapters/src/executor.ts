@@ -5360,7 +5360,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const replied = await deps.prisma.message.count({
                 where: { threadId: thread.id, runId, role: "bot" },
               });
-              if (replied > 0) return;
+              if (replied > 0) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
+                return;
+              }
               await publishMessage(deps, run, "bot", [
                 { kind: "text", text: redactSecrets(text, runSecrets) },
               ]);
