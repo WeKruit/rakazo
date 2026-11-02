@@ -64,7 +64,8 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
         report_back: true,
       });
       expect(first).toMatchObject({ ok: true });
-      if (!("runId" in first)) throw new Error("Native handoff did not create its child");
+      if (!("runId" in first) || typeof first.runId !== "string")
+        throw new Error("Native handoff did not create its child");
       const child = await p.run.update({
         where: { id: first.runId },
         data: { status: "running", trigger: "tool_background" },
@@ -94,7 +95,8 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
             message: "Show the reviewed draft",
             report_back: true,
           });
-          if (!("runId" in next)) throw new Error("Native nested handoff did not create its child");
+          if (!("runId" in next) || typeof next.runId !== "string")
+            throw new Error("Native nested handoff did not create its child");
           specialistId = next.runId;
         } else {
           expect(
