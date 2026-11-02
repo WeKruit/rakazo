@@ -348,7 +348,63 @@ async function ownedLegacySender(
   const account = await rest("GET", `/accounts/${encodeURIComponent(email)}`);
   if (typeof account.email !== "string" || account.email.toLowerCase() !== email)
     throw new IsolationError();
-  return { email, displayName, domain: email.split("@")[1]!, attached: true };
+  const current = [account.first_name, account.last_name]
+    .filter((part) => typeof part === "string" && part.trim())
+    .join(" ");
+  return {
+    email,
+    displayName: displayName || current,
+    domain: email.split("@")[1]!,
+    attached: true,
+  };
+}
+
+/**
+ * An account whose own campaigns already sent from a mailbox no other account used keeps it as
+ * its sender: the same exclusive proof as an attach, recorded once, with no new name and no card.
+ */
+export async function adoptLegacySender(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+) {
+  if (!context.runId || (await confirmedSendingMailboxes(prisma, context)).length) return null;
+  const [last] = await prisma.$queryRaw<{ email: string }[]>(Sql.sql`
+    SELECT lower(e.result->>'eaccount') AS "email"
+    FROM external_effects e JOIN runs r ON r.id=e."runId"
+    WHERE e.kind='instantly_role_campaign' AND e.status='completed' AND e."spaceId"=${context.spaceId}
+      AND r."spaceId"=${context.spaceId} AND r."userId"=${context.userId}
+      AND e.request->>'serverId'=${serverId} AND e.result->>'eaccount' LIKE '%@%'
+    ORDER BY e."updatedAt" DESC LIMIT 1
+  `);
+  if (!last) return null;
+  let value: Sender;
+  try {
+    // An empty name keeps the mailbox's current sender name.
+    value = await ownedLegacySender(prisma, rest, context, serverId, last.email, "");
+  } catch (error) {
+    if (error instanceof IsolationError || is404(error)) return null;
+    throw error;
+  }
+  const runId = context.runId;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["sending-identity", context.userId, context.spaceId])}, 0))`;
+    if (await tx.externalEffect.findUnique({ where: { idempotencyKey: key(value.email) } }))
+      return null;
+    await tx.externalEffect.create({
+      data: {
+        spaceId: context.spaceId,
+        runId,
+        kind: "instantly_sender_account",
+        status: "completed",
+        idempotencyKey: key(value.email),
+        request: { serverId, adopted: "role_campaign" },
+        result: value as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return value.email;
+  });
 }
 
 /** A confirmed sender is an existing native receipt, never authority to activate a campaign. */

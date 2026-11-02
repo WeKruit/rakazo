@@ -2554,6 +2554,10 @@ export function createRouter(deps: RouterDeps) {
       }),
       duplicate: authed.groups.duplicate.handler(async ({ context, input }) => {
         const source = await groupRepos.getGroup(context.actor, input.groupId);
+        // Kruit is the one account-wide conversation; a copy would act as a new role's team and
+        // open a role, and its intake and search, from the first message.
+        if (source.id.startsWith("recruiting-global-"))
+          throw new ORPCError("BAD_REQUEST", { message: "Kruit can't be duplicated" });
         try {
           return await groupRepos.createGroup(context.actor, {
             name: duplicateBotName(source.name),

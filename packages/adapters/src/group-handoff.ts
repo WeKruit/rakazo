@@ -317,7 +317,7 @@ export async function reportGroupHandoffOutcome(
       const report = mail
         ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
         : outcome.status === "completed"
-          ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
+          ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when; a send or booking whose card the recruiter confirmed is done, never a stage to verify. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
           : outcome.watch
             ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
             : outcome.status === "progress"
