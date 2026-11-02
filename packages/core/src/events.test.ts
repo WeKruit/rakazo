@@ -142,6 +142,42 @@ describe("reduceLiveMessageBlocks", () => {
   });
 });
 
+describe("a question being written", () => {
+  const writing = (text: string) => ({
+    type: "progress" as const,
+    payload: { text, streaming: true, question: true },
+  });
+
+  it("shows with reply streaming off and stays until its card replaces it", () => {
+    let blocks = reduceLiveMessageBlocks(
+      [{ kind: "steps", steps: [{ label: "Save role", count: 1 }] }],
+      writing("Which language?"),
+    );
+    blocks = reduceLiveMessageBlocks(blocks, writing("Which language do they need?\n· English"));
+    blocks = reduceLiveMessageBlocks(blocks, {
+      type: "progress",
+      payload: { text: "Using ask_user", activity: true },
+    });
+    blocks = reduceLiveMessageBlocks(blocks, { type: "tool", name: "ask_user" });
+    const live = { id: "progress:run-1", blocks };
+    expect(stripLiveStreamingProgress([live])[0]?.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "progress",
+        text: "Which language do they need?\n· English",
+        question: true,
+      }),
+    );
+  });
+
+  it("leaves ordinary reply text hidden while streaming is off", () => {
+    const blocks = reduceLiveMessageBlocks([], {
+      type: "progress",
+      payload: { text: "Lisbon is", streaming: true },
+    });
+    expect(stripLiveStreamingProgress([{ id: "progress:run-1", blocks }])).toEqual([]);
+  });
+});
+
 describe("runFailureError", () => {
   it("returns the error only for run.failed with a real message", () => {
     expect(runFailureError({ type: "run.failed", payload: { error: "provider missing" } })).toBe(
