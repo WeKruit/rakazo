@@ -706,6 +706,10 @@ msgstr ""
 msgid "Background tasks"
 msgstr ""
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Balanced"
+msgstr ""
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "बेस URL"
@@ -1421,6 +1425,10 @@ msgstr "खोज परिणाम लोड नहीं किए जा स
 msgid "Could not load sign-in options"
 msgstr "साइन इन के विकल्प लोड नहीं हो सके"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Could not load the complete message."
+msgstr ""
+
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Could not load the complete shortlist"
 msgstr ""
@@ -1693,6 +1701,10 @@ msgstr ""
 msgid "Days unavailable."
 msgstr ""
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Deep"
+msgstr ""
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "डिफ़ॉल्ट"
@@ -1900,6 +1912,11 @@ msgstr ""
 msgid "Education"
 msgstr ""
 
+#. placeholder {0}: labels[selected]
+#: src/pages/shell/effort-picker.tsx
+msgid "Effort: {0}"
+msgstr ""
+
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
@@ -2091,6 +2108,10 @@ msgstr "विफल।"
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "विफलता प्रबंधन"
+
+#: src/pages/shell/effort-picker.tsx
+msgid "Fast"
+msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Feedback sent"
@@ -3605,7 +3626,7 @@ msgid "Preview only · variables remain unfilled"
 msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
+msgid "Preview only. The complete message has not loaded."
 msgstr ""
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx

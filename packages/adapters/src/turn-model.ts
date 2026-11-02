@@ -61,3 +61,28 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
     return { ...fast, reason: "short_user_message" };
   return { ...configured, reason: "long_message" };
 }
+
+export type EffortMode = "fast" | "balanced" | "deep";
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+/**
+ * A chat's effort mode applied to the turn's thinking level. Fast (the default) caps thinking at
+ * low and keeps lower levels; balanced keeps the routed level; deep thinks at high.
+ */
+export function effortThinkingLevel(
+  mode: EffortMode,
+  level: ThinkingLevel | null | undefined,
+): ThinkingLevel | null | undefined {
+  if (mode === "deep") return "high";
+  if (mode === "balanced") return level;
+  return level === "off" || level === "minimal" || level === "low" ? level : "low";
+}
+
+/** The stored mode when the account may choose one; fast otherwise. */
+export function resolveEffortMode(
+  stored: string | null | undefined,
+  mayChoose: boolean,
+): EffortMode {
+  if (!mayChoose) return "fast";
+  return stored === "balanced" || stored === "deep" ? stored : "fast";
+}

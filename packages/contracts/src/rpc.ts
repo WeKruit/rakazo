@@ -51,6 +51,7 @@ import {
   CreateRoutineInput,
   CreateScratchpadItemInput,
   DeploymentSettingsSchema,
+  EffortModeSchema,
   ExportManifestSchema,
   ExternalConversationPolicySchema,
   GroupDetailSchema,
@@ -634,6 +635,10 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Set how hard this chat's replies think; FORBIDDEN for accounts outside the operator. */
+    setEffort: oc
+      .input(threadTarget.safeExtend({ mode: EffortModeSchema }))
+      .output(z.object({ ok: z.literal(true) })),
     /** Change a message still waiting for the working reply; CONFLICT once the run read it. */
     updateQueued: oc
       .input(

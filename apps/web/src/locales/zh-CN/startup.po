@@ -706,6 +706,10 @@ msgstr "后台任务"
 msgid "Background tasks"
 msgstr "后台任务"
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Balanced"
+msgstr "均衡"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "Base URL"
@@ -1421,6 +1425,10 @@ msgstr "无法加载搜索结果"
 msgid "Could not load sign-in options"
 msgstr "无法加载登录选项"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Could not load the complete message."
+msgstr "无法加载完整邮件。"
+
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Could not load the complete shortlist"
 msgstr "无法加载完整候选名单"
@@ -1693,6 +1701,10 @@ msgstr "间隔天数"
 msgid "Days unavailable."
 msgstr "暂无天数。"
 
+#: src/pages/shell/effort-picker.tsx
+msgid "Deep"
+msgstr "深入"
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "默认"
@@ -1900,6 +1912,11 @@ msgstr "编辑"
 msgid "Education"
 msgstr "教育经历"
 
+#. placeholder {0}: labels[selected]
+#: src/pages/shell/effort-picker.tsx
+msgid "Effort: {0}"
+msgstr "思考强度：{0}"
+
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Email"
@@ -2091,6 +2108,10 @@ msgstr "失败。"
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "失败处理"
+
+#: src/pages/shell/effort-picker.tsx
+msgid "Fast"
+msgstr "快速"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Feedback sent"
@@ -3605,8 +3626,8 @@ msgid "Preview only · variables remain unfilled"
 msgstr "仅供预览 · 变量尚未填入"
 
 #: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
+msgid "Preview only. The complete message has not loaded."
+msgstr ""
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"

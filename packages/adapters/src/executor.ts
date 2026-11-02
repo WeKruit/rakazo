@@ -278,6 +278,7 @@ import {
   saveRecruitingCalibrationRound,
   saveRunThinking,
   searchHistory,
+  seesOperatorSpend,
   skipRateLimitedRun,
   unitVector,
   votePoll,
@@ -700,7 +701,7 @@ import {
   sendDeclineRetry,
   turnRequestText,
 } from "./turn-end-guard.js";
-import { chooseTurnModel } from "./turn-model.js";
+import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
@@ -13855,35 +13856,50 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .map((block) => block.text)
               .join("\n")
           : taskPrompt;
+        // The chat's effort mode applies to the recruiter's own turns. Only operator
+        // accounts can pick one; every other turn runs fast.
+        const effortMode = resolveEffortMode(
+          thread.effortMode,
+          run.trigger === "user" &&
+            Boolean(thread.effortMode) &&
+            (await seesOperatorSpend(deps.prisma, run.userId).catch(() => false)),
+        );
         // Light turns run on the fast model; the configured model becomes the first backup.
-        let turnModel = scripted
+        let turnModel: ReturnType<typeof chooseTurnModel> = scripted
           ? {
               model: { provider: runModelProvider, id: runModelId },
               routed: "configured" as const,
               reason: "scripted",
             }
-          : chooseTurnModel({
-              configured: { provider: runModelProvider, id: runModelId },
-              trigger: run.trigger,
-              answersQuestion: Boolean(nativeSources?.currentAnswer),
-              peerIntent: peerMessage?.intent,
-              userText: turnUserText,
-              hasAttachments:
-                (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
-                (currentTurnImages?.length ?? 0) > 0,
-              pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
-              // A role team whose role is not saved yet is still in intake: its questions
-              // are what the recruiter waits on, so they skip reasoning too.
-              recruitingIntake:
-                Boolean(linkRole) ||
-                firstRoundPending ||
-                (Boolean(thread.groupId) &&
-                  // Kruit's account-wide conversation is never a role's intake.
-                  !thread.groupId?.startsWith("recruiting-global-") &&
-                  !thread.activeRecruitingRoleId &&
-                  recruitingSearch &&
-                  Boolean(recruitingBotKey(bot))),
-            });
+          : effortMode === "deep"
+            ? {
+                model: { provider: runModelProvider, id: runModelId },
+                routed: "configured" as const,
+                reason: "effort_deep",
+              }
+            : chooseTurnModel({
+                configured: { provider: runModelProvider, id: runModelId },
+                trigger: run.trigger,
+                answersQuestion: Boolean(nativeSources?.currentAnswer),
+                peerIntent: peerMessage?.intent,
+                userText: turnUserText,
+                hasAttachments:
+                  (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
+                  (currentTurnImages?.length ?? 0) > 0,
+                pendingToolLoop:
+                  Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+                // A role team whose role is not saved yet is still in intake: its questions
+                // are what the recruiter waits on, so they skip reasoning too.
+                recruitingIntake:
+                  Boolean(linkRole) ||
+                  firstRoundPending ||
+                  (Boolean(thread.groupId) &&
+                    // Kruit's account-wide conversation is never a role's intake.
+                    !thread.groupId?.startsWith("recruiting-global-") &&
+                    !thread.activeRecruitingRoleId &&
+                    recruitingSearch &&
+                    Boolean(recruitingBotKey(bot))),
+              });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
           provider,
@@ -13932,6 +13948,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             routeReason: turnModel.reason,
           };
         }
+        if (!scripted && run.trigger === "user")
+          runModel = {
+            ...runModel,
+            thinkingLevel: effortThinkingLevel(effortMode, runModel.thinkingLevel),
+          };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.

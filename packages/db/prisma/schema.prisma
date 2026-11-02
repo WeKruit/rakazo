@@ -587,6 +587,8 @@ model Thread {
   historyCompactionSummary    String?    @db.Text
   historyCompactionGeneration Int        @default(0)
   unread                      Boolean    @default(false)
+  /// fast | balanced | deep; null is fast. Only operator accounts can set it.
+  effortMode                  String?
   messages                    Message[]
   events                      Event[]
   tasks                       Task[]

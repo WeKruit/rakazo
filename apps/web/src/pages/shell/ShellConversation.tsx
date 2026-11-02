@@ -45,6 +45,7 @@ const RoleSetupCard = lazyPanel(() =>
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
+import { EffortPicker } from "../shell/effort-picker";
 import { Transcript } from "../shell/Transcript";
 import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
@@ -1031,6 +1032,19 @@ export function ShellConversation({
                   onClearReply={clearReply}
                   suggestion={
                     emptyCrmChat || !activeSnapshot ? null : currentSuggestion(activeSnapshot)
+                  }
+                  toolbar={
+                    !emptyCrmChat && activeSnapshot?.effortMode ? (
+                      <EffortPicker
+                        key={activeSnapshot.threadId}
+                        mode={activeSnapshot.effortMode}
+                        target={
+                          activeSnapshot.groupId
+                            ? { groupId: activeSnapshot.groupId }
+                            : { botId: activeSnapshot.botId ?? "" }
+                        }
+                      />
+                    ) : undefined
                   }
                   mentionTargets={showToolActivity ? composerMentionTargets : []}
                   agentSkills={showToolActivity ? agentSkills : []}
