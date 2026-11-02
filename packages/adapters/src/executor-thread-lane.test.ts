@@ -307,3 +307,54 @@ describe("automation rate cap", () => {
     expect(await db.start("later")).toBe(true);
   });
 });
+
+it("keeps a cyclic delegation chain behind its live parent", async () => {
+  const db = lane([
+    {
+      id: "parent",
+      trigger: "tool_background",
+      status: "running",
+      botId: "main",
+      sourceMessageId: "to-main",
+    },
+    {
+      id: "child",
+      trigger: "tool_background",
+      status: "queued",
+      botId: "specialist",
+      sourceMessageId: "to-specialist",
+    },
+  ]);
+  const messages = new Map([
+    [
+      "to-specialist",
+      {
+        role: "bot",
+        botId: "main",
+        runId: "parent",
+        blocks: [{ kind: "handoff", fromBotId: "main", toBotId: "specialist", text: "Work" }],
+      },
+    ],
+    [
+      "to-main",
+      {
+        role: "bot",
+        botId: "specialist",
+        runId: "child",
+        blocks: [{ kind: "handoff", fromBotId: "specialist", toBotId: "main", text: "Work" }],
+      },
+    ],
+  ]);
+  Object.assign(db.prisma, {
+    message: {
+      findFirst: vi.fn(
+        async ({ where }: { where: { id: string } }) => messages.get(where.id) ?? null,
+      ),
+    },
+  });
+  Object.assign(db.prisma.run, {
+    findFirst: vi.fn(async ({ where }: { where: { id: string } }) => db.row(where.id) ?? null),
+  });
+  expect(await db.start("child")).toBe(false);
+  expect(db.status("child")).toBe("queued");
+});

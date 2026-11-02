@@ -16938,11 +16938,10 @@ async function threadLaneAncestors(
             },
           })
         : null;
+    if (owner && (owner.id === current.id || owner.id === run.id || ancestors.includes(owner.id)))
+      return [];
     if (
       !owner ||
-      owner.id === current.id ||
-      owner.id === run.id ||
-      ancestors.includes(owner.id) ||
       owner.threadId !== run.threadId ||
       owner.spaceId !== run.spaceId ||
       owner.userId !== run.userId ||
