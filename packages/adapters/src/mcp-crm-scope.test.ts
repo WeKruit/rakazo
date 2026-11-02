@@ -565,6 +565,10 @@ describe("direct Instantly MCP email reads", () => {
     vi.stubEnv("INSTANTLY_API_KEY", "synthetic-platform-mail-key");
     const f = scopedFixture();
     Object.assign(f.prisma, { externalEffect: { findUnique: vi.fn(async () => null) } });
+    f.prisma.run.findFirst.mockResolvedValue({
+      threadId: "current-thread",
+      thread: { activeRecruitingRoleId: null },
+    } as never);
     f.callTool.mockResolvedValue({ structuredContent: email } as never);
     const events = await f.collect("reply_to_email", {
       reply_to_uuid: email.id,
