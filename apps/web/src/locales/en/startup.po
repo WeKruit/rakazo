@@ -4609,6 +4609,10 @@ msgid "Sent (all time): {sentTotal}"
 msgstr "Sent (all time): {sentTotal}"
 
 #: src/components/MailReplyAskContent.tsx
+msgid "Sent with different line or paragraph formatting. View the sent email; do not resend."
+msgstr "Sent with different line or paragraph formatting. View the sent email; do not resend."
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Sent email"
 msgstr "Sent email"
 

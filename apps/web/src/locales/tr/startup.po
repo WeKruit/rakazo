@@ -4609,6 +4609,10 @@ msgid "Sent (all time): {sentTotal}"
 msgstr ""
 
 #: src/components/MailReplyAskContent.tsx
+msgid "Sent with different line or paragraph formatting. View the sent email; do not resend."
+msgstr "Gönderildi, ancak satır sonları veya paragraf biçimi değişti. Gönderilen e-postayı inceleyin; tekrar göndermeyin."
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Sent email"
 msgstr ""
 

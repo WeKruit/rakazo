@@ -80,6 +80,7 @@ export function MailReplyAskContent({
             : undefined))
       : undefined;
   const visibleError = error ?? reportedError;
+  const formattingChanged = status === "sent" && reply.error === "formatting_changed";
   const anchor = [reply.inReplyTo.subject, reply.inReplyTo.sender].filter(Boolean).join(" · ");
 
   async function submit(action: "send" | "discard") {
@@ -263,6 +264,13 @@ export function MailReplyAskContent({
       ) : status === "needs_approval" && !reportedError ? (
         <p className="text-sm text-muted-foreground">
           <Trans>No longer active</Trans>
+        </p>
+      ) : null}
+      {formattingChanged ? (
+        <p role="status" className="text-sm text-warning">
+          <Trans>
+            Sent with different line or paragraph formatting. View the sent email; do not resend.
+          </Trans>
         </p>
       ) : null}
       {visibleError ? (

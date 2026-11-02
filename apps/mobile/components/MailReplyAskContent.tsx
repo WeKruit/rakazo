@@ -92,6 +92,7 @@ export function MailReplyAskContent({
             : undefined))
       : undefined;
   const visibleError = error ?? reportedError;
+  const formattingChanged = reply.status === "sent" && reply.error === "formatting_changed";
   const sentAt =
     reply.status === "sent" && reply.sentAt
       ? new Date(reply.sentAt).toLocaleString(dateLocaleForUi(locale))
@@ -208,6 +209,13 @@ export function MailReplyAskContent({
       {sentAt ? (
         <Text style={{ color: tokens.mutedForeground, fontSize: 12 }}>
           {t("Sent at {time}", { time: sentAt })}
+        </Text>
+      ) : null}
+      {formattingChanged ? (
+        <Text accessibilityLiveRegion="polite" style={{ color: tokens.warning, fontSize: 13 }}>
+          {t(
+            "Sent with different line or paragraph formatting. View the sent email; do not resend.",
+          )}
         </Text>
       ) : null}
       {visibleError ? (

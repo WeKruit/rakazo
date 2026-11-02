@@ -5,6 +5,8 @@ export const RU_MESSAGES: Record<string, string> = {
     "Этот адрес отправителя ещё не готов к отправке.",
   "The sending address changed. Prepare a new reply for review.":
     "Адрес отправителя изменился. Подготовьте новый ответ для проверки.",
+  "Sent with different line or paragraph formatting. View the sent email; do not resend.":
+    "Письмо отправлено, но переносы строк или абзацы изменились. Просмотрите отправленное письмо; не отправляйте его повторно.",
   "This reply was not sent.": "Этот ответ не был отправлен.",
   "Create this sending address?": "Создать этот адрес отправителя?",
   "Use this sending address?": "Использовать этот адрес отправителя?",

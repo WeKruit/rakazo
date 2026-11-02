@@ -207,3 +207,48 @@ it.each([
     await view.close();
   }
 });
+
+it("keeps Sent, warns about formatting, and expands the actual sent text without send actions", async () => {
+  const actualBody =
+    "Hi Noah, This is a staging QA check. No action is needed. Best, Recruiting Team";
+  const view = await mount({
+    ...reply,
+    status: "sent",
+    error: "formatting_changed",
+    body: actualBody,
+  });
+  try {
+    expect(view.container.querySelector('[data-status="sent"]')).not.toBeNull();
+    expect(view.container.querySelector('[role="status"]')?.textContent).toBe(
+      "Sent with different line or paragraph formatting. View the sent email; do not resend.",
+    );
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () =>
+      view.container.querySelector<HTMLButtonElement>('[aria-expanded="false"]')!.click(),
+    );
+    expect(view.container.textContent).toContain(actualBody);
+    expect(view.container.textContent).not.toContain(reply.body);
+    expect(view.button("Send")).toBeUndefined();
+    expect(view.button("Discard")).toBeUndefined();
+    expect(view.container.querySelector("textarea")).toBeNull();
+    expect(view.onAnswer).not.toHaveBeenCalled();
+  } finally {
+    await view.close();
+  }
+});
+
+it.each(["sent", "discarded"] as const)(
+  "hides stale or raw errors on %s history",
+  async (status) => {
+    for (const error of ["send_failed", "private-provider-tool-id"]) {
+      const view = await mount({ ...reply, status, error });
+      try {
+        expect(view.container.querySelector('[role="status"], [role="alert"]')).toBeNull();
+        expect(view.container.textContent).not.toContain(error);
+        expect(view.button("Send")).toBeUndefined();
+      } finally {
+        await view.close();
+      }
+    }
+  },
+);
