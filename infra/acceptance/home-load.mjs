@@ -153,7 +153,14 @@ try {
               document.body.innerText.includes("Loading roles")
             )
               return false;
-            const loading = [...main.querySelectorAll('[role="status"]')];
+            // A loading status is a spinner or a line ending in "…"; a static note such as an
+            // empty state also uses role="status" but is not still loading.
+            const loading = [...main.querySelectorAll('[role="status"]')].filter(
+              (node) =>
+                node.matches('[data-slot="spinner"]') ||
+                node.querySelector('[data-slot="spinner"]') !== null ||
+                /…\s*$/.test(node.textContent ?? ""),
+            );
             if (complete) return loading.length === 0;
             // Shown: no page-level loading, and a role (or the empty state) is on screen.
             return (
