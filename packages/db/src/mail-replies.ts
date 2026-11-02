@@ -137,13 +137,33 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         .map((item) => item.toLowerCase())
         .sort()
         .join("\n");
+  const nativeBody = object(payload?.body);
+  // ponytail: accept only the observed text-only HTML document; richer/quoted HTML stays unconfirmed.
+  const htmlText =
+    typeof nativeBody?.html === "string"
+      ? /^\s*<html>\s*<head>(?:\s*<meta\b[^>]*>)*\s*<title>[^<]*<\/title>\s*<\/head>\s*<body>([^<]*)<\/body>\s*<\/html>\s*$/iu.exec(
+          nativeBody.html,
+        )?.[1]
+      : undefined;
+  const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const escapedBody = edited
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  const bodyMatches =
+    typeof nativeBody?.text === "string"
+      ? nativeBody.text === edited
+      : htmlText !== undefined && normalize(htmlText) === normalize(escapedBody);
   const nativeReceipt =
     payload?.ue_type === 3 &&
     typeof payload?.id === "string" &&
+    payload.id !== draft.inReplyTo.emailId &&
+    typeof draft.inReplyTo.threadId === "string" &&
+    payload.thread_id === draft.inReplyTo.threadId &&
     payload?.eaccount === draft.from &&
     sameAddresses(payload?.to_address_email_list, draft.to) &&
     payload?.subject === draft.subject &&
-    object(payload?.body)?.text === edited &&
+    bodyMatches &&
     sameAddresses(payload?.cc_address_email_list ?? "", draft.cc);
   const sent =
     !error &&
