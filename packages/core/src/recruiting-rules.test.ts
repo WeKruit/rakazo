@@ -58,6 +58,7 @@ const TEXTS = {
   "Candidate evidence and feedback skill": skill("Candidate evidence and feedback"),
   "Review recruiting draft skill": skill("Review recruiting draft"),
   "Coordinate interview skill": skill("Coordinate interview"),
+  "Global recruiting overview skill": skill("Global recruiting overview"),
 };
 
 type Target = keyof typeof TEXTS;
@@ -1059,6 +1060,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "Main",
     phrase: "or as the recruiter named them, even when no role is linked",
     why: "Main asked which role a person was in before handing over an interview the recruiter had fully specified.",
+  },
+  {
+    rule: "hand a named booking to Scheduling in the global conversation",
+    in: "Global recruiting overview skill",
+    phrase:
+      "An interview booking for a person the recruiter names with an email goes to Scheduling in this conversation",
+    why: "In the global conversation Main asked which role a named person's interview belonged to instead of handing the booking to Scheduling.",
   },
   {
     rule: "book a named email without a role",
