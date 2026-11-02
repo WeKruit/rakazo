@@ -404,3 +404,52 @@ for (const selected of ["fixture-campaign", "fixture-second-campaign"]) {
     await expect(page.getByText("Saved Avery", { exact: true })).toHaveCount(0);
   });
 }
+
+test("closing Outreach drafts keeps the unsaved editor while another thread cannot see it", async ({
+  page,
+}) => {
+  const fixture = await mockRecruitingApp(page, { sequenceDraft: true });
+  await page.goto(`/app/g/${appGroupId}?view=sequence`);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  const summary = page.locator("summary").filter({ hasText: "Outreach drafts" });
+  const panel = summary.locator("..");
+  await expect(panel).not.toHaveAttribute("open", "");
+  expect(fixture.calls.filter((call) => call.method === "artifacts/get")).toHaveLength(0);
+  expect(fixture.calls.filter((call) => call.method === "recruiting/roleCampaign")).toHaveLength(1);
+  await summary.click();
+  const body = panel.locator('textarea[aria-label="Message"]');
+  await expect(body).toHaveValue("Original saved draft");
+  await body.fill("Unsaved text must survive collapsing this panel");
+  const reads = fixture.calls.filter((call) => call.method === "artifacts/get").length;
+  await summary.click();
+  await expect(panel).not.toHaveAttribute("open", "");
+  await expect(body).toHaveCount(1);
+  await expect(body).not.toBeVisible();
+  await summary.click();
+  await expect(body).toHaveValue("Unsaved text must survive collapsing this panel");
+  expect(fixture.calls.filter((call) => call.method === "artifacts/get")).toHaveLength(reads);
+  expect(
+    fixture.calls.some((call) =>
+      /createArtifact|artifacts\/create|threads\/send/.test(call.method),
+    ),
+  ).toBe(false);
+  await page.screenshot({
+    path: test.info().outputPath("outreach-draft-collapse-preserves-unsaved.png"),
+    fullPage: true,
+  });
+  await page.evaluate(() => {
+    history.pushState({}, "", "/app/fixture-bot?view=conversation");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await expect
+    .poll(() =>
+      fixture.calls.some(
+        (call) => call.method === "threads/get" && call.input.botId === "fixture-bot",
+      ),
+    )
+    .toBe(true);
+  await expect(body).toHaveCount(0);
+  await expect(
+    page.getByText("Unsaved text must survive collapsing this panel", { exact: true }),
+  ).toHaveCount(0);
+});
