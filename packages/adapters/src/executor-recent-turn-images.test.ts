@@ -43,6 +43,7 @@ type HistoryMessage = {
   replyToMessageId: null;
   replyQuote: null;
   replyTo: null;
+  clientNonce?: string;
 };
 
 function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
@@ -322,6 +323,35 @@ describe("reply suggestion", () => {
     expect(runtimeRun.mock.invocationCallOrder.at(-1)!).toBeLessThan(
       finalizeRun.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("follows an auto-continued reply too, from what the user last wrote", async () => {
+    const { runtimeRun, events } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      finalText: "Here is the next step.",
+      replySuggestions: true,
+      sourceMessage: {
+        id: "auto",
+        threadId: "thread-1",
+        seq: 3,
+        role: "user",
+        runId: "run-1",
+        blocks: [{ kind: "text", text: "Continue with the next playbook step." }],
+        replyToMessageId: null,
+        replyQuote: null,
+        replyTo: null,
+        clientNonce: "autocontinue:run-0",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(events.append).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "thread.suggestion", runId: "run-1" }),
+      ),
+    );
+    const prompt = runtimeRun.mock.calls.at(-1)![0].prompt;
+    expect(prompt).toContain("User:\nwhat was in the screenshot?");
+    expect(prompt).toContain("Here is the next step.");
+    expect(prompt).not.toContain("Continue with the next playbook step.");
   });
 
   it("skips runs that a person did not start", async () => {

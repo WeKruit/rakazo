@@ -611,7 +611,7 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
-import { suggestNextMessage } from "./reply-suggestion.js";
+import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import { startRoleFromRecruiterMessage } from "./role-start.js";
@@ -4850,6 +4850,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: message.botId,
           runId: message.runId,
           blocks: message.blocks as MessageBlock[],
+          // A harness-written turn, such as an auto-continue prompt: not something the user said.
+          internal: Boolean(
+            "clientNonce" in message && message.clientNonce?.startsWith("autocontinue:"),
+          ),
         }));
         const currentTurnMessage = nativeSources?.currentAnswer
           ? {
@@ -15085,10 +15089,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.
+          // A follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last
+          // word too, so it gets a suggestion based on what the user last wrote.
+          const suggestionTurns = historyMessages.filter(
+            (message) =>
+              message.id !== currentTurnMessage?.id &&
+              ((message.role === "user" && !message.internal) || message.role === "bot") &&
+              blocksText(message.blocks).trim(),
+          );
+          const lastUserIndex =
+            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
+          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
           const suggestionPending =
             deps.replySuggestions &&
             !scripted &&
-            run.trigger === "user" &&
+            (run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) &&
             !messagingChannelRun &&
             !handedOff &&
             text.trim() &&
@@ -15096,20 +15111,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? suggestNextMessage({
                   runtime: deps.runtime,
                   model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-                  earlier: historyMessages
-                    .filter(
-                      (message) =>
-                        message.id !== currentTurnMessage?.id &&
-                        (message.role === "user" || message.role === "bot"),
-                    )
-                    .map((message) => ({
-                      role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                      text: message.blocks
-                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                        .join("\n"),
-                    })),
-                  userText: turnUserText,
-                  replyText: text,
+                  earlier: (lastUserTurn
+                    ? suggestionTurns.slice(0, lastUserIndex)
+                    : suggestionTurns
+                  ).map((message) => ({
+                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                    text: blocksText(message.blocks),
+                  })),
+                  userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
+                  // Replies already sent in this turn come before this one.
+                  replyText: [
+                    ...(lastUserTurn
+                      ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
+                      : []),
+                    text,
+                  ]
+                    .filter((part) => part.trim())
+                    .join("\n\n"),
                   runId,
                   spaceId: run.spaceId,
                   userId: run.userId,

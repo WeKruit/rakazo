@@ -1,10 +1,11 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
+import type { MessageBlock } from "@rakazo/contracts";
 
 const TIMEOUT_MS = 4_000;
 const MAX_USER_CHARS = 1_200;
 const MAX_REPLY_CHARS = 2_400;
 const MAX_SUGGESTION_CHARS = 120;
-const EARLIER_TURNS = 6;
+const EARLIER_TURNS = 10;
 const MAX_EARLIER_CHARS = 500;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
@@ -12,9 +13,15 @@ const INSTRUCTIONS = [
   "The user is a headhunter or recruiter filling roles for clients. You suggest the next message they are most likely to send in this chat with their recruiting assistant.",
   "Reply with only that message, written in the recruiter's own voice to the assistant (never the assistant's words, never a question addressed to the recruiter), at most 12 words, in the language the user writes in.",
   "Make it the natural next step in the task the conversation is working on, in everyday recruiting words about the role, candidates, interviews or outreach: usually answering the assistant's question or asking for the next piece of work, such as finding more people like the good ones or checking who replied. Never internal terms like intake or calibration, a generic greeting or a change of topic. If the assistant just handed the work to a role's own conversation, reply with nothing.",
+  "Respect what the user already decided or asked to hold off on (for example not searching yet): never suggest it again.",
   "Never suggest approving, sending or confirming emails, outreach or interview invitations.",
   "No quotes, no explanation, no markdown. If there is no clear next step, reply with nothing.",
 ].join(" ");
+
+/** The plain text of a message. */
+export function blocksText(blocks: readonly MessageBlock[]): string {
+  return blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join("\n");
+}
 
 function clip(text: string, max: number): string {
   const trimmed = text.trim();
