@@ -736,7 +736,10 @@ export function AccountRecruitingView({
             {view === "inbox" && !renderCorrespondence ? (
               <>
                 {indexedMail?.key === readKey ? (
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div
+                    data-dock-avoid
+                    className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
+                  >
                     <span>
                       <Trans>Saved mail · partial source coverage</Trans>
                     </span>
@@ -752,7 +755,7 @@ export function AccountRecruitingView({
                 !indexedMail.data.items.length &&
                 indexedMail.data.coverage.importsComplete &&
                 indexedMail.data.coverage.crmComplete ? (
-                  <p className="mb-3 text-sm text-muted-foreground">
+                  <p data-dock-avoid className="mb-3 text-sm text-muted-foreground">
                     <Trans>No indexed mail matches this view.</Trans>
                   </p>
                 ) : null}
