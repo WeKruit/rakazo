@@ -53,6 +53,16 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
           status: "running",
         },
       });
+      const older = await p.run.create({
+        data: {
+          ...scope,
+          botId: `${id}-unrelated`,
+          taskId: task.id,
+          trigger: "bot_message",
+          status: "queued",
+          createdAt: new Date(0),
+        },
+      });
       const deps = {
         prisma: p,
         jobs: { enqueue },
@@ -219,6 +229,8 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
         await executor.continueRun(specialist.id, "resume-worker");
         expect((await p.run.findUnique({ where: { id: specialist.id } }))!.status).toBe("queued");
         await p.run.update({ where: { id: unrelated.id }, data: { status: "completed" } });
+        await executor.continueRun(older.id, "resume-worker");
+        expect((await p.run.findUnique({ where: { id: older.id } }))!.status).toBe("queued");
         const source = await p.message.findUniqueOrThrow({
           where: { id: specialist.sourceMessageId! },
         });
@@ -258,6 +270,28 @@ it.skipIf(process.env.VERIFY_DATABASE !== "1" || !process.env.DATABASE_URL)(
         expect((await p.run.findUnique({ where: { id: child.id } }))!.status).toBe("running");
         await p.run.update({ where: { id: specialist.id }, data: { status: "completed" } });
       }
+      // Without an active canonical ancestor, the same delegated source must obey queued FIFO.
+      const later = await handoffToGroupBot(deps, child, id, {
+        turnKey: "after-turn",
+        bot_id: `${id}-specialist`,
+        message: "Later work",
+      });
+      if (!("runId" in later) || typeof later.runId !== "string")
+        throw new Error("Missing later handoff");
+      await p.run.update({
+        where: { id: later.runId },
+        data: { trigger: "tool_background", leaseFence: 1 },
+      });
+      await p.run.updateMany({
+        where: { id: { in: [main.id, child.id] } },
+        data: { status: "completed" },
+      });
+      await executor.continueRun(later.runId, "resume-worker");
+      expect((await p.run.findUnique({ where: { id: later.runId } }))!.status).toBe("queued");
+      await expect(executor.continueRun(older.id, "resume-worker")).rejects.toThrow(claimed);
+      expect((await p.run.findUnique({ where: { id: older.id } }))!.status).toBe("leased");
+      await p.run.update({ where: { id: older.id }, data: { status: "completed" } });
+      await expect(executor.continueRun(later.runId, "resume-worker")).rejects.toThrow(claimed);
       stop.mockRestore();
     } finally {
       vi.restoreAllMocks();
