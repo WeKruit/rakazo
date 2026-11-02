@@ -135,6 +135,12 @@ describe("mail reply provenance", () => {
 it("reports the recorded card outcome rather than inventing missing or unconfirmed cards", () => {
   expect(mailReplyOutcomeInstruction({ status: "discarded" })).toContain("reply card was created");
   expect(mailReplyOutcomeInstruction({ status: "failed" })).toContain("definite send failure");
+  expect(mailReplyOutcomeInstruction({ status: "sent", error: "formatting_changed" })).toContain(
+    "different line or paragraph formatting",
+  );
+  expect(mailReplyOutcomeInstruction({ status: "sent", error: "formatting_changed" })).toContain(
+    "never resend",
+  );
   expect(mailReplyOutcomeInstruction({ status: "unknown" })).toContain(
     "Do not claim it sent or that nothing was sent",
   );
@@ -223,19 +229,17 @@ describe("verified reply outcome handoff", () => {
         ],
       },
     ]);
-    const effects = vi
-      .fn()
-      .mockResolvedValue([
-        {
-          id: "private-effect",
-          runId: child.id,
-          status: "completed",
-          request: {},
-          result: { status: "sent_recorded" },
-          updatedAt: new Date(),
-          run: { status: "completed" },
-        },
-      ]);
+    const effects = vi.fn().mockResolvedValue([
+      {
+        id: "private-effect",
+        runId: child.id,
+        status: "completed",
+        request: {},
+        result: { status: "sent_recorded" },
+        updatedAt: new Date(),
+        run: { status: "completed" },
+      },
+    ]);
     return {
       db: { run: { findFirst }, message: { findMany }, externalEffect: { findMany: effects } },
       findFirst,
