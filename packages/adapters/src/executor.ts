@@ -538,6 +538,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
+import { quickReply } from "./quick-reply.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -3658,6 +3659,8 @@ export interface ExecutorDeps {
   autoReview?: AutoReviewProvider;
   /** Suggest the user's next message after each reply (one extra small model call). */
   replySuggestions?: boolean;
+  /** Post a short first reply on each person's turn while the full answer is worked out. */
+  quickReplies?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -5303,6 +5306,73 @@ export function createRunExecutor(deps: ExecutorDeps) {
             setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
           }),
         );
+        // A short first reply while the full answer is worked out. It starts beside the rest of
+        // setup and is posted only if the run has not replied yet; the run is told what it said.
+        const quickReplyText = turnBlocks ? blocksText(turnBlocks) : "";
+        let quickReplySaid: string | undefined;
+        if (
+          deps.quickReplies &&
+          run.trigger === "user" &&
+          !messagingChannelRun &&
+          !deps.runtime.describe().capabilities.scripted &&
+          quickReplyText.trim()
+        )
+          void resolvedPending()
+            .then((resolved) =>
+              quickReply({
+                runtime: deps.runtime,
+                model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
+                earlier: historyMessages
+                  .filter(
+                    (message) =>
+                      message.id !== currentTurnMessage?.id &&
+                      ((message.role === "user" && !message.internal) || message.role === "bot"),
+                  )
+                  .map((message) => ({
+                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                    text: blocksText(message.blocks),
+                  })),
+                userText: quickReplyText,
+                runId,
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                threadId: thread.id,
+                onUsage: (event) =>
+                  recordUsage(
+                    deps.prisma,
+                    event,
+                    {
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      botId: bot.id,
+                      parentRunId: runId,
+                      runId,
+                      operationId: `quick-reply:${runId}`,
+                      operationKind: "setup",
+                    },
+                    estimateCatalogTokenCostUsd,
+                  ),
+              }),
+            )
+            .then(async (text) => {
+              if (!text) return;
+              const replied = await deps.prisma.message.count({
+                where: { threadId: thread.id, runId, role: "bot" },
+              });
+              if (replied > 0) return;
+              await publishMessage(deps, run, "bot", [
+                { kind: "text", text: redactSecrets(text, runSecrets) },
+              ]);
+              getLogger().info("run.quick_reply", {
+                runId,
+                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
+              });
+              quickReplySaid = text;
+            })
+            .catch((error) => {
+              getLogger().warn("quick reply failed", { runId, reason: String(error) });
+            });
         const initialRecruitingContext = await initialRecruitingContextPending();
         currentRecruitingContext = initialRecruitingContext;
         setupMark("recruitingContext");
@@ -13840,6 +13910,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const prompt = [
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
+          quickReplySaid
+            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it; go on with the full answer.`
+            : undefined,
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -13882,26 +13955,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
             .map((candidate) => JSON.stringify([candidate.provider, candidate.modelId])),
         );
-        const configuredRunModel: AgentRunRequest["model"] = {
-          provider: runModelProvider,
-          id: runModelId,
-          apiKey: resolved.oauth ? undefined : resolved.apiKey,
-          ...cloudflareRunFields(resolved),
-          baseUrl: resolved.baseUrl,
-          cacheCapabilities: resolved.cacheCapabilities,
-          contextWindow: resolved.contextWindow,
-          reasoning: resolved.reasoning,
-          maxTokens: resolved.maxTokens,
-          acceptsImages: resolved.acceptsImages,
-          maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-          thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-          oauth: resolved.oauth
-            ? {
-                credential: resolved.oauth,
-                modify: resolved.modifyOAuth,
-              }
-            : undefined,
-        };
+        const configuredRunModel = runModelFromResolved(
+          runModelProvider,
+          runModelId,
+          resolved,
+          thinkingLevel,
+        );
         const turnUserText = turnBlocks
           ? turnBlocks
               .filter((block) => block.kind === "text")
@@ -17575,6 +17634,34 @@ async function resolveModelKey(
   if (requireStoredSecret) throw new Error("Backup model credential is no longer available");
   cloudflareGatewayProviderEnv({ provider });
   return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+}
+
+function runModelFromResolved(
+  provider: string,
+  id: string,
+  resolved: Awaited<ReturnType<typeof resolveModelKey>>,
+  thinkingLevel: AgentRunRequest["model"]["thinkingLevel"] | undefined,
+): AgentRunRequest["model"] {
+  return {
+    provider,
+    id,
+    apiKey: resolved.oauth ? undefined : resolved.apiKey,
+    ...cloudflareRunFields(resolved),
+    baseUrl: resolved.baseUrl,
+    cacheCapabilities: resolved.cacheCapabilities,
+    contextWindow: resolved.contextWindow,
+    reasoning: resolved.reasoning,
+    maxTokens: resolved.maxTokens,
+    acceptsImages: resolved.acceptsImages,
+    maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+    thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+    oauth: resolved.oauth
+      ? {
+          credential: resolved.oauth,
+          modify: resolved.modifyOAuth,
+        }
+      : undefined,
+  };
 }
 
 function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string }): {

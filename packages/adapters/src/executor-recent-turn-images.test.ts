@@ -101,6 +101,7 @@ async function runWithModel(
     /** The model's final reply; defaults to "Done". */
     finalText?: string;
     replySuggestions?: boolean;
+    quickReplies?: boolean;
   } = {},
 ) {
   const run = {
@@ -198,6 +199,7 @@ async function runWithModel(
           : [],
       ),
       findUnique: vi.fn(async () => null),
+      count: vi.fn(async () => 0),
       findFirst: vi.fn(async () =>
         options.priorRoutineRun
           ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
@@ -287,6 +289,7 @@ async function runWithModel(
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
     replySuggestions: options.replySuggestions,
+    quickReplies: options.quickReplies,
     ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
@@ -361,6 +364,43 @@ describe("reply suggestion", () => {
       replySuggestions: true,
     });
     expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":suggestion"))).toBe(true);
+  });
+});
+
+describe("quick reply", () => {
+  it("posts a short first reply beside setup and tells the run what it said", async () => {
+    const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "On it.",
+      quickReplies: true,
+    });
+    const quick = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1:quick-reply")?.[0];
+    expect(quick?.tools).toEqual([]);
+    expect(quick?.prompt).toContain("what was in the screenshot?");
+    expect(prisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ blocks: [{ kind: "text", text: "On it." }] }),
+      }),
+    );
+    // It starts before the main model call.
+    const main = runtimeRun.mock.calls.findIndex(([call]) => call.runId === "run-1");
+    const quickIndex = runtimeRun.mock.calls.findIndex(
+      ([call]) => call.runId === "run-1:quick-reply",
+    );
+    expect(quickIndex).toBeLessThan(main);
+    expect(runtimeRun.mock.calls[main]![0].prompt).toContain(
+      'You already sent the person this first line while you work: "On it."',
+    );
+  });
+
+  it("skips runs that a person did not start", async () => {
+    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+      priorRoutineRun: { id: "run-0", completedAt: new Date(), replyText: "x" },
+      quickReplies: true,
+    });
+    expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":quick-reply"))).toBe(
+      true,
+    );
   });
 });
 
