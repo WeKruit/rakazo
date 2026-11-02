@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { buttonVariants } from "@rakazo/ui-web";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DeferredPopover } from "../../components/DeferredPopover";
@@ -16,8 +16,11 @@ export function RoleDetailsMenu() {
       label={t`Role details`}
       trigger={
         <>
-          <Trans>Role details</Trans>
-          <ChevronDown size={14} aria-hidden />
+          <FileText size={17} aria-hidden className="sm:hidden" />
+          <span className="sr-only sm:not-sr-only">
+            <Trans>Role details</Trans>
+          </span>
+          <ChevronDown size={14} aria-hidden className="max-sm:hidden" />
         </>
       }
       triggerProps={{
