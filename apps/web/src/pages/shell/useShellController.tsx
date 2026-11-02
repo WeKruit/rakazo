@@ -406,7 +406,9 @@ export function useShellController() {
   );
   const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
   const visibleSidebarWidth = botsSidebarCollapsed
-    ? 0
+    ? showToolActivity || viewportWidth < 768
+      ? 0
+      : 64
     : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
   const [roleChatWidth, setRoleChatWidth] = usePaneWidth(
     "rakazo:role-chat-width",
@@ -1243,10 +1245,6 @@ export function useShellController() {
   }, [active?.id, clearReply, groupId, inGroup]);
 
   useEffect(() => {
-    if (!showToolActivity) {
-      setCommandPaletteOpen(false);
-      return;
-    }
     function onKey(event: KeyboardEvent) {
       if (!isCommandPaletteHotkey(event)) return;
       event.preventDefault();
@@ -1254,7 +1252,7 @@ export function useShellController() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showToolActivity]);
+  }, []);
 
   function dismissComposerError() {
     // The strip shows one message at a time, so only dismiss the run failure when it is the

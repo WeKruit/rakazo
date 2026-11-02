@@ -198,6 +198,8 @@ export async function recruitingRoundListText(
     unverified?: Readonly<Record<string, string>>;
     /** The first line, when the list is not a round (a role's people listed elsewhere). */
     heading?: string;
+    /** Number of the first line, for a later page of a longer list. */
+    firstNumber?: number;
   },
 ) {
   const people = await recruitingRoundPeople(prisma, input);
@@ -225,7 +227,7 @@ export async function recruitingRoundListText(
       .join(" · ");
     const passage = roundPassage(person?.snippet);
     const unknown = shared ? undefined : input.unverified?.[key]?.trim();
-    return `${index + 1}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
+    return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
   });
   const heading =
     input.heading ?? `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:`;

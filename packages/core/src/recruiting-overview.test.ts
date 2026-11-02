@@ -7,8 +7,12 @@ async function getRecruitingOverview(...args: Parameters<typeof streamRecruiting
   const events = [];
   for await (const event of streamRecruitingOverview(...args)) events.push(event);
   expect(events.at(-1)).toEqual({ kind: "done" });
+  // A role's later event replaces its earlier one, as on Home.
+  const roles = new Map(
+    events.flatMap((event) => (event.kind === "role" ? [[event.role.groupId, event.role]] : [])),
+  );
   return {
-    roles: events.flatMap((event) => (event.kind === "role" ? [event.role] : [])),
+    roles: [...roles.values()],
     failedGroups: events.flatMap((event) => (event.kind === "failed" ? [event.groupId] : [])),
   };
 }
@@ -229,7 +233,43 @@ describe("streamRecruitingOverview", () => {
       seen.push(event.kind === "role" ? event.role.groupId : event.kind);
       if (seen.length === 1) release();
     }
-    expect(seen).toEqual(["g2", "g1", "done"]);
+    expect(seen[0]).toBe("g2");
+    expect(seen.at(-1)).toBe("done");
+  });
+
+  it("sends every role's saved numbers before any slow source answers", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = reads();
+    const stream = streamRecruitingOverview(
+      groups,
+      reads({ candidates: (group, signal) => held.then(() => base.candidates(group, signal)) }),
+      new AbortController().signal,
+    );
+    const seen = [];
+    for await (const event of stream) {
+      seen.push(event);
+      if (seen.length === 2) release();
+    }
+    // Both bound roles arrive from saved records first, still marked partial.
+    expect(seen.slice(0, 2)).toEqual([
+      {
+        kind: "role",
+        role: expect.objectContaining({ groupId: "g1", shortlisted: 2, incomplete: true }),
+      },
+      {
+        kind: "role",
+        role: expect.objectContaining({ groupId: "g2", shortlisted: 2, incomplete: true }),
+      },
+    ]);
+    // Then each role's full numbers replace them.
+    expect(seen.slice(2, 4)).toEqual([
+      expect.objectContaining({ role: expect.objectContaining({ replied: 1, incomplete: false }) }),
+      expect.objectContaining({ role: expect.objectContaining({ replied: 1, incomplete: false }) }),
+    ]);
+    expect(seen.at(-1)).toEqual({ kind: "done" });
   });
 
   it("keeps at most four CRM, campaign and calendar reads in flight across roles", async () => {

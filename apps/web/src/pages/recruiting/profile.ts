@@ -534,6 +534,7 @@ export function savedProfileFields(profile: RecruitingSavedProfile | null | unde
   const summarize = (parts: readonly (string | null)[]) => parts.filter(Boolean).join(" · ");
   return [
     ...field("Profile image url", profile.profileImageUrl),
+    ...field("Email", profile.email),
     ...field("Current company url", current?.company_url),
     ...field("Current company industry", current?.company_industry),
     ...field("Current company size", current?.company_size),

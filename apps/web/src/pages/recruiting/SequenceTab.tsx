@@ -31,10 +31,12 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { rememberRecruitingSequenceRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
+import { PersonAvatar } from "./ProfileImage";
 import { SequenceEditor } from "./SequenceEditor";
 import { SequenceOverview } from "./SequenceOverview";
 import type { SequenceRunFilter } from "./SequenceRuns";
@@ -45,6 +47,7 @@ import {
   CrmGate,
   formatDate,
   LoadMore,
+  RecruitingReadCacheContext,
   statusText,
   TabLoading,
   TabNotice,
@@ -158,6 +161,8 @@ export function SequenceTab(
   props: RecruitingTabProps & {
     onAskChat?: (message: string) => void;
     onViewAnalytics?: (roleId?: string) => void;
+    requestedCampaign?: { id: string; serverId?: string };
+    composeNew?: boolean;
   },
 ) {
   const { t } = useLingui();
@@ -167,15 +172,26 @@ export function SequenceTab(
     props.conversation && "groupId" in props.conversation ? props.conversation.groupId : undefined;
   const botId =
     props.conversation && "botId" in props.conversation ? props.conversation.botId : undefined;
+  const sharedCache = useContext(RecruitingReadCacheContext);
+  const readCache = props.readCache ?? sharedCache;
   const executeDraft = useCallback(
-    (command: RecruitingSequenceInput) => {
+    async (command: RecruitingSequenceInput) => {
       if (!groupId && !botId) return Promise.reject(new Error("No role conversation"));
-      return rpc.recruiting.sequenceDraft({
+      const epoch = readCache?.epoch;
+      const result = await rpc.recruiting.sequenceDraft({
         ...(groupId ? { groupId } : { botId: botId! }),
         command,
       });
+      if (props.readCacheScope && result.campaign)
+        rememberRecruitingSequenceRead(
+          readCache,
+          `${props.readCacheScope}:sequence-observation:${JSON.stringify([command.roleId, command.serverId, result.campaign.id])}`,
+          result,
+          epoch,
+        );
+      return result;
     },
-    [groupId, botId],
+    [groupId, botId, readCache, props.readCacheScope],
   );
 
   const instantly = useInstantlyStatus();
@@ -206,6 +222,8 @@ export function SequenceTab(
     props,
   );
   const campaignScope = JSON.stringify([props.spaceId, props.roleId, props.conversation, ready]);
+  const requestedCampaign = props.requestedCampaign?.id;
+  const requestedServer = props.requestedCampaign?.serverId;
   const [chosenCampaign, setChosenCampaign] = useState<{
     scope: string;
     campaignId: string;
@@ -222,6 +240,15 @@ export function SequenceTab(
     setSearch("");
     setRunFilter("all");
   }, [campaignScope]);
+  useEffect(() => {
+    if (!requestedCampaign) return;
+    setChosenCampaign({
+      scope: campaignScope,
+      campaignId: requestedCampaign,
+      ...(requestedServer ? { serverId: requestedServer } : {}),
+    });
+    setPage("detail");
+  }, [campaignScope, requestedCampaign, requestedServer]);
   const selection =
     chosenCampaign?.scope === campaignScope
       ? {
@@ -232,12 +259,79 @@ export function SequenceTab(
           ...(chosenCampaign.serverId ? { serverId: chosenCampaign.serverId } : {}),
         }
       : undefined;
+  const selectedCampaignId = selection?.campaignId ?? requestedCampaign;
+  const selectedServerId = selection ? selection.serverId : requestedServer;
+  const savedSelection = selectedCampaignId && !selectedServerId ? selectedCampaignId : null;
   const roleCampaign = useRoleCampaign(
-    { ...props, refreshSignal: (props.refreshSignal ?? 0) + reload },
+    {
+      ...props,
+      conversation: savedSelection ? undefined : props.conversation,
+      refreshSignal: (props.refreshSignal ?? 0) + reload,
+    },
     selection,
     campaignScope,
   );
-  const draftServerId = roleCampaign.data?.serverId;
+  const savedRead = useCrmData(
+    crm,
+    "roleCampaigns",
+    savedSelection && ready
+      ? {
+          crmRoleId: ready.crmRoleId,
+          campaignId: savedSelection,
+          limit: 25,
+        }
+      : null,
+    props,
+  );
+  const savedCampaign = savedRead.data?.items.find((row) => row.id === savedSelection);
+  const savedLeads = useCrmPages(
+    crm,
+    "campaignLeads",
+    savedCampaign ? { campaignId: savedCampaign.id } : null,
+    props,
+  );
+  const savedRows = savedLeads.data?.items ?? [];
+  const savedCounts =
+    savedCampaign && savedLeads.data
+      ? {
+          contacted:
+            page === "detail"
+              ? savedRows.length
+              : savedRows.filter((row) => row.lastContactAt !== null).length,
+          active: savedRows.some((row) => row.status !== null)
+            ? savedRows.filter((row) => row.status === 1).length
+            : null,
+          opened: savedRows.some((row) => row.openCount !== null)
+            ? savedRows.filter((row) => (row.openCount ?? 0) > 0).length
+            : null,
+          replied: savedRows.some((row) => row.replyCount !== null)
+            ? savedRows.filter((row) => (row.replyCount ?? 0) > 0).length
+            : null,
+          interested: savedRows.some((row) => row.interestStatus !== null)
+            ? savedRows.filter(
+                (row) => row.interestStatus !== null && [1, 2, 3, 4].includes(row.interestStatus),
+              ).length
+            : null,
+          bounced: savedRows.some((row) => row.status !== null)
+            ? savedRows.filter((row) => row.status === -1).length
+            : null,
+          clicked: null,
+        }
+      : undefined;
+  const draftServerId =
+    roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired
+      ? undefined
+      : roleCampaign.data?.serverId;
+  const openedCompose = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!props.composeNew) {
+      openedCompose.current = undefined;
+      return;
+    }
+    if (!draftServerId || roleCampaign.loading || openedCompose.current === props.roleId) return;
+    openedCompose.current = props.roleId;
+    setNewOpen(true);
+  }, [props.composeNew, props.roleId, draftServerId, roleCampaign.loading]);
   const nativeDrafts = useKeyedRead<RecruitingSequenceOutput>(
     draftServerId && (groupId || botId)
       ? JSON.stringify([campaignScope, draftServerId, reload])
@@ -325,6 +419,9 @@ export function SequenceTab(
   const currentRows = campaigns.data?.items ?? [];
   const sequenceRows = [
     ...currentRows,
+    ...(savedCampaign && !currentRows.some((row) => row.id === savedCampaign.id)
+      ? [savedCampaign]
+      : []),
     ...(nativeDrafts.data?.campaigns ?? [])
       .filter((item) => !currentRows.some((row) => row.id === item.id))
       .map((item) => ({
@@ -351,7 +448,7 @@ export function SequenceTab(
     );
   const choose = (id: string) => {
     const offset = campaigns.itemOffsets.get(id);
-    const native = nativeDrafts.data?.campaigns?.some((row) => row.id === id);
+    const native = live?.id === id || nativeDrafts.data?.campaigns?.some((row) => row.id === id);
     setChosenCampaign(
       native && draftServerId
         ? { scope: campaignScope, campaignId: id, serverId: draftServerId }
@@ -404,7 +501,7 @@ export function SequenceTab(
     }
   };
   const openEditor = (campaignId?: string) => {
-    const serverId = roleCampaign.data?.serverId;
+    const serverId = draftServerId;
     if (serverId) setEditing({ serverId, ...(campaignId ? { campaignId } : {}) });
   };
   if (editing)
@@ -443,10 +540,13 @@ export function SequenceTab(
               <Trans>Sequences</Trans>
             </p>
           )}
-          <h2 className="truncate text-xl font-semibold leading-snug" title={live?.name}>
+          <h2
+            className="truncate text-xl font-semibold leading-snug"
+            title={live?.name ?? savedCampaign?.name}
+          >
             {page === "detail"
-              ? live
-                ? campaignName(live.name)
+              ? live || savedCampaign
+                ? campaignName((live ?? savedCampaign)!.name)
                 : t`Sequence details`
               : t`Overview`}
           </h2>
@@ -476,9 +576,7 @@ export function SequenceTab(
           {page === "overview" ? (
             <Button
               onClick={() => setNewOpen(true)}
-              disabled={
-                !roleCampaign.data?.serverId || Boolean(nativeDrafts.data?.unconfirmedDrafts)
-              }
+              disabled={!draftServerId || Boolean(nativeDrafts.data?.unconfirmedDrafts)}
             >
               <Plus size={14} aria-hidden />
               <Trans>New sequence</Trans>
@@ -487,7 +585,7 @@ export function SequenceTab(
             <>
               <Button
                 variant="outline"
-                disabled={!live || !roleCampaign.data?.serverId}
+                disabled={!live || !draftServerId}
                 onClick={() => openEditor(live?.id)}
               >
                 <Trans>View sequence</Trans>
@@ -519,8 +617,7 @@ export function SequenceTab(
         </p>
       ) : null}
       {roleCampaign.loading ? <TabLoading /> : null}
-      {roleCampaign.failed ||
-      (roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired) ? (
+      {roleCampaign.failed ? (
         <TabNotice alert>
           <Trans>Could not read this sequence. Try refreshing.</Trans>
         </TabNotice>
@@ -537,7 +634,9 @@ export function SequenceTab(
             onChange={(event) => {
               const campaignId = event.target.value;
               const campaignOffset = campaigns.itemOffsets.get(campaignId);
-              const native = nativeDrafts.data?.campaigns?.some((row) => row.id === campaignId);
+              const native =
+                live?.id === campaignId ||
+                nativeDrafts.data?.campaigns?.some((row) => row.id === campaignId);
               setChosenCampaign(
                 native && draftServerId
                   ? { scope: campaignScope, campaignId, serverId: draftServerId }
@@ -554,6 +653,7 @@ export function SequenceTab(
                 value={row.id}
                 disabled={
                   !campaigns.itemOffsets.has(row.id) &&
+                  savedCampaign?.id !== row.id &&
                   !nativeDrafts.data?.campaigns?.some((item) => item.id === row.id)
                 }
               >
@@ -575,6 +675,18 @@ export function SequenceTab(
         detail={page === "detail"}
         onMetric={page === "detail" ? setRunFilter : undefined}
         sendDates={null}
+        overviewCounts={!live ? savedCounts : undefined}
+        overviewPartial={
+          !live &&
+          (savedLeads.hasMore ||
+            savedRows.some(
+              (row) =>
+                row.status === null ||
+                row.interestStatus === null ||
+                row.openCount === null ||
+                row.replyCount === null,
+            ))
+        }
       />
       {page === "overview" ? (
         <section
@@ -738,7 +850,7 @@ export function SequenceTab(
                           </DropdownMenuTrigger>
                           <DropdownMenuContent>
                             <DropdownMenuItem
-                              disabled={!roleCampaign.data?.serverId}
+                              disabled={!draftServerId}
                               onClick={() => {
                                 choose(row.id);
                                 openEditor(row.id);
@@ -781,6 +893,61 @@ export function SequenceTab(
             <LoadMore pages={campaigns} />
           </footer>
         </section>
+      ) : !live && savedCampaign ? (
+        <section aria-label={t`Contacts`} className="rounded-xl border bg-card">
+          <div className="flex items-center justify-between border-b p-4 text-sm">
+            <Badge variant="outline">
+              {statusLabel(instantly.campaign, savedCampaign.status) || "—"}
+            </Badge>
+            <span className="text-muted-foreground">{formatDate(savedCampaign.syncedAt)}</span>
+          </div>
+          {savedRows
+            .filter(
+              (row) =>
+                runFilter === "all" ||
+                (runFilter === "active" && row.status === 1) ||
+                (runFilter === "bounced" && row.status === -1) ||
+                (runFilter === "interested" &&
+                  row.interestStatus !== null &&
+                  [1, 2, 3, 4].includes(row.interestStatus)),
+            )
+            .map((row) => (
+              <div key={row.id} className="flex items-center gap-3 border-b p-4 text-sm">
+                {row.person && (row.person.name || row.person.email) ? (
+                  <PersonAvatar
+                    name={row.person.name || row.person.email!}
+                    src={row.person.profileImageUrl}
+                    size="sm"
+                  />
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">
+                    {row.person?.name || row.person?.email || t`Not reported`}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">{row.person?.email}</p>
+                </div>
+                <span>{statusLabel(instantly.lead, row.status) || "—"}</span>
+                <span>{formatDate(row.lastContactAt)}</span>
+              </div>
+            ))}
+          {savedLeads.loading ? <TabLoading /> : null}
+          {savedLeads.failed ? (
+            <TabNotice alert>
+              <Trans>Could not load candidate records. Try refreshing.</Trans>
+            </TabNotice>
+          ) : null}
+          <LoadMore pages={savedLeads} />
+        </section>
+      ) : savedSelection && savedRead.failed ? (
+        <TabNotice alert>
+          <Trans>Could not read this sequence. Try refreshing.</Trans>
+        </TabNotice>
+      ) : savedSelection && savedRead.loading ? (
+        <TabLoading />
+      ) : savedSelection && savedRead.data && !savedCampaign ? (
+        <TabNotice>
+          <Trans>This sequence is not saved for this role.</Trans>
+        </TabNotice>
       ) : campaign?.status === "ready" && campaign.campaign ? (
         <>
           <div className="flex items-center gap-1 border-b">
@@ -951,7 +1118,7 @@ export function SequenceTab(
             <Button
               className="h-auto w-full justify-start py-4"
               variant="outline"
-              disabled={!roleCampaign.data?.serverId}
+              disabled={!draftServerId}
               onClick={() => {
                 setNewOpen(false);
                 openEditor();

@@ -163,6 +163,7 @@ export function useShellRecruiting({
     null;
   const workspaceViews: readonly RecruitingWorkspaceView[] = [
     "home",
+    "roles",
     "conversation",
     "results",
     "brief",
@@ -219,9 +220,9 @@ export function useShellRecruiting({
     !showToolActivity &&
     !crmMode &&
     !workspaceNewRole &&
-    inGroup &&
+    (inGroup || (Boolean(active) && ["sequence", "interview"].includes(recruitingWorkspaceView))) &&
     recruitingWorkspaceView !== "conversation" &&
-    !["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
+    recruitingWorkspaceView !== "inbox";
   const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
   const [bindingRead, setBindingRead] = useState<{
     key: string;
@@ -364,6 +365,7 @@ export function useShellRecruiting({
   // A failed binding read keeps the role's own results on screen with a retry for its CRM part.
   const boundRoleCrmMode =
     boundRoleView &&
+    !["sequence", "interview"].includes(recruitingWorkspaceView) &&
     !currentBindingRead?.failed &&
     (!currentBindingRead ||
       currentBindingRead.workspace === undefined ||
@@ -598,9 +600,7 @@ export function useShellRecruiting({
           activeGroupId.current === groupId &&
           snapshotRef.current?.threadId === draft.threadId &&
           draft.threadId === activeSnapshot?.threadId &&
-          ((recruitingWorkspaceView === "inbox" &&
-            draft.candidateId === searchParams.get("crmCandidate")) ||
-            draft.candidateId === selectedReplyCandidate.current) &&
+          draft.candidateId === selectedReplyCandidate.current &&
           draft.source.serverId === bound.target.mcpServerId &&
           draft.source.serverRevision === bound.target.serverRevision &&
           draft.source.organizationId === bound.target.organizationId &&
@@ -636,7 +636,7 @@ export function useShellRecruiting({
         ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
       ].join("\n");
       openRoleChat(
-        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card.`}`,
       );
     } catch (error) {
       if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));

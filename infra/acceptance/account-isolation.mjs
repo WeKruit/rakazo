@@ -9,7 +9,8 @@
 //      that money and every account's spend show only to verified operator-domain staff;
 //   5. checks every listing refuses a request with no session;
 //   6. on the shared mail account, asks B's own crew (in B's test copy) for one of A's outreach
-//      campaigns by id and fails if its name or recipients come back. Skip with --no-mail.
+//      campaigns by id and fails if its name, sender or recipients come back, and fails if B's
+//      own sequence editor offers A's sending mailbox. Skip with --no-mail.
 // Customer resources are read-only. Mutation probes use disposable native test copies only.
 //
 // Usage:
@@ -28,6 +29,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import {
   checkCopyMutations,
+  checkSenderMailboxes,
   checkSharedMail,
   findOwnedCampaign,
   withIsolationTestCopies,
@@ -688,7 +690,10 @@ await withIsolationTestCopies([a, b], async ([copyA, copyB]) => {
     }
     await checkCopyMutations(viewer, copy, record);
   }
-  if (campaignA) await checkSharedMail(b, copyB, campaignA, record);
+  if (campaignA) {
+    await checkSenderMailboxes(b, copyB, campaignA, record);
+    await checkSharedMail(b, copyB, campaignA, record);
+  }
 });
 
 const collectedA = await collect(a, meA, GROUPS);

@@ -2,6 +2,7 @@ import type {
   AskRequestedSchema,
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  RecruitingCorrespondence,
   RecruitingPreferenceFeedbackInput,
   SandboxKind,
   UsageRecordedPayload,
@@ -18,12 +19,21 @@ export interface AdapterContext {
   homeLifecycleClaim?: { computerId: string; providerRef: string | null; updatedAt: Date };
   /** Trusted in-process scheduling confirmation binding; never a provider argument. */
   schedulingConfirmationEffectId?: string;
+  /** Trusted native approval for creating/selecting a sending identity; never an RPC/tool argument. */
+  senderConfirmationEffectId?: string;
   /** Opaque fence for releasing a graphical screen without tearing down its replacement. */
   screenLeaseId?: string;
   /** When releasing a screen after cancel, also stop orphaned browser work on that screen. */
   cancelRunWork?: boolean;
   /** Trusted in-process authorization fence before external mutations; never RPC/provider input. */
   reauthorize?: () => Promise<void>;
+  /** Native in-process read timing; never a provider argument or recruiter-facing output. */
+  recruitingCampaignSourceRevision?: number;
+  onRecruitingCampaignRead?: (read: {
+    roleId: string;
+    campaignId: string;
+    observedAt: string;
+  }) => void;
   signal: AbortSignal;
   /** Connected external accounts available to this run, including their owning connector. */
   connectedConnections?: ConnectedConnector[];
@@ -745,6 +755,18 @@ export interface VoiceTranscribeRequest {
   signal?: AbortSignal;
 }
 
+/** Server-normalized rows from one authorized live mailbox GET, never raw provider output. */
+export interface RecruitingInboxObservation {
+  threadId: string;
+  roleId: string;
+  sourceId: string;
+  sourceRevision: number;
+  botId: string;
+  campaignId: string;
+  observedAt: string;
+  emails: RecruitingCorrespondence["emails"];
+}
+
 export interface BackgroundJobPayloads {
   "run.continue": { runId: string };
   "routine.wakeup": { routineId: string; scheduledFor: string };
@@ -764,6 +786,10 @@ export interface BackgroundJobPayloads {
   "recruiting_checkin.start": { threadId: string };
   /** Bring a people-search agent run that outlived its turn back to the agent that started it. */
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
+  /** Project facts from one newly saved candidate page; authorization is re-read by the worker. */
+  "recruiting_profile.project": { pageEffectId: string };
+  /** Normalize a canonical native mailbox receipt without blocking its caller. */
+  "recruiting_inbox.project": { effectId: string } | { observation: RecruitingInboxObservation };
   /** After a conversation goes quiet, make sure the person's newest message got a reply. */
   "thread.reply_check": { threadId: string };
   /** Deliver a run notification whose first push failed; the queue retries with backoff. */

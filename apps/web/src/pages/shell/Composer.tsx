@@ -33,7 +33,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import type { ClipboardEvent, DragEvent, Ref, RefObject } from "react";
+import type { ClipboardEvent, DragEvent, ReactNode, Ref, RefObject } from "react";
 import {
   memo,
   useEffect,
@@ -124,6 +124,7 @@ export const Composer = memo(function Composer({
   contextKey,
   enterToSend,
   suggestion,
+  toolbar,
 }: {
   ref?: Ref<ComposerHandle>;
   activeName?: string;
@@ -164,6 +165,8 @@ export const Composer = memo(function Composer({
   enterToSend: boolean;
   /** Likely next message, shown as gray text in an empty composer; Tab accepts it. */
   suggestion?: string | null;
+  /** Extra controls on the composer's bottom row, beside Attach. */
+  toolbar?: ReactNode;
 }) {
   const { t } = useLingui();
   const [backgroundTasksOpen, setBackgroundTasksOpen] = useState(false);
@@ -530,7 +533,7 @@ export const Composer = memo(function Composer({
   const draftHasUrl = URL_IN_TEXT.test(draft);
   const highlightRef = useRef<HTMLDivElement>(null);
   const showSuggestion = Boolean(
-    suggestion && !running && !disabled && showComposerPlaceholder && !replyTarget,
+    suggestion && !disabled && showComposerPlaceholder && !replyTarget,
   );
   const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
   const replyNameRef = useRef(replyName);
@@ -776,6 +779,11 @@ export const Composer = memo(function Composer({
         >
           <Plus size={16} strokeWidth={2} />
         </Button>
+        {toolbar ? (
+          <div className="col-start-2 row-start-2 flex min-w-0 items-center justify-self-start">
+            {toolbar}
+          </div>
+        ) : null}
         <div className="composer-input col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
           {selectedSkill ? (
             <span

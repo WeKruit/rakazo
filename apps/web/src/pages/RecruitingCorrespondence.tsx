@@ -1056,7 +1056,7 @@ function SavedCorrespondenceView({
                       ? (email) => {
                           if (email.id !== selected.id) return;
                           onConversation(
-                            t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+                            t`Prepare an editable reply card for the selected email. Read the original conversation and verify the candidate and role. Include the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card.`,
                           );
                         }
                       : undefined

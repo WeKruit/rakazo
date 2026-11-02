@@ -23,6 +23,7 @@ import {
   Search,
 } from "lucide-react";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { ListPager } from "../../components/ListPager";
 import { withFeatureMessages } from "../../lib/i18n";
 import {
   compactRosterStatusLabel,
@@ -35,6 +36,7 @@ import { SpaceSearchResults } from "../SpaceSearch";
 const BotCreatePicker = lazyPanel(() => import("./bot-picker").then((m) => m.BotCreatePicker));
 
 import type { useShellController } from "../shell/useShellController";
+import { ARCHIVED_GROUPS_PER_PAGE } from "../shell/useShellRoster";
 import { WindowChrome } from "../WindowChrome";
 
 const ActivityList = lazyPanel(() =>
@@ -50,6 +52,9 @@ export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellC
     spaces,
     archivedBots,
     archivedGroups,
+    archivedGroupTotal,
+    archivedGroupPage,
+    openArchivedGroupPage,
     archivedOpen,
     setArchivedOpen,
     collapsedSidebarSections,
@@ -96,6 +101,7 @@ export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellC
     restoreGroup,
     setBotsSidebarCollapsedPref,
   } = model;
+  const archivedGroupCount = Math.max(archivedGroupTotal, archivedGroups.length);
   return (
     <>
       <div className="app-drag flex items-center justify-between px-[18px] pb-3 pt-4">
@@ -598,7 +604,7 @@ export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellC
             })}
           </>
         )}
-        {archivedBots.length + archivedGroups.length > 0 && !showSpaceSearch ? (
+        {archivedBots.length + archivedGroupCount > 0 && !showSpaceSearch ? (
           <div className="mt-2 border-t border-border pt-2">
             <button
               type="button"
@@ -609,7 +615,7 @@ export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellC
               <span>
                 <Trans>Archived</Trans>
               </span>
-              <span>{archivedBots.length + archivedGroups.length}</span>
+              <span>{archivedBots.length + archivedGroupCount}</span>
             </button>
             {archivedOpen ? (
               <>
@@ -665,6 +671,11 @@ export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellC
                     </Button>
                   </div>
                 ))}
+                <ListPager
+                  page={archivedGroupPage}
+                  pageCount={Math.ceil(archivedGroupTotal / ARCHIVED_GROUPS_PER_PAGE)}
+                  onPage={(page) => void openArchivedGroupPage(page).catch(() => undefined)}
+                />
               </>
             ) : null}
           </div>

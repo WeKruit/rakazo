@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { chooseTurnModel, type TurnModelInput } from "./turn-model.js";
+import type { TurnModelInput } from "./turn-model.js";
+import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 
 const base: TurnModelInput = {
   configured: { provider: "openai-codex", id: "gpt-6.1-sol" },
@@ -83,5 +84,27 @@ describe("chooseTurnModel", () => {
       reason: "recruiting_intake",
       thinkingLevel: "off",
     });
+  });
+});
+
+describe("effort mode", () => {
+  it("caps fast turns at low thinking and keeps lower levels", () => {
+    expect(effortThinkingLevel("fast", "medium")).toBe("low");
+    expect(effortThinkingLevel("fast", null)).toBe("low");
+    expect(effortThinkingLevel("fast", "off")).toBe("off");
+    expect(effortThinkingLevel("fast", "minimal")).toBe("minimal");
+  });
+
+  it("keeps the routed level when balanced and thinks high when deep", () => {
+    expect(effortThinkingLevel("balanced", "medium")).toBe("medium");
+    expect(effortThinkingLevel("balanced", "off")).toBe("off");
+    expect(effortThinkingLevel("deep", "off")).toBe("high");
+  });
+
+  it("runs fast unless the account may choose", () => {
+    expect(resolveEffortMode("deep", false)).toBe("fast");
+    expect(resolveEffortMode("deep", true)).toBe("deep");
+    expect(resolveEffortMode(null, true)).toBe("fast");
+    expect(resolveEffortMode("bogus", true)).toBe("fast");
   });
 });

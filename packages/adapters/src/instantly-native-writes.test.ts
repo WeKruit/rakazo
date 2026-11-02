@@ -1,13 +1,17 @@
+import { boundDirectApprovalRequest } from "@rakazo/core";
+import { mailReplyState, type Prisma } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   describeCampaignActivation,
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
-  ownedInstantlyCampaigns,
+  ownedInstantly,
   ownedInstantlyRest,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
+import { mailReplyFromAnchor } from "./mail-reply.js";
 
 const ORIGINAL = {
   id: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
@@ -19,6 +23,69 @@ const ORIGINAL = {
   thread_id: "thread-1",
 };
 const context = { spaceId: "s", userId: "u", botId: "b" } as never;
+
+it.each(["preserved", "flattened", "conflicting-fallback"])(
+  "sends approved paragraph HTML and verifies the real rendered receipt: %s",
+  async (mode) => {
+    const text =
+      'Hi Noah,\r\n\r\nThanks for "A&B" <机会>.\r\n\r\nBest,\r\nRecruiting Team\r\n\r\nP.S. I\'m ready.';
+    const html =
+      '<p>Hi Noah,<br /><br />Thanks for "A&amp;B" &lt;机会&gt;.<br /><br />Best,<br />Recruiting Team<br /><br />P.S. I\'m ready.</p>';
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server",
+      toolName: "native_instantly_reply_to_email",
+    };
+    const args = {
+      reply_to_uuid: ORIGINAL.id,
+      subject: "Re: Founding Engineer",
+      body: { text, html: "<p>Not approved</p>" },
+    };
+    let raw: Record<string, unknown> = {};
+    const rest = vi.fn(async (method: string, path: string, payload?: unknown) => {
+      if (path === `/emails/${ORIGINAL.id}`) return ORIGINAL;
+      if (path === "/accounts/team%40example.test") return { email: ORIGINAL.eaccount };
+      if (method !== "POST" || path !== "/emails/reply")
+        throw new Error("Unexpected synthetic call");
+      expect(payload).toMatchObject({ body: { text: text.replace(/\r\n/g, "\n"), html } });
+      const returned = mode === "preserved" ? html : html.replaceAll("<br />", " ");
+      raw = {
+        ...ORIGINAL,
+        id: "new-reply",
+        ue_type: 3,
+        to_address_email_list: ORIGINAL.from_address_email,
+        subject: args.subject,
+        body: {
+          html: `<html><head><title>Ignore this title</title></head><body>${returned}</body></html>`,
+          ...(mode === "conflicting-fallback" ? { text } : {}),
+        },
+      };
+      return raw;
+    });
+    const result = await runInstantlyWrite(
+      {} as never,
+      rest as never,
+      context,
+      "server",
+      route.toolName,
+      args,
+    );
+    expect(result).toEqual(raw); // Raw provider fields are retained, not filled from approval text.
+    expect(rest.mock.calls.filter(([method]) => method === "POST")).toHaveLength(1);
+    const reply = mailReplyFromAnchor(route, args, ORIGINAL);
+    const projected = mailReplyState(reply, {
+      status: "completed",
+      request: boundDirectApprovalRequest(route, args, "__rakazoCatalogTool") as Prisma.JsonArray,
+      result: {
+        structuredContent: { source: "local_native_instantly_rest", result: raw },
+      } as Prisma.JsonObject,
+      updatedAt: new Date("2026-11-02T04:32:00Z"),
+    });
+    expect(projected.status).toBe("sent");
+    expect(projected.error).toBeUndefined();
+    expect(projected.body.includes("\n")).toBe(mode === "preserved");
+  },
+);
 
 describe("native reply_to_email", () => {
   it("is a registered sending write", () => {
@@ -44,14 +111,19 @@ describe("native reply_to_email", () => {
       context,
       "server",
       "native_instantly_reply_to_email",
-      { reply_to_uuid: ORIGINAL.id, body: { text: "收到，谢谢" } },
+      {
+        reply_to_uuid: ORIGINAL.id,
+        body: { text: "收到，谢谢" },
+        cc_address_email_list: "copy@example.test",
+      },
     );
     expect(result).toEqual({ id: "sent-1" });
     expect(rest).toHaveBeenLastCalledWith("POST", "/emails/reply", {
       reply_to_uuid: ORIGINAL.id,
       eaccount: "team@example.test",
       subject: "Re: Founding Engineer",
-      body: { text: "收到，谢谢" },
+      body: { text: "收到，谢谢", html: "<p>收到，谢谢</p>" },
+      cc_address_email_list: "copy@example.test",
     });
   });
 
@@ -83,7 +155,7 @@ describe("native reply_to_email", () => {
       reply_to_uuid: ORIGINAL.id,
       body: { text: "收到，谢谢" },
     });
-    expect(display).toEqual({
+    expect(display).toMatchObject({
       to: "ada@example.test",
       from: "team@example.test",
       subject: "Re: Founding Engineer",
@@ -208,8 +280,39 @@ describe("native campaign analytics", () => {
       { campaign_id: id },
     );
     expect(rest).toHaveBeenCalledWith("GET", `/campaigns/analytics/overview?id=${id}`);
-    expect(result).toEqual({ emails_sent_count: 3, open_count_unique: 2, reply_count_unique: 1 });
+    expect(result).toEqual({
+      emails_sent_count: 3,
+      open_count_unique: 2,
+      reply_count_unique: 1,
+      observedAt: expect.any(String),
+    });
   });
+});
+
+it("timestamps a campaign GET before slower lead reads finish", async () => {
+  vi.useFakeTimers();
+  const started = "2030-01-01T00:00:00.000Z";
+  vi.setSystemTime(new Date(started));
+  const id = "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69";
+  try {
+    const rest = vi.fn(async (_method: string, path: string) => {
+      if (path === `/campaigns/${id}`) return { id, name: "Before pause", status: 1 };
+      vi.setSystemTime(new Date("2030-01-01T00:00:10.000Z"));
+      return { items: [] };
+    });
+    expect(
+      await runInstantlyWrite(
+        {} as never,
+        rest,
+        context,
+        "server",
+        "native_instantly_get_campaign",
+        { campaign_id: id },
+      ),
+    ).toMatchObject({ id, status: 1, observedAt: started });
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 describe("shared mail account isolation", () => {
@@ -223,7 +326,10 @@ describe("shared mail account isolation", () => {
 
   it("reads and changes only this account's own campaigns", async () => {
     const rest = account();
-    const own = ownedInstantlyRest(rest as never, new Set([MINE]));
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(),
+    });
     await expect(own("GET", `/campaigns/${MINE}`)).resolves.toMatchObject({ ok: true });
     await expect(own("POST", `/campaigns/${MINE}/activate`)).resolves.toMatchObject({ ok: true });
     await expect(own("POST", "/leads/list", { campaign: MINE })).resolves.toMatchObject({
@@ -247,7 +353,7 @@ describe("shared mail account isolation", () => {
 
   it("never finds another account's campaign by name and owns the one it creates", async () => {
     const rest = account();
-    const own = ownedInstantlyRest(rest as never, new Set());
+    const own = ownedInstantlyRest(rest as never, { campaigns: new Set(), mailboxes: new Set() });
     await expect(own("GET", "/campaigns?search=Founding%20Engineer&limit=100")).resolves.toEqual({
       items: [],
     });
@@ -266,7 +372,7 @@ describe("shared mail account isolation", () => {
         "server",
         "native_instantly_create_campaign",
         {},
-        new Set(),
+        { campaigns: new Set(), mailboxes: new Set() },
       ),
     ).rejects.toThrow("ensure_role_campaign");
     await expect(
@@ -277,29 +383,178 @@ describe("shared mail account isolation", () => {
         "server",
         "native_instantly_get_campaign",
         { campaign_id: THEIRS },
-        new Set([MINE]),
+        { campaigns: new Set([MINE]), mailboxes: new Set() },
       ),
     ).rejects.toThrow("does not belong to this account");
     expect(rest).not.toHaveBeenCalled();
   });
 
-  it("lists the campaigns bound to this connection's roles", async () => {
+  it("lists and uses only this account's own sending mailboxes", async () => {
+    const rest = vi.fn(async (method: string, path: string) =>
+      path.startsWith("/accounts?")
+        ? { items: [{ email: "Me@Ours.test" }, { email: "them@other.test" }] }
+        : method === "POST" && path === "/campaigns"
+          ? { id: NEW }
+          : { ok: true },
+    );
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(["me@ours.test"]),
+    });
+    await expect(own("GET", "/accounts?limit=100")).resolves.toEqual({
+      items: [{ email: "Me@Ours.test" }],
+    });
+    await expect(own("GET", "/accounts/me%40ours.test")).resolves.toEqual({ ok: true });
+    await expect(own("POST", "/campaigns", { email_list: ["me@ours.test"] })).resolves.toEqual({
+      id: NEW,
+    });
+    for (const [method, path, body] of [
+      ["GET", "/accounts/them%40other.test"],
+      ["POST", "/campaigns", { email_list: ["them@other.test"] }],
+      ["PATCH", `/campaigns/${MINE}`, { email_list: ["me@ours.test", "them@other.test"] }],
+      ["POST", "/emails/reply", { eaccount: "them@other.test", reply_to_uuid: MINE }],
+    ] as const)
+      await expect(own(method, path, body)).rejects.toThrow("mailbox does not belong");
+  });
+
+  it("finds the campaigns and senders this connection owns", async () => {
     const findMany = vi.fn(async () => [
-      { result: { campaignId: MINE } },
-      { result: { campaignId: MINE } },
-      { result: null },
+      { kind: "instantly_role_campaign", result: { campaignId: MINE, eaccount: "Me@Ours.test" } },
+      { kind: "instantly_role_campaign", result: { campaignId: MINE } },
+      { kind: "instantly_sender_account", result: { email: "second@ours.test" } },
+      { kind: "instantly_role_campaign", result: null },
     ]);
     await expect(
-      ownedInstantlyCampaigns({ externalEffect: { findMany } } as never, "s", "server"),
-    ).resolves.toEqual([MINE]);
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        spaceId: "s",
-        kind: "instantly_role_campaign",
-        status: "completed",
-        request: { path: ["serverId"], equals: "server" },
-      },
-      select: { result: true },
-    });
+      ownedInstantly({ $queryRaw: findMany } as never, "s", "server", "owner"),
+    ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["second@ours.test"] });
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany.mock.calls[0]?.slice(1)).toEqual(["s", "server", "s", "owner"]);
   });
+});
+
+describe("reply sender checks before card creation", () => {
+  it("checks the exact existing campaign sender without provisioning or POSTing", async () => {
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.kind === "instantly_role_campaign"
+        ? {
+            result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" },
+          }
+        : null,
+    );
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: { findUnique },
+    };
+    const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
+    await expect(
+      requireReplySendingMailboxReady(
+        prisma as never,
+        rest,
+        { spaceId: "s", userId: "u", botId: "b", runId: "run-proof" } as never,
+        "source-proof",
+        original,
+        ORIGINAL.eaccount,
+      ),
+    ).resolves.toMatchObject({ usable: true });
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          idempotencyKey: "instantly-role-campaign:source-proof:role-proof",
+          run: { userId: "u", spaceId: "s" },
+          status: "completed",
+          kind: "instantly_role_campaign",
+          AND: [
+            { request: { path: ["serverId"], equals: "source-proof" } },
+            { request: { path: ["roleId"], equals: "role-proof" } },
+            { result: { path: ["campaignId"], equals: "campaign-proof" } },
+          ],
+        }),
+      }),
+    );
+    expect(rest.mock.calls).toEqual([["GET", "/accounts/team%40example.test"]]);
+  });
+  it("returns a blocked sender check from the read-only email tool", async () => {
+    const prisma = { externalEffect: { findMany: vi.fn(async () => []) } };
+    const rest = vi.fn(async () => ORIGINAL);
+    const result = await runInstantlyWrite(
+      prisma as never,
+      rest as never,
+      context,
+      "source",
+      "native_instantly_get_email",
+      { id: ORIGINAL.id, check_sender: true },
+      { campaigns: new Set(), mailboxes: new Set() },
+    );
+    expect(result).toMatchObject({
+      replySenderCheck: { ready: false, error: "sender_unavailable" },
+    });
+    expect(rest.mock.calls).toHaveLength(1);
+  });
+});
+
+it.each([false, true])(
+  "rechecks the prior campaign's exact sender immediately before POST (anchor changed: %s)",
+  async (changed) => {
+    let reads = 0;
+    const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      externalEffect: {
+        findMany: vi.fn(async () => []),
+        findUnique: vi.fn(async (input: any) =>
+          input.where.kind === "instantly_role_campaign" &&
+          input.where.AND[2].result.equals === "campaign-proof"
+            ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
+            : null,
+        ),
+      },
+    };
+    const rest = vi.fn(async (method: string, path: string) => {
+      if (path === `/emails/${ORIGINAL.id}`)
+        return {
+          ...original,
+          campaign_id: changed && ++reads > 1 ? "foreign-campaign" : original.campaign_id,
+        };
+      if (method === "GET" && path.startsWith("/accounts/"))
+        return { email: ORIGINAL.eaccount, status: 1, setup_pending: false };
+      if (method === "POST" && path === "/emails/reply") return { id: "sent-proof" };
+      throw new Error("Unexpected provider request");
+    });
+    const owned = { campaigns: new Set([original.campaign_id]), mailboxes: new Set<string>() };
+    const result = runInstantlyWrite(
+      prisma as never,
+      rest,
+      { spaceId: "s", userId: "u", runId: "run-proof" } as never,
+      "source-proof",
+      "native_instantly_reply_to_email",
+      { reply_to_uuid: ORIGINAL.id, body: { text: "Exact approved reply" } },
+      owned,
+    );
+    if (changed) await expect(result).rejects.toThrow("sender_unavailable");
+    else await expect(result).resolves.toEqual({ id: "sent-proof" });
+    expect(rest.mock.calls.filter((call) => call[0] === "POST")).toHaveLength(changed ? 0 : 1);
+    expect(owned.mailboxes.size).toBe(0);
+  },
+);
+
+it("requires positive read-only sender proof and does not echo an unsupported sender error", async () => {
+  const read = vi.fn(async () => ({
+    ...ORIGINAL,
+    replySenderCheck: { ready: false, error: "private-provider-id" },
+  }));
+  const result = await describeReplyToEmail(read, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(read).toHaveBeenCalledWith("native_instantly_get_email", {
+    id: ORIGINAL.id,
+    check_sender: true,
+  });
+  expect(result.refusal).toBe("sender_unavailable");
+  const missing = await describeReplyToEmail(async () => ORIGINAL, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(missing.refusal).toBe("sender_unavailable");
 });

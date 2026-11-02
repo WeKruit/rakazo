@@ -119,6 +119,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  localStorage.clear();
   vi.resetAllMocks();
   vi.unstubAllGlobals();
 });
@@ -222,6 +223,31 @@ it("shows each role as it streams in, with partial totals until the read ends", 
   await render();
   const funnel = container.querySelector('[aria-label="Outreach funnel"]')!;
   expect(funnel.textContent).toContain("Shortlisted≥3");
+  expect(text()).not.toContain("could not be read");
+});
+
+it("does not report a failure while saved numbers wait for their sources", async () => {
+  overview.mockImplementation(async function* () {
+    yield {
+      kind: "role",
+      role: {
+        groupId: "g1",
+        roleId: "r1",
+        shortlisted: 3,
+        shortlistedDates: [],
+        contacted: null,
+        replied: null,
+        interested: null,
+        interestedPartial: false,
+        incomplete: true,
+        bookings: [],
+        bookingUnknown: true,
+      },
+    };
+    await new Promise(() => undefined);
+  });
+  await render();
+  expect(text()).toContain("Shortlisted");
   expect(text()).not.toContain("could not be read");
 });
 
@@ -610,4 +636,62 @@ it("does not present another role's retained calendar events as this role's book
     container.querySelector('[aria-label="Upcoming recorded bookings"]')!.textContent,
   ).not.toContain("Wrong role");
   expect(text()).toContain("Some role calendar records are unavailable or partial.");
+});
+
+it("opens with the last finished numbers while a fresh read is still running", async () => {
+  await render({ readCacheScope: "account-a" });
+  const funnel = () => container.querySelector('[aria-label="Outreach funnel"]')?.textContent;
+  expect(funnel()).toContain("Shortlisted6");
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  overview.mockReturnValue(new Promise(() => undefined));
+  await render({ readCacheScope: "account-a" });
+  expect(funnel()).toContain("Shortlisted6");
+  // Calendar events are never kept in the browser store.
+  expect(localStorage.getItem("rakazo:home-overview:account-a")).not.toContain('"start"');
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await render({ readCacheScope: "account-b" });
+  expect(container.querySelectorAll('[role="status"]').length).toBeGreaterThan(0);
+});
+
+it("pages a long role breakdown ten at a time", async () => {
+  const many = Array.from({ length: 12 }, (_, index) =>
+    group(`m${index}`, `Role ${index}`, "2026-10-20T00:00:00Z"),
+  );
+  await render({ groups: many });
+  const funnel = container.querySelector<HTMLElement>('[aria-label="Outreach funnel"]')!;
+  await act(async () =>
+    funnel.querySelector<HTMLButtonElement>('button[aria-label="Inspect Shortlisted"]')!.click(),
+  );
+  const rows = () => funnel.querySelectorAll('ul[aria-label="Projects"] li');
+  expect(rows()).toHaveLength(10);
+  await act(async () => button("Page 2").click());
+  expect(rows()).toHaveLength(2);
+});
+
+it("keeps each arrived role for the next visit even when the read never finishes", async () => {
+  overview.mockImplementation(async () =>
+    (async function* () {
+      yield {
+        kind: "role" as const,
+        role: {
+          groupId: "g1",
+          roleId: "role-thread-g1",
+          shortlisted: 4,
+          shortlistedDates: [],
+          contacted: null,
+          replied: null,
+          interested: null,
+          interestedPartial: false,
+          incomplete: true,
+          bookings: [],
+          bookingUnknown: true,
+        },
+      };
+      await new Promise(() => undefined);
+    })(),
+  );
+  await render({ readCacheScope: "account-c" });
+  expect(localStorage.getItem("rakazo:home-overview:account-c")).toContain('"shortlisted":4');
 });

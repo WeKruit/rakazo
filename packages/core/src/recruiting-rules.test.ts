@@ -58,6 +58,7 @@ const TEXTS = {
   "Candidate evidence and feedback skill": skill("Candidate evidence and feedback"),
   "Review recruiting draft skill": skill("Review recruiting draft"),
   "Coordinate interview skill": skill("Coordinate interview"),
+  "Global recruiting overview skill": skill("Global recruiting overview"),
 };
 
 type Target = keyof typeof TEXTS;
@@ -1053,6 +1054,31 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     phrase:
       "Never refuse a booking because the person has not been emailed, has not replied or has not agreed yet",
     why: "Scheduling refused to book a candidate who had not been emailed or agreed yet.",
+  },
+  {
+    rule: "hand a named booking to Scheduling without a role",
+    in: "Main",
+    phrase: "or as the recruiter named them, even when no role is linked",
+    why: "Main asked which role a person was in before handing over an interview the recruiter had fully specified.",
+  },
+  {
+    rule: "hand a named booking to Scheduling in the global conversation",
+    in: "Global recruiting overview skill",
+    phrase:
+      "An interview booking for a person the recruiter names with an email goes to Scheduling in this conversation",
+    why: "In the global conversation Main asked which role a named person's interview belonged to instead of handing the booking to Scheduling.",
+  },
+  {
+    rule: "hand a booking to Scheduling before asking for an interviewer",
+    in: "Main",
+    phrase: "never ask for a role, an interviewer or anything else first",
+    why: "Main asked the recruiter who the interviewer was instead of handing a fully named booking to Scheduling.",
+  },
+  {
+    rule: "book a named email without a role",
+    in: "Scheduling",
+    phrase: "book with that email even if the person is not a saved candidate in any role",
+    why: "Scheduling asked which role a person belonged to before booking an interview the recruiter had fully specified.",
   },
   {
     rule: "offer a new booking when nothing exists to move",

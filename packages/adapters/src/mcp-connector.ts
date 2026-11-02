@@ -15,6 +15,7 @@ import {
   RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
+  RecruitingSequenceOutputSchema,
 } from "@rakazo/contracts";
 import {
   abortableDelay,
@@ -29,6 +30,7 @@ import {
   getRecruitingWorkspaceCrmTarget,
   IsolationError,
   loadVerifiedRecruitingSchedulingPlan,
+  rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
@@ -48,9 +50,11 @@ import {
   InstantlyRestError,
   instantlyRest,
   isNativeInstantlyWrite,
+  MailReplySendingError,
   nativeInstantlyWrites,
-  ownedInstantlyCampaigns,
+  ownedInstantly,
   readRoleCampaignBinding,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -784,6 +788,7 @@ export class McpConnector implements ConnectorProvider {
     private readonly prisma: PrismaClient,
     private readonly secrets: SecretStore,
     private readonly options: {
+      deferSequenceObservation?: (work: () => Promise<void>) => void;
       stdioEnabled?: boolean;
       allowedCommands?: string[];
       network?: RemoteTransportDependencies;
@@ -1174,6 +1179,8 @@ export class McpConnector implements ConnectorProvider {
         args = { ...args, campaign_id: campaignId };
       }
 
+      let replyMailbox: string | undefined;
+      let replyOriginal: Record<string, unknown> | undefined;
       if (emailScope && call.route.toolName === "reply_to_email") {
         await requireMcpToolAssignment(this.prisma, context, call.route, "get_email");
         if (typeof args.reply_to_uuid !== "string" || !UUID.test(args.reply_to_uuid))
@@ -1194,6 +1201,8 @@ export class McpConnector implements ConnectorProvider {
           throw new IsolationError(
             "Reply anchor does not belong to the current role campaign and mailbox",
           );
+        replyMailbox = email.eaccount;
+        replyOriginal = email as unknown as Record<string, unknown>;
       }
 
       if (crmTarget) {
@@ -1250,6 +1259,28 @@ export class McpConnector implements ConnectorProvider {
       ) {
         await this.assertInstantlyScope(context, assignment.server.id, emailScope);
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+      }
+      if (replyMailbox && sharedInstantlyAccount(assignment.server)) {
+        if (!replyOriginal) throw new IsolationError();
+        const credential = await this.authorizeInstantlyRest(call, context, []);
+        const rest = instantlyRest(
+          createSafeRemoteFetch(this.options.network?.fetch, this.options.network?.resolveHostname),
+          credential.key,
+          context.signal,
+        );
+        await requireReplySendingMailboxReady(
+          this.prisma,
+          rest,
+          context,
+          assignment.server.id,
+          replyOriginal,
+          replyMailbox,
+        );
+        await context.reauthorize?.();
+        await this.assertInstantlyScope(context, assignment.server.id, emailScope);
+        const current = await this.authorizeInstantlyRest(call, context, []);
+        if (current.secretId !== credential.secretId || current.digest !== credential.digest)
+          throw new IsolationError();
       }
       callStarted = true;
       calledAt = Date.now();
@@ -1543,14 +1574,22 @@ export class McpConnector implements ConnectorProvider {
           }
           return rest(method, path, body);
         },
-        context,
+        { ...context, recruitingCampaignSourceRevision: credential.server.revision },
         credential.server.id,
         call.route!.toolName,
         call.args,
         sharedInstantlyAccount(credential.server)
-          ? new Set(
-              await ownedInstantlyCampaigns(this.prisma, context.spaceId, credential.server.id),
-            )
+          ? emailScope
+            ? { campaigns: new Set(emailScope.campaignIds), mailboxes: new Set<string>() }
+            : await ownedInstantly(
+                this.prisma,
+                context.spaceId,
+                credential.server.id,
+                context.userId,
+              ).then((owned) => ({
+                campaigns: new Set(owned.campaigns),
+                mailboxes: new Set(owned.mailboxes),
+              }))
           : undefined,
       );
       if (call.route!.toolName === "native_instantly_get_email") await assertScope();
@@ -1563,10 +1602,55 @@ export class McpConnector implements ConnectorProvider {
         )
           throw new IsolationError("Email does not belong to the current role campaign");
       }
+      const sequence = RecruitingSequenceOutputSchema.safeParse(result);
+      if (
+        !context.onRecruitingCampaignRead &&
+        context.botId &&
+        context.runId &&
+        sequence.success &&
+        sequence.data.campaign &&
+        sequence.data.observedAt
+      ) {
+        const snapshot = {
+          botId: context.botId,
+          roleId: sequence.data.roleId,
+          serverId: credential.server.id,
+          sourceRevision: credential.server.revision,
+          observedAt: sequence.data.observedAt,
+          campaign: {
+            ...sequence.data.campaign,
+            stopOnReply: sequence.data.campaign.stopOnReply ?? null,
+          },
+        };
+        this.options.deferSequenceObservation?.(async () => {
+          await assertScope();
+          const run = await this.prisma.run.findFirst({
+            where: {
+              id: context.runId,
+              userId: context.userId,
+              spaceId: context.spaceId,
+              botId: context.botId,
+            },
+            select: { threadId: true },
+          });
+          if (!run) throw new IsolationError();
+          await rememberRecruitingSequenceObservation(
+            this.prisma,
+            { userId: context.userId, spaceId: context.spaceId },
+            { ...snapshot, threadId: run.threadId },
+          );
+        });
+      }
+      const publicResult =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? Object.fromEntries(
+              Object.entries(result).filter(([key]) => key !== "__rakazoSequenceObservation"),
+            )
+          : result;
       yield {
         type: "result",
         data: redactConnectorPayload(
-          { structuredContent: { source: "local_native_instantly_rest", result } },
+          { structuredContent: { source: "local_native_instantly_rest", result: publicResult } },
           redactions,
         ),
       };
@@ -1583,7 +1667,10 @@ export class McpConnector implements ConnectorProvider {
               : " Check the current assigned connection and requested scope.";
       yield {
         type: "error",
-        message: `Instantly ${call.route!.toolName} failed.${detail}`,
+        message:
+          error instanceof MailReplySendingError
+            ? error.code
+            : `Instantly ${call.route!.toolName} failed.${detail}`,
         // A network failure mid-request may still have reached the provider.
         ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
       };
@@ -1748,7 +1835,12 @@ export class McpConnector implements ConnectorProvider {
       select: { secretId: true, transport: true, endpoint: true },
     });
     if (!server || !sharedInstantlyAccount(server)) return null;
-    const campaignIds = await ownedInstantlyCampaigns(this.prisma, context.spaceId, serverId);
+    const { campaigns: campaignIds } = await ownedInstantly(
+      this.prisma,
+      context.spaceId,
+      serverId,
+      context.userId,
+    );
     if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
   }

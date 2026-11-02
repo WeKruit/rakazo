@@ -5288,9 +5288,26 @@ describe("native candidate source provenance", () => {
     await nativeCandidateListRead(f);
     const saved = f.tx.event.findMany.mock.calls
       .map((call) => (call as unknown as [{ where: Record<string, unknown> }])[0].where)
-      .filter((where) => where.type === "recruiting.candidates.saved");
+      .filter(
+        (where) =>
+          Array.isArray(where.OR) &&
+          where.OR.some((branch) => branch.type === "recruiting.candidates.saved"),
+      );
     expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({ spaceId: actor.spaceId, runId: { in: [f.run.id] } });
+    expect(saved[0]).toMatchObject({
+      spaceId: actor.spaceId,
+      runId: { in: [f.run.id] },
+      OR: [
+        { type: "recruiting.candidates.saved" },
+        {
+          type: "effect.recorded",
+          AND: [
+            { payload: { path: ["tool"], equals: "recruiting_research" } },
+            { payload: { path: ["profileFactsVersion"], equals: 1 } },
+          ],
+        },
+      ],
+    });
   });
   it("batches exact current-binding imports and verifies their shared native page once after the read snapshot", async () => {
     const row = {
@@ -6587,11 +6604,40 @@ describe("native candidate results without domain actions", () => {
 
   it("reuses the locked run and same source thread without rereading validated artifact metadata", async () => {
     const f = nativeCandidateFixture();
-    await recruiting.saveNativeRecruitingCandidatePage(f.prisma, actor, f.trusted, f.input, {
+    const facts = {
+      headline: null,
+      profileImageUrl: "https://images.example.test/person.png",
+      email: "supplied@example.test",
+      githubUrl: "https://github.com/supplied",
+      websiteUrl: null,
+      stackOverflowUrl: null,
+      experience: [],
+      education: [],
+    };
+    const result = await recruiting.saveNativeRecruitingCandidatePage(
+      f.prisma,
+      actor,
+      f.trusted,
+      f.input,
+      {
+        sourceEffectId: "read",
+        rows: [{ ...f.row, _profile: facts }],
+        outputArtifact: f.file,
+      },
+    );
+    expect(result).toMatchObject({
+      profileFactsVersion: 1,
       sourceEffectId: "read",
-      rows: [f.row],
-      outputArtifact: f.file,
+      candidateRows: [
+        {
+          candidateKey: "linkedin:/in/example",
+          rowIndex: 0,
+          _profile: facts,
+          _profileSourceEffectId: "read",
+        },
+      ],
     });
+    expect(f.saveEffect.result).toEqual(result);
     expect(f.tx.run.findFirst).toHaveBeenCalledTimes(1);
     expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(2);
     expect(f.tx.artifact.findFirst).toHaveBeenCalledExactlyOnceWith({

@@ -51,6 +51,7 @@ import {
   CreateRoutineInput,
   CreateScratchpadItemInput,
   DeploymentSettingsSchema,
+  EffortModeSchema,
   ExportManifestSchema,
   ExternalConversationPolicySchema,
   GroupDetailSchema,
@@ -219,13 +220,14 @@ import {
   RunsListOutputSchema,
   RunTraceSchema,
 } from "./runs.js";
-import { SearchQueryOutputSchema } from "./search.js";
+import { RecruitingSearchTargetsOutputSchema, SearchQueryOutputSchema } from "./search.js";
 
 const listPageFields = { offset: z.number().int().min(0).max(1000000).optional() };
 
 const sidebarPage = z.object({
   offset: z.number().int().min(0).default(0),
   archived: z.boolean().default(false),
+  limit: z.number().int().min(1).max(200).optional(),
 });
 
 const TurnMs = z.number().int().nonnegative().max(86_400_000);
@@ -283,6 +285,19 @@ export const RecruitingQuestionSchema = z.strictObject({
   canAnswer: z.boolean(),
 });
 export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
+
+export const MailReplyMessageFilterSchema = z
+  .strictObject({
+    sourceId: Id,
+    mailbox: z.string().trim().toLowerCase().min(1).max(512),
+    threadId: Id.optional(),
+    emailIds: z.array(Id).min(1).max(50).optional(),
+  })
+  .refine(
+    (input) => Boolean(input.threadId || input.emailIds?.length),
+    "Provide an original email or mail thread",
+  );
+export type MailReplyMessageFilter = z.infer<typeof MailReplyMessageFilterSchema>;
 
 const threadTarget = z
   .object({
@@ -440,6 +455,7 @@ export const appContract = {
     update: oc
       .input(
         z.object({
+          sendingMailboxLimit: z.number().int().min(1).max(100).optional(),
           signupsEnabled: z.boolean().optional(),
           signupAllowlist: z.array(z.string()).optional(),
           computerHost: z.enum(["docker", "this-mac"]).nullable().optional(),
@@ -559,11 +575,13 @@ export const appContract = {
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),
-    page: oc
-      .input(sidebarPage)
-      .output(
-        z.object({ items: z.array(GroupSchema).max(200), nextOffset: z.number().int().nullable() }),
-      ),
+    page: oc.input(sidebarPage).output(
+      z.object({
+        items: z.array(GroupSchema).max(200),
+        nextOffset: z.number().int().nullable(),
+        total: z.number().int().nonnegative().optional(),
+      }),
+    ),
     list: oc.output(z.array(GroupSchema).max(200)),
     listArchived: oc.output(z.array(GroupSchema).max(200)),
     get: oc.input(groupId).output(GroupDetailSchema),
@@ -594,6 +612,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           before: z.number().int().nonnegative().optional(),
+          mailReplyFor: MailReplyMessageFilterSchema.optional(),
           includePeerRuns: z.boolean().optional(),
           includePeerReceipts: z.boolean().optional(),
           around: z
@@ -616,6 +635,10 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Set how hard this chat's replies think; FORBIDDEN for accounts outside the operator. */
+    setEffort: oc
+      .input(threadTarget.safeExtend({ mode: EffortModeSchema }))
+      .output(z.object({ ok: z.literal(true) })),
     /** Change a message still waiting for the working reply; CONFLICT once the run read it. */
     updateQueued: oc
       .input(
@@ -1486,6 +1509,9 @@ export const appContract = {
   },
   search: {
     query: oc.input(z.object({ q: z.string().max(200) })).output(SearchQueryOutputSchema),
+    recruitingTargets: oc
+      .input(z.strictObject({ q: z.string().trim().min(1).max(200) }))
+      .output(RecruitingSearchTargetsOutputSchema),
   },
   links: {
     /**

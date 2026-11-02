@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   checkCopyMutations,
+  checkSenderMailboxes,
   checkSharedMail,
   findOwnedCampaign,
   withIsolationTestCopies,
@@ -123,7 +124,12 @@ function mailClient(reply) {
   };
 }
 const copy = { groupId: "B-copy", name: "测试副本 · Isolation x" };
-const foreign = { id: "c-1", name: "Founding Engineer Outreach", emails: ["ada@example.test"] };
+const foreign = {
+  id: "c-1",
+  name: "Founding Engineer Outreach",
+  mailbox: "sender@ours.test",
+  emails: ["ada@example.test"],
+};
 
 test("a crew that reveals another account's campaign is a leak", async () => {
   for (const [reply, verdict] of [
@@ -155,7 +161,29 @@ test("finds the owner's first named campaign without changing anything", async (
   assert.deepEqual(await findOwnedCampaign(owner, ["g1", "g2", "g3"]), {
     id: "c-2",
     name: "Role",
+    mailbox: null,
     emails: ["ada@example.test"],
   });
   assert.deepEqual(calls, ["recruiting/roleCampaign", "recruiting/roleCampaign"]);
+});
+
+test("offering another account's sending mailbox is a leak", async () => {
+  for (const [mailboxes, verdict] of [
+    [[], "ok"],
+    [["Sender@Ours.test"], "leak"],
+  ]) {
+    const records = [];
+    const viewer = {
+      label: "B",
+      async rpc(route) {
+        if (route === "mcp/servers/list")
+          return { status: 200, data: [{ id: "s", endpoint: "https://mcp.instantly.ai/mcp" }] };
+        return { status: 200, data: { mailboxes } };
+      },
+    };
+    await checkSenderMailboxes(viewer, { ...copy, roleId: "r" }, foreign, (row) =>
+      records.push(row),
+    );
+    assert.equal(records[0].verdict, verdict);
+  }
 });

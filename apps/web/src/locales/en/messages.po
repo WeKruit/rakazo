@@ -366,6 +366,14 @@ msgstr "Added"
 msgid "Adding…"
 msgstr "Adding…"
 
+#: src/components/AskCard.tsx
+msgid "Address change requested"
+msgstr "Address change requested"
+
+#: src/components/AskCard.tsx
+msgid "Address confirmed"
+msgstr "Address confirmed"
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
@@ -1017,6 +1025,10 @@ msgstr "Card view"
 msgid "Change password"
 msgstr "Change password"
 
+#: src/components/AskCard.tsx
+msgid "Change the address"
+msgstr "Change the address"
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Change the date range or status to review saved records. Empty space does not confirm availability."
 msgstr "Change the date range or status to review saved records. Empty space does not confirm availability."
@@ -1586,6 +1598,7 @@ msgid "Contacted"
 msgstr "Contacted"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/SequenceTab.tsx
 msgid "Contacts"
 msgstr "Contacts"
 
@@ -1966,7 +1979,6 @@ msgstr "Could not reach the server"
 msgid "Could not read {failedCalendars}."
 msgstr "Could not read {failedCalendars}."
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "Could not read this campaign."
@@ -2150,6 +2162,10 @@ msgstr "Create"
 msgid "Create a section and move {0} into it."
 msgstr "Create a section and move {0} into it."
 
+#: src/components/AskCard.tsx
+msgid "Create address"
+msgstr "Create address"
+
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
 msgstr "Create group"
@@ -2162,6 +2178,10 @@ msgstr "Create Routine"
 #: src/pages/shell/dialogs.tsx
 msgid "Create space"
 msgstr "Create space"
+
+#: src/components/AskCard.tsx
+msgid "Create this sending address?"
+msgstr "Create this sending address?"
 
 #: src/components/AskCard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
@@ -2531,10 +2551,6 @@ msgstr "Draft"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
 msgstr "Draft a proposed-times email for review in the selected original conversation. Read the original conversation first and preserve its exact reply recipients, mailbox, candidate and role. Save the draft through the existing correspondence draft workflow. Do not send, book or create calendar events. These are alternatives for one interview, not confirmed bookings."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
-msgstr "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Draft an email sequence from this role's saved brief. Show all steps for review; do not add recipients or send."
@@ -3591,6 +3607,10 @@ msgstr "Low"
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
 msgstr "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
 
+#: src/components/AskCard.tsx
+msgid "Mail"
+msgstr "Mail"
+
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr "Mailbox not recorded"
@@ -4004,10 +4024,6 @@ msgstr "no auth"
 msgid "No authentication"
 msgstr "No authentication"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No campaign yet."
-msgstr "No campaign yet."
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
@@ -4341,6 +4357,10 @@ msgstr "Not recorded"
 msgid "Not recorded in this source"
 msgstr "Not recorded in this source"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Not reported"
+msgstr "Not reported"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not returned"
 msgstr "Not returned"
@@ -4521,7 +4541,6 @@ msgstr "Open work"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-compatible server URL"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Opened"
 msgstr "Opened"
@@ -4775,6 +4794,10 @@ msgstr "Preferred criteria"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Prepare adding contacts to the saved sequence \"{0}\" in this role. Show the exact recipients and saved emails before any send. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
 msgstr "Prepare adding contacts to the saved sequence \"{0}\" in this role. Show the exact recipients and saved emails before any send. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Prepare an editable reply card for the selected email. Read the original conversation and verify the candidate and role. Include the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
+msgstr "Prepare an editable reply card for the selected email. Read the original conversation and verify the candidate and role. Include the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Prepare drafts"
@@ -5175,7 +5198,6 @@ msgstr "Replace value"
 msgid "Replaced"
 msgstr "Replaced"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Replied"
@@ -6023,10 +6045,6 @@ msgstr "Sending…"
 msgid "Seniority"
 msgstr "Seniority"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Sent"
-msgstr "Sent"
-
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr "Sent at"
@@ -6607,6 +6625,10 @@ msgstr "This removes the connection from every space."
 msgid "This result cannot be displayed yet"
 msgstr "This result cannot be displayed yet"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "This sequence is not saved for this role."
+msgstr "This sequence is not saved for this role."
+
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
 msgstr "This server cannot be assigned without a bot."
@@ -6839,9 +6861,17 @@ msgstr "Use default guidance"
 msgid "Use the connected service to check this role. Saved results will appear here when the agent finishes."
 msgstr "Use the connected service to check this role. Saved results will appear here when the agent finishes."
 
+#: src/components/AskCard.tsx
+msgid "Use this address"
+msgstr "Use this address"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Use this model"
 msgstr "Use this model"
+
+#: src/components/AskCard.tsx
+msgid "Use this sending address?"
+msgstr "Use this sending address?"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Use unique guest email addresses, a valid meeting link, and notes up to 1000 characters."
@@ -6967,6 +6997,10 @@ msgstr "Web, desktop and mobile apps"
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "Webhook"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Website"
+msgstr "Website"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"

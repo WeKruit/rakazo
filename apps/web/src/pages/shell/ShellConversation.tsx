@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentProps, CSSProperties } from "react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { MessageSkeleton } from "../../components/ai/primitives";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
@@ -45,6 +45,7 @@ const RoleSetupCard = lazyPanel(() =>
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
+import { EffortPicker } from "../shell/effort-picker";
 import { Transcript } from "../shell/Transcript";
 import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
@@ -90,6 +91,7 @@ export function ShellConversation({
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
+  const [mountedOutreachThread, setMountedOutreachThread] = useState<string>();
   const { setReplyTarget, setReplyQuote, peopleAdded, workEstimate } = model;
   // Stable handlers keep the memoized transcript from re-rendering when a panel changes.
   const replyTo = useCallback(
@@ -405,6 +407,15 @@ export function ShellConversation({
               {recruitingWorkspaceView === "sequence" ? (
                 <>
                   <SequenceTab
+                    composeNew={searchParams.get("compose") === "new"}
+                    requestedCampaign={
+                      searchParams.get("campaign")
+                        ? {
+                            id: searchParams.get("campaign")!,
+                            serverId: searchParams.get("campaignServer") ?? undefined,
+                          }
+                        : undefined
+                    }
                     onAskChat={(text) => openRoleChat(text)}
                     roleId={currentBindingRead.workspace.role.id}
                     spaceId={currentBindingRead.workspace.role.spaceId}
@@ -414,11 +425,20 @@ export function ShellConversation({
                     readCache={recruitingReadCache.current}
                     readCacheScope={recruitingCacheScope}
                   />
-                  <details className="mt-6">
+                  <details
+                    key={activeSnapshot.threadId}
+                    className="mt-6"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open)
+                        setMountedOutreachThread(activeSnapshot.threadId);
+                    }}
+                  >
                     <summary>
                       <Trans>Outreach drafts</Trans>
                     </summary>
-                    {nativeCorrespondence}
+                    {mountedOutreachThread === activeSnapshot.threadId
+                      ? nativeCorrespondence
+                      : null}
                   </details>
                 </>
               ) : (
@@ -1011,7 +1031,22 @@ export function ShellConversation({
                   replyTargetName={emptyCrmChat ? undefined : replyTargetName}
                   onClearReply={clearReply}
                   suggestion={
-                    emptyCrmChat || !activeSnapshot ? null : currentSuggestion(activeSnapshot)
+                    emptyCrmChat || !activeSnapshot
+                      ? null
+                      : currentSuggestion(activeSnapshot, currentRuns)
+                  }
+                  toolbar={
+                    !emptyCrmChat && activeSnapshot?.effortMode ? (
+                      <EffortPicker
+                        key={activeSnapshot.threadId}
+                        mode={activeSnapshot.effortMode}
+                        target={
+                          activeSnapshot.groupId
+                            ? { groupId: activeSnapshot.groupId }
+                            : { botId: activeSnapshot.botId ?? "" }
+                        }
+                      />
+                    ) : undefined
                   }
                   mentionTargets={showToolActivity ? composerMentionTargets : []}
                   agentSkills={showToolActivity ? agentSkills : []}

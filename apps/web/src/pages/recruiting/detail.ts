@@ -150,15 +150,8 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
     while (index >= 0 && detailKey(current[index]!) !== param) index -= 1;
     if (index === -1 && !current.length && param === pendingRef.current) return;
     if (index === -1) {
-      // A reloaded or shared URL carries no row snapshot to show; drop the stale entry.
-      setSearchParams(
-        (previous) => {
-          const next = new URLSearchParams(previous);
-          next.delete(DETAIL_PARAM);
-          return next;
-        },
-        { replace: true },
-      );
+      // A search-result link has no row snapshot yet, just like a reloaded link.
+      setPending(param);
       if (current.length) setStack([]);
     } else if (index < current.length - 1) setStack(current.slice(0, index + 1));
   }, [param]);

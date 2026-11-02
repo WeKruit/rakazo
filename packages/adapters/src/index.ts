@@ -64,7 +64,6 @@ export * from "./e2b-sandbox.js";
 export * from "./elevenlabs-voice.js";
 export * from "./email-emulator.js";
 export * from "./embeddings.js";
-export * from "./exa-organization-search.js";
 export * from "./exa-page-reader.js";
 export * from "./executor.js";
 export * from "./expo-push.js";
@@ -131,7 +130,10 @@ export {
 } from "./recruiting-agent-run-wait.js";
 export * from "./recruiting-global-inbox.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
-export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
+export {
+  fillRecruitingRoleProfiles,
+  projectRecruitingCandidateProfiles,
+} from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,

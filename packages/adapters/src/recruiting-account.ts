@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import type { ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
+import type { ArtifactStore, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingAccountViewInput,
@@ -20,6 +20,7 @@ import {
   listRecruitingSchedulingPlans,
   listRoutinesDto,
   Prisma,
+  readSavedRecruitingSequences,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
@@ -37,6 +38,7 @@ export type RecruitingAccountReadDeps = {
   prisma: PrismaClient;
   artifacts: ArtifactStore;
   connectors: Pick<ConnectorProvider, "execute">;
+  jobs?: JobPublisher;
   firstPartyMcpUrl?: string;
   signal?: AbortSignal;
   stillAuthorized?: () => Promise<boolean>;
@@ -135,6 +137,7 @@ export async function readRecruitingAccountView(
       userId: actor.userId,
       spaceId: actor.spaceId,
       archivedAt: null,
+      activeThreads: { some: { userId: actor.userId, spaceId: actor.spaceId } },
       sourceThread: {
         userId: actor.userId,
         spaceId: actor.spaceId,
@@ -169,6 +172,11 @@ export async function readRecruitingAccountView(
       }))
     )
       throw new ORPCError("NOT_FOUND");
+    if (input.view === "sequence" && input.sequenceSummary) {
+      const page = await readSavedRecruitingSequences(deps.prisma, actor, input);
+      await guard();
+      return page;
+    }
     if (
       (input.itemCursor && !input.roleId) ||
       (input.cursor && input.roleId && input.view !== "routines") ||

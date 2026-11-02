@@ -5178,9 +5178,12 @@ describe("latestReplySuggestion", () => {
   it("returns the saved suggestion for the newest reply", async () => {
     const { prisma, findFirst } = prismaWith({ text: "下一步做什么？" });
     const result = await latestReplySuggestion(prisma, [
-      { role: "user", runId: null },
-      { role: "bot", runId: "run-2" },
-      { role: "user", runId: null, internal: true },
+      { id: "u1", role: "user", runId: null },
+      { id: "b1", role: "bot", runId: "run-2" },
+      { id: "u2", role: "user", runId: null, internal: true },
+      { id: "s1", role: "system", runId: "run-bg" },
+      // A background search's live progress doesn't count as a newer message.
+      { id: "progress:run-bg", role: "bot", runId: "run-bg" },
     ]);
     expect(result).toEqual({ runId: "run-2", text: "下一步做什么？" });
     expect(findFirst).toHaveBeenCalledWith(
@@ -5192,8 +5195,8 @@ describe("latestReplySuggestion", () => {
     const { prisma, findFirst } = prismaWith({ text: "x" });
     expect(
       await latestReplySuggestion(prisma, [
-        { role: "bot", runId: "run-1" },
-        { role: "user", runId: null },
+        { id: "b1", role: "bot", runId: "run-1" },
+        { id: "u1", role: "user", runId: null },
       ]),
     ).toBeNull();
     expect(findFirst).not.toHaveBeenCalled();

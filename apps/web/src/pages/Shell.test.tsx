@@ -199,6 +199,12 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       archive: shellApi.archiveGroup,
       restore: shellApi.restoreGroup,
       listArchived: shellApi.listArchivedGroups,
+      // Tests hold few archived roles; one page returns the same list the test mutates.
+      page: async () => {
+        const items = await shellApi.listArchivedGroups();
+        return { items, nextOffset: null, total: items.length };
+      },
+      get: vi.fn().mockRejectedValue(new Error("not found")),
     },
     bots: {
       listArchived: shellApi.listArchivedBots,
@@ -787,6 +793,9 @@ it("restarts the CRM role catalog after native invalidation without dispatching 
           kruitHref="/app?view=conversation"
           groups={[]}
           archivedGroups={[]}
+          archivedGroupTotal={0}
+          archivedGroupPage={0}
+          onArchivedGroupPage={vi.fn()}
           archivedOpen={false}
           query=""
           view="results"
@@ -1023,6 +1032,8 @@ it("drafts from the canonical Inbox without sending or replacing an existing com
   type(draft, "Keep my separate draft");
   await view.click("Draft reply");
   expect(draft.value).toContain("Keep my separate draft");
+  expect(draft.value).toContain("editable reply card");
+  expect(draft.value).toContain("choose Send on the card");
   expect(draft.value).toContain("Do not send");
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(shellApi.followUp).not.toHaveBeenCalled();
@@ -1399,6 +1410,9 @@ async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingRea
         kruitHref="/app?view=conversation"
         groups={[]}
         archivedGroups={[]}
+        archivedGroupTotal={0}
+        archivedGroupPage={0}
+        onArchivedGroupPage={vi.fn()}
         archivedOpen={false}
         query=""
         view="results"
@@ -4981,10 +4995,6 @@ describe("Composer", () => {
     expect(onSend.mock.calls[0]?.[0]).toBe("see https://example.com/jobs/1 please");
   });
 
-  it("hides the suggestion while a reply is running", () => {
-    const textarea = renderComposer(vi.fn(), { suggestion: "Find 20 more", running: true });
-    expect(textarea.placeholder).not.toBe("Find 20 more");
-  });
   it("clears the draft once the message is sent", async () => {
     const onSend = vi.fn().mockResolvedValue(true);
     const textarea = renderComposer(onSend);
@@ -5572,6 +5582,14 @@ it.each(["normal", "retry", "switch", "missing-source"] as const)(
           ],
         },
       ],
+    });
+    const drafts = [...container!.querySelectorAll<HTMLDetailsElement>("details")].find(
+      (node) => node.querySelector("summary")?.textContent === "Outreach drafts",
+    )!;
+    expect(props!).toBeUndefined();
+    await act(async () => {
+      drafts.open = true;
+      drafts.dispatchEvent(new Event("toggle"));
     });
     const save = props!.onSaveDraft!;
     const input: RecruitingCorrespondenceModule.RecruitingSequenceSaveInput = {

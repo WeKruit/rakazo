@@ -276,3 +276,55 @@ it("joins one explicit email to saved summary facts and never joins mismatched C
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps the exact requested sent original without exposing other sent-only threads", async () => {
+  const sent = { ...email("sent-original", "source-one"), direction: "sent" as const };
+  const other = { ...email("other-sent", "source-two"), direction: "sent" as const };
+  const records: Item[] = [item("one", []), item("two", [])];
+  records[0]!.correspondence!.emails = [sent, other];
+  records[1]!.correspondence!.emails = [sent];
+  expect(accountInboxThreads(records)).toEqual([]);
+  const rows = accountInboxThreads(records, {
+    roleId: "one",
+    emailId: sent.id,
+    sourceId: sent.sourceId,
+  });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.roleId).toBe("one");
+  expect(rows[0]?.emails.map((entry) => entry.id)).toEqual(["sent-original"]);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <AccountInbox
+          roles={[]}
+          items={records}
+          pending={[]}
+          requestedThread="exact-thread"
+          requestedEmail="sent-original"
+          serverThreads={[
+            {
+              key: "exact-thread",
+              roleId: "one",
+              emailId: sent.id,
+              sourceId: sent.sourceId,
+              organizationId: null,
+              mailbox: sent.eaccount,
+              latestIncomingAt: null,
+            },
+          ]}
+          onLoadMore={vi.fn()}
+          onRetry={vi.fn()}
+          onOpenRole={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.querySelector("article")?.textContent).toContain(sent.body);
+    expect(container.textContent).not.toContain(other.body);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});

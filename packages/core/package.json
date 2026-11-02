@@ -58,6 +58,11 @@
       "types": "./src/node/novnc-proxy.ts",
       "development": "./src/node/novnc-proxy.ts",
       "default": "./src/node/novnc-proxy.ts"
+    },
+    "./node/html-text": {
+      "types": "./src/node/html-text.ts",
+      "development": "./src/node/html-text.ts",
+      "default": "./src/node/html-text.ts"
     }
   },
   "scripts": {
@@ -74,13 +79,15 @@
     "mdast-util-to-hast": "13.2.1",
     "remark-gfm": "4.0.1",
     "remark-parse": "11.0.0",
-    "unified": "11.0.5"
+    "unified": "11.0.5",
+    "jsdom": "30.0.1"
   },
   "devDependencies": {
     "@types/d3-dsv": "3.0.7",
     "fast-check": "4.10.0",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "@types/jsdom": "30.0.0"
   },
   "sideEffects": false
 }

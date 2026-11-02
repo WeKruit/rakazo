@@ -1372,6 +1372,11 @@ export const RecruitingSavedProfileSchema = z.strictObject({
   fetchedAt: IsoDate,
   headline: ProfileText,
   profileImageUrl: ProfileText,
+  /** Historical profiles may predate these facts; every new save writes explicit nulls. */
+  email: z.email().nullable().optional(),
+  githubUrl: z.httpUrl().nullable().optional(),
+  websiteUrl: z.httpUrl().nullable().optional(),
+  stackOverflowUrl: z.httpUrl().nullable().optional(),
   experience: z.array(RecruitingProfileExperienceSchema).max(80),
   education: z.array(RecruitingProfileEducationSchema).max(40),
 });
@@ -1577,7 +1582,8 @@ const RecruitingAccountToolReadSchema = z.strictObject({
   campaignId: RecruitingId.optional(),
   campaignServerId: RecruitingId.optional(),
   campaignLeadCursor: Text.max(10000).optional(),
-  limit: z.number().int().min(1).max(50).optional(),
+  // Pages hold at most 50; a larger ask reads the first 50 and pages on, instead of failing.
+  limit: z.number().int().min(1).max(100).optional(),
 });
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
   // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
@@ -1766,6 +1772,20 @@ export const RecruitingCampaignDetailsSchema = z.strictObject({
 export type RecruitingCampaignDetails = z.infer<typeof RecruitingCampaignDetailsSchema>;
 
 export const RecruitingRoleCampaignSchema = z.strictObject({
+  sourceRevision: z.number().int().nonnegative().optional(),
+  campaignObservedAt: IsoDate.optional(),
+  sourceKind: z.enum(["crm", "native"]).optional(),
+  observations: z
+    .strictObject({
+      total: z.number().int().nonnegative(),
+      contacted: z.number().int().nonnegative().nullable(),
+      active: z.number().int().nonnegative().nullable(),
+      opened: z.number().int().nonnegative().nullable(),
+      replied: z.number().int().nonnegative().nullable(),
+      interested: z.number().int().nonnegative().nullable(),
+      bounced: z.number().int().nonnegative().nullable(),
+    })
+    .optional(),
   nextLeadCursor: z.string().nullable().optional(),
   stats: z
     .strictObject({
@@ -1786,6 +1806,7 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       eaccount: z.string().nullable(),
       status: z.number().int().nullable(),
       stopOnReply: z.boolean().nullable(),
+      createdAt: IsoDate.nullable().optional(),
       observedDetails: RecruitingCampaignDetailsSchema.optional(),
     })
     .nullable(),
@@ -1897,41 +1918,50 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     }),
   ),
   emails: z.array(
-    z.strictObject({
-      id: Id,
-      sourceName: z.string(),
-      ...CorrespondenceOriginFields,
-      /** Imported history is evidence, never authority to replay a provider operation. */
-      imported: z.literal(true).optional(),
-      candidateKey: RecruitingId.optional(),
-      attachments: z
-        .array(
-          z.strictObject({
-            id: Id,
-            name: z.string(),
-            mimeType: z.string(),
-            size: z.number().int().min(0),
-          }),
-        )
-        .optional(),
-      direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
-      /** Optional provider observations, never application viewed-by state or current totals. */
-      unread: z.boolean().nullable().optional(),
-      leadId: z.uuid().nullable().optional(),
-      /** Provider-supplied step text; not an inferred stable step ID. */
-      step: z.string().nullable().optional(),
-      observedAt: IsoDate.optional(),
-      crm: CorrespondenceCrmContext,
-      sender: z.string().nullable(),
-      recipients: z.array(z.string()),
-      cc: z.array(z.string()).optional(),
-      bcc: z.array(z.string()).optional(),
-      subject: z.string(),
-      body: z.string(),
-      snippet: z.boolean(),
-      date: IsoDate.nullable(),
-      url: z.httpUrl().nullable(),
-    }),
+    z
+      .strictObject({
+        id: Id,
+        sourceName: z.string(),
+        ...CorrespondenceOriginFields,
+        /** Imported history is evidence, never authority to replay a provider operation. */
+        imported: z.literal(true).optional(),
+        candidateKey: RecruitingId.optional(),
+        attachments: z
+          .array(
+            z.strictObject({
+              id: Id,
+              name: z.string(),
+              mimeType: z.string(),
+              size: z.number().int().min(0),
+            }),
+          )
+          .optional(),
+        direction: z.enum(["sent", "received", "manual"]).nullable().optional(),
+        /** Optional provider observations, never application viewed-by state or current totals. */
+        unread: z.boolean().nullable().optional(),
+        leadId: z.uuid().nullable().optional(),
+        /** Provider-supplied step text; not an inferred stable step ID. */
+        step: z.string().nullable().optional(),
+        observedAt: IsoDate.optional(),
+        crm: CorrespondenceCrmContext,
+        sender: z.string().nullable(),
+        recipients: z.array(z.string()),
+        cc: z.array(z.string()).optional(),
+        bcc: z.array(z.string()).optional(),
+        subject: z.string(),
+        body: z.string(),
+        snippet: z.boolean(),
+        date: IsoDate.nullable(),
+        url: z.httpUrl().nullable(),
+      })
+      .transform((email) => {
+        // Provider list previews carry an agent instruction; presentation keeps only the preview fact.
+        const body = email.body.replace(
+          /\[truncated — use get_email for full content\](\s*)$/u,
+          "$1",
+        );
+        return body === email.body ? email : { ...email, body, snippet: true };
+      }),
   ),
   events: z.array(
     z.strictObject({
@@ -2193,6 +2223,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
   }),
   z.object({
     operation: z.literal("roleCampaigns"),
+    campaignId: Id.optional(),
     ...crmBrowsePinned,
     ...crmBrowsePage,
     crmRoleId: z.uuid(),
@@ -2456,6 +2487,14 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     items: z.array(
       z.strictObject({
         id: Id,
+        person: z
+          .strictObject({
+            name: z.string(),
+            email: z.string().nullable(),
+            profileImageUrl: z.string().nullable(),
+          })
+          .nullable()
+          .optional(),
         candidateId: z.uuid().nullable(),
         status: z.number().int().nullable(),
         interestStatus: z.number().int().nullable(),

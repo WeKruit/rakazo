@@ -46,8 +46,8 @@ export function ListPager({
     if (target !== page) onPage(target);
   };
   return (
-    <Pagination aria-label={t`Pages`} className="mx-0 w-auto justify-start">
-      <PaginationContent>
+    <Pagination aria-label={t`Pages`} className="ms-auto me-0 w-auto justify-end">
+      <PaginationContent className="flex-wrap justify-end">
         <PaginationItem>
           <Button
             variant="ghost"

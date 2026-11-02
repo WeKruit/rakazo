@@ -344,6 +344,7 @@ model DeploymentSettings {
   computerHost                    String?
   usageCreditsPerUsd              Float    @default(100)
   usageGrossMargin                Float    @default(0.5)
+  sendingMailboxLimit             Int      @default(2)
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 
@@ -586,6 +587,8 @@ model Thread {
   historyCompactionSummary    String?    @db.Text
   historyCompactionGeneration Int        @default(0)
   unread                      Boolean    @default(false)
+  /// fast | balanced | deep; null is fast. Only operator accounts can set it.
+  effortMode                  String?
   messages                    Message[]
   events                      Event[]
   tasks                       Task[]

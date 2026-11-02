@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
+import { MailReplyCards } from "./MailReplyCards";
 import { ProfileImage } from "./ProfileImage";
 import { initials, storedProfileFields } from "./profile";
 import { RetryNotice } from "./RetryNotice";
@@ -14,6 +15,7 @@ import { emailThreadIdentity, useInboxReadState } from "./useInboxReadState";
 
 type AccountItem = RecruitingAccountViewOutput["items"][number];
 type Props = {
+  accountKey?: string;
   roles: RecruitingAccountViewOutput["roles"];
   items: AccountItem[];
   spaceId?: string;
@@ -33,6 +35,8 @@ type Props = {
     latestIncomingAt: string | null;
   }[];
   serverReadKey?: string;
+  requestedThread?: string | null;
+  requestedEmail?: string | null;
   query?: string;
   onQueryChange?: (value: string) => void;
   onFilterChange?: (value: string) => void;
@@ -75,7 +79,10 @@ export function accountInboxPerson(
 }
 
 /** A list entry keeps its exact role/source/mailbox; missing provider threads stay single messages. */
-export function accountInboxThreads(items: readonly AccountItem[]) {
+export function accountInboxThreads(
+  items: readonly AccountItem[],
+  requested?: { roleId: string; emailId: string; sourceId: string },
+) {
   const rows = new Map<
     string,
     {
@@ -126,7 +133,15 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
     }
   }
   return [...rows.values()]
-    .filter((row) => row.emails.some((email) => email.direction !== "sent"))
+    .filter((row) =>
+      row.emails.some(
+        (email) =>
+          email.direction !== "sent" ||
+          (row.roleId === requested?.roleId &&
+            email.id === requested.emailId &&
+            email.sourceId === requested.sourceId),
+      ),
+    )
     .map((row) => ({
       ...row,
       emails: row.emails.sort(
@@ -140,6 +155,7 @@ export function accountInboxThreads(items: readonly AccountItem[]) {
 }
 
 export function AccountInbox({
+  accountKey,
   roles,
   items,
   spaceId,
@@ -151,12 +167,15 @@ export function AccountInbox({
   onOpenProfile,
   serverThreads,
   serverReadKey,
+  requestedThread,
+  requestedEmail,
   query,
   onQueryChange,
   onFilterChange,
 }: Props) {
   const { t } = useLingui();
-  const rows = accountInboxThreads(items);
+  const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
+  const rows = accountInboxThreads(items, requestedServerThread);
   for (const row of rows) {
     const saved = serverThreads?.find(
       (thread) =>
@@ -174,10 +193,31 @@ export function AccountInbox({
   const [filter, setFilter] = useState("all");
   const [chosen, setChosen] = useState<string>();
   const [selectedEmail, setSelectedEmail] = useState<string>();
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(Boolean(requestedThread));
+  useEffect(() => setSelectedEmail(undefined), [requestedThread, requestedEmail]);
   const railTrigger = useRef<HTMLButtonElement | null>(null);
   const back = useRef<HTMLButtonElement | null>(null);
-  const selected = rows.find((row) => row.key === chosen) ?? rows[0];
+  const requestedRow =
+    requestedServerThread &&
+    rows.find(
+      (item) =>
+        item.roleId === requestedServerThread.roleId &&
+        item.emails.some(
+          (email) =>
+            email.id === requestedServerThread.emailId &&
+            email.sourceId === requestedServerThread.sourceId &&
+            (email.organizationId ?? null) === requestedServerThread.organizationId &&
+            (email.eaccount ?? null) === requestedServerThread.mailbox,
+        ),
+    );
+  const selected = rows.find((row) => row.key === chosen) ?? requestedRow ?? rows[0];
+  useEffect(() => {
+    const row = requestedRow;
+    if (row) {
+      setChosen(row.key);
+      setMobileDetail(true);
+    }
+  }, [requestedThread, requestedRow?.key]);
   useEffect(() => {
     if (selected && selected.key !== chosen) setChosen(selected.key);
   }, [selected?.key, chosen]);
@@ -245,7 +285,15 @@ export function AccountInbox({
     };
   }, [detailKey]);
   const detailEmails = detail?.key === detailKey ? detail.emails : [];
-  const conversationEmails = serverThreads ? detailEmails : (selected?.emails ?? []);
+  const conversationEmails = serverThreads
+    ? requestedEmail
+      ? [
+          ...new Map(
+            [...(selected?.emails ?? []), ...detailEmails].map((email) => [email.id, email]),
+          ).values(),
+        ]
+      : detailEmails
+    : (selected?.emails ?? []);
   const authoritativeThreads = serverThreads?.flatMap((thread) => {
     const email = rows
       .find(
@@ -284,6 +332,10 @@ export function AccountInbox({
   const email =
     conversationEmails.find((item) => item.id === selectedEmail) ??
     selected?.emails.find((item) => item.id === selectedEmail) ??
+    conversationEmails.find(
+      (item) =>
+        requestedEmail && (item.providerMessageId === requestedEmail || item.id === requestedEmail),
+    ) ??
     conversationEmails.find((item) => item.id === selected?.emails[0]?.id) ??
     conversationEmails[0] ??
     selected?.emails[0];
@@ -596,6 +648,8 @@ export function AccountInbox({
               ) : null}
               {(!serverThreads || conversationEmails.length > 0) && !detailFailed ? (
                 <EmailConversation
+                  spaceId={spaceId}
+                  roleId={selected.roleId}
                   key={selected.key}
                   artifactTarget={
                     roles.find((role) => role.id === selected.roleId)?.groupId
@@ -620,6 +674,47 @@ export function AccountInbox({
                   }
                   onSelect={(message) => setSelectedEmail(message.id)}
                   readState={readState}
+                />
+              ) : null}
+              {email.sourceId &&
+              email.eaccount?.trim() &&
+              roles.find((role) => role.id === selected.roleId)?.groupId ? (
+                <MailReplyCards
+                  key={JSON.stringify([
+                    selected.key,
+                    email.sourceId,
+                    email.threadId ?? email.providerMessageId ?? email.id,
+                  ])}
+                  conversation={{
+                    groupId: roles.find((role) => role.id === selected.roleId)!.groupId!,
+                  }}
+                  readCacheScope={accountKey}
+                  filter={{
+                    sourceId: email.sourceId,
+                    mailbox: email.eaccount,
+                    ...(email.threadId ? { threadId: email.threadId } : {}),
+                    emailIds: [email.providerMessageId ?? email.id],
+                  }}
+                />
+              ) : email.sourceId &&
+                email.eaccount?.trim() &&
+                roles.find((role) => role.id === selected.roleId)?.botId ? (
+                <MailReplyCards
+                  key={JSON.stringify([
+                    selected.key,
+                    email.sourceId,
+                    email.threadId ?? email.providerMessageId ?? email.id,
+                  ])}
+                  conversation={{
+                    botId: roles.find((role) => role.id === selected.roleId)!.botId!,
+                  }}
+                  readCacheScope={accountKey}
+                  filter={{
+                    sourceId: email.sourceId,
+                    mailbox: email.eaccount,
+                    ...(email.threadId ? { threadId: email.threadId } : {}),
+                    emailIds: [email.providerMessageId ?? email.id],
+                  }}
                 />
               ) : null}
               {serverThread && detail?.key === detailKey && detail.nextCursor ? (

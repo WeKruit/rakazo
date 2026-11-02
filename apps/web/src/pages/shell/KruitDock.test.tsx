@@ -14,6 +14,13 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@rakazo/ui-web", async (original) => ({
+  ...(await original<typeof import("@rakazo/ui-web")>()),
+  toast: toastMock,
+  Toaster: () => null,
+}));
+
 import { KruitDock } from "./KruitDock";
 
 const group = (id: string, extra: Partial<Group> = {}) =>
@@ -22,10 +29,7 @@ const KRUIT = "recruiting-global-a";
 let host: HTMLDivElement | undefined;
 afterEach(() => host?.remove());
 
-async function render(
-  groups: Group[],
-  props: { groupId?: string; chatting?: boolean; start?: number } = {},
-) {
+async function render(groups: Group[], props: { groupId?: string; chatting?: boolean } = {}) {
   host = document.createElement("div");
   document.body.append(host);
   const onOpen = vi.fn();
@@ -67,18 +71,56 @@ it("shows a small reminder and lists what waits only when asked", async () => {
   expect(host.querySelector('[role="status"]')).not.toBeNull();
 });
 
-it("minimizes the reminder to the Kruit button and brings it back", async () => {
-  const { host } = await render([group(KRUIT), group("Designer", { attention: "approval" })]);
+it("opens a single wait straight from the reminder or the Kruit button", async () => {
+  const { host, onOpen } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+  ]);
+  await act(async () => find(host, "1 items").click());
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
   await act(async () => find(host, "Minimize").click());
   expect(host.querySelector('[role="status"]')).toBeNull();
   expect(find(host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(host, "Kruit").click());
-  expect(host.querySelector('[role="status"]')).not.toBeNull();
+  expect(onOpen).toHaveBeenCalledTimes(2);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
 });
 
-it("sits beside the sidebar", async () => {
-  const { host } = await render([group(KRUIT)], { start: 260 });
-  expect((host.firstElementChild as HTMLElement).style.insetInlineStart).toBe("calc(260px + 1rem)");
+it("opens the list in one click from the Kruit button when several wait", async () => {
+  const { host } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  await act(async () => find(host, "Minimize").click());
+  await act(async () => find(host, "Kruit").click());
+  expect(host.textContent).toContain("Needs approval");
+  expect(host.textContent).toContain("Open role");
+});
+
+it("floats bottom right and remembers where it was dragged", async () => {
+  localStorage.clear();
+  const { host } = await render([group(KRUIT)]);
+  const dock = host.firstElementChild as HTMLElement;
+  expect(dock.style.right).toBe("16px");
+  expect(dock.style.bottom).toBe("16px");
+  const logo = find(host, "Kruit");
+  const fire = (type: string, x: number, y: number, target: EventTarget = window) =>
+    act(async () => {
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+    });
+  Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  await fire("pointerdown", 900, 700, logo);
+  await fire("pointermove", 700, 500);
+  await fire("pointerup", 700, 500);
+  expect(JSON.parse(localStorage.getItem("kruit-dock-position")!)).toMatchObject({
+    right: expect.any(Number),
+    bottom: expect.any(Number),
+  });
+  expect(dock.style.right).not.toBe("16px");
+  localStorage.clear();
 });
 
 it("in a conversation starts minimized and shows only waits from other conversations", async () => {
@@ -93,10 +135,31 @@ it("in a conversation starts minimized and shows only waits from other conversat
     { groupId: "Designer", chatting: true },
   );
   expect(other.host.querySelector('[role="status"]')).toBeNull();
-  expect(other.host.firstElementChild?.className).toContain("bottom-24");
   expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
   await act(async () => find(other.host, "Kruit").click());
-  expect(other.host.querySelector('[role="status"]')?.textContent).toContain(
-    "1 items need your attention",
-  );
+  expect(other.onOpen).toHaveBeenCalledWith("Open role");
+});
+
+it("pops a top-right toast when something newly waits, not for what already waited", async () => {
+  toastMock.mockClear();
+  host = document.createElement("div");
+  document.body.append(host);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const onOpen = vi.fn();
+  const root = createRoot(host);
+  const show = (groups: Group[]) =>
+    act(async () => root.render(<KruitDock groups={groups} onOpen={onOpen} />));
+  await show([group(KRUIT), group("Designer", { attention: "approval" })]);
+  expect(toastMock).not.toHaveBeenCalled();
+  await show([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  expect(toastMock).toHaveBeenCalledTimes(1);
+  const [title, options] = toastMock.mock.calls[0]!;
+  expect(title).toBe("Open role");
+  expect(options.description).toBe("Needs your response");
+  options.action.onClick();
+  expect(onOpen).toHaveBeenCalledWith("Open role");
 });

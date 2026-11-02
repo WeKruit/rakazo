@@ -58,12 +58,10 @@ import { getLogger } from "@rakazo/logging";
 
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
-import { inlineProfilePhotos } from "./profile-photo.js";
-import type { PeopleSearchRow } from "./recruiting-profiles.js";
 import {
   isPeopleSearchEndpoint,
-  keepSearchHistory,
   peopleFromSearch,
+  prepareRecruitingProfileRows,
 } from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
@@ -573,6 +571,7 @@ export async function saveNativeRecruitingCandidateResults(
       );
     phase = "serializeArtifactPut";
     phaseStarted = performance.now();
+    const profileRows = prepareRecruitingProfileRows(observation.rows);
     const outputArtifact = await uploadResearchReceipt(
       deps,
       context,
@@ -591,13 +590,15 @@ export async function saveNativeRecruitingCandidateResults(
       input,
       {
         sourceEffectId: source.effect.id,
-        rows: observation.rows,
+        rows: profileRows,
         outputId: observation.outputId,
         outputArtifact,
       },
     );
     succeeded = true;
-    return await withCandidatePageSummary(deps.prisma, result, observation.rows);
+    return withoutProfileMetadata(
+      await withCandidatePageSummary(deps.prisma, result, observation.rows),
+    );
   } finally {
     const finished = performance.now();
     if (phase !== "validation") wallMs[phase] = finished - phaseStarted;
@@ -803,6 +804,22 @@ const PEOPLE_SEARCH_PAGE_LIMIT = 500;
 /** Idempotency prefix of the save the server makes the moment one people search returns. */
 export const PEOPLE_SEARCH_AUTOSAVE_KEY = "people-search-autosave:";
 
+function withoutProfileMetadata(result: unknown) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    !("candidateRows" in result) ||
+    !Array.isArray(result.candidateRows)
+  )
+    return result;
+  return {
+    ...result,
+    candidateRows: result.candidateRows.map((row: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith("_profile"))),
+    ),
+  };
+}
+
 type SavedSearchRow = { candidateKey: string; alreadyInPool: boolean } & Record<string, unknown>;
 
 function savedRows(result: unknown): SavedSearchRow[] {
@@ -842,7 +859,8 @@ export async function saveRecruitingPeopleSearch(
   )
     throw new IsolationError();
   const sources: Array<{ effectId: string; toolName: string; host: string }> = [];
-  const rows: Array<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }> = [];
+  const rows: Array<{ rowIndex: number; sourceEffectId: string; row: Record<string, unknown> }> =
+    [];
   const seen = new Set<string>();
   let truncated = false;
   const saves = onlyEffectId
@@ -912,13 +930,15 @@ export async function saveRecruitingPeopleSearch(
       !(await completeExternalEffect(deps.prisma, trusted.effectId, "executing", result as never))
     )
       throw new IsolationError();
-    return result;
+    return withoutProfileMetadata(result);
   }
   if (!rows.length)
     throw new RecruitingPeopleSearchError(
       "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
     );
-  await inlineProfilePhotos(rows.map((entry) => entry.row));
+  const normalized = prepareRecruitingProfileRows(rows.map((entry) => entry.row));
+  for (const [index, row] of normalized.entries())
+    rows[index]!.row = row as Record<string, unknown>;
   const captured = { sources, rows, truncated };
   const bytes = Buffer.from(
     stableJsonValue(recruitingPeopleSearchReceipt(input, captured)),
@@ -944,28 +964,14 @@ export async function saveRecruitingPeopleSearch(
       },
     },
   );
-  // Results reads education and work history from the saved profile, since a later grading
-  // result becomes the person's newest row and does not repeat them. It runs beside the reply
-  // and never fails the save.
-  const searchedAt = new Map(calls.map((call) => [call.effectId, call.createdAt]));
-  void keepSearchHistory(
-    deps.prisma,
-    trusted.actor,
-    trusted.runId,
-    rows.map((entry) => ({
-      row: entry.row as PeopleSearchRow,
-      effectId: entry.sourceEffectId,
-      createdAt: searchedAt.get(entry.sourceEffectId) ?? new Date(),
-    })),
-  ).catch((error) => getLogger().warn("recruiting.profiles.keep_failed", { error: String(error) }));
-  if (!reused.size) return saved;
+  if (!reused.size) return withoutProfileMetadata(saved);
   const fresh = savedRows(saved).filter((row) => !reused.has(row.candidateKey));
   const candidateRows = [...reused.values(), ...fresh];
-  return {
+  return withoutProfileMetadata({
     ...(saved as Record<string, unknown>),
     newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
     candidateRows,
-  };
+  });
 }
 
 export async function completeRecruitingResearchCall(

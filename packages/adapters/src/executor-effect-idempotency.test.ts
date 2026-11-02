@@ -260,10 +260,22 @@ function fixture(
       async ({
         where,
       }: {
-        where?: { id?: string; spaceId?: string; runId?: string; status?: string; kind?: string };
+        where?: {
+          id?: string;
+          spaceId?: string;
+          runId?: string;
+          status?: string | { in: string[] };
+          kind?: string;
+        };
       } = {}) =>
         effects.filter((effect) => {
-          if (where?.status && effect.status !== where.status) return false;
+          if (
+            where?.status &&
+            !(typeof where.status === "string"
+              ? effect.status === where.status
+              : where.status.in.includes(effect.status))
+          )
+            return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.spaceId && effect.spaceId !== where.spaceId) return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
@@ -523,6 +535,95 @@ function fixture(
   };
 }
 
+describe("asynchronous mailbox receipt projection", () => {
+  it.each([undefined, {}, { providerTrace: "retained" }])(
+    "publishes canonical mail with private timing and unchanged provider metadata %j without waiting for the display queue",
+    async (providerMeta) => {
+      const f = fixture("mail-receipt-projection");
+      const tool = {
+        name: "mcp__mail__get_email",
+        description: "Read email",
+        readOnly: true,
+        inputSchema: { type: "object" },
+        route: {
+          connectorId: "mcp",
+          resourceId: "mail",
+          resourceRevision: 1,
+          toolName: "get_email",
+        },
+      };
+      f.connector.discoverTools.mockResolvedValue([tool]);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
+      ]);
+      const pending: Array<() => void> = [];
+      let dispatchedAt: string | undefined;
+      const providerResult = {
+        structuredContent: { id: "saved-email" },
+        ...(providerMeta ? { _meta: providerMeta } : {}),
+      };
+      f.connector.execute.mockImplementation(async function* () {
+        dispatchedAt = new Date().toISOString();
+        yield {
+          type: "result" as const,
+          data: providerResult,
+        };
+      });
+      const enqueue = vi.fn((job: { name: string; payload: { effectId?: string } }) => {
+        if (job.name !== "recruiting_inbox.project") return Promise.resolve();
+        expect(f.effects.find((effect) => effect.id === job.payload.effectId)?.status).toBe(
+          "completed",
+        );
+        return new Promise<void>((resolve) => pending.push(resolve));
+      });
+      f.executorDeps.jobs.enqueue = enqueue as never;
+      f.setCalls([
+        {
+          name: tool.name,
+          args: { id: "saved-email" },
+          executionId: "read-email",
+        },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(enqueue).toHaveBeenCalledWith({
+        name: "recruiting_inbox.project",
+        payload: { effectId: f.effects[0]!.id },
+        replaceKey: `recruiting_inbox.project:${f.effects[0]!.id}`,
+        keepExisting: true,
+      });
+      const receipt = f.effects[0]!.result;
+      expect(receipt).toMatchObject({
+        _meta: {
+          "rakazo/recruitingInbox": { dispatchStartedAt: expect.any(String) },
+        },
+      });
+      const clock = (
+        receipt as {
+          _meta: { "rakazo/recruitingInbox": { dispatchStartedAt: string } };
+        }
+      )._meta["rakazo/recruitingInbox"].dispatchStartedAt;
+      expect(Date.parse(clock)).toBeLessThanOrEqual(Date.parse(dispatchedAt!));
+      expect(f.results[0]).toEqual(providerResult);
+      f.setCalls([
+        {
+          name: tool.name,
+          args: { id: "saved-email" },
+          executionId: "replayed-email",
+        },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(
+        enqueue.mock.calls.filter(([job]) => job.name === "recruiting_inbox.project"),
+      ).toHaveLength(2);
+      expect(f.effects[0]!.result).toEqual(receipt);
+      expect(f.results[1]).toEqual(providerResult);
+      for (const resolve of pending) resolve();
+    },
+  );
+});
+
 describe("native Cal.com booking approvals", () => {
   it.each(
     (["direct", "catalog"] as const).flatMap((mode) =>
@@ -633,6 +734,7 @@ describe("native Cal.com booking approvals", () => {
         expect.anything(),
       );
       expect(f.effects[0]).toMatchObject({ status: "completed", request });
+      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
       f.setCalls([call(original, "duplicate")]);
       await f.run();
       expect(f.connector.execute).toHaveBeenCalledOnce();
@@ -5687,6 +5789,57 @@ describe("native recruiting assessment effect delivery", () => {
       "agent.tool.called recruiting_role",
       "agent.tool.completed recruiting_role",
     ]);
+  });
+
+  it("reads a JD attached in Kruit's conversation once, before the model's first step", async () => {
+    const f = fixture("kruit-attached-jd");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    Object.assign(f.thread, { groupId: "recruiting-global-abc" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({
+          id: "recruiting-global-abc",
+          name: "Kruit",
+          members: [],
+        })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "kruit-attached-jd",
+        blocks: [
+          { kind: "text", text: "New role, let's find people" },
+          {
+            kind: "file",
+            artifactId: "jd-file",
+            name: "jd.docx",
+            mimeType: "application/msword",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Overseas Sales Manager. Grow the US market.",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Overseas Sales Manager. Grow the US market.");
+    expect(prompt).toContain("never read it again");
+    expect(prompt).not.toContain("read it and the intake skill");
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ artifactId: "jd-file", limit: 16_000 }),
+    );
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {

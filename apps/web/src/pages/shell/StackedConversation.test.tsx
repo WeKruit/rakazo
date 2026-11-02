@@ -87,3 +87,41 @@ it("stacks the waiting conversation, answers its card there and goes back", asyn
   await act(async () => back.click());
   expect(onBack).toHaveBeenCalled();
 });
+
+it("shows the answer being worked on and clears a failed refresh on the next good one", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.useFakeTimers();
+  api.get
+    .mockResolvedValueOnce(snapshot)
+    .mockResolvedValueOnce(snapshot)
+    .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  api.answer.mockResolvedValue({ ok: true });
+  host = document.createElement("div");
+  document.body.append(host);
+  await act(async () =>
+    createRoot(host!).render(
+      <StackedConversation
+        groupId="role"
+        title="Designer"
+        bots={[]}
+        onBack={vi.fn()}
+        onOpenFull={vi.fn()}
+      />,
+    ),
+  );
+  expect(host.textContent).not.toContain("Thinking");
+  // The answer shows as taken at once, before the run's next refresh.
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-message="card"]')!.click());
+  expect(host.textContent).toContain("Thinking");
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Could not reach the server");
+  api.get.mockResolvedValue({
+    ...snapshot,
+    run: { id: "run", status: "running" },
+    activeRuns: [{ id: "run", status: "running" }],
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).toContain("Thinking");
+  vi.useRealTimers();
+});

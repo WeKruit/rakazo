@@ -124,31 +124,47 @@ async function withBudget<T>(
   ]).catch(() => undefined);
 }
 
-async function readRole(
+/** A role's saved numbers, sent before its slower sources (CRM, campaign, calendar) answer. */
+function savedRole(
+  group: OverviewGroup,
+  roleId: string,
+  list: { total: number; dates: (string | null)[] },
+): RecruitingOverviewRole {
+  return {
+    groupId: group.id,
+    roleId,
+    shortlisted: list.total,
+    shortlistedDates: list.dates,
+    replied: null,
+    contacted: null,
+    interested: null,
+    interestedPartial: false,
+    incomplete: true,
+    bookings: [],
+    bookingUnknown: true,
+  };
+}
+
+async function sourceRole(
+  base: RecruitingOverviewRole,
   group: OverviewGroup,
   reads: OverviewReads,
   signal: AbortSignal,
   now: number,
   sourceMs: number,
   external: Limit,
-): Promise<RecruitingOverviewRole | null> {
-  const roleId = await reads.roleId(group, signal);
-  if (!roleId) return null;
-  const [list, candidates, campaign, calendar] = await Promise.all([
-    reads.shortlist(roleId, signal),
+): Promise<RecruitingOverviewRole> {
+  const [candidates, campaign, calendar] = await Promise.all([
     optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
     optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
     optional(external, (budget) => reads.calendar(group, budget), signal, sourceMs),
   ]);
   const calendarRead =
-    calendar?.roleId === roleId && ["ready", "empty"].includes(calendar.status)
+    calendar?.roleId === base.roleId && ["ready", "empty"].includes(calendar.status)
       ? calendar
       : undefined;
   return {
-    groupId: group.id,
-    roleId,
-    shortlisted: list.total,
-    shortlistedDates: list.dates,
+    ...base,
     replied: crmReplied(candidates ?? null),
     ...campaignStages(campaign ?? null),
     incomplete: !candidates || !campaign,
@@ -177,17 +193,30 @@ export async function* streamRecruitingOverview(
     ready.push(event);
     wake?.();
   };
+  // Saved numbers (database only) go out for every role first; each role's CRM, campaign and
+  // calendar read follows in the background and replaces that role's numbers when it answers.
+  const sources: Promise<void>[] = [];
   const run = mapWithConcurrency(groups, OVERVIEW_CONCURRENCY, async (group) => {
     try {
-      const role = await readRole(group, reads, signal, now, sourceMs, external);
-      if (role) push({ kind: "role", role });
+      const roleId = await reads.roleId(group, signal);
+      if (!roleId) return;
+      const base = savedRole(group, roleId, await reads.shortlist(roleId, signal));
+      push({ kind: "role", role: base });
+      sources.push(
+        sourceRole(base, group, reads, signal, now, sourceMs, external).then(
+          (role) => push({ kind: "role", role }),
+          () => undefined,
+        ),
+      );
     } catch {
       if (!signal.aborted) push({ kind: "failed", groupId: group.id });
     }
-  }).finally(() => {
-    finished = true;
-    wake?.();
-  });
+  })
+    .then(() => Promise.all(sources))
+    .finally(() => {
+      finished = true;
+      wake?.();
+    });
   for (;;) {
     while (ready.length) yield ready.shift()!;
     if (finished) break;

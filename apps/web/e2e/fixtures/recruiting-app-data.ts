@@ -375,10 +375,35 @@ export async function mockRecruitingApp(
     emptyCalendar?: boolean;
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
+    sequenceDraft?: boolean;
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
   } = {},
 ) {
+  const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
+    ? {
+        ...snapshot,
+        cursor: 1,
+        messages: [
+          {
+            id: "fixture-draft-message",
+            threadId: snapshot.threadId,
+            seq: 1,
+            role: "user",
+            createdAt: checkedAt,
+            blocks: [
+              {
+                kind: "file",
+                artifactId: "fixture-sequence-draft",
+                name: "sequence.json",
+                mimeType: "application/json",
+                size: 1,
+              },
+            ],
+          },
+        ],
+      }
+    : snapshot;
   const plans: RecruitingSchedulingPlan[] = [];
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
@@ -520,6 +545,17 @@ export async function mockRecruitingApp(
     let method = url.pathname.slice(5);
     let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
+    const requestedSnapshot =
+      options.sequenceDraft && (input.botId === bot.id || input.threadId === bot.threadId)
+        ? {
+            threadId: bot.threadId!,
+            botId: bot.id,
+            cursor: 0,
+            messages: [],
+            olderCursor: null,
+            run: null,
+          }
+        : initialSnapshot;
     if (method === "recruiting/overview") {
       const role = accountRolesData()[0]!;
       return route.fulfill({
@@ -565,8 +601,8 @@ export async function mockRecruitingApp(
     }
     let value: unknown;
     if (method === "recruiting/globalInbox" || method === "recruiting/globalInboxSummary") {
-      const roles = accountRolesData().slice(0, 1);
-      const rows = roles.flatMap((role) => {
+      const roles = accountRolesData();
+      const rows = roles.slice(0, 1).flatMap((role) => {
         const item = fixtureAccountItem(role);
         return (item.correspondence?.emails ?? []).map((email) => ({
           roleId: role.id,
@@ -668,12 +704,42 @@ export async function mockRecruitingApp(
     } else if (method === "recruiting/accountView") {
       const roles = accountRolesData().slice(0, 1);
       const selected = roles.filter((role) => !input.roleId || input.roleId === role.id);
-      value = {
-        roles,
-        items: selected.map(fixtureAccountItem),
-        nextCursor: null,
-      };
-    } else if (method === "bootstrap") value = bootstrap;
+      const items = selected.map(fixtureAccountItem);
+      if (input.view === "sequence" && input.sequenceSummary) {
+        const rows = items.flatMap((item) =>
+          (item.campaigns ?? (item.campaign ? [item.campaign] : []))
+            .filter(
+              (campaign) =>
+                campaign.campaign &&
+                (!input.sequenceQuery ||
+                  campaign.campaign.name
+                    .toLowerCase()
+                    .includes(String(input.sequenceQuery).toLowerCase())) &&
+                (input.sequenceStatus === undefined ||
+                  campaign.campaign.status === input.sequenceStatus),
+            )
+            .map((campaign) => ({ roleId: item.roleId, campaigns: [campaign] })),
+        );
+        const offset = Number(input.offset ?? input.cursor ?? 0);
+        const limit = Number(input.limit ?? 25);
+        value = {
+          roles,
+          items: rows.slice(offset, offset + limit),
+          total: rows.length,
+          nextCursor: offset + limit < rows.length ? String(offset + limit) : null,
+          sequenceSummary: {
+            contacted: null,
+            active: null,
+            opened: 4,
+            clicked: null,
+            replied: 2,
+            interested: null,
+            sent: 6,
+            partial: true,
+          },
+        };
+      } else value = { roles, items, nextCursor: null };
+    } else if (method === "bootstrap") value = { ...bootstrap, thread: initialSnapshot };
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };
     else if (method === "links/companySites")
@@ -692,11 +758,34 @@ export async function mockRecruitingApp(
           botSections: [],
         },
       };
-    else if (method === "threads/get") value = snapshot;
-    else if (method === "threads/head") value = { threadId: snapshot.threadId, cursor: 0 };
+    else if (method === "threads/get") value = requestedSnapshot;
+    else if (method === "threads/head")
+      value = { threadId: requestedSnapshot.threadId, cursor: requestedSnapshot.cursor };
     else if (method === "threads/messages")
-      value = { threadId: snapshot.threadId, messages: [], olderCursor: null };
+      value = {
+        threadId: snapshot.threadId,
+        messages: initialSnapshot.messages,
+        olderCursor: null,
+      };
     else if (method === "threads/markRead") value = { ok: true };
+    else if (method === "artifacts/get" && options.sequenceDraft)
+      value = {
+        contentBase64: Buffer.from(
+          JSON.stringify({
+            kind: "wekruit.outreach-sequence",
+            version: 1,
+            roleTitle: "Platform Engineer",
+            recipients: [
+              {
+                name: "Avery",
+                email: "avery@example.test",
+                linkedinUrl: null,
+                steps: [{ dayOffset: 0, subject: "A role", body: "Original saved draft" }],
+              },
+            ],
+          }),
+        ).toString("base64"),
+      };
     else if (
       [
         "agentSkills/list",
@@ -817,10 +906,23 @@ export async function mockRecruitingApp(
         actorName: entry.actorName,
         roleTitle: entry.roleTitle,
       };
-    } else if (method === "recruiting/roleCampaign")
+    } else if (method === "recruiting/sequenceDraft")
+      value = {
+        roleId: appRoleId,
+        roleTitle: "Staff Platform Engineer",
+        mailboxes: [],
+        campaigns: [],
+        campaign: null,
+      };
+    else if (method === "recruiting/roleCampaign")
       value =
         options.multipleCampaigns && !input.campaignId
-          ? { status: "unavailable", campaign: null, selectionRequired: true }
+          ? {
+              status: "unavailable",
+              serverId: "fixture-campaign-source",
+              campaign: null,
+              selectionRequired: true,
+            }
           : {
               status: "ready",
               serverId: "fixture-campaign-source",

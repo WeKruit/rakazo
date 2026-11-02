@@ -1,16 +1,16 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Bot, Group, RecruitingRoleCampaign } from "@rakazo/contracts";
-import { hideVendorNames } from "@rakazo/core";
+import type { Bot, Group } from "@rakazo/contracts";
 import { Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ListPager } from "../../components/ListPager";
 import { retryTransientRead } from "../../lib/read-retry";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
 import { AccountInbox } from "./AccountInbox";
+import { AccountSequences } from "./AccountSequences";
 import { AllContacts } from "./AllContacts";
 import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
@@ -20,15 +20,9 @@ import { formatDate, TabLoading } from "./shared";
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
 const MAIL_PER_PAGE = 30;
-/** One campaign's recipient pages read so far, and the provider cursor after each. */
-type LeadPages = {
-  pages: RecruitingRoleCampaign["leads"][];
-  next: (string | null)[];
-  page: number;
-};
 // The all-roles pages read each role on its own and show it when it arrives, so one role with a
 // large CRM never holds back the others. The roles on one page read together.
-const PER_ROLE_VIEWS = new Set(["sequence", "inbox", "interview"]);
+const PER_ROLE_VIEWS = new Set(["inbox", "interview"]);
 
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 
@@ -56,6 +50,7 @@ export function AccountRecruitingView({
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
+  const location = useLocation();
   const [params, setParams] = useSearchParams();
   const requested = params.get("view");
   const view = isAccountRecruitingView(requested) ? requested : "shortlist";
@@ -63,9 +58,28 @@ export function AccountRecruitingView({
   const scopedGroupId = params.has("role") ? undefined : groupId;
   // Every role's people in one list, filtered and paged by the server.
   const globalInbox = view === "inbox" && !renderCorrespondence;
-  const [mailQuery, setMailQuery] = useState("");
-  const [mailSearch, setMailSearch] = useState("");
+  const mailAnchor =
+    globalInbox && role !== "all" && params.get("mailThread") && params.get("mailMessage")
+      ? { roleId: role, key: params.get("mailThread")!, emailId: params.get("mailMessage")! }
+      : undefined;
+  function clearMailAnchor() {
+    if (!params.has("mailThread")) return;
+    const next = new URLSearchParams(params);
+    next.delete("mailThread");
+    next.delete("mailMessage");
+    setParams(next);
+  }
+  const urlQuery = params.get("query") ?? "";
+  const [mailQuery, setMailQuery] = useState(urlQuery);
+  const [mailSearch, setMailSearch] = useState(urlQuery.trim());
+  useEffect(() => setMailQuery(urlQuery), [urlQuery]);
   const [mailUnread, setMailUnread] = useState(false);
+  useEffect(() => {
+    if (!location.state?.recruitingSearch) return;
+    setMailQuery(urlQuery);
+    setMailSearch(urlQuery.trim());
+    setMailUnread(false);
+  }, [location.key]);
   useEffect(() => {
     const timer = setTimeout(() => setMailSearch(mailQuery.trim()), 300);
     return () => clearTimeout(timer);
@@ -79,10 +93,6 @@ export function AccountRecruitingView({
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState<string>();
-  const [leadPages, setLeadPages] = useState<{
-    key: string;
-    byCampaign: Record<string, LeadPages>;
-  }>();
   const [taskError, setTaskError] = useState(false);
   const [reload, setReload] = useState(0);
   const pageKey = JSON.stringify([
@@ -90,10 +100,11 @@ export function AccountRecruitingView({
     view,
     role,
     scopedGroupId,
-    globalInbox ? [mailSearch, mailUnread] : null,
+    globalInbox ? [mailSearch, mailUnread, mailAnchor] : null,
   ]);
   // Mail and role lists page by number; routines keep their forward cursor.
-  const numbered = globalInbox || (view !== "routines" && role === "all" && !scopedGroupId);
+  const numbered =
+    (globalInbox && !mailAnchor) || (view !== "routines" && role === "all" && !scopedGroupId);
   const [pagination, setPagination] = useState<{ key: string; cursor?: string; page?: number }>();
   const cursor = pagination?.key === pageKey ? pagination.cursor : undefined;
   const pageIndex = pagination?.key === pageKey ? (pagination.page ?? 0) : 0;
@@ -105,7 +116,7 @@ export function AccountRecruitingView({
   const [pendingRoles, setPendingRoles] = useState<{ key: string; ids: string[] }>();
   const pending = pendingRoles?.key === readKey ? pendingRoles.ids : [];
   useEffect(() => {
-    if (view === "routines" || allContacts) return;
+    if (view === "routines" || view === "sequence" || allContacts) return;
     let cancelled = false;
     setLoading(true);
     setFailed(false);
@@ -119,10 +130,14 @@ export function AccountRecruitingView({
           rpc.recruiting.globalInbox(
             {
               spaceId,
-              ...(role !== "all" ? { roleId: role } : {}),
-              ...(mailSearch ? { query: mailSearch } : {}),
-              unreadOnly: mailUnread,
-              ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+              ...(mailAnchor
+                ? { thread: mailAnchor }
+                : {
+                    ...(role !== "all" ? { roleId: role } : {}),
+                    ...(mailSearch ? { query: mailSearch } : {}),
+                    unreadOnly: mailUnread,
+                    ...(pageIndex ? { offset: pageIndex * MAIL_PER_PAGE } : {}),
+                  }),
               limit: MAIL_PER_PAGE,
             },
             { signal: abort.signal },
@@ -193,7 +208,6 @@ export function AccountRecruitingView({
             view: "roles",
             ...(pageIndex ? { offset: pageIndex * ROLES_PER_PAGE } : {}),
             limit: ROLES_PER_PAGE,
-            ...(view === "sequence" ? { briefedOnly: true } : {}),
           },
           { signal: abort.signal },
         );
@@ -353,49 +367,6 @@ export function AccountRecruitingView({
       setLoadingMore(undefined);
     }
   };
-  const leadKey = (roleId: string, campaign: RecruitingRoleCampaign) =>
-    JSON.stringify([roleId, campaign.serverId, campaign.campaign?.id]);
-  const leadPagesOf = (roleId: string, campaign: RecruitingRoleCampaign): LeadPages =>
-    (leadPages?.key === readKey ? leadPages.byCampaign[leadKey(roleId, campaign)] : undefined) ?? {
-      pages: [campaign.leads],
-      next: [campaign.nextLeadCursor ?? null],
-      page: 0,
-    };
-  // Recipients page by the provider's cursor: pages already read are kept, a new one is read once.
-  const openLeadPage = async (roleId: string, campaign: RecruitingRoleCampaign, index: number) => {
-    const current = leadPagesOf(roleId, campaign);
-    const key = leadKey(roleId, campaign);
-    const save = (value: LeadPages) =>
-      setLeadPages((saved) => ({
-        key: readKey,
-        byCampaign: { ...(saved?.key === readKey ? saved.byCampaign : {}), [key]: value },
-      }));
-    if (index < current.pages.length) return save({ ...current, page: index });
-    const cursor = current.next[index - 1];
-    if (!page || !campaign.campaign || !campaign.serverId || !cursor || loadingMore) return;
-    setLoadingMore(roleId);
-    try {
-      const next = await rpc.recruiting.accountView({
-        view: "sequence",
-        roleId,
-        campaignId: campaign.campaign.id,
-        campaignServerId: campaign.serverId,
-        campaignLeadCursor: cursor,
-        limit: 20,
-      });
-      const update = next.items[0]?.campaigns?.[0];
-      if (update)
-        save({
-          pages: [...current.pages, update.leads],
-          next: [...current.next, update.nextLeadCursor ?? null],
-          page: index,
-        });
-    } catch {
-      setFailed(true);
-    } finally {
-      setLoadingMore(undefined);
-    }
-  };
   const calendarRows = new Map<
     string,
     {
@@ -468,6 +439,15 @@ export function AccountRecruitingView({
     next.set("view", nextView);
     return { search: `?${next}` };
   };
+  if (view === "sequence")
+    return (
+      <AccountSequences
+        accountKey={accountKey}
+        refreshSignal={refreshSignal}
+        initialQuery={urlQuery}
+        onOpenNavigation={onOpenNavigation}
+      />
+    );
   const Page = renderCorrespondence ? "section" : "main";
   return (
     <Page
@@ -497,6 +477,8 @@ export function AccountRecruitingView({
             onChange={(event) => {
               const next = new URLSearchParams(params);
               next.set("role", event.target.value);
+              next.delete("mailThread");
+              next.delete("mailMessage");
               setParams(next);
             }}
           >
@@ -637,7 +619,12 @@ export function AccountRecruitingView({
       {view === "routines" ? (
         <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} />
       ) : allContacts ? (
-        <AllContacts spaceId={spaceId} groups={groups} refreshSignal={refreshSignal} />
+        <AllContacts
+          accountKey={accountKey}
+          spaceId={spaceId}
+          groups={groups}
+          refreshSignal={refreshSignal}
+        />
       ) : (
         <>
           {loading ? <TabLoading /> : null}
@@ -749,7 +736,10 @@ export function AccountRecruitingView({
             {view === "inbox" && !renderCorrespondence ? (
               <>
                 {indexedMail?.key === readKey ? (
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div
+                    data-dock-avoid
+                    className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
+                  >
                     <span>
                       <Trans>Saved mail · partial source coverage</Trans>
                     </span>
@@ -765,11 +755,12 @@ export function AccountRecruitingView({
                 !indexedMail.data.items.length &&
                 indexedMail.data.coverage.importsComplete &&
                 indexedMail.data.coverage.crmComplete ? (
-                  <p className="mb-3 text-sm text-muted-foreground">
+                  <p data-dock-avoid className="mb-3 text-sm text-muted-foreground">
                     <Trans>No indexed mail matches this view.</Trans>
                   </p>
                 ) : null}
                 <AccountInbox
+                  accountKey={accountKey}
                   key={pageKey}
                   roles={page?.roles ?? []}
                   items={page?.items ?? []}
@@ -789,9 +780,17 @@ export function AccountRecruitingView({
                       : undefined
                   }
                   serverReadKey={readKey}
+                  requestedThread={params.get("mailThread")}
+                  requestedEmail={params.get("mailMessage")}
                   query={mailQuery}
-                  onQueryChange={setMailQuery}
-                  onFilterChange={(value) => setMailUnread(value === "unread")}
+                  onQueryChange={(value) => {
+                    setMailQuery(value);
+                    clearMailAnchor();
+                  }}
+                  onFilterChange={(value) => {
+                    setMailUnread(value === "unread");
+                    clearMailAnchor();
+                  }}
                   pending={pending}
                   loadingMore={loadingMore}
                   onRetry={() => setReload((value) => value + 1)}
@@ -909,84 +908,7 @@ export function AccountRecruitingView({
                       </ul>
                     </>
                   ) : null}
-                  {view === "sequence" ? (
-                    <>
-                      {(item.campaigns ?? (item.campaign?.campaign ? [item.campaign] : []))
-                        .length ? (
-                        (item.campaigns ?? [item.campaign!]).map((campaign) => (
-                          <div key={campaign.campaign?.id} className="space-y-2">
-                            {campaign.campaign?.name &&
-                            hideVendorNames(campaign.campaign.name).trim() !==
-                              info?.title.trim() ? (
-                              <h3 className="text-sm font-medium">
-                                {hideVendorNames(campaign.campaign.name)}
-                              </h3>
-                            ) : null}
-                            {campaign.status === "unavailable" ? (
-                              <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                                <Trans>Could not read this campaign.</Trans>
-                              </RetryNotice>
-                            ) : null}
-                            <dl className="flex flex-wrap gap-4 text-sm">
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Sent</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.sent ?? "—"}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Opened</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.opened ?? "—"}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-muted-foreground">
-                                  <Trans>Replied</Trans>
-                                </dt>
-                                <dd>{campaign.stats?.replied ?? "—"}</dd>
-                              </div>
-                            </dl>
-                            {(() => {
-                              const leads = leadPagesOf(item.roleId, campaign);
-                              return (
-                                <>
-                                  <ul className="space-y-2 text-sm">
-                                    {(leads.pages[leads.page] ?? []).map((lead) => (
-                                      <li key={lead.email}>{lead.email}</li>
-                                    ))}
-                                  </ul>
-                                  <ListPager
-                                    page={leads.page}
-                                    pageCount={leads.pages.length + (leads.next.at(-1) ? 1 : 0)}
-                                    onPage={(index) =>
-                                      void openLeadPage(item.roleId, campaign, index)
-                                    }
-                                    disabled={Boolean(loadingMore)}
-                                  />
-                                </>
-                              );
-                            })()}
-                          </div>
-                        ))
-                      ) : item.campaign?.status === "unavailable" ? (
-                        <RetryNotice onRetry={() => setReload((value) => value + 1)}>
-                          <Trans>Could not read this campaign.</Trans>
-                        </RetryNotice>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          <Trans>No campaign yet.</Trans>
-                        </p>
-                      )}
-                      {item.correspondence?.contacts.map((contact) => (
-                        <p key={contact.candidateKey} className="text-sm">
-                          {contact.emails.map((email) => email.address).join(", ")}
-                        </p>
-                      ))}
-                    </>
-                  ) : null}
-                  {(view === "sequence" || view === "interview" || view === "inbox") &&
-                  renderCorrespondence
+                  {(view === "interview" || view === "inbox") && renderCorrespondence
                     ? renderCorrespondence(item)
                     : null}
                   {view === "feedback" && item.feedback?.nextCursor ? (

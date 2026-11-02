@@ -424,6 +424,24 @@ describe("guardRecruitingTurnEnd", () => {
     );
   });
 
+  it("numbers a later page from its place in the whole list", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-11", name: "Person 11" }]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "role-thread",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-11"],
+      heading: "Warehouse manager · 11–11 / 81:",
+      firstNumber: 11,
+    });
+    expect(text).toContain("\n\n11. **Person 11**");
+  });
+
   it("says must-haves no one's row shows once, not under every person", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },

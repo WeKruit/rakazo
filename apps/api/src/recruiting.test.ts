@@ -5202,6 +5202,7 @@ describe("live CRM browser reads", () => {
       expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toMatchObject({
         status: "unavailable",
         selectionRequired: true,
+        serverId: "instantly",
         campaign: null,
         leads: [],
       });
@@ -6031,11 +6032,12 @@ describe("live CRM browser reads", () => {
     await expect(page({ limit: 51 })).rejects.toThrow();
     await expect(page({ cursor: "01" })).rejects.toThrow();
   });
-  it("shares one request's CRM memberships across its reads", async () => {
+  it("shares one request's CRM memberships and role list across its reads", async () => {
     const f = browserFixture();
     const crmMemberships = new Map();
+    const crmRoleLists = new Map();
     const read = () =>
-      api.getRecruitingCrmData({ ...f.deps, crmMemberships }, actor, target, {
+      api.getRecruitingCrmData({ ...f.deps, crmMemberships, crmRoleLists }, actor, target, {
         operation: "candidates",
         serverId: "crm",
         serverRevision: 3,
@@ -6048,6 +6050,9 @@ describe("live CRM browser reads", () => {
     const tools = f.execute.mock.calls.map(([call]) => call.route!.toolName);
     expect(tools.filter((tool) => tool === "list_crm_memberships")).toHaveLength(1);
     expect(tools.filter((tool) => tool === "list_crm_candidates")).toHaveLength(2);
+    expect(tools.filter((tool) => tool === "list_crm_roles")).toHaveLength(1);
+    // Each role still reads its own CRM role record.
+    expect(tools.filter((tool) => tool === "get_crm_role")).toHaveLength(2);
   });
   it("reads every candidate page of a role while checking the role binding once", async () => {
     const f = browserFixture();
@@ -6793,6 +6798,128 @@ describe("live CRM browser reads", () => {
       },
     });
   });
+  it("reads an exact saved role campaign directly without walking remote pages", async () => {
+    const f = browserFixture();
+    const lookup = vi.fn(async ({ where }) =>
+      where.crmCampaignId === campaign.id
+        ? {
+            crmCampaignId: campaign.id,
+            name: campaign.name,
+            status: 2,
+            syncedAt: new Date(timestamp),
+          }
+        : null,
+    );
+    Object.assign(f.mockPrisma, { recruitingCrmCampaign: { findFirst: lookup } });
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "roleCampaigns",
+        ...pinned,
+        crmRoleId: roleId,
+        campaignId: campaign.id,
+      }),
+    ).toMatchObject({ items: [{ id: campaign.id, status: 2 }], offset: 0, nextOffset: null });
+    expect(lookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          mcpServerId: "crm",
+          organizationId: org,
+          crmRoleId: roleId,
+          crmCampaignId: campaign.id,
+          archivedAt: null,
+        },
+      }),
+    );
+    expect(f.execute.mock.calls.map(([call]) => call.route!.toolName)).toEqual([
+      "list_crm_memberships",
+    ]);
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "roleCampaigns",
+        ...pinned,
+        crmRoleId: roleId,
+        campaignId: "not-bound",
+      }),
+    ).toMatchObject({ items: [], nextOffset: null });
+  });
+
+  it("joins only the current saved lead page's owned source and organization contacts", async () => {
+    const f = browserFixture();
+    f.assignment.allowedTools.push("list_crm_campaigns");
+    const contacts = vi.fn(async () => [
+      {
+        crmCandidateId: candidateId,
+        name: "Saved name",
+        email: "saved@example.test",
+        profile: { profileImageUrl: "https://images.example.test/saved.png" },
+      },
+    ]);
+    Object.assign(f.mockPrisma, { recruitingCrmContact: { findMany: contacts } });
+    f.results.list_crm_campaigns = {
+      organization_id: org,
+      campaign_id: campaign.id,
+      pagination: "offset",
+      offset: 0,
+      next_offset: null,
+      leads: [
+        {
+          id: "saved-lead",
+          campaign_id: campaign.id,
+          candidate_id: candidateId,
+          status: 1,
+          interest_status: null,
+          email_open_count: 2,
+          email_reply_count: 1,
+          timestamp_last_contact: timestamp,
+          timestamp_last_reply: null,
+          synced_at: timestamp,
+        },
+      ],
+    };
+    expect(
+      await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "campaignLeads",
+        ...pinned,
+        campaignId: campaign.id,
+      }),
+    ).toMatchObject({
+      items: [
+        {
+          person: { name: "Saved name", email: "saved@example.test" },
+          openCount: 2,
+          replyCount: 1,
+        },
+      ],
+    });
+    expect(contacts).toHaveBeenCalledOnce();
+    expect(contacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          mcpServerId: "crm",
+          organizationId: org,
+          archivedAt: null,
+          crmCandidateId: { in: [candidateId] },
+        },
+      }),
+    );
+    f.results.list_crm_campaigns = {
+      ...(f.results.list_crm_campaigns as object),
+      organization_id: clientId,
+    };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "campaignLeads",
+        ...pinned,
+        campaignId: campaign.id,
+      }),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(contacts).toHaveBeenCalledOnce();
+  });
+
   it("reads the exact role's stored campaign associations and raw status without sequence steps", async () => {
     const f = browserFixture();
     f.results.get_crm_role = {
@@ -7203,6 +7330,8 @@ describe("role campaign read", () => {
       ["native_instantly_get_campaign_analytics", { campaign_id: CAMPAIGN }],
     ]);
     expect(output).toEqual({
+      sourceRevision: 4,
+      campaignObservedAt: expect.any(String),
       status: "ready",
       stats: { sent: null, opened: null, replied: null },
       leadsComplete: true,
