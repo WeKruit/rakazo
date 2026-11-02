@@ -42,6 +42,7 @@ type Results = {
   moreContacts: boolean;
   moreMail: boolean;
   failed: boolean;
+  pending: number;
 };
 
 /** Search existing owned stores, never fetch providers or copy records into another index. */
@@ -71,32 +72,46 @@ export function RecruitingGlobalSearch({
   }, [open]);
   useEffect(() => {
     if (!open || !spaceId || !needle) return;
-    let cancelled = false;
+    const abort = new AbortController();
     const timer = setTimeout(() => {
-      void Promise.allSettled([
-        rpc.recruiting.contacts.list({ filters: { query: needle }, sort: "name", limit: 8 }),
-        rpc.search.recruitingTargets({ q: needle }),
-        rpc.recruiting.globalInbox({ spaceId, query: needle, limit: 8 }),
-      ]).then(([contacts, targets, mail]) => {
-        if (cancelled) return;
-        setResults({
-          key,
-          contacts: contacts.status === "fulfilled" ? contacts.value.items : [],
-          targets: targets.status === "fulfilled" ? targets.value.items : [],
-          mail: mail.status === "fulfilled" ? mail.value.items : [],
-          moreContacts: contacts.status === "fulfilled" && Boolean(contacts.value.nextCursor),
-          moreMail: mail.status === "fulfilled" && Boolean(mail.value.nextCursor),
-          failed: [contacts, targets, mail].some((result) => result.status === "rejected"),
-        });
-      });
+      let next: Results = {
+        key,
+        contacts: [],
+        targets: [],
+        mail: [],
+        moreContacts: false,
+        moreMail: false,
+        failed: false,
+        pending: 3,
+      };
+      setResults(next);
+      const complete = (change: Partial<Results>) => {
+        if (abort.signal.aborted) return;
+        next = { ...next, ...change, pending: next.pending - 1 };
+        setResults(next);
+      };
+      const failed = () => complete({ failed: true });
+      void rpc.recruiting.contacts
+        .list({ filters: { query: needle }, sort: "name", limit: 8 }, { signal: abort.signal })
+        .then(
+          (contacts) =>
+            complete({ contacts: contacts.items, moreContacts: Boolean(contacts.nextCursor) }),
+          failed,
+        );
+      void rpc.search
+        .recruitingTargets({ q: needle }, { signal: abort.signal })
+        .then((targets) => complete({ targets: targets.items }), failed);
+      void rpc.recruiting
+        .globalInbox({ spaceId, query: needle, limit: 8 }, { signal: abort.signal })
+        .then((mail) => complete({ mail: mail.items, moreMail: Boolean(mail.nextCursor) }), failed);
     }, 300);
     return () => {
-      cancelled = true;
+      abort.abort();
       clearTimeout(timer);
     };
   }, [open, spaceId, needle, key]);
   const current = results?.key === key && needle ? results : undefined;
-  const loading = Boolean(needle && !current);
+  const loading = Boolean(open && spaceId && needle && (!current || current.pending > 0));
   const navigate = (href: string) => {
     onNavigate(href);
     onOpenChange(false);
@@ -145,7 +160,7 @@ export function RecruitingGlobalSearch({
               </Button>
             </div>
           ) : null}
-          {current && !current.failed && count === 0 ? (
+          {current && !loading && !current.failed && count === 0 ? (
             <p role="status" className="px-4 py-5 text-sm text-muted-foreground">
               <Trans>No results</Trans>
             </p>

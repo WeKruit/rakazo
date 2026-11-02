@@ -185,6 +185,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
     resolveTranscriptBot,
     userName,
   } = model;
+  const searchSpaceId = selectedSpaceId() ?? bootstrapMe?.spaceId;
   return (
     <>
       <Suspense fallback={<TabLoading />}>
@@ -515,10 +516,10 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
         )}
         {!showToolActivity && commandPaletteOpen && (
           <RecruitingGlobalSearch
-            key={JSON.stringify([userId, bootstrapMe?.spaceId])}
+            key={JSON.stringify([userId, searchSpaceId])}
             open={commandPaletteOpen}
             onOpenChange={setCommandPaletteOpen}
-            spaceId={bootstrapMe?.spaceId}
+            spaceId={searchSpaceId}
             onNavigate={(href) => {
               setMobileSidebarOpen(false);
               navigate(href, { state: { recruitingSearch: true } });
