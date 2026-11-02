@@ -163,6 +163,7 @@ const RUN_HISTORY_SELECT = {
   updatedAt: true,
   replyToMessageId: true,
   replyQuote: true,
+  clientNonce: true,
   replyTo: { select: { id: true, threadId: true, role: true, botId: true, blocks: true } },
 } as const;
 

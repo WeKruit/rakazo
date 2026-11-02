@@ -6,6 +6,8 @@ import { createRunExecutor } from "./executor.js";
 type Row = {
   id: string;
   spaceId: string;
+  userId: string;
+  sourceMessageId: string | null;
   taskId: string;
   threadId: string;
   botId: string;
@@ -34,6 +36,7 @@ function matches(row: Row, where: Where): boolean {
       return compare(value) === compare(condition);
     const filter = condition as Record<string, unknown>;
     if ("in" in filter && !(filter.in as unknown[]).includes(value)) return false;
+    if ("notIn" in filter && (filter.notIn as unknown[]).includes(value)) return false;
     if ("not" in filter && value === filter.not) return false;
     if ("gte" in filter && !(value !== null && compare(value) >= compare(filter.gte))) return false;
     if ("lt" in filter && !(value !== null && compare(value) < compare(filter.lt))) return false;
@@ -48,6 +51,8 @@ const CLAIMED = "claimed: the run left the queue";
 function lane(seed: Array<Partial<Row> & Pick<Row, "id" | "trigger" | "status">>) {
   const rows: Row[] = seed.map((row, index) => ({
     spaceId: "space-1",
+    userId: "user-1",
+    sourceMessageId: null,
     taskId: `task-${row.id}`,
     threadId: "thread-1",
     botId: "bot-1",
@@ -301,4 +306,55 @@ describe("automation rate cap", () => {
     ]);
     expect(await db.start("later")).toBe(true);
   });
+});
+
+it("keeps a cyclic delegation chain behind its live parent", async () => {
+  const db = lane([
+    {
+      id: "parent",
+      trigger: "tool_background",
+      status: "running",
+      botId: "main",
+      sourceMessageId: "to-main",
+    },
+    {
+      id: "child",
+      trigger: "tool_background",
+      status: "queued",
+      botId: "specialist",
+      sourceMessageId: "to-specialist",
+    },
+  ]);
+  const messages = new Map([
+    [
+      "to-specialist",
+      {
+        role: "bot",
+        botId: "main",
+        runId: "parent",
+        blocks: [{ kind: "handoff", fromBotId: "main", toBotId: "specialist", text: "Work" }],
+      },
+    ],
+    [
+      "to-main",
+      {
+        role: "bot",
+        botId: "specialist",
+        runId: "child",
+        blocks: [{ kind: "handoff", fromBotId: "specialist", toBotId: "main", text: "Work" }],
+      },
+    ],
+  ]);
+  Object.assign(db.prisma, {
+    message: {
+      findFirst: vi.fn(
+        async ({ where }: { where: { id: string } }) => messages.get(where.id) ?? null,
+      ),
+    },
+  });
+  Object.assign(db.prisma.run, {
+    findFirst: vi.fn(async ({ where }: { where: { id: string } }) => db.row(where.id) ?? null),
+  });
+  expect(await db.start("child")).toBe(false);
+  expect(db.status("child")).toBe("queued");
 });
