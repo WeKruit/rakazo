@@ -1,4 +1,6 @@
+import { t } from "@lingui/core/macro";
 import type { ProductEvent } from "@rakazo/contracts";
+import { runFailureError, runRecoveryAction } from "@rakazo/core";
 import { i18n } from "./i18n";
 
 export type BrowserNotificationPermission = "default" | "denied" | "granted";
@@ -64,6 +66,14 @@ export function shouldNotifyBrowser(
   );
 }
 
+/** The same next step the conversation shows, so a failure never reads as a bare "Failed." */
+function failureNextStep(event: Pick<ProductEvent, "type" | "payload">): string {
+  const action = runRecoveryAction(runFailureError(event) ?? "");
+  if (action === "model_connection") return t`Reconnect your model to continue.`;
+  if (action === "computer") return t`The computer could not start. Reset it to continue.`;
+  return t`The reply stopped. Try again.`;
+}
+
 export function browserNotificationMessage(
   event: Pick<ProductEvent, "type" | "payload">,
   botName: string,
@@ -75,7 +85,7 @@ export function browserNotificationMessage(
   if (event.type === "run.failed") {
     return {
       title: i18n._({ id: "{name} failed", message: "{name} failed", values: { name } }),
-      body: i18n._({ id: "Failed.", message: "Failed." }),
+      body: failureNextStep(event),
     };
   }
   if (event.type === "run.cancelled") {

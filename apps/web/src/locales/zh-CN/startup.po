@@ -2104,11 +2104,6 @@ msgstr "发送消息失败"
 msgid "Failed to stop"
 msgstr "停止失败"
 
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
-msgid "Failed."
-msgstr "失败。"
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "失败处理"
@@ -3754,6 +3749,7 @@ msgstr "收件人将关联到 {0}。"
 msgid "Reconnect"
 msgstr "重新连接"
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "Reconnect your model to continue."
 msgstr "请重新连接模型以继续。"
@@ -5148,9 +5144,10 @@ msgstr "正在测试…"
 msgid "The API did not come back. Refresh this page."
 msgstr "API 未恢复。请刷新此页面。"
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The computer could not start. Reset it to continue."
-msgstr ""
+msgstr "电脑没能启动，请重置后继续。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
@@ -5172,6 +5169,7 @@ msgstr "招聘团队已变更，请重新打开岗位。"
 msgid "The recruiting team is not ready yet."
 msgstr "招聘团队尚未准备就绪。"
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The reply stopped. Try again."
 msgstr "回复已中断，请重试。"
@@ -5691,6 +5689,7 @@ msgstr "后台任务进行中…"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Working…"
 msgstr "处理中…"

@@ -2104,11 +2104,6 @@ msgstr "Mesaj gönderilemedi"
 msgid "Failed to stop"
 msgstr "Durdurulamadı"
 
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
-msgid "Failed."
-msgstr "Başarısız oldu."
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "Hata yönetimi"
@@ -3754,6 +3749,7 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "Reconnect your model to continue."
 msgstr ""
@@ -5148,6 +5144,7 @@ msgstr "Test ediliyor…"
 msgid "The API did not come back. Refresh this page."
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The computer could not start. Reset it to continue."
 msgstr ""
@@ -5172,6 +5169,7 @@ msgstr ""
 msgid "The recruiting team is not ready yet."
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The reply stopped. Try again."
 msgstr ""
@@ -5691,6 +5689,7 @@ msgstr "Arka planda çalışıyor…"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Working…"
 msgstr "Çalışıyor…"
