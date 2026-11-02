@@ -364,6 +364,10 @@ msgstr ""
 msgid "Add attachment"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Add Cc"
+msgstr ""
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Add email"
 msgstr ""
@@ -706,6 +710,7 @@ msgstr ""
 msgid "Base URL"
 msgstr "URL Base"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Bcc"
 msgstr ""
@@ -885,6 +890,7 @@ msgstr ""
 msgid "Cards"
 msgstr "Cartões"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Cc"
 msgstr ""
@@ -1307,6 +1313,10 @@ msgstr "Não foi possível criar o grupo"
 msgid "Could not create role"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not discard this reply."
+msgstr ""
+
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Could not download {0}. Try again."
@@ -1388,6 +1398,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountInbox.tsx
 msgid "Could not load replies."
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Could not load reply drafts."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
@@ -1516,6 +1530,10 @@ msgstr "Não foi possível enviar"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Could not submit this reply."
 msgstr ""
 
 #: src/pages/shell/useShellComputer.ts
@@ -1728,6 +1746,10 @@ msgstr ""
 msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Delivery unconfirmed"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Description"
 msgstr "Descrição"
@@ -1748,12 +1770,20 @@ msgstr ""
 msgid "Direct MCP"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Discard"
+msgstr ""
+
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard changes"
 msgstr ""
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Discard unsaved changes?"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Discarded"
 msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -1846,6 +1876,10 @@ msgstr ""
 
 #: src/components/RunTrace.tsx
 msgid "Duration not recorded"
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Earlier drafts"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
@@ -1947,6 +1981,10 @@ msgstr ""
 msgid "Enter a password"
 msgstr "Digite uma senha"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Enter a reply and valid Cc email addresses."
+msgstr ""
+
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
 msgstr "Digite um e-mail válido"
@@ -2023,6 +2061,7 @@ msgstr "Extra alta"
 msgid "failed"
 msgstr "falhou"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Failed"
 msgstr "Falha"
@@ -2153,6 +2192,7 @@ msgstr ""
 msgid "Forgot password?"
 msgstr "Esqueceu a senha?"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -2308,6 +2348,10 @@ msgstr ""
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "In reply to"
 msgstr ""
 
 #: src/lib/ticket-status.ts
@@ -2633,6 +2677,10 @@ msgstr "Baixo"
 msgid "Low"
 msgstr "Baixo"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Mail"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Mail results include indexed saved messages."
 msgstr ""
@@ -2850,6 +2898,7 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/KruitDock.tsx
 msgid "Needs approval"
 msgstr "Precisa de aprovação"
@@ -2997,6 +3046,10 @@ msgstr ""
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "No longer active"
+msgstr "Não está mais ativo"
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "No matching accounts"
@@ -3333,6 +3386,10 @@ msgstr ""
 msgid "Organization API key"
 msgstr "Chave da API da organização"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Original email"
+msgstr ""
+
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Original email content"
 msgstr ""
@@ -3650,6 +3707,7 @@ msgstr ""
 msgid "Recently discovered"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
 msgstr ""
@@ -3861,8 +3919,16 @@ msgstr ""
 msgid "Reply"
 msgstr "Responder"
 
+#: src/components/MailReplyAskContent.tsx
+msgid "Reply body"
+msgstr ""
+
 #: src/pages/shell/Composer.tsx
 msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/recruiting/MailReplyCards.tsx
+msgid "Reply drafts"
 msgstr ""
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
@@ -4450,6 +4516,7 @@ msgstr ""
 msgid "Selected role · deduplicated people"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/StackedConversation.tsx
 msgid "Send"
@@ -4487,6 +4554,7 @@ msgstr ""
 msgid "Sender not reported"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
@@ -4500,10 +4568,12 @@ msgstr ""
 msgid "Sending schedule"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Sending…"
 msgstr "Enviando…"
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4511,6 +4581,10 @@ msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Sent (all time): {sentTotal}"
+msgstr ""
+
+#: src/components/MailReplyAskContent.tsx
+msgid "Sent email"
 msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
@@ -4931,6 +5005,7 @@ msgstr ""
 msgid "Strong Match"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Subject"
 msgstr ""
@@ -5158,6 +5233,7 @@ msgstr ""
 msgid "Title: {0}"
 msgstr ""
 
+#: src/components/MailReplyAskContent.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "To"
 msgstr ""

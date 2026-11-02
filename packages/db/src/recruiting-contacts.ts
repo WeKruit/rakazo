@@ -57,6 +57,7 @@ type PeopleOptions = {
   /** Each role entry, for display. */
   detail: boolean;
   skills: boolean;
+  query?: string;
 };
 
 /**
@@ -66,9 +67,14 @@ type PeopleOptions = {
 function peopleSql(actor: Actor, options: PeopleOptions) {
   const user = actor.userId;
   const space = actor.spaceId;
-  const { keys, activity, detail, skills } = options;
+  const { keys, activity, detail, skills, query } = options;
   const only = (column: Prisma.Sql) =>
-    keys ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})` : Prisma.empty;
+    keys
+      ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})`
+      : query
+        ? Prisma.sql`AND ${column} IN (SELECT person_key FROM matching_keys)`
+        : Prisma.empty;
+  const pattern = query ? like(query) : "";
   const crmOwner = Prisma.sql`cc."userId" = ${user} AND cc."spaceId" = ${space} AND cc."archivedAt" IS NULL`;
   const crmCandidates = keys
     ? Prisma.sql`AND "crmCandidateId" IN (
@@ -85,7 +91,23 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND NOT EXISTS (
           SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
     ),
-    -- Each role candidate's latest named row and the first time any saved page showed them.
+    ${
+      query
+        ? Prisma.sql`matching_keys AS MATERIALIZED (
+      SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
+      WHERE ${crmOwner} AND concat_ws(' ',cc.name,cc.title,cc.company,cc.location,cc.email) ILIKE ${pattern}
+      UNION
+      SELECT o."candidateKey" FROM recruiting_candidate_occurrences o
+      WHERE o."roleId" IN (SELECT id FROM roles)
+        AND concat_ws(' ',o.name,o.title,o.company,o.location) ILIKE ${pattern}
+      UNION
+      SELECT sp."personKey" FROM recruiting_saved_profiles sp
+      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern}
+    ),`
+        : Prisma.empty
+    }
+    -- Query matches narrow identities, not observations: canonical row selection still sees
+    -- every occurrence/source for each identity and the final predicate remains authoritative.
     occ AS (
       SELECT DISTINCT ON (o."roleId", o."candidateKey")
         o."roleId", o."candidateKey", o.name, o.title, o.company, o.location, o."linkedinUrl",
@@ -134,6 +156,7 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND a."crmRoleId" = cr."crmRoleId"
       LEFT JOIN roles ar ON ar.id = a."roleId"
       WHERE cr."userId" = ${user} AND cr."spaceId" = ${space} AND cr."archivedAt" IS NULL
+        ${keys || query ? Prisma.sql`AND rc."contactId" IN (SELECT cc.id FROM recruiting_crm_contacts cc WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})` : Prisma.empty}
     ),
 ${
   activity
@@ -354,7 +377,7 @@ export async function listRecruitingContacts(
     ].some((value) => value !== undefined);
   // Which people, in order: only the columns the sort and filters need, for everyone.
   const page = await prisma.$queryRaw<{ person_key: string; total: bigint | number }[]>(Prisma.sql`
-    WITH ${peopleSql(actor, { activity, detail: false, skills: Boolean(filters.skills) })}
+    WITH ${peopleSql(actor, { activity, detail: false, skills: Boolean(filters.skills), query: filters.query })}
     SELECT p.person_key, count(*) OVER () AS total
     FROM people p
     ${filterSql(actor, filters)}

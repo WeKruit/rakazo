@@ -1438,3 +1438,87 @@ describe("provider names in saved messages", () => {
     expect(quiet.thread.findUnique).not.toHaveBeenCalled();
   });
 });
+
+it("projects a saved mail receipt with the same owned approval read instead of another database query", async () => {
+  const draft = {
+    from: "sender@example.test",
+    to: ["recipient@example.test"],
+    cc: [],
+    bcc: [],
+    subject: "Re: Interview",
+    body: "Original draft",
+    inReplyTo: {
+      sourceId: "mail",
+      emailId: "anchor",
+      threadId: "mail-thread",
+      subject: "Interview",
+      sender: "recipient@example.test",
+    },
+    status: "needs_approval" as const,
+    sentAt: null,
+  };
+  const findMany = vi.fn(async () => [
+    {
+      id: "mail-effect",
+      kind: "mcp",
+      runId: "run",
+      status: "completed",
+      request: boundDirectApprovalRequest(
+        { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "reply_to_email" },
+        {
+          eaccount: draft.from,
+          to: draft.to[0],
+          reply_to_uuid: "anchor",
+          subject: draft.subject,
+          body_text: "Actually sent edit",
+        },
+        "__rakazoCatalogTool",
+      ),
+      result: { status: "sent_recorded" },
+      updatedAt: new Date("2026-11-01T12:00:00Z"),
+      run: { botId: "bot", status: "completed" },
+    },
+  ]);
+  const prisma = { externalEffect: { findMany } } as unknown as PrismaClient;
+  const [result] = await projectRecruitingApprovalFiles(
+    prisma,
+    { userId: "owner", spaceId: "space", email: "owner@example.test", isDeploymentOwner: false },
+    "chat",
+    [
+      {
+        id: "original-message",
+        threadId: "chat",
+        runId: "run",
+        botId: "bot",
+        role: "bot" as const,
+        blocks: [
+          {
+            kind: "ask" as const,
+            text: "Review reply",
+            status: "answered" as const,
+            answer: "allow",
+            approvalEffectId: "mail-effect",
+            mailReply: draft,
+          },
+        ],
+      },
+    ],
+  );
+  expect(findMany).toHaveBeenCalledOnce();
+  expect(findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        spaceId: "space",
+        run: expect.objectContaining({ userId: "owner", threadId: "chat" }),
+        id: { in: ["mail-effect"] },
+      }),
+    }),
+  );
+  expect(result?.id).toBe("original-message");
+  expect(result?.blocks[0]?.mailReply).toMatchObject({
+    body: "Actually sent edit",
+    status: "sent",
+    sentAt: "2026-11-01T12:00:00.000Z",
+    canAnswer: false,
+  });
+});

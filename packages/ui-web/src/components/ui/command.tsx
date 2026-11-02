@@ -33,12 +33,14 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  initialFocus,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string;
   description?: string;
   className?: string;
   showCloseButton?: boolean;
+  initialFocus?: React.ComponentProps<typeof DialogContent>["initialFocus"];
   children: React.ReactNode;
 }) {
   return (
@@ -46,6 +48,7 @@ function CommandDialog({
       <DialogContent
         className={cn("top-1/3 translate-y-0 gap-0 overflow-hidden rounded-xl! p-0", className)}
         showCloseButton={showCloseButton}
+        initialFocus={initialFocus}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>

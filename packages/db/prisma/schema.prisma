@@ -344,6 +344,7 @@ model DeploymentSettings {
   computerHost                    String?
   usageCreditsPerUsd              Float    @default(100)
   usageGrossMargin                Float    @default(0.5)
+  sendingMailboxLimit             Int      @default(2)
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 

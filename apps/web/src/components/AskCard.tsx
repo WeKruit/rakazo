@@ -26,6 +26,7 @@ import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
 import { AskDeadline } from "./AskDeadline";
 import { SuccessPop } from "./ai/primitives";
+import { MailReplyAskContent } from "./MailReplyAskContent";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
 
@@ -39,9 +40,12 @@ function formatAnsweredState(
   if (secret) return t`Saved`;
   if (!answer) return t`Answered`;
   if (!approval) return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
+  const label = actions?.find((action) => action.id === answer)?.label;
+  if (answer === "allow" && (label === "Create address" || label === "Use this address"))
+    return t`Address confirmed`;
+  if (answer === "deny" && label === "Change the address") return t`Address change requested`;
   if (outcome === "created") return t`Created`;
   if (outcome === "cancelled") return t`Cancelled`;
-  const label = actions?.find((action) => action.id === answer)?.label;
   if (answer === "allow" && (label === undefined || label === "Allow once")) return t`Allowed once`;
   if (
     answer === "always" &&
@@ -57,6 +61,9 @@ function approvalActionLabel(
   fallback: string,
   outcome?: "created" | "cancelled",
 ): string {
+  if (id === "allow" && fallback === "Create address") return t`Create address`;
+  if (id === "allow" && fallback === "Use this address") return t`Use this address`;
+  if (id === "deny" && fallback === "Change the address") return t`Change the address`;
   if (outcome === "created") return t`Create space`;
   if (outcome === "cancelled") return t`Cancel`;
   if (id === "allow" && fallback === "Allow once") return t`Allow once`;
@@ -79,6 +86,8 @@ function approvalTitle(text: string): string {
   const titles: Record<string, string> = {
     "Confirm sending the first email": t`Confirm sending the first email`,
     "Confirm reply": t`Confirm reply`,
+    "Create this sending address?": t`Create this sending address?`,
+    "Use this sending address?": t`Use this sending address?`,
     "Confirm requirements": t`Confirm requirements`,
     "Role requirements": t`Role requirements`,
     "Approve documents": t`Approve documents`,
@@ -334,312 +343,333 @@ function QuestionAskCard({
   return (
     <fieldset
       data-testid={secretInput ? "secret-ask-card" : undefined}
-      aria-label={block.text}
+      aria-label={block.mailReply ? t`Mail` : block.text}
       className="min-w-0 w-full max-w-2xl rounded-2xl border border-border bg-card px-5 py-4"
     >
-      <div className="text-base leading-relaxed text-foreground">
-        <ChatMarkdown>
-          {block.approvalEffectId ? approvalTitle(block.text) : block.text}
-        </ChatMarkdown>
-      </div>
-      {canAnswer && block.status !== "answered" && expiresAt ? (
-        <AskDeadline expiresAt={expiresAt} />
-      ) : null}
-      {secretInput && block.credential ? (
-        <div
-          data-testid="secret-ask-destination"
-          className="mt-2 break-all text-[13px] text-muted-foreground"
-        >
-          {block.credential.auth.type === "command"
-            ? `${t`Command variable`} · $${commandVariableName(block.credential.name)}`
-            : block.credential.origin}
-        </div>
-      ) : null}
-      {block.detail && !secretInput && (canAnswer || block.status === "answered") ? (
-        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-sans text-sm leading-relaxed text-foreground">
-          {block.detail}
-        </pre>
-      ) : null}
-      {block.status === "answered" ? (
-        <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
-          {formatAnsweredState(
-            block.answer,
-            Boolean(block.approvalEffectId),
-            secretInput,
-            askActions?.find((action) => action.id === block.answer)?.outcome,
-            askActions,
-          )}
-        </div>
-      ) : !canAnswer ? (
-        <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
-          <Trans>No longer active</Trans>
-        </div>
-      ) : block.requestedSchema ? (
-        <form
-          className="mt-3.5 flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitForm("accept");
-          }}
-        >
-          {Object.entries(block.requestedSchema.properties).map(([name, field], index) => {
-            const id = `${formId}-${index}`;
-            const label = field.title ?? name;
-            const required = block.requestedSchema!.required?.includes(name);
-            const options = askFormOptions(field);
-            const value = formValues[name];
-            const setValue = (next: AskFormContent[string] | undefined) =>
-              setFormValues((current) => {
-                const values = { ...current };
-                if (next === undefined) delete values[name];
-                else values[name] = next;
-                return values;
-              });
-            return (
-              <fieldset key={name} className="min-w-0 space-y-2" disabled={submitting}>
-                <legend className="text-sm font-medium">
-                  {label}
-                  {required ? " *" : ""}
-                </legend>
-                {field.description ? (
-                  <p id={`${id}-description`} className="text-sm text-muted-foreground">
-                    {field.description}
-                  </p>
-                ) : null}
-                {field.type === "array" ? (
-                  options?.map((option) => (
-                    <label key={option.value} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        aria-label={option.label}
+      {block.mailReply ? (
+        <MailReplyAskContent
+          reply={block.mailReply}
+          canAnswer={canAnswer}
+          expiresAt={expiresAt}
+          onAnswer={onAnswer}
+        />
+      ) : (
+        <>
+          <div className="text-base leading-relaxed text-foreground">
+            <ChatMarkdown>
+              {block.approvalEffectId ? approvalTitle(block.text) : block.text}
+            </ChatMarkdown>
+          </div>
+          {canAnswer && block.status !== "answered" && expiresAt ? (
+            <AskDeadline expiresAt={expiresAt} />
+          ) : null}
+          {secretInput && block.credential ? (
+            <div
+              data-testid="secret-ask-destination"
+              className="mt-2 break-all text-[13px] text-muted-foreground"
+            >
+              {block.credential.auth.type === "command"
+                ? `${t`Command variable`} · $${commandVariableName(block.credential.name)}`
+                : block.credential.origin}
+            </div>
+          ) : null}
+          {block.detail && !secretInput && (canAnswer || block.status === "answered") ? (
+            <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-sans text-sm leading-relaxed text-foreground">
+              {block.detail}
+            </pre>
+          ) : null}
+          {block.status === "answered" ? (
+            <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
+              {formatAnsweredState(
+                block.answer,
+                Boolean(block.approvalEffectId),
+                secretInput,
+                askActions?.find((action) => action.id === block.answer)?.outcome,
+                askActions,
+              )}
+            </div>
+          ) : !canAnswer ? (
+            <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
+              <Trans>No longer active</Trans>
+            </div>
+          ) : block.requestedSchema ? (
+            <form
+              className="mt-3.5 flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitForm("accept");
+              }}
+            >
+              {Object.entries(block.requestedSchema.properties).map(([name, field], index) => {
+                const id = `${formId}-${index}`;
+                const label = field.title ?? name;
+                const required = block.requestedSchema!.required?.includes(name);
+                const options = askFormOptions(field);
+                const value = formValues[name];
+                const setValue = (next: AskFormContent[string] | undefined) =>
+                  setFormValues((current) => {
+                    const values = { ...current };
+                    if (next === undefined) delete values[name];
+                    else values[name] = next;
+                    return values;
+                  });
+                return (
+                  <fieldset key={name} className="min-w-0 space-y-2" disabled={submitting}>
+                    <legend className="text-sm font-medium">
+                      {label}
+                      {required ? " *" : ""}
+                    </legend>
+                    {field.description ? (
+                      <p id={`${id}-description`} className="text-sm text-muted-foreground">
+                        {field.description}
+                      </p>
+                    ) : null}
+                    {field.type === "array" ? (
+                      options?.map((option) => (
+                        <label key={option.value} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            aria-label={option.label}
+                            aria-describedby={field.description ? `${id}-description` : undefined}
+                            checked={Array.isArray(value) && value.includes(option.value)}
+                            onChange={(event) =>
+                              setValue(
+                                event.target.checked
+                                  ? [...(Array.isArray(value) ? value : []), option.value]
+                                  : (Array.isArray(value) ? value : []).filter(
+                                      (item) => item !== option.value,
+                                    ),
+                              )
+                            }
+                          />
+                          {option.label}
+                        </label>
+                      ))
+                    ) : field.type === "boolean" ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          aria-label={label}
+                          checked={value === true}
+                          onChange={(event) => setValue(event.target.checked)}
+                        />
+                        {label}
+                      </label>
+                    ) : options ? (
+                      <select
+                        id={id}
+                        aria-label={label}
+                        aria-required={required}
+                        required={required}
                         aria-describedby={field.description ? `${id}-description` : undefined}
-                        checked={Array.isArray(value) && value.includes(option.value)}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-base"
+                        value={
+                          value === undefined
+                            ? ""
+                            : String(options.findIndex((option) => option.value === value))
+                        }
                         onChange={(event) =>
                           setValue(
-                            event.target.checked
-                              ? [...(Array.isArray(value) ? value : []), option.value]
-                              : (Array.isArray(value) ? value : []).filter(
-                                  (item) => item !== option.value,
-                                ),
+                            event.target.value === ""
+                              ? undefined
+                              : options[Number(event.target.value)]?.value,
                           )
                         }
+                      >
+                        <option value=""></option>
+                        {options.map((option, optionIndex) => (
+                          <option key={option.value} value={String(optionIndex)}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.type === "string" && !("format" in field && field.format) ? (
+                      <Textarea
+                        id={id}
+                        aria-label={label}
+                        aria-required={required}
+                        required={required && "minLength" in field && (field.minLength ?? 0) > 0}
+                        aria-describedby={field.description ? `${id}-description` : undefined}
+                        value={typeof value === "string" ? value : ""}
+                        onChange={(event) => setValue(event.target.value)}
                       />
-                      {option.label}
-                    </label>
-                  ))
-                ) : field.type === "boolean" ? (
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      aria-label={label}
-                      checked={value === true}
-                      onChange={(event) => setValue(event.target.checked)}
-                    />
-                    {label}
-                  </label>
-                ) : options ? (
-                  <select
-                    id={id}
-                    aria-label={label}
-                    aria-required={required}
-                    required={required}
-                    aria-describedby={field.description ? `${id}-description` : undefined}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-base"
-                    value={
-                      value === undefined
-                        ? ""
-                        : String(options.findIndex((option) => option.value === value))
-                    }
-                    onChange={(event) =>
-                      setValue(
-                        event.target.value === ""
-                          ? undefined
-                          : options[Number(event.target.value)]?.value,
+                    ) : (
+                      <Input
+                        id={id}
+                        aria-label={label}
+                        aria-required={required}
+                        // JSON Schema permits an explicitly empty plain string unless constrained.
+                        required={
+                          required &&
+                          (field.type === "number" ||
+                            field.type === "integer" ||
+                            ("format" in field && Boolean(field.format)) ||
+                            ("minLength" in field && (field.minLength ?? 0) > 0))
+                        }
+                        aria-describedby={field.description ? `${id}-description` : undefined}
+                        type={
+                          field.type === "number" || field.type === "integer"
+                            ? "number"
+                            : "format" in field
+                              ? field.format === "uri"
+                                ? "url"
+                                : field.format === "email"
+                                  ? "email"
+                                  : field.format === "date"
+                                    ? "date"
+                                    : "text"
+                              : "text"
+                        }
+                        step={field.type === "integer" ? 1 : "any"}
+                        min={"minimum" in field ? field.minimum : undefined}
+                        max={"maximum" in field ? field.maximum : undefined}
+                        value={typeof value === "string" || typeof value === "number" ? value : ""}
+                        onChange={(event) => setValue(event.target.value)}
+                      />
+                    )}
+                  </fieldset>
+                );
+              })}
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={submitting}>
+                  {pendingAction === "accept" ? (
+                    <Trans>Sending…</Trans>
+                  ) : (
+                    <Trans>Send answer</Trans>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={submitting}
+                  onClick={() => void submitForm("decline")}
+                >
+                  <Trans>Decline</Trans>
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={submitting}
+                  onClick={() => void submitForm("cancel")}
+                >
+                  <Trans>Cancel</Trans>
+                </Button>
+              </div>
+            </form>
+          ) : multiple ? (
+            <div className="mt-3.5 space-y-1.5">
+              {askActions!.map((action) => (
+                // biome-ignore lint/a11y/noLabelWithoutControl: the Checkbox inside is the control.
+                <label
+                  key={action.id}
+                  className="flex w-full cursor-pointer items-start gap-3 rounded-md border border-border px-3.5 py-3 text-base hover:bg-muted"
+                >
+                  <Checkbox
+                    className="mt-1"
+                    checked={picked.includes(action.id)}
+                    disabled={submitting}
+                    onCheckedChange={(checked) =>
+                      setPicked((current) =>
+                        checked
+                          ? [...current, action.id]
+                          : current.filter((id) => id !== action.id),
                       )
                     }
-                  >
-                    <option value=""></option>
-                    {options.map((option, optionIndex) => (
-                      <option key={option.value} value={String(optionIndex)}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : field.type === "string" && !("format" in field && field.format) ? (
-                  <Textarea
-                    id={id}
-                    aria-label={label}
-                    aria-required={required}
-                    required={required && "minLength" in field && (field.minLength ?? 0) > 0}
-                    aria-describedby={field.description ? `${id}-description` : undefined}
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(event) => setValue(event.target.value)}
                   />
-                ) : (
-                  <Input
-                    id={id}
-                    aria-label={label}
-                    aria-required={required}
-                    // JSON Schema permits an explicitly empty plain string unless constrained.
-                    required={
-                      required &&
-                      (field.type === "number" ||
-                        field.type === "integer" ||
-                        ("format" in field && Boolean(field.format)) ||
-                        ("minLength" in field && (field.minLength ?? 0) > 0))
-                    }
-                    aria-describedby={field.description ? `${id}-description` : undefined}
-                    type={
-                      field.type === "number" || field.type === "integer"
-                        ? "number"
-                        : "format" in field
-                          ? field.format === "uri"
-                            ? "url"
-                            : field.format === "email"
-                              ? "email"
-                              : field.format === "date"
-                                ? "date"
-                                : "text"
-                          : "text"
-                    }
-                    step={field.type === "integer" ? 1 : "any"}
-                    min={"minimum" in field ? field.minimum : undefined}
-                    max={"maximum" in field ? field.maximum : undefined}
-                    value={typeof value === "string" || typeof value === "number" ? value : ""}
-                    onChange={(event) => setValue(event.target.value)}
-                  />
-                )}
-              </fieldset>
-            );
-          })}
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={submitting}>
-              {pendingAction === "accept" ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={submitting}
-              onClick={() => void submitForm("decline")}
+                  <span className="min-w-0">{action.label}</span>
+                </label>
+              ))}
+            </div>
+          ) : askActions?.length ? (
+            <div className="mt-3.5 space-y-1.5">
+              {askActions.map((action) => (
+                <Button
+                  key={action.id}
+                  variant={approvalActions && action.id === "allow" ? "default" : "outline"}
+                  className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start text-base font-normal"
+                  disabled={submitting}
+                  onClick={() => void submitAnswer(action.id)}
+                >
+                  {pendingAction === action.id ? (
+                    <Trans>Sending…</Trans>
+                  ) : approvalActions ? (
+                    approvalActionLabel(action.id, action.label, action.outcome)
+                  ) : (
+                    action.label
+                  )}
+                </Button>
+              ))}
+            </div>
+          ) : secretInput ? (
+            <form
+              className="mt-3.5 flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitAnswer(answer);
+              }}
             >
-              <Trans>Decline</Trans>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={submitting}
-              onClick={() => void submitForm("cancel")}
-            >
-              <Trans>Cancel</Trans>
-            </Button>
-          </div>
-        </form>
-      ) : multiple ? (
-        <div className="mt-3.5 space-y-1.5">
-          {askActions!.map((action) => (
-            // biome-ignore lint/a11y/noLabelWithoutControl: the Checkbox inside is the control.
-            <label
-              key={action.id}
-              className="flex w-full cursor-pointer items-start gap-3 rounded-md border border-border px-3.5 py-3 text-base hover:bg-muted"
-            >
-              <Checkbox
-                className="mt-1"
-                checked={picked.includes(action.id)}
+              {loginInput ? (
+                <Input
+                  aria-label={t`Username`}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={submitting}
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder={t`Username`}
+                />
+              ) : null}
+              <Input
+                aria-label={secretLabel}
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
                 disabled={submitting}
-                onCheckedChange={(checked) =>
-                  setPicked((current) =>
-                    checked ? [...current, action.id] : current.filter((id) => id !== action.id),
-                  )
-                }
+                value={answer}
+                onChange={(event) => setAnswer(event.target.value)}
+                placeholder={secretLabel}
               />
-              <span className="min-w-0">{action.label}</span>
-            </label>
-          ))}
-        </div>
-      ) : askActions?.length ? (
-        <div className="mt-3.5 space-y-1.5">
-          {askActions.map((action) => (
-            <Button
-              key={action.id}
-              variant={approvalActions && action.id === "allow" ? "default" : "outline"}
-              className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start text-base font-normal"
-              disabled={submitting}
-              onClick={() => void submitAnswer(action.id)}
-            >
-              {pendingAction === action.id ? (
-                <Trans>Sending…</Trans>
-              ) : approvalActions ? (
-                approvalActionLabel(action.id, action.label, action.outcome)
-              ) : (
-                action.label
-              )}
-            </Button>
-          ))}
-        </div>
-      ) : secretInput ? (
-        <form
-          className="mt-3.5 flex flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitAnswer(answer);
-          }}
-        >
-          {loginInput ? (
-            <Input
-              aria-label={t`Username`}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={submitting}
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              placeholder={t`Username`}
-            />
+              <Button
+                type="submit"
+                className="self-start"
+                disabled={answer.length === 0 || (loginInput && !username.trim()) || submitting}
+              >
+                {submitting ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
+              </Button>
+            </form>
           ) : null}
-          <Input
-            aria-label={secretLabel}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={submitting}
-            value={answer}
-            onChange={(event) => setAnswer(event.target.value)}
-            placeholder={secretLabel}
-          />
-          <Button
-            type="submit"
-            className="self-start"
-            disabled={answer.length === 0 || (loginInput && !username.trim()) || submitting}
-          >
-            {submitting ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
-          </Button>
-        </form>
-      ) : null}
-      {block.status !== "answered" &&
-      canAnswer &&
-      !secretInput &&
-      !approvalActions &&
-      !block.requestedSchema ? (
-        <form
-          className="mt-3.5 flex flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submitAnswer(typedAnswer);
-          }}
-        >
-          <Textarea
-            aria-label={t`Answer`}
-            className="text-base leading-relaxed md:text-base"
-            value={answer}
-            disabled={submitting}
-            onChange={(event) => setAnswer(event.target.value)}
-            placeholder={t`Type your answer`}
-          />
-          <Button type="submit" className="self-start" disabled={!typedAnswer.trim() || submitting}>
-            {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
-          </Button>
-        </form>
-      ) : null}
-      {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
+          {block.status !== "answered" &&
+          canAnswer &&
+          !secretInput &&
+          !approvalActions &&
+          !block.requestedSchema ? (
+            <form
+              className="mt-3.5 flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitAnswer(typedAnswer);
+              }}
+            >
+              <Textarea
+                aria-label={t`Answer`}
+                className="text-base leading-relaxed md:text-base"
+                value={answer}
+                disabled={submitting}
+                onChange={(event) => setAnswer(event.target.value)}
+                placeholder={t`Type your answer`}
+              />
+              <Button
+                type="submit"
+                className="self-start"
+                disabled={!typedAnswer.trim() || submitting}
+              >
+                {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+              </Button>
+            </form>
+          ) : null}
+          {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
+        </>
+      )}
     </fieldset>
   );
 }

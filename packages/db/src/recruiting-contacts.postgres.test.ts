@@ -314,6 +314,16 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     expect(theirs.items.map((item) => item.name)).toEqual(["Ada Lovelace (foreign)"]);
   });
 
+  it("narrows text matches before aggregation without changing canonical identity or literal matching", async () => {
+    const search = (query: string, owner = actor) =>
+      listRecruitingContacts(prisma, owner, { filters: { query }, limit: 8 });
+    expect((await search("Ada")).items.map((person) => person.name)).toEqual(["Ada Lovelace"]);
+    // A secondary CRM spelling must not replace the canonical product name to manufacture a match.
+    expect((await search("Ada L.")).items).toEqual([]);
+    expect((await search("100%")).items.map((person) => person.name)).toEqual(["Cy 100%_off"]);
+    expect((await search("100%", other)).items).toEqual([]);
+  });
+
   it("filters, sorts and pages in the database", async () => {
     const first = await listRecruitingContacts(prisma, actor, { limit: 2 });
     expect(first.items).toHaveLength(2);

@@ -64,7 +64,6 @@ export * from "./e2b-sandbox.js";
 export * from "./elevenlabs-voice.js";
 export * from "./email-emulator.js";
 export * from "./embeddings.js";
-export * from "./exa-organization-search.js";
 export * from "./exa-page-reader.js";
 export * from "./executor.js";
 export * from "./expo-push.js";

@@ -11,6 +11,7 @@ import type {
 import {
   encodeLoginSecret,
   LoginSecretValue,
+  MailReplySendAnswerSchema,
   MessageBlock as MessageBlockSchema,
   parseAskFormResponse,
   RecruitingSchedulingApprovalEvidenceSchema,
@@ -38,6 +39,7 @@ import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import { loadConnectServer } from "./connect-asks.js";
+import { editMailReplyRequest } from "./mail-replies.js";
 import {
   assertRunCanWriteHistory,
   assertRunIsCancelled,
@@ -943,17 +945,23 @@ async function commitAnswerRunInput(
     (block) => block.kind === "ask" && block.status !== "answered",
   );
   if (pendingAsk?.kind !== "ask") return null;
+  const replyAnswer = pendingAsk.mailReply
+    ? MailReplySendAnswerSchema.safeParse(input.answer)
+    : undefined;
+  if (pendingAsk.mailReply && input.answer !== "deny" && !replyAnswer?.success) return null;
   let formResponse: AskFormResponse | undefined;
   try {
     if (pendingAsk.requestedSchema)
       formResponse = parseAskFormResponse(pendingAsk.requestedSchema, input.answer);
-    else if (typeof input.answer !== "string") return null;
+    else if (typeof input.answer !== "string" && !replyAnswer?.success) return null;
   } catch {
     return null;
   }
   const answerText = formResponse
     ? askFormAnswerText(pendingAsk.requestedSchema!, formResponse)
-    : (input.answer as string);
+    : replyAnswer?.success
+      ? "allow"
+      : (input.answer as string);
   // Composer/voice messages cannot stand in for a structured card submission.
   if (formResponse && (input.answerMessageId || input.username || input.clientNonce)) return null;
   const approvalAsk = isApprovalAskBlock(pendingAsk);
@@ -991,6 +999,19 @@ async function commitAnswerRunInput(
     result?: Prisma.JsonValue;
   } | null = null;
   let approvalUserId: string | null = null;
+  let editedApprovalRequest: Prisma.InputJsonValue | undefined;
+  let editedApprovalResult: Prisma.InputJsonValue | undefined;
+  let editedSchedulingEvidence:
+    | {
+        planId: string;
+        bookingEffectId: string;
+        previousHash: string;
+        requestHash: string;
+        sourceId: string;
+        sourceRevision: string | number;
+        emailId: string;
+      }
+    | undefined;
 
   if (approvalAsk) {
     if (!pendingAsk.actions?.some((action) => action.id === answerText)) return null;
@@ -1048,6 +1069,69 @@ async function commitAnswerRunInput(
           createHash("sha256").update(stableJsonValue(evidence)).digest("hex")
       )
         return null;
+    }
+
+    if (replyAnswer?.success && pendingAsk.mailReply) {
+      try {
+        editedApprovalRequest = editMailReplyRequest(
+          approvalEffect.request,
+          pendingAsk.mailReply,
+          replyAnswer.data,
+        );
+      } catch {
+        return null;
+      }
+      approvalEffect.request = editedApprovalRequest as Prisma.JsonValue;
+      editedApprovalResult = {
+        ...(approvalEffect.result &&
+        typeof approvalEffect.result === "object" &&
+        !Array.isArray(approvalEffect.result)
+          ? approvalEffect.result
+          : {}),
+        mailReplyApproval: {
+          ...pendingAsk.mailReply,
+          body: replyAnswer.data.body,
+          cc: replyAnswer.data.cc,
+          status: "sending",
+        },
+      };
+      if (evidence && typeof evidence === "object" && !Array.isArray(evidence)) {
+        const changed = {
+          ...evidence,
+          requestHash: createHash("sha256")
+            .update(stableJsonValue(editedApprovalRequest))
+            .digest("hex"),
+        };
+        if (evidence.kind === "recruiting_scheduling") {
+          const scheduling = RecruitingSchedulingApprovalEvidenceSchema.parse(evidence);
+          if (
+            scheduling.operation !== "confirm" ||
+            !scheduling.bookingEffectId ||
+            !approvedRoute ||
+            approvedRoute.resourceRevision === undefined
+          )
+            return null;
+          editedSchedulingEvidence = {
+            planId: scheduling.planId,
+            bookingEffectId: scheduling.bookingEffectId,
+            previousHash: scheduling.requestHash,
+            requestHash: changed.requestHash,
+            sourceId: approvedRoute.resourceId,
+            sourceRevision: approvedRoute.resourceRevision,
+            emailId: pendingAsk.mailReply.inReplyTo.emailId,
+          };
+        }
+        const previous = editedApprovalResult as Prisma.InputJsonObject;
+        editedApprovalResult = {
+          ...previous,
+          ...(previous.schedulingApprovalEvidence
+            ? { schedulingApprovalEvidence: changed }
+            : { calendarApprovalEvidence: changed }),
+        } as Prisma.InputJsonValue;
+        pendingAsk.approvalEvidenceHash = createHash("sha256")
+          .update(stableJsonValue(changed))
+          .digest("hex");
+      }
     }
 
     if (
@@ -1150,10 +1234,34 @@ async function commitAnswerRunInput(
   }
 
   if (approvalAsk) {
+    if (editedSchedulingEvidence) {
+      const proof = editedSchedulingEvidence;
+      const rebound = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE external_effects plan
+        SET result=jsonb_set(plan.result,'{confirmationRequestHash}',to_jsonb(${proof.requestHash}::text))
+        FROM runs owner
+        WHERE plan.id=${proof.planId} AND plan.kind='recruiting_scheduling_plan'
+          AND plan."spaceId"=${input.spaceId} AND owner.id=plan."runId"
+          AND owner."spaceId"=${input.spaceId} AND owner."userId"=${run.userId}
+          AND owner."threadId"=${input.threadId}
+          AND plan.result->>'confirmationEffectId'=${approvalEffect!.id}
+          AND plan.result->>'bookingEffectId'=${proof.bookingEffectId}
+          AND plan.result->>'confirmationRequestHash'=${proof.previousHash}
+          AND plan.request->>'mailSourceId'=${proof.sourceId}
+          AND plan.request->>'mailSourceRevision'=${String(proof.sourceRevision)}
+          AND plan.request->'input'->'originalEmail'->>'providerMessageId'=${proof.emailId}
+        RETURNING plan.id`;
+      if (rebound.length !== 1)
+        throw new IsolationError("The bound scheduling confirmation changed");
+    }
     const allowed = answerText === "allow" || answerText === "always";
     await tx.externalEffect.update({
       where: { id: approvalEffect!.id },
-      data: { status: allowed ? "approved" : "denied" },
+      data: {
+        status: allowed ? "approved" : "denied",
+        ...(editedApprovalRequest ? { request: editedApprovalRequest } : {}),
+        ...(editedApprovalResult ? { result: editedApprovalResult } : {}),
+      },
     });
     if (answerText === "always") {
       await tx.actionApprovalRule.upsert({
@@ -1231,6 +1339,17 @@ async function commitAnswerRunInput(
           ...block,
           status: "answered" as const,
           answer: recordedAnswer,
+          ...(block.mailReply
+            ? {
+                mailReply: {
+                  ...block.mailReply,
+                  ...(replyAnswer?.success
+                    ? { body: replyAnswer.data.body, cc: replyAnswer.data.cc }
+                    : {}),
+                  status: answerText === "deny" ? ("discarded" as const) : ("sending" as const),
+                },
+              }
+            : {}),
           ...(formResponse ? { formResponse } : {}),
         }
       : block,

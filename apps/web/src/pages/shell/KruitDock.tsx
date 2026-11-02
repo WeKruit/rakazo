@@ -7,7 +7,7 @@ import type { MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   clampOffset,
-  controlAt,
+  controlRects,
   DOCK_MARGIN,
   type DockOffset,
   findFreeOffset,
@@ -140,7 +140,12 @@ export function KruitDock({
               else if (kruit && kruit.id !== groupId) onOpen(kruit.id);
             }}
           >
-            <img src="/wekruit-logo.png" alt="" className="size-8 object-contain" />
+            <img
+              src="/wekruit-logo.png"
+              alt=""
+              draggable={false}
+              className="pointer-events-none size-8 select-none object-contain"
+            />
             {waiting.length ? (
               <span className="absolute -end-1 -top-1 grid min-w-5 place-items-center rounded-full bg-destructive px-1 text-xs font-medium text-destructive-foreground">
                 {waiting.length}
@@ -153,24 +158,35 @@ export function KruitDock({
   );
 }
 
-/** Where the dock sits, how to drag it, and the clearing of controls it would otherwise cover. */
+/**
+ * Where the dock sits and how to drag it. Dragging moves the element with a transform straight
+ * from the pointer events, with no React render and no storage write per move; the spot is
+ * committed and saved once, on drop. Clearing controls runs only when the user has not placed the
+ * dock, off the main path (idle time, debounced) and on control rectangles.
+ */
 function useFloatingDock(hidden: boolean, layout: string) {
   const ref = useRef<HTMLDivElement>(null);
   const [stored, setStored] = useState(readDockOffset);
   const [auto, setAuto] = useState<DockOffset>({ right: DOCK_MARGIN, bottom: DOCK_MARGIN });
+  const dragging = useRef(false);
   const moved = useRef(false);
-  const latest = useRef<DockOffset | undefined>(undefined);
+  const placed = useRef(Boolean(stored));
+  placed.current = Boolean(stored);
   const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 
   const settle = useCallback(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || dragging.current) return;
     const box = { width: el.offsetWidth, height: el.offsetHeight };
-    if (readDockOffset()) {
-      setStored((was) => was && clampOffset(was, box, viewport()));
+    if (placed.current) {
+      setStored((was) => {
+        if (!was) return was;
+        const next = clampOffset(was, box, viewport());
+        return next.right === was.right && next.bottom === was.bottom ? was : next;
+      });
       return;
     }
-    const next = findFreeOffset(box, viewport(), (x, y) => controlAt(x, y, el));
+    const next = findFreeOffset(box, viewport(), controlRects(el));
     setAuto((was) => (was.right === next.right && was.bottom === next.bottom ? was : next));
   }, []);
 
@@ -183,10 +199,15 @@ function useFloatingDock(hidden: boolean, layout: string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const later = () => {
       clearTimeout(timer);
-      timer = setTimeout(settle, 400);
+      timer = setTimeout(() => {
+        if (document.hidden || dragging.current) return;
+        if ("requestIdleCallback" in window) window.requestIdleCallback(settle, { timeout: 1500 });
+        else settle();
+      }, 1000);
     };
     const observer = new MutationObserver((records) => {
-      if (records.some((record) => !ref.current?.contains(record.target))) later();
+      if (!placed.current && records.some((record) => !ref.current?.contains(record.target)))
+        later();
     });
     observer.observe(document.body, { subtree: true, childList: true });
     window.addEventListener("resize", later);
@@ -200,41 +221,57 @@ function useFloatingDock(hidden: boolean, layout: string) {
   const drag = {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       const el = ref.current;
-      if (!el || (event.target as Element).closest('button[aria-label="Minimize"]')) return;
+      if (
+        !el ||
+        event.button > 0 ||
+        (event.target as Element).closest('button[aria-label="Minimize"]')
+      )
+        return;
       const rect = el.getBoundingClientRect();
+      const box = { width: rect.width, height: rect.height };
       const start = {
         x: event.clientX,
         y: event.clientY,
         right: window.innerWidth - rect.right,
         bottom: window.innerHeight - rect.bottom,
       };
+      let last = { right: start.right, bottom: start.bottom };
       moved.current = false;
+      dragging.current = true;
       const move = (e: globalThis.PointerEvent) => {
         const dx = e.clientX - start.x;
         const dy = e.clientY - start.y;
         if (!moved.current && Math.hypot(dx, dy) < 5) return;
         moved.current = true;
-        latest.current = clampOffset(
-          { right: start.right - dx, bottom: start.bottom - dy },
-          { width: rect.width, height: rect.height },
-          viewport(),
-        );
-        setStored(latest.current);
+        last = clampOffset({ right: start.right - dx, bottom: start.bottom - dy }, box, viewport());
+        el.style.transform = `translate3d(${start.right - last.right}px, ${start.bottom - last.bottom}px, 0)`;
       };
-      const up = () => {
+      const end = () => {
         window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        window.removeEventListener("pointercancel", up);
-        if (moved.current && latest.current) saveDockOffset(latest.current);
+        window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
+        dragging.current = false;
+        if (moved.current) {
+          saveDockOffset(last);
+          setStored(last);
+          // The next paint uses the new right/bottom, so the transform goes in the same frame.
+          requestAnimationFrame(() => {
+            el.style.transform = "";
+          });
+          // A drag ends in a click on the same element; swallow that one, then forget it.
+          setTimeout(() => {
+            moved.current = false;
+          }, 0);
+        }
       };
       window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-      window.addEventListener("pointercancel", up);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
     },
     onClickCapture: (event: MouseEvent) => {
       if (!moved.current) return;
-      moved.current = false;
       event.stopPropagation();
+      event.preventDefault();
     },
   };
 

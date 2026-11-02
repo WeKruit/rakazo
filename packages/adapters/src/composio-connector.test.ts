@@ -498,6 +498,55 @@ describe("composio tool mapping", () => {
     }
   });
 
+  it.each(["gmail", "github"])(
+    "refuses an inactive explicit %s account instead of executing through another default",
+    async (toolkit) => {
+      composioSdkState.created.length = 0;
+      composioSdkState.sessions.clear();
+      composioSdkState.executions.length = 0;
+      composioToolkitDirectory.invalidate();
+      const restore = stubActiveAccounts(["ca-other-space"]);
+      try {
+        const connector = new ComposioConnector();
+        const events: ConnectorEvent[] = [];
+        const operation = toolkit === "gmail" ? "GMAIL_REPLY_TO_THREAD" : "GITHUB_CREATE_AN_ISSUE";
+        for await (const event of connector.execute(
+          {
+            tool: operation,
+            args: {},
+            executionId: "pinned",
+            route: {
+              connectorId: "composio",
+              resourceId: "selected-connection",
+              resourceRevision: "ca-selected",
+              toolName: operation,
+            },
+          },
+          {
+            operationId: "pinned",
+            traceId: "pinned",
+            spaceId: "workspace",
+            userId: "user-1",
+            signal: new AbortController().signal,
+            connectedConnections: [
+              {
+                id: "selected-connection",
+                connectorId: "composio",
+                externalId: toolkit,
+                displayName: "Selected",
+                providerRef: "ca-selected",
+              },
+            ],
+          },
+        ))
+          events.push(event);
+        expect(events).toMatchObject([{ type: "error" }]);
+        expect(composioSdkState.executions).toHaveLength(0);
+      } finally {
+        restore();
+      }
+    },
+  );
   it("pins a single concrete account without enabling multi-account mode", async () => {
     composioSdkState.created.length = 0;
     composioSdkState.sessions.clear();

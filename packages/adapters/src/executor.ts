@@ -60,6 +60,7 @@ import {
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
+  MailReplySchema,
   MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingApprovalToolCallSchema,
@@ -257,6 +258,7 @@ import {
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
   prepareRecruitingSchedulingPlan,
+  publishMailReplyCard,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingGradeRowsError,
@@ -465,12 +467,14 @@ import {
   readInstantlyEmail,
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
+import { senderApprovalDisplay } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
   uniquifyInstalledToolName,
 } from "./lazy-tool-catalog.js";
+import { gmailReplyRoute, mailReplyFromAnchor, readGmailReplyCard } from "./mail-reply.js";
 import { requireMcpToolAssignment } from "./mcp-connector.js";
 import {
   buildMcpCredentialBlob,
@@ -5577,7 +5581,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const approvedEffects = await deps.prisma.externalEffect.findMany({
           where: { runId, status: "approved" },
           orderBy: APPROVED_EFFECT_REPLAY_ORDER,
-          select: { id: true, kind: true, request: true },
+          select: { id: true, kind: true, request: true, result: true },
         });
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
         const legacyCalibrations = approvedEffects.flatMap((effect) => {
@@ -7375,6 +7379,52 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (
+            connectorCall.route?.connectorId === "composio" &&
+            connectorCall.route.toolName.toUpperCase() === "COMPOSIO_MULTI_EXECUTE_TOOL" &&
+            Array.isArray(args.tools) &&
+            args.tools.some(
+              (item) =>
+                item &&
+                typeof item === "object" &&
+                !Array.isArray(item) &&
+                String(item.tool_slug).toUpperCase() === "GMAIL_REPLY_TO_THREAD",
+            )
+          )
+            return {
+              error:
+                "Draft each reply with GMAIL_REPLY_TO_THREAD directly so the recruiter can edit and send its individual Mail card.",
+              dispatched: false,
+            };
+          if (
+            connectorCall.route?.connectorId === "composio" &&
+            connectorCall.route.toolName.toUpperCase() === "GMAIL_REPLY_TO_THREAD"
+          ) {
+            try {
+              const saved =
+                boundDirectApprovalDetails(
+                  approvedEffectReplays.nextRequest(),
+                  CATALOG_APPROVAL_TOOL,
+                )?.route ??
+                catalogApprovalDetails(approvedEffectReplays.nextRequest(), CATALOG_APPROVAL_TOOL)
+                  ?.route;
+              connectorCall = {
+                ...connectorCall,
+                route: gmailReplyRoute(
+                  saved?.connectorId === "composio"
+                    ? {
+                        ...connectorCall.route,
+                        resourceId: saved.resourceId,
+                        resourceRevision: saved.resourceRevision,
+                      }
+                    : connectorCall.route,
+                  context,
+                ),
+              };
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+            }
+          }
+          if (
             !catalogRemapped &&
             connectorCall.route?.resourceId &&
             connectorCall.route.connectorId &&
@@ -7725,6 +7775,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               return replyProofError(error);
             }
+            if (
+              connectorCall.route?.connectorId === "composio" &&
+              connectorCall.route.toolName.toUpperCase() === "GMAIL_REPLY_TO_THREAD" &&
+              deps.connector
+            ) {
+              try {
+                const retained = approvedEffects.find(
+                  (effect) => effect.request === nextApprovedRequest,
+                )?.result;
+                const metadata =
+                  retained && typeof retained === "object" && !Array.isArray(retained)
+                    ? retained.mailReplyApproval
+                    : undefined;
+                const expected = MailReplySchema.parse(metadata);
+                await readGmailReplyCard(
+                  deps.connector,
+                  connectorCall.route,
+                  args,
+                  context,
+                  expected,
+                );
+              } catch (error) {
+                return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+              }
+            }
             approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
@@ -8033,7 +8108,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : connectorCall.route?.connectorId === "composio"
                 ? connectorCall.route.toolName.toUpperCase()
                 : undefined;
+          const mailReplyOperation = [
+            "reply_to_email",
+            "native_instantly_reply_to_email",
+            "GMAIL_REPLY_TO_THREAD",
+          ].includes(sendOperation ?? "");
           const recruiterSaidSend =
+            !mailReplyOperation &&
             !nextApprovedTool &&
             run.trigger === "user" &&
             Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
@@ -8081,6 +8162,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The card offers "send when I say send" unless the recruiter's own rule requires
           // approval for this send.
           const offerSendPreference =
+            !mailReplyOperation &&
             Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
             !(
               await Promise.all(
@@ -8101,6 +8183,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args,
               nativeMcpWriteServer?.endpoint,
             );
+          const senderConfirmation =
+            connectorCall.route?.connectorId === "mcp" &&
+            connectorCall.route.toolName === "native_instantly_ensure_sender" &&
+            (args.operation === "confirm" || args.operation === "select");
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
           // execute; a catalog call uses the tool it was just resolved to. Known one-time
@@ -8442,7 +8528,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (relevantWrite) calendarReadEpoch = `${relevantWrite.id}:${relevantWrite.status}`;
             }
           }
+          const approvedReplyMetadata = approvedEffects.find(
+            (effect) => effect.request === nextApprovedRequest,
+          )?.result;
+          const structuredReplyApproval =
+            approvedReplyMetadata &&
+            typeof approvedReplyMetadata === "object" &&
+            !Array.isArray(approvedReplyMetadata) &&
+            MailReplySchema.safeParse(approvedReplyMetadata.mailReplyApproval).data?.status ===
+              "sending";
+          const approvedReplyEffect =
+            nextApprovedTool &&
+            structuredReplyApproval &&
+            mailReplyOperation &&
+            crmContext.approvedEffectId
+              ? await deps.prisma.externalEffect.findFirst({
+                  where: {
+                    id: crmContext.approvedEffectId,
+                    runId,
+                    spaceId: run.spaceId,
+                    status: "approved",
+                  },
+                })
+              : null;
           const effectKey =
+            approvedReplyEffect?.idempotencyKey ??
             (calendarReadEpoch
               ? toolEffectIdempotencyKey(
                   runId,
@@ -8457,7 +8567,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const domainEffect = replyAdmission?.effect ?? crmImportAdmission?.effect;
+          const domainEffect =
+            replyAdmission?.effect ?? crmImportAdmission?.effect ?? approvedReplyEffect;
           const applied = domainEffect
             ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
@@ -9505,6 +9616,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             await workspaceCheckpoint.flush();
+            const instantlySender = senderConfirmation
+              ? await senderApprovalDisplay(deps.prisma, context, args)
+              : undefined;
             const approvalBlock = buildApprovalAskBlock(
               applied!.effect.id,
               name,
@@ -9521,8 +9635,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 crmImportTarget: crmImportSelection?.target,
                 instantlyActivation,
                 instantlyReply,
+                instantlySender,
               },
             );
+            if (mailReplyOperation) {
+              try {
+                const route = connectorCall.route;
+                if (!route) throw new IsolationError();
+                approvalBlock.mailReply =
+                  route.connectorId === "composio" && deps.connector
+                    ? await readGmailReplyCard(deps.connector, route, args, context)
+                    : mailReplyFromAnchor(
+                        route,
+                        args,
+                        replyEvidence?.anchor ?? instantlyReply?.original ?? {},
+                      );
+                if (thread.activeRecruitingRoleId)
+                  approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                approvalBlock.actions = [
+                  { id: "allow", label: "Send" },
+                  { id: "deny", label: "Discard" },
+                ];
+                const previous =
+                  applied!.effect.result &&
+                  typeof applied!.effect.result === "object" &&
+                  !Array.isArray(applied!.effect.result)
+                    ? applied!.effect.result
+                    : {};
+                await deps.prisma.externalEffect.updateMany({
+                  where: { id: applied!.effect.id, status: "intended" },
+                  data: { result: { ...previous, mailReplyApproval: approvalBlock.mailReply } },
+                });
+              } catch (error) {
+                const result = {
+                  error: sanitizeConnectorError(error, runSecrets),
+                  dispatched: false,
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             if (schedulingSelection && schedulingApprovalHash) {
               const review = redactSecrets(
                 schedulingPlanReview(schedulingSelection.plan, schedulingSelection.operation),
@@ -12458,7 +12611,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 { ...connectorCall, tool: name, args, executionId: effectKey },
                 schedulingSelection?.operation === "confirm" && applied
                   ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
-                  : context,
+                  : senderConfirmation && applied
+                    ? { ...context, senderConfirmationEffectId: applied.effect.id }
+                    : context,
               )) {
                 if (event.type === "result") {
                   result = event.data;
@@ -13395,6 +13550,81 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return;
           }
         }
+
+        // A recruiter clicked Send on a saved reply: replay the native approved request now,
+        // before any model call. The regular tool path still owns preflight, claim and receipt.
+        let sentReplyDirectly = false;
+        while (approvedEffectReplays.nextToolName()) {
+          const request = approvedEffectReplays.nextRequest();
+          const direct = boundDirectApprovalDetails(request, CATALOG_APPROVAL_TOOL);
+          const catalog = catalogApprovalDetails(request, CATALOG_APPROVAL_TOOL);
+          const operation = (direct?.route ?? catalog?.route)?.toolName;
+          const result = approvedEffects.find((effect) => effect.request === request)?.result;
+          if (
+            !result ||
+            typeof result !== "object" ||
+            Array.isArray(result) ||
+            MailReplySchema.safeParse(result.mailReplyApproval).data?.status !== "sending"
+          )
+            break;
+          if (
+            ![
+              "reply_to_email",
+              "native_instantly_reply_to_email",
+              "GMAIL_REPLY_TO_THREAD",
+            ].includes(operation ?? "")
+          )
+            break;
+          const name = catalog?.toolName ?? approvedEffectReplays.nextToolName()!;
+          const effect = approvedEffects.find((effect) => effect.request === request)!;
+          const outcome = await applyTool(
+            name,
+            catalog?.args ?? direct!.args,
+            `reply-approval:${effect.id}`,
+          );
+          const replayPending = approvedEffectReplays.nextRequest() === request;
+          const replayError = toolResultError(outcome);
+          if (replayPending || replayError) {
+            const failed = await deps.prisma.externalEffect.updateMany({
+              where: { id: effect.id, spaceId: run.spaceId, runId, status: "approved" },
+              data: {
+                status: "failed",
+                result: {
+                  error:
+                    replayError ??
+                    "The approved reply could not be verified. No email was dispatched.",
+                  dispatched: false,
+                } as never,
+              },
+            });
+            if (replayPending) approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
+            if (failed.count === 1)
+              await deps.events.append({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+                type: "effect.recorded",
+                payload: { effectId: effect.id, tool: name },
+              });
+          }
+          await publishMailReplyCard(
+            deps.prisma,
+            { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
+            effect.id,
+          )
+            .then(async (event) => {
+              if (event) await deps.events.notify?.(event.threadId, event.seq);
+            })
+            .catch((error) =>
+              getLogger().warn("mail.reply.card_publish_failed", {
+                effectId: effect.id,
+                error: String(error),
+              }),
+            );
+          sentReplyDirectly = true;
+        }
+        if (sentReplyDirectly) probeFoundNothing = true;
 
         // Stop during setup must not still open the model. A reclaimed lease can
         // leave status "running" under a new owner, and the stream loop only
