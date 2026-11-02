@@ -128,7 +128,7 @@ const EnsureRoleCampaignInput = z.strictObject({
     "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
   ),
   recipients: Recipients.describe(
-    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email who is not in the campaign yet is added first. Everyone else keeps the role's email.",
+    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -1454,13 +1454,22 @@ function withTemplate(steps: { delay: unknown; delay_unit?: unknown; variants: u
   ];
 }
 
+/** The lead key for an email the recruiter named for someone who is not a saved candidate. */
+const NAMED_EMAIL = "email:";
+const namedEmailKey = (address: string) => `${NAMED_EMAIL}${address.trim().toLowerCase()}`;
+const isNamedEmail = (candidate: { candidate_key: string; email?: string | null }) =>
+  candidate.candidate_key.startsWith(NAMED_EMAIL) &&
+  Boolean(candidate.email) &&
+  namedEmailKey(candidate.email!) === candidate.candidate_key;
+
 const notFound = (people: string[]) =>
   `Nothing was saved: ${people.join(", ")} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`;
 
 /**
  * Adds the named people who are this role's saved candidates to its campaign the way
- * add_shortlist_leads does (a sending campaign keeps them ready instead). A name or email that
- * matches no candidate, or more than one, is refused with one question for the recruiter.
+ * add_shortlist_leads does (a sending campaign keeps them ready instead), plus any email the
+ * recruiter typed for someone who is not a candidate. A name that matches no candidate, or more
+ * than one, is refused with one question for the recruiter.
  */
 async function addSavedRecipients(
   prisma: PrismaClient,
@@ -1505,7 +1514,13 @@ async function addSavedRecipients(
     const email = value.includes("@")
       ? person?.emails.find((e) => sameAddress(e.address, value))
       : person?.best;
-    if (!person) unknown.push(entry);
+    if (!person && !byEmail.length && Email.safeParse(value).success) {
+      // An address the recruiter typed for someone not in Results is theirs to send to; the send
+      // card still lists it before anything goes out.
+      const key = namedEmailKey(value);
+      if (!candidates.some((c) => c.candidate_key === key))
+        candidates.push({ candidate_key: key, email: value });
+    } else if (!person) unknown.push(entry);
     else if (!email) noEmail.push(person.name || entry);
     else if (!candidates.some((c) => c.candidate_key === person.key)) {
       const [first, ...last] = person.name.split(/\s+/).filter(Boolean);
@@ -1783,7 +1798,10 @@ async function addShortlistLeads(
       })
       .map((candidate) => candidate.candidateKey),
   );
-  const inRole = new Set(saved.map((candidate) => candidate.candidateKey));
+  const inRole = new Set([
+    ...saved.map((candidate) => candidate.candidateKey),
+    ...candidates.filter(isNamedEmail).map((candidate) => candidate.candidate_key),
+  ]);
   const notInRole = candidates.filter((c) => !inRole.has(c.candidate_key));
   const onHoldOrPassed = candidates.filter((c) => stopped.has(c.candidate_key));
   const eligible = candidates.filter(

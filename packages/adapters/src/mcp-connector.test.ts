@@ -5241,6 +5241,34 @@ describe("local native Instantly campaign and lead tools", () => {
         ]);
       });
 
+      it("sends to an email the recruiter typed for someone who is not a candidate", async () => {
+        const { f, binding } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        const note = { subject: "A data role", body: "Hi Noah,\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", { steps: [note], recipients: ["Noah@X.test"] }),
+        );
+        expect(out).toMatchObject({
+          ownEmailSavedFor: ["noah@x.test"],
+          addedToCampaign: ["noah@x.test"],
+        });
+        expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([
+          expect.objectContaining({
+            body: expect.objectContaining({
+              leads: [expect.objectContaining({ email: "noah@x.test" })],
+            }),
+          }),
+        ]);
+        expect(binding.result).toMatchObject({
+          leads: { "email:noah@x.test": { email: "noah@x.test" } },
+          drafts: { "noah@x.test": note },
+        });
+        // Nothing goes out until the send card is confirmed.
+        expect(f.state.requests.filter((r) => r.path.endsWith("/activate"))).toEqual([]);
+      });
+
       it("still refuses an unknown or ambiguous person with one question, adding nobody", async () => {
         const { f } = await roleWithSixteen();
         f.state.addToCampaign = true;
@@ -5261,7 +5289,7 @@ describe("local native Instantly campaign and lead tools", () => {
               message: string;
             }
           ).message;
-        for (const who of ["Sam Lee", "Sam", "Nobody Known", "nobody@x.test"])
+        for (const who of ["Sam Lee", "Sam", "Nobody Known"])
           expect(await message([who])).toContain(
             `Nothing was saved: ${who} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`,
           );
