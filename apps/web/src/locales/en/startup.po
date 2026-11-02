@@ -1747,6 +1747,10 @@ msgid "Delivery hours and timezone apply to the whole sequence."
 msgstr "Delivery hours and timezone apply to the whole sequence."
 
 #: src/components/MailReplyAskContent.tsx
+msgid "Delivery is not confirmed. Check the conversation before trying again."
+msgstr "Delivery is not confirmed. Check the conversation before trying again."
+
+#: src/components/MailReplyAskContent.tsx
 msgid "Delivery unconfirmed"
 msgstr "Delivery unconfirmed"
 
@@ -3675,8 +3679,8 @@ msgid "Read the attached materials for this role."
 msgstr "Read the attached materials for this role."
 
 #: src/pages/shell/useShellRecruiting.ts
-msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
-msgstr "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
+msgstr "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card."
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason"
@@ -5143,6 +5147,10 @@ msgstr "The recruiting team is not ready yet."
 msgid "The reply stopped. Try again."
 msgstr "The reply stopped. Try again."
 
+#: src/components/MailReplyAskContent.tsx
+msgid "The sending address changed. Prepare a new reply for review."
+msgstr "The sending address changed. Prepare a new reply for review."
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
 msgstr "The workspace changed. Open the role again."
@@ -5187,6 +5195,14 @@ msgstr "This provider cannot be tested without saving."
 msgid "This provider is not connected yet."
 msgstr "This provider is not connected yet."
 
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply could not be sent."
+msgstr "This reply could not be sent."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This reply was not sent."
+msgstr "This reply was not sent."
+
 #: src/pages/Auth.tsx
 msgid "This reset link is invalid or expired"
 msgstr "This reset link is invalid or expired"
@@ -5194,6 +5210,14 @@ msgstr "This reset link is invalid or expired"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not available for this conversation."
+msgstr "This sending address is not available for this conversation."
+
+#: src/components/MailReplyAskContent.tsx
+msgid "This sending address is not ready to send yet."
+msgstr "This sending address is not ready to send yet."
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "This sequence is available for review only. Its saved draft is not linked to this role."

@@ -1,4 +1,11 @@
 export const DE_MESSAGES: Record<string, string> = {
+  "This sending address is not available for this conversation.":
+    "Diese Absenderadresse ist für diese Unterhaltung nicht verfügbar.",
+  "This sending address is not ready to send yet.":
+    "Diese Absenderadresse ist noch nicht versandbereit.",
+  "The sending address changed. Prepare a new reply for review.":
+    "Die Absenderadresse hat sich geändert. Erstelle eine neue Antwort zur Prüfung.",
+  "This reply was not sent.": "Diese Antwort wurde nicht gesendet.",
   "Create this sending address?": "Diese Absenderadresse erstellen?",
   "Use this sending address?": "Diese Absenderadresse verwenden?",
   "Create address": "Adresse erstellen",

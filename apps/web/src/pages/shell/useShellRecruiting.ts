@@ -636,7 +636,7 @@ export function useShellRecruiting({
         ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
       ].join("\n");
       openRoleChat(
-        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card.`}`,
       );
     } catch (error) {
       if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));

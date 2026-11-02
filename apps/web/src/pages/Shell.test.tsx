@@ -1032,6 +1032,8 @@ it("drafts from the canonical Inbox without sending or replacing an existing com
   type(draft, "Keep my separate draft");
   await view.click("Draft reply");
   expect(draft.value).toContain("Keep my separate draft");
+  expect(draft.value).toContain("editable reply card");
+  expect(draft.value).toContain("choose Send on the card");
   expect(draft.value).toContain("Do not send");
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(shellApi.followUp).not.toHaveBeenCalled();
