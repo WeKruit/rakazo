@@ -17,8 +17,8 @@ import {
 export async function getGlobalRecruitingInbox(
   deps: {
     prisma: PrismaClient;
-    connectors?: Pick<ConnectorProvider, "execute">;
-    jobs?: JobPublisher;
+    connectors: Pick<ConnectorProvider, "execute">;
+    jobs: JobPublisher;
     signal?: AbortSignal;
     reauthorize?: () => Promise<void>;
     stillAuthorized?: () => Promise<boolean>;
@@ -33,14 +33,10 @@ export async function getGlobalRecruitingInbox(
   return authenticated(async () => {
     const page = await readGlobalRecruitingInbox(deps.prisma, actor, input, authorize);
     // Lists and thread pages stay stored/paginated. Only one explicitly opened preview reads its body.
-    if (!input.thread?.emailId || page.items.length !== 1 || !deps.connectors) return page;
+    if (!input.thread?.emailId || page.items.length !== 1) return page;
     const entry = page.items[0]!;
     const message = entry.email;
-    if (
-      !message.snippet &&
-      !/\[truncated — use get_email for full content\]\s*$/u.test(message.body)
-    )
-      return page;
+    if (!message.snippet) return page;
     const role = page.roles.find((role) => role.id === entry.roleId);
     if (!role) throw new IsolationError();
     const target = async (): Promise<RecruitingThreadTarget> => {

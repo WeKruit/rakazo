@@ -87,8 +87,7 @@ function MessageBody({
         </p>
       ) : null}
       <div className="break-words whitespace-pre-wrap text-sm leading-relaxed">
-        {email.body.replace(/\[truncated — use get_email for full content\]\s*$/u, "") ||
-          t`Message body unavailable`}
+        {email.body || t`Message body unavailable`}
       </div>
       {artifactTarget
         ? email.attachments?.map((file) => (
@@ -187,9 +186,7 @@ export function EmailConversation({
     loadedBody && loadedBody.owner === cache && loadedBody.key === bodyKey
       ? loadedBody.email
       : storedBody;
-  const needsBody =
-    chosen &&
-    (chosen.partial || /\[truncated — use get_email for full content\]\s*$/u.test(chosen.body));
+  const needsBody = chosen?.partial;
   useEffect(() => {
     let active = true;
     if (

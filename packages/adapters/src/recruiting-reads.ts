@@ -2759,12 +2759,8 @@ export async function getRecruitingCorrespondence(
         const fullText =
           email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
         const text = fullText || email.content_preview || "";
-        const displayText =
-          call.route.toolName === "list_emails"
-            ? text.replace(/\[truncated — use get_email for full content\](\s*)$/u, "$1")
-            : text;
         output.partial ||= email.body_fallback_reason != null;
-        emails.set(id, {
+        const message = RecruitingCorrespondenceSchema.shape.emails.element.parse({
           id,
           sourceName: source.name,
           sourceId: source.id,
@@ -2777,7 +2773,7 @@ export async function getRecruitingCorrespondence(
           sender: email.from_address_email ?? null,
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
           subject: email.subject,
-          body: displayText.slice(0, 50_000),
+          body: text,
           snippet:
             (listRead && !native) ||
             email.body_fallback_reason != null ||
@@ -2786,6 +2782,8 @@ export async function getRecruitingCorrespondence(
           date: email.timestamp_email,
           url: null,
         });
+        message.body = message.body.slice(0, 50_000);
+        emails.set(id, message);
       }
     }
     if (crmPages.length) {
@@ -2816,7 +2814,9 @@ export async function getRecruitingCorrespondence(
           if (!emails.has(message.id)) emails.set(message.id, message);
       }
     }
-    output.emails = [...emails.values()];
+    output.emails = [...emails.values()].map((email) =>
+      RecruitingCorrespondenceSchema.shape.emails.element.parse(email),
+    );
     output.events = [...events.values()];
     output.partial ||= unsupported || failed;
     output.status =

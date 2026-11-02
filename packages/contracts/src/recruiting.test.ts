@@ -20,6 +20,10 @@ it("keeps observed mail metadata optional and validates its known types", () => 
     url: null,
   };
   expect(schema.parse(base)).not.toHaveProperty("unread");
+  expect(
+    schema.parse({ ...base, body: "A real preview [truncated — use get_email for full content]" }),
+  ).toMatchObject({ body: "A real preview ", snippet: true });
+  expect(schema.parse(base)).toMatchObject({ body: "Body", snippet: false });
   const observed = {
     ...base,
     unread: false,

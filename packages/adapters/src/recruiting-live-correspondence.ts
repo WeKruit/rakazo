@@ -323,11 +323,10 @@ export async function refreshRecruitingCorrespondence(
                 continue;
               }
               const text =
-                email.body.text ??
+                email.body.text ||
                 (email.body.html
                   ? htmlToPlainText(email.body.html)
                   : (email.content_preview ?? ""));
-              const truncated = /\[truncated — use get_email for full content\]\s*$/u.test(text);
               const row = RecruitingCorrespondenceSchema.shape.emails.element.parse({
                 id: `${source.id}:${email.id}`,
                 sourceId: source.id,
@@ -341,14 +340,15 @@ export async function refreshRecruitingCorrespondence(
                 sender: email.from_address_email ?? null,
                 recipients: [email.to_address_email_list],
                 subject: email.subject,
-                body: text.replace(/\[truncated — use get_email for full content\]\s*$/u, ""),
+                body: text,
                 snippet:
                   !!email.body_fallback_reason ||
-                  truncated ||
-                  !(email.body.text || email.body.html),
+                  !(email.body.text || email.body.html) ||
+                  (!scope.message && text.length > 50000),
                 date: email.timestamp_email,
                 url: null,
               });
+              if (!scope.message) row.body = row.body.slice(0, 50000);
               emails.set(row.id, row);
               observed.push(row);
             }

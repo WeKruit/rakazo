@@ -99,7 +99,7 @@ function mailItems(page: MailPage, crmRoleId: string | undefined) {
         entry.email.providerThreadId,
       ]),
       sourceId: entry.email.sourceId,
-      organizationId: page.source.organizationId,
+      organizationId: null,
       crmRoleId: entry.crmRoleId,
       providerMessageId: entry.email.providerMessageId,
       threadId: entry.email.providerThreadId,
