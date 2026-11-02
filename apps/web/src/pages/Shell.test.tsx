@@ -6329,6 +6329,24 @@ it("keeps the resolved CRM role context in primary navigation links", async () =
   expect(inbox.getAttribute("href")).toBe("/app?view=inbox&role=all");
 });
 
+it("opens account Sequence and Interview from an account page, not the bot conversation", async () => {
+  await renderFeedbackShell("bot", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app?view=roles",
+  });
+  const nav = document.querySelector('nav[aria-label="Recruiting workspace"]')!;
+  await vi.waitFor(() => {
+    for (const [label, view] of [
+      ["Sequence", "sequence"],
+      ["Interview", "interview"],
+    ]) {
+      const link = [...nav.querySelectorAll("a")].find((item) => item.textContent?.trim() === label)!;
+      expect(link.getAttribute("href")).toBe(`/app?view=${view}&role=all`);
+    }
+  });
+});
+
 it("opens the account Inbox filtered to the open role from primary navigation", async () => {
   await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,

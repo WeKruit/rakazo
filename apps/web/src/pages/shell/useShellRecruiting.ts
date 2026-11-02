@@ -58,6 +58,7 @@ export function useShellRecruiting({
   inGroup,
   snapshot,
   groupId,
+  routeBotId,
   active,
   threadSnapshotCache,
   searchParams,
@@ -102,6 +103,8 @@ export function useShellRecruiting({
   inGroup: boolean;
   snapshot: ThreadSnapshot | null;
   groupId: string | undefined;
+  /** The bot named in the URL; account pages such as /app?view=inbox have none. */
+  routeBotId: string | undefined;
   active: Bot | undefined;
   threadSnapshotCache: RefObject<Map<string, ThreadSnapshot>>;
   searchParams: URLSearchParams;
@@ -440,7 +443,8 @@ export function useShellRecruiting({
       // One Inbox: inside a role it opens the account Inbox filtered to that role.
       if (view === "inbox")
         return `/app?${new URLSearchParams({ view, role: scope ?? currentBindingRead?.workspace?.role.id ?? "all" })}`;
-      if (!scope && !inGroup && active?.id && knownThreadId)
+      // Only an open bot conversation keeps its own view; account pages open the account view.
+      if (!scope && !inGroup && routeBotId && active?.id === routeBotId && knownThreadId)
         return `/app/${active.id}?${new URLSearchParams({ view })}`;
       return groupId && !groupId.startsWith("recruiting-global-") && !scope
         ? `/app/g/${groupId}?${new URLSearchParams({ view })}`
