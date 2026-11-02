@@ -479,7 +479,6 @@ import {
 } from "./lazy-tool-catalog.js";
 import {
   gmailReplyRoute,
-  mailReplyEffectWithText,
   mailReplyFromAnchor,
   mailReplyOutcomeInstruction,
   readGmailReplyCard,
@@ -13761,7 +13760,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           replyOutcome = mailReplyOutcomeInstruction(
             currentReplyEffect
-              ? mailReplyState(replyDraft, mailReplyEffectWithText(currentReplyEffect, replyDraft))
+              ? mailReplyState(replyDraft, currentReplyEffect)
               : { status: "unknown" },
           );
           try {

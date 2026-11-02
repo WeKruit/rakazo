@@ -10,6 +10,7 @@ import {
   catalogApprovalDetails,
   catalogApprovalRequest,
 } from "@rakazo/core";
+import { JSDOM } from "jsdom";
 import type { Prisma, PrismaClient } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 import { IsolationError } from "./scope.js";
@@ -19,6 +20,34 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined;
 const marker = "__rakazoCatalogTool";
+
+/** Compare the rendered email, never a plain-text fallback that disagrees with its HTML. */
+function renderedReplyText(html: string): string | undefined {
+  const dom = new JSDOM(html);
+  try {
+    const document = dom.window.document;
+    // ponytail: only text, line breaks and plain blocks are proven; quotes/rich markup stay unconfirmed.
+    if (
+      document.body.attributes.length ||
+      document.querySelector("script,style") ||
+      [...document.body.querySelectorAll("*")].some(
+        (node) => !["BR", "P", "DIV"].includes(node.tagName) || node.attributes.length,
+      )
+    )
+      return undefined;
+    const render = (node: Node): string => {
+      if (node.nodeType === 3) return (node.nodeValue ?? "").replace(/[\t\n\f\r ]+/g, " ");
+      if (node.nodeName === "BR") return "\n";
+      return (
+        [...node.childNodes].map(render).join("") +
+        (node.nodeName === "P" ? "\n\n" : node.nodeName === "DIV" ? "\n" : "")
+      );
+    };
+    return render(document.body);
+  } finally {
+    dom.window.close();
+  }
+}
 
 /** Only these two mutable fields can enter the saved, one-time native approval. */
 export function editMailReplyRequest(
@@ -138,11 +167,25 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         .sort()
         .join("\n");
   const nativeBody = object(payload?.body);
-  const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
+  const normalize = (text: string) => text.replace(/\r\n?/g, "\n").trim();
+  const nativeContent = object(provider?.structuredContent);
+  const htmlText =
+    typeof nativeBody?.html === "string" &&
+    route?.connectorId === "mcp" &&
+    route.toolName === "native_instantly_reply_to_email" &&
+    nativeContent?.source === "local_native_instantly_rest" &&
+    payload?.id !== draft.inReplyTo.emailId &&
+    draft.inReplyTo.threadId &&
+    payload?.thread_id === draft.inReplyTo.threadId
+      ? renderedReplyText(nativeBody.html)
+      : undefined;
   const bodyMatches =
-    typeof nativeBody?.text === "string" &&
-    (nativeBody.text === edited ||
-      (typeof nativeBody.html === "string" && normalize(nativeBody.text) === normalize(edited)));
+    typeof nativeBody?.html === "string"
+      ? htmlText !== undefined &&
+        normalize(htmlText) === normalize(edited) &&
+        (nativeBody.text === undefined ||
+          (typeof nativeBody.text === "string" && normalize(nativeBody.text) === normalize(edited)))
+      : typeof nativeBody?.text === "string" && normalize(nativeBody.text) === normalize(edited);
   const nativeReceipt =
     payload?.ue_type === 3 &&
     typeof payload?.id === "string" &&

@@ -20,7 +20,6 @@ import {
   sendingMailboxState,
 } from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
-import { nativeReplyBodyWithText } from "./mail-reply.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
@@ -1238,19 +1237,18 @@ async function replyToEmail(
     (typeof original.subject === "string" && original.subject.trim()
       ? `Re: ${original.subject.replace(/^(re:\s*)+/iu, "")}`
       : "Re:");
+  const text = input.body.text.replace(/\r\n?/g, "\n");
+  const html = `<p>${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\n", "<br />")}</p>`;
   const sent = await rest("POST", "/emails/reply", {
     reply_to_uuid: input.reply_to_uuid,
     eaccount,
     subject,
-    body: input.body,
+    body: { text, html },
     ...(input.cc_address_email_list !== undefined
       ? { cc_address_email_list: input.cc_address_email_list }
       : {}),
   });
-  return nativeReplyBodyWithText(sent, {
-    emailId: input.reply_to_uuid,
-    threadId: typeof original.thread_id === "string" ? original.thread_id : null,
-  });
+  return sent;
 }
 
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {

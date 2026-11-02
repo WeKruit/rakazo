@@ -30,12 +30,14 @@
     "@rakazo/core": "workspace:*",
     "@rakazo/logging": "workspace:*",
     "pg": "8.23.0",
-    "dotenv": "17.4.2"
+    "dotenv": "17.4.2",
+    "jsdom": "30.0.1"
   },
   "devDependencies": {
     "@types/pg": "8.23.1",
     "prisma": "7.10.0",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "@types/jsdom": "30.0.0"
   }
 }
