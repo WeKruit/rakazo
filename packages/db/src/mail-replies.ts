@@ -146,8 +146,7 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
     payload?.ue_type === 3 &&
     typeof payload.id === "string" &&
     payload.id !== draft.inReplyTo.emailId &&
-    Boolean(draft.inReplyTo.threadId) &&
-    payload.thread_id === draft.inReplyTo.threadId &&
+    (draft.inReplyTo.threadId === null || payload.thread_id === draft.inReplyTo.threadId) &&
     payload.eaccount === draft.from &&
     sameAddresses(payload.to_address_email_list, draft.to) &&
     sameAddresses(payload.cc_address_email_list ?? "", draft.cc) &&

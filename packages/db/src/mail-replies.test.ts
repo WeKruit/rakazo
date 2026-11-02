@@ -333,6 +333,7 @@ it("uses only the same native POST identity for Sent and displays its actual rec
     { id: "anchor" },
     { ue_type: 4 },
     { thread_id: "foreign" },
+    { thread_id: null },
     { eaccount: "foreign@example.test" },
     { to_address_email_list: "foreign@example.test" },
     { cc_address_email_list: "foreign@example.test" },
@@ -340,8 +341,12 @@ it("uses only the same native POST identity for Sent and displays its actual rec
   ])
     expect(mailReplyState(draft, effect({ ...receipt, ...changed })).status).toBe("unknown");
   expect(mailReplyState(draft, effect(receipt, "untrusted-source")).status).toBe("unknown");
+  const { thread_id: _, ...missingThread } = receipt;
+  expect(mailReplyState(draft, effect(missingThread)).status).toBe("unknown");
+  const withoutThread = { ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } };
+  for (const payload of [receipt, missingThread])
+    expect(mailReplyState(withoutThread, effect(payload)).status).toBe("sent");
   expect(
-    mailReplyState({ ...draft, inReplyTo: { ...draft.inReplyTo, threadId: null } }, effect(receipt))
-      .status,
+    mailReplyState(withoutThread, effect({ ...receipt, eaccount: "foreign@example.test" })).status,
   ).toBe("unknown");
 });
