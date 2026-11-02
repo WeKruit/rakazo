@@ -1031,7 +1031,9 @@ export function ShellConversation({
                   replyTargetName={emptyCrmChat ? undefined : replyTargetName}
                   onClearReply={clearReply}
                   suggestion={
-                    emptyCrmChat || !activeSnapshot ? null : currentSuggestion(activeSnapshot)
+                    emptyCrmChat || !activeSnapshot
+                      ? null
+                      : currentSuggestion(activeSnapshot, currentRuns)
                   }
                   toolbar={
                     !emptyCrmChat && activeSnapshot?.effortMode ? (

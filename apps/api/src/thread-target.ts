@@ -555,9 +555,14 @@ export async function threadHead(prisma: PrismaClient, target: ThreadTarget) {
 /** The saved next-message suggestion for the newest reply, so it survives a reload. */
 export async function latestReplySuggestion(
   prisma: PrismaClient,
-  messages: ReadonlyArray<{ role: string; runId?: string | null; internal?: boolean }>,
+  messages: ReadonlyArray<{ id: string; role: string; runId?: string | null; internal?: boolean }>,
 ): Promise<{ runId: string; text: string } | null> {
-  const last = messages.findLast((message) => !message.internal);
+  const last = messages.findLast(
+    (message) =>
+      !message.internal &&
+      (message.role === "user" || message.role === "bot") &&
+      !message.id.startsWith("progress:"),
+  );
   if (last?.role !== "bot" || !last.runId) return null;
   const runId = last.runId;
   // Never fails the thread read: no suggestion is the fallback.

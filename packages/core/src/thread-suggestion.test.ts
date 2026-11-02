@@ -48,4 +48,21 @@ describe("thread suggestion", () => {
     });
     expect(currentSuggestion(stale)).toBeNull();
   });
+
+  it("hides while a reply is being written, not while background work runs", () => {
+    const next = reduceThreadEvent(
+      {
+        ...thread,
+        messages: [
+          ...thread.messages,
+          { id: "progress:bg", role: "bot", runId: "bg", blocks: [{ kind: "steps", steps: [] }] },
+        ],
+      },
+      { type: "thread.suggestion", threadId: "t1", runId: "r1", payload: { text: "Find more" } },
+    );
+    expect(currentSuggestion(next, [{ status: "running", trigger: "tool_background" }])).toBe(
+      "Find more",
+    );
+    expect(currentSuggestion(next, [{ status: "running", trigger: "user" }])).toBeNull();
+  });
 });
