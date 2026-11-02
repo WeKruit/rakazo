@@ -318,6 +318,7 @@ it("uses only the same native POST identity for Sent and displays its actual rec
       "Actual 中文 & <text>",
     ],
     [{ text: "Actual plain body" }, "Actual plain body"],
+    [{}, ""],
   ] as const) {
     const state = mailReplyState(draft, effect({ ...receipt, body }));
     expect(state).toMatchObject({

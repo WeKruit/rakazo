@@ -165,7 +165,7 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
           ? htmlToPlainText(nativeBody.html)
           : typeof nativeBody?.text === "string"
             ? nativeBody.text
-            : edited
+            : ""
         : edited,
     ...(effect.status === "uncertain"
       ? { error: "delivery_unconfirmed" }
