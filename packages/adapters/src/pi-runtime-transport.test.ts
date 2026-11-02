@@ -42,25 +42,49 @@ describe("Pi runtime transport", () => {
   beforeEach(() => vi.stubEnv("MODEL_STREAM_MAX_RETRIES", undefined));
   afterEach(() => vi.unstubAllEnvs());
 
-  it("shares the prompt cache key across chats with the same bot and tools", async () => {
+  it("shares the prompt cache key across chats and accounts with the same tools and instructions", async () => {
     const tools = [{ type: "function", name: "ask_user" }];
-    const keyFor = async (threadId: string, payload: Record<string, unknown>) =>
-      reliableStreamOptions(codexModel, {
-        sessionId: conversationSessionId(threadId, "bot-1"),
-      }).onPayload?.(payload, codexModel);
-    const first = (await keyFor("thread-1", { prompt_cache_key: "thread-1", tools })) as {
-      prompt_cache_key: string;
+    const system = {
+      role: "developer",
+      content: `You are Main, recruiting lead.${".".repeat(5000)}`,
     };
-    const second = (await keyFor("thread-2", { prompt_cache_key: "thread-2", tools })) as {
-      prompt_cache_key: string;
-    };
-    expect(first.prompt_cache_key).toMatch(/^rk:bot-1:[0-9a-f]{16}$/);
-    expect(second.prompt_cache_key).toBe(first.prompt_cache_key);
-    expect(sharedPromptCacheKey(conversationSessionId("thread-1", "bot-1"))?.([])).not.toBe(
-      first.prompt_cache_key,
-    );
+    const keyFor = async (threadId: string, botId: string, payload: Record<string, unknown>) =>
+      (
+        (await reliableStreamOptions(codexModel, {
+          sessionId: conversationSessionId(threadId, botId),
+        }).onPayload?.(payload, codexModel)) as { prompt_cache_key: string }
+      ).prompt_cache_key;
+    const input = (content: string) => [{ ...system, content: `${system.content}${content}` }];
+    const first = await keyFor("thread-1", "bot-1", {
+      prompt_cache_key: "thread-1",
+      tools,
+      input: input(""),
+    });
+    expect(first).toMatch(/^rk:[0-9a-f]{32}$/);
+    // Another account's default bot, with its own context past the shared prefix.
+    expect(
+      await keyFor("thread-2", "bot-2", {
+        prompt_cache_key: "thread-2",
+        tools,
+        input: input("Space: Acme"),
+      }),
+    ).toBe(first);
+    expect(
+      await keyFor("thread-1", "bot-1", {
+        prompt_cache_key: "thread-1",
+        tools,
+        input: [{ role: "developer", content: "You are Sourcer." }],
+      }),
+    ).not.toBe(first);
+    expect(
+      sharedPromptCacheKey(conversationSessionId("thread-1", "bot-1"))?.([], undefined),
+    ).not.toBe(first);
     const untouched = { messages: [] };
-    expect(await keyFor("thread-1", untouched)).toBe(untouched);
+    expect(
+      await reliableStreamOptions(codexModel, {
+        sessionId: conversationSessionId("thread-1", "bot-1"),
+      }).onPayload?.(untouched, codexModel),
+    ).toBe(untouched);
   });
 
   it.each(["0", "3", "5"])("uses the configured retry limit %s", (value) => {
