@@ -259,13 +259,18 @@ export function SequenceTab(
           ...(chosenCampaign.serverId ? { serverId: chosenCampaign.serverId } : {}),
         }
       : undefined;
+  const selectedCampaignId = selection?.campaignId ?? requestedCampaign;
+  const selectedServerId = selection ? selection.serverId : requestedServer;
+  const savedSelection = selectedCampaignId && !selectedServerId ? selectedCampaignId : null;
   const roleCampaign = useRoleCampaign(
-    { ...props, refreshSignal: (props.refreshSignal ?? 0) + reload },
+    {
+      ...props,
+      conversation: savedSelection ? undefined : props.conversation,
+      refreshSignal: (props.refreshSignal ?? 0) + reload,
+    },
     selection,
     campaignScope,
   );
-  const savedSelection =
-    ready && selection?.campaignId && !selection.serverId ? selection.campaignId : null;
   const savedRead = useCrmData(
     crm,
     "roleCampaigns",

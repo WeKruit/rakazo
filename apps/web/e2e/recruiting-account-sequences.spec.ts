@@ -252,11 +252,13 @@ for (const selected of ["fixture-campaign", "fixture-second-campaign"]) {
         },
       }),
     );
-    await page.route("**/rpc/recruiting/roleCampaign", (route) =>
-      route.fulfill({
+    let liveRequests = 0;
+    await page.route("**/rpc/recruiting/roleCampaign", (route) => {
+      liveRequests++;
+      return route.fulfill({
         json: { json: { status: "unavailable", serverId: null, campaign: null, leads: [] } },
-      }),
-    );
+      });
+    });
     await page.route("**/rpc/recruiting/crmData", async (route) => {
       const input = route.request().postDataJSON().json;
       if (!["roleCampaigns", "campaignLeads"].includes(input.operation)) return route.fallback();
@@ -359,6 +361,7 @@ for (const selected of ["fixture-campaign", "fixture-second-campaign"]) {
       sequence.getByRole("button", { name: "View sequence", exact: true }),
     ).toBeDisabled();
     await expect(contacts).not.toContainText("private-lead");
+    expect(liveRequests).toBe(0);
     if (selected === ids[0]) {
       await expect(contacts.getByText("Not reported", { exact: true })).toBeVisible();
       await contacts.getByRole("button", { name: "Load more", exact: true }).click();
@@ -385,12 +388,18 @@ for (const selected of ["fixture-campaign", "fixture-second-campaign"]) {
       path: test.info().outputPath(`saved-sequence-detail-${selected}.png`),
       fullPage: true,
     });
+    const drafts = page.locator("summary").filter({ hasText: "Outreach drafts" });
+    await drafts.click();
+    await expect.poll(() => liveRequests).toBe(1);
+    await drafts.click();
+    await expect(drafts.locator("..")).not.toHaveAttribute("open", "");
     const before = requests.filter((request) => request.operation === "campaignLeads").length;
     await page.goto(`/app/g/${appGroupId}?view=sequence&campaign=not-authorized`);
     await expect(
       page.getByText("This sequence is not saved for this role.", { exact: true }),
     ).toBeVisible();
     expect(requests.filter((request) => request.operation === "campaignLeads").length).toBe(before);
+    expect(liveRequests).toBe(1);
     await expect(page.getByText("Saved Zoe", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Saved Avery", { exact: true })).toHaveCount(0);
   });
