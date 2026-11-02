@@ -365,11 +365,6 @@ export class PiAgentRuntime implements AgentRuntime {
           request.sourceMessageId,
           model,
         );
-        const initialPrompt = initialSteering.length
-          ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
-              .map((item) => item.text)
-              .join("\n")}`
-          : request.prompt;
         const systemPrompt =
           request.instructions ||
           (toolDefs.some((tool) => tool.name === "computer_observe")
@@ -568,14 +563,7 @@ export class PiAgentRuntime implements AgentRuntime {
           },
         });
 
-        const steerIn = (item: AgentSteeringMessage) => {
-          const images = toPiImages(item.images);
-          agent.steer({
-            role: "user",
-            content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
-            timestamp: Date.now(),
-          });
-        };
+        const steerIn = (item: AgentSteeringMessage) => agent.steer(userMessage(item));
         // Interject: while the model is streaming, a flagged steering message aborts only
         // that stream (tools in flight are untouched), is steered in, and the same run
         // continues from the partial assistant message.
@@ -808,12 +796,17 @@ export class PiAgentRuntime implements AgentRuntime {
 
         // No "working…" progress push here: the shell already renders its own
         // placeholder while a run is active, and emitting one here shows two.
-        const images = toPiImages([
-          ...(request.currentTurnImages ?? []),
-          ...initialSteering.flatMap((item) => item.images ?? []),
-        ]);
+        const images = toPiImages(request.currentTurnImages);
         try {
-          await agent.prompt(initialPrompt, images?.length ? images : undefined);
+          // A message that arrived before the first step (for example right after a card
+          // answer) is its own, latest user turn: folded into the prompt as extra context,
+          // the model answered only the prompt and the message counted as answered.
+          if (initialSteering.length)
+            await agent.prompt([
+              userMessage({ text: request.prompt, images: request.currentTurnImages }),
+              ...initialSteering.map(userMessage),
+            ]);
+          else await agent.prompt(request.prompt, images.length ? images : undefined);
           while (!signal.aborted && !host.pausePending && !host.toolCallBudget.exceeded) {
             // A message claimed just as the last step ended was steered in after the loop
             // stopped looking: answer it in this run, or it would count as answered unseen.
@@ -946,6 +939,19 @@ export class PiAgentRuntime implements AgentRuntime {
       if (running.get(request.runId) === active) running.delete(request.runId);
     }
   }
+}
+
+/** One user turn for the model, with its images. */
+function userMessage(item: {
+  text: string;
+  images?: AgentRunRequest["currentTurnImages"];
+}): AgentMessage {
+  const images = toPiImages(item.images);
+  return {
+    role: "user",
+    content: images.length ? [{ type: "text", text: item.text }, ...images] : item.text,
+    timestamp: Date.now(),
+  };
 }
 
 function toPiImages(images: AgentRunRequest["currentTurnImages"]) {

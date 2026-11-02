@@ -43,7 +43,7 @@ const fakeAgentState = vi.hoisted(() => ({
   steeredMessages: [] as unknown[],
   followUpMessages: [] as unknown[],
   initialMessages: [] as unknown[],
-  promptInputs: [] as string[],
+  promptInputs: [] as unknown[],
   promptImages: [] as unknown[][],
   toolResult: undefined as unknown,
 }));
@@ -78,7 +78,7 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       this.listeners.push(listener);
     }
 
-    async prompt(prompt: string, images?: unknown[]) {
+    async prompt(prompt: unknown, images?: unknown[]) {
       fakeAgentState.promptInputs.push(prompt);
       fakeAgentState.promptImages.push(images ?? []);
       if (fakeAgentState.mode === "empty" || fakeAgentState.mode === "two-boundaries") {
@@ -833,12 +833,55 @@ describe("Pi connector tool dispatch", () => {
       // Exhaust the runtime event stream.
     }
 
-    expect(fakeAgentState.promptInputs).toHaveLength(1);
-    for (const item of steering) {
-      expect(fakeAgentState.promptInputs[0]?.split(item.text)).toHaveLength(2);
+    expect(fakeAgentState.promptInputs).toEqual([
+      [
+        expect.objectContaining({
+          role: "user",
+          content: "Respond to the user's steering context.",
+        }),
+        expect.objectContaining({ role: "user", content: steering[0]!.text }),
+        expect.objectContaining({ role: "user", content: steering[1]!.text }),
+      ],
+    ]);
+    for (const item of steering)
       expect(JSON.stringify(fakeAgentState.initialMessages)).not.toContain(item.text);
-    }
     expect(fakeAgentState.steeredMessages).toEqual([]);
+  });
+
+  it("gives a request sent right after a card answer its own, latest user turn", async () => {
+    fakeAgentState.mode = "empty";
+    const request = {
+      id: "steering-1",
+      messageId: "message-1",
+      text: "List any 3 saved people in the data engineer role.",
+    };
+    const claimSteering = vi.fn(async (seenIds: string[]) => (seenIds.length ? [] : [request]));
+    const runtime = new PiAgentRuntime();
+
+    for await (const _event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "answer",
+        prompt: "Atlanta; Dallas",
+        instructions: "Follow the user's instructions.",
+        history: [],
+        tools: [],
+        model: { provider: "test", id: "dispatch-test-model" },
+        claimSteering,
+      },
+      { signal: new AbortController().signal },
+    )) {
+      // Exhaust the runtime event stream.
+    }
+
+    // The request is not folded into the answer as extra context.
+    expect(fakeAgentState.promptInputs).toEqual([
+      [
+        expect.objectContaining({ role: "user", content: "Atlanta; Dallas" }),
+        expect.objectContaining({ role: "user", content: request.text }),
+      ],
+    ]);
   });
 
   it("delivers images attached to initial and boundary steering", async () => {
@@ -896,8 +939,16 @@ describe("Pi connector tool dispatch", () => {
       // Exhaust the runtime event stream.
     }
 
-    expect(fakeAgentState.promptImages).toEqual([
-      [{ type: "image", data: "AQID", mimeType: "image/png" }],
+    expect(fakeAgentState.promptInputs).toEqual([
+      [
+        expect.objectContaining({ content: "continue" }),
+        expect.objectContaining({
+          content: [
+            { type: "text", text: "Inspect the first image." },
+            { type: "image", data: "AQID", mimeType: "image/png" },
+          ],
+        }),
+      ],
     ]);
     expect(fakeAgentState.steeredMessages).toContainEqual({
       role: "user",
