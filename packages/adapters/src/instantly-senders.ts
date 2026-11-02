@@ -63,6 +63,19 @@ const sender = (value: unknown): Sender | undefined => {
 const is404 = (error: unknown) =>
   error instanceof Error && "status" in error && error.status === 404;
 
+export async function confirmedSendingMailbox(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  context: AdapterContext,
+  email: string,
+) {
+  const row = await prisma.externalEffect.findUnique({
+    where: { idempotencyKey: key(email), ...receiptScope(context), status: "completed" },
+    select: { result: true },
+  });
+  const value = sender(row?.result);
+  return value?.email.trim().toLowerCase() === email.trim().toLowerCase() ? value : undefined;
+}
+
 export async function confirmedSendingMailboxes(
   prisma: Pick<PrismaClient, "externalEffect">,
   context: Pick<AdapterContext, "userId" | "spaceId">,
@@ -144,18 +157,14 @@ export async function requireSendingMailboxReady(
   context: AdapterContext,
   email: string,
 ) {
-  const mine = await confirmedSendingMailboxes(prisma, context);
-  if (!mine.some((row) => row.email === email.trim().toLowerCase()))
-    throw new IsolationError("Confirm this account's sending address before sending.");
+  const mine = await confirmedSendingMailbox(prisma, context, email);
+  if (!mine) throw new IsolationError("Confirm this account's sending address before sending.");
   const state = await sendingMailboxState(rest, email);
   if (!state.usable)
     throw new Error(
       "This sending address is not active yet. The draft is saved; sending must wait.",
     );
-  if (
-    !("displayName" in state) ||
-    state.displayName !== mine.find((row) => row.email === email.trim().toLowerCase())!.displayName
-  )
+  if (!("displayName" in state) || state.displayName !== mine.displayName)
     throw new Error(
       "The sending display name changed. Review this account's sender before sending.",
     );

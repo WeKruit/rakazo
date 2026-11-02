@@ -250,6 +250,7 @@ import {
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
+  mailReplyState,
   Prisma,
   parseComputerMode,
   pollOf,
@@ -13439,7 +13440,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
-        let prompt = [
+        const promptParts = [
           replyContext,
           nativeSources?.currentAnswer
             ? [blocksToAgentHistoryText(turnBlocks ?? []), missingImagesInstruction]
@@ -13467,9 +13468,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
           // Per-turn, not in the system prompt: the timestamp changes every call and would break the cacheable prefix.
           formatCurrentTimeInstruction(),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+        ];
+        let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
@@ -13620,6 +13620,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ].includes(operation ?? "")
           )
             break;
+          const replyDraft = MailReplySchema.parse(result.mailReplyApproval);
           const name = catalog?.toolName ?? approvedEffectReplays.nextToolName()!;
           const effect = approvedEffects.find((effect) => effect.request === request)!;
           const outcome = await applyTool(
@@ -13653,37 +13654,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 payload: { effectId: effect.id, tool: name },
               });
           }
-          await publishMailReplyCard(
-            deps.prisma,
-            { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
-            effect.id,
-          )
-            .then(async (event) => {
-              if (event) {
-                await deps.events.notify?.(event.threadId, event.seq);
-                const blocks = MessageBlockSchema.array().safeParse(
-                  (event.payload as { blocks?: unknown }).blocks,
-                );
-                const card = blocks.data?.find(
-                  (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
-                );
-                if (card?.kind === "ask" && card.mailReply) {
-                  prompt =
-                    prompt.replace(approvalContinuation ?? "", "") +
-                    "\n\n" +
-                    mailReplyOutcomeInstruction(card.mailReply);
-                }
-              }
-            })
-            .catch((error) =>
-              getLogger().warn("mail.reply.card_publish_failed", {
-                effectId: effect.id,
-                error: String(error),
-              }),
+          // Remove the obsolete approval instruction even if publishing fails: never replay dispatch.
+          const currentReplyEffect = await deps.prisma.externalEffect.findFirst({
+            where: { id: effect.id, spaceId: run.spaceId, runId, run: { userId: run.userId } },
+          });
+          replyOutcome = mailReplyOutcomeInstruction(
+            currentReplyEffect
+              ? mailReplyState(replyDraft, currentReplyEffect)
+              : { status: "unknown" },
+          );
+          try {
+            const event = await publishMailReplyCard(
+              deps.prisma,
+              { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
+              effect.id,
             );
+            if (event) {
+              const blocks = MessageBlockSchema.array().safeParse(
+                (event.payload as { blocks?: unknown }).blocks,
+              );
+              const card = blocks.data?.find(
+                (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+              );
+              if (card?.kind === "ask" && card.mailReply)
+                replyOutcome = mailReplyOutcomeInstruction(card.mailReply);
+              await deps.events.notify?.(event.threadId, event.seq);
+            }
+          } catch (error) {
+            getLogger().warn("mail.reply.card_publish_failed", {
+              effectId: effect.id,
+              error: String(error),
+            });
+          }
           sentReplyDirectly = true;
         }
         if (sentReplyDirectly) probeFoundNothing = true;
+        const prompt = [
+          ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
+          replyOutcome,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
 
         // Stop during setup must not still open the model. A reclaimed lease can
         // leave status "running" under a new owner, and the stream loop only

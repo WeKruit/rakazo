@@ -1261,6 +1261,7 @@ export class McpConnector implements ConnectorProvider {
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
       }
       if (replyMailbox && sharedInstantlyAccount(assignment.server)) {
+        if (!replyOriginal) throw new IsolationError();
         const credential = await this.authorizeInstantlyRest(call, context, []);
         const rest = instantlyRest(
           createSafeRemoteFetch(this.options.network?.fetch, this.options.network?.resolveHostname),
@@ -1272,7 +1273,7 @@ export class McpConnector implements ConnectorProvider {
           rest,
           context,
           assignment.server.id,
-          replyOriginal!,
+          replyOriginal,
           replyMailbox,
         );
         await context.reauthorize?.();
@@ -1578,15 +1579,17 @@ export class McpConnector implements ConnectorProvider {
         call.route!.toolName,
         call.args,
         sharedInstantlyAccount(credential.server)
-          ? await ownedInstantly(
-              this.prisma,
-              context.spaceId,
-              credential.server.id,
-              context.userId,
-            ).then((owned) => ({
-              campaigns: new Set(owned.campaigns),
-              mailboxes: new Set(owned.mailboxes),
-            }))
+          ? emailScope
+            ? { campaigns: new Set(emailScope.campaignIds), mailboxes: new Set<string>() }
+            : await ownedInstantly(
+                this.prisma,
+                context.spaceId,
+                credential.server.id,
+                context.userId,
+              ).then((owned) => ({
+                campaigns: new Set(owned.campaigns),
+                mailboxes: new Set(owned.mailboxes),
+              }))
           : undefined,
       );
       if (call.route!.toolName === "native_instantly_get_email") await assertScope();

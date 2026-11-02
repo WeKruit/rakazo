@@ -90,7 +90,7 @@ type Effect = {
   result: Prisma.JsonValue | null;
   updatedAt: Date;
 };
-function state(draft: MailReply, effect: Effect): MailReply {
+export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
   const result = object(effect.result);
   const provider = object(result?.providerResult) ?? result;
   const envelope =
@@ -167,7 +167,7 @@ function state(draft: MailReply, effect: Effect): MailReply {
             ? "failed"
             : sent
               ? "sent"
-              : effect.status === "uncertain" || effect.status === "completed"
+              : effect.status === "completed"
                 ? "unknown"
                 : ["approved", "executing"].includes(effect.status)
                   ? "sending"
@@ -227,7 +227,7 @@ export async function projectMailReplyCards<
         ? {
             ...block,
             mailReply: {
-              ...state(block.mailReply, effect),
+              ...mailReplyState(block.mailReply, effect),
               canAnswer:
                 block.status === "pending" &&
                 effect.status === "intended" &&
@@ -264,7 +264,7 @@ export async function publishMailReplyCard(prisma: PrismaClient, actor: Actor, e
     if (!message || !parsed.success) return null;
     const blocks = parsed.data.map((block) =>
       block.kind === "ask" && block.mailReply && block.approvalEffectId === effectId
-        ? { ...block, mailReply: { ...state(block.mailReply, effect), canAnswer: false } }
+        ? { ...block, mailReply: { ...mailReplyState(block.mailReply, effect), canAnswer: false } }
         : block,
     );
     await tx.message.update({ where: { id: message.id }, data: { blocks } });

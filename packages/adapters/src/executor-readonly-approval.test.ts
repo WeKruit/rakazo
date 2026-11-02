@@ -113,6 +113,7 @@ type Effect = {
   request: unknown;
   result?: unknown;
   reviewDecision?: string;
+  updatedAt?: Date;
   runId?: string;
 };
 
@@ -270,7 +271,7 @@ function fixture({
         ) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
-      const effect = { ...data, id: `effect-${effects.length + 1}` };
+      const effect = { ...data, updatedAt: new Date(), id: `effect-${effects.length + 1}` };
       effects.push(effect);
       return { ...effect };
     }),

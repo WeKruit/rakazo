@@ -11,6 +11,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  confirmedSendingMailbox,
   confirmedSendingMailboxes,
   defaultSendingMailbox,
   EnsureSenderInput,
@@ -740,21 +741,26 @@ const mailboxKey = (email: string) => email.trim().toLowerCase();
  * A campaign's existing mailbox authorizes its own reply thread only, not general sender access.
  */
 export async function ownedInstantly(
-  prisma: Pick<PrismaClient, "externalEffect">,
+  prisma: Pick<PrismaClient, "$queryRaw">,
   spaceId: string,
   serverId: string,
   userId: string,
 ): Promise<{ campaigns: string[]; mailboxes: string[] }> {
-  const effects = await prisma.externalEffect.findMany({
-    where: {
-      spaceId,
-      run: { userId, spaceId },
-      kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
-      status: "completed",
-      request: { path: ["serverId"], equals: serverId },
-    },
-    select: { kind: true, result: true },
-  });
+  // Run ownership is the indexed boundary; OFFSET 0 keeps each receipt lookup on (runId, status).
+  const effects = await prisma.$queryRaw<{ kind: string; result: unknown }[]>`
+    SELECT e.kind, e.result
+    FROM runs r
+    CROSS JOIN LATERAL (
+      SELECT e.kind, e.result
+      FROM external_effects e
+      WHERE e."runId" = r.id AND e."spaceId" = ${spaceId}
+        AND e.status = 'completed'
+        AND e.kind IN ('instantly_role_campaign', 'instantly_sender_account')
+        AND e.request->>'serverId' = ${serverId}
+      OFFSET 0
+    ) e
+    WHERE r."spaceId" = ${spaceId} AND r."userId" = ${userId}
+  `;
   const campaigns = new Set<string>();
   const mailboxes = new Set<string>();
   for (const { kind, result } of effects) {
@@ -1154,8 +1160,7 @@ export async function requireReplySendingMailboxReady(
 ) {
   if (typeof original.eaccount !== "string" || !sameAddress(original.eaccount, email))
     throw new MailReplySendingError("sender_unavailable");
-  const senders = await confirmedSendingMailboxes(prisma, context);
-  if (senders.some((row) => sameAddress(row.email, email))) {
+  if (await confirmedSendingMailbox(prisma, context, email)) {
     try {
       return await requireSendingMailboxReady(prisma, rest, context, email);
     } catch (error) {
@@ -1179,21 +1184,28 @@ export async function requireReplySendingMailboxReady(
     !original.thread_id.trim()
   )
     throw new MailReplySendingError("sender_unavailable");
-  const binding = await prisma.externalEffect.findFirst({
-    where: {
-      spaceId: context.spaceId,
-      run: { userId: context.userId, spaceId: context.spaceId },
-      kind: "instantly_role_campaign",
-      status: "completed",
-      AND: [
-        { request: { path: ["serverId"], equals: serverId } },
-        { request: { path: ["roleId"], equals: roleId } },
-        { result: { path: ["campaignId"], equals: original.campaign_id } },
-      ],
-    },
-    select: { result: true },
-  });
-  const owned = binding?.result as Partial<RoleBinding> | null;
+  const key = bindingKey(serverId, roleId);
+  let owned: Partial<RoleBinding> | null = null;
+  // Existing native associations have unique keys; never scan unrelated effect history for proof.
+  for (const idempotencyKey of [key, `${key}:campaign:${original.campaign_id}`]) {
+    const binding = await prisma.externalEffect.findUnique({
+      where: {
+        idempotencyKey,
+        spaceId: context.spaceId,
+        run: { userId: context.userId, spaceId: context.spaceId },
+        kind: "instantly_role_campaign",
+        status: "completed",
+        AND: [
+          { request: { path: ["serverId"], equals: serverId } },
+          { request: { path: ["roleId"], equals: roleId } },
+          { result: { path: ["campaignId"], equals: original.campaign_id } },
+        ],
+      },
+      select: { result: true },
+    });
+    owned = binding?.result as Partial<RoleBinding> | null;
+    if (typeof owned?.eaccount === "string" && sameAddress(owned.eaccount, email)) break;
+  }
   if (typeof owned?.eaccount !== "string" || !sameAddress(owned.eaccount, email))
     throw new MailReplySendingError("sender_unavailable");
   let state: Awaited<ReturnType<typeof sendingMailboxState>>;

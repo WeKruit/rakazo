@@ -359,30 +359,26 @@ describe("shared mail account isolation", () => {
       { kind: "instantly_role_campaign", result: null },
     ]);
     await expect(
-      ownedInstantly({ externalEffect: { findMany } } as never, "s", "server", "owner"),
+      ownedInstantly({ $queryRaw: findMany } as never, "s", "server", "owner"),
     ).resolves.toEqual({ campaigns: [MINE], mailboxes: ["second@ours.test"] });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        spaceId: "s",
-        run: { userId: "owner", spaceId: "s" },
-        kind: { in: ["instantly_role_campaign", "instantly_sender_account"] },
-        status: "completed",
-        request: { path: ["serverId"], equals: "server" },
-      },
-      select: { kind: true, result: true },
-    });
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany.mock.calls[0]?.slice(1)).toEqual(["s", "server", "s", "owner"]);
   });
 });
 
 describe("reply sender checks before card creation", () => {
   it("checks the exact existing campaign sender without provisioning or POSTing", async () => {
     const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
-    const findFirst = vi.fn(async () => ({
-      result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" },
-    }));
+    const findUnique = vi.fn(async ({ where }: any) =>
+      where.kind === "instantly_role_campaign"
+        ? {
+            result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" },
+          }
+        : null,
+    );
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
-      externalEffect: { findMany: vi.fn(async () => []), findFirst },
+      externalEffect: { findUnique },
     };
     const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
     await expect(
@@ -395,9 +391,10 @@ describe("reply sender checks before card creation", () => {
         ORIGINAL.eaccount,
       ),
     ).resolves.toMatchObject({ usable: true });
-    expect(findFirst).toHaveBeenCalledWith(
+    expect(findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          idempotencyKey: "instantly-role-campaign:source-proof:role-proof",
           run: { userId: "u", spaceId: "s" },
           status: "completed",
           kind: "instantly_role_campaign",
@@ -439,7 +436,8 @@ it.each([false, true])(
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
       externalEffect: {
         findMany: vi.fn(async () => []),
-        findFirst: vi.fn(async (input: any) =>
+        findUnique: vi.fn(async (input: any) =>
+          input.where.kind === "instantly_role_campaign" &&
           input.where.AND[2].result.equals === "campaign-proof"
             ? { result: { eaccount: ORIGINAL.eaccount, campaignId: "campaign-proof" } }
             : null,
