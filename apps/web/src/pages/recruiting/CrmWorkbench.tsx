@@ -20,8 +20,10 @@ import type {
   RecruitingCrmDataOutput,
   RecruitingCrmTarget,
 } from "@rakazo/contracts";
+import { Button } from "@rakazo/ui-web";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { retryTransientRead } from "../../lib/read-retry";
 import {
   clearRecruitingReads,
@@ -35,6 +37,7 @@ import { useRecruitingDetail } from "../recruiting/detail";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "../recruiting/shared";
 import type { Props, RecruitingWorkspaceRead } from "../recruiting/workspace-types";
 import type { RecruitingWorkspaceView } from "../shell/RecruitingNavigation";
+import { RoleDetailsMenu } from "./RoleDetailsMenu";
 
 type BoundRole = {
   roleId: string;
@@ -53,10 +56,10 @@ function useBoundRole(
   refreshSignal: number,
   cache: Pick<Props, "readCache" | "readCacheScope">,
   workspaceRead?: RecruitingWorkspaceRead,
-): { done: boolean; role?: BoundRole; title?: string } {
+): { done: boolean; role?: BoundRole; title?: string; nativeRoleId?: string } {
   const read = useKeyedRead(
     enabled && !workspaceRead ? JSON.stringify([threadId, refreshSignal]) : null,
-    async (): Promise<{ role?: BoundRole; title?: string }> => {
+    async (): Promise<{ role?: BoundRole; title?: string; nativeRoleId?: string }> => {
       const workspace = await fetchRecruitingRead(
         cache.readCache,
         cache.readCacheScope,
@@ -69,6 +72,7 @@ function useBoundRole(
       return workspace?.crmTarget
         ? {
             title,
+            nativeRoleId: workspace.role.id,
             role: {
               roleId: workspace.role.id,
               spaceId: workspace.role.spaceId,
@@ -76,7 +80,7 @@ function useBoundRole(
               crmTarget: workspace.crmTarget.target,
             },
           }
-        : { title };
+        : { title, nativeRoleId: workspace?.role.id };
     },
     tabCacheSlot(cache, ["boundRole", threadId]),
   );
@@ -85,6 +89,7 @@ function useBoundRole(
     return {
       done: !enabled || workspace !== undefined,
       title: workspace?.role.title,
+      nativeRoleId: workspace?.role.id,
       role: workspace?.crmTarget
         ? {
             roleId: workspace.role.id,
@@ -99,6 +104,7 @@ function useBoundRole(
     done: !enabled || Boolean(read.data) || read.failed,
     role: read.data?.role,
     title: read.data?.title,
+    nativeRoleId: read.data?.nativeRoleId,
   };
 }
 
@@ -329,7 +335,7 @@ export function useCrmWorkbenchModel({
   const draftEmail = currentMail?.validated ? selectedInboxEmail : undefined;
   const people = page?.items ?? [];
   const selectedPerson = people.find((person) => person.candidateId === browse.candidateId);
-  const importantView = ["shortlist", "interview", "workflow"].includes(browse.view);
+  const importantView = ["interview", "workflow"].includes(browse.view);
   type ImportantStatus = NonNullable<
     Extract<RecruitingCrmDataInput, { operation: "important" }>["status"]
   >;
@@ -348,11 +354,9 @@ export function useCrmWorkbenchModel({
   const importantStatus =
     statusSelection?.view === browse.view
       ? statusSelection.status
-      : browse.view === "shortlist"
-        ? "high_signal"
-        : browse.view === "interview"
-          ? "needs_scheduling"
-          : "";
+      : browse.view === "interview"
+        ? "needs_scheduling"
+        : "";
   const [sectionPage, setSectionPage] = useState<{ key: string; offset: number }>();
   const sectionScope = JSON.stringify([browse.view, importantStatus]);
   const sectionOffset = sectionPage?.key === sectionScope ? sectionPage.offset : 0;
@@ -631,6 +635,7 @@ export function CrmRecruitingPanel(
   props: Props & { browse: NonNullable<Props["crmBrowse"]>; agent?: ReactNode },
 ) {
   const { t } = useLingui();
+  const [params] = useSearchParams();
   const model = useCrmWorkbenchModel(props);
   const {
     onReviewSchedulingPlan,
@@ -653,9 +658,11 @@ export function CrmRecruitingPanel(
       {crmHistory}
     </>
   );
+  const nativeShortlist = Boolean(agent && bound.nativeRoleId && browse.view === "shortlist");
   const nestedWorkspaceHeading = Boolean(
-    agent && bound.role && ["contacts", "shortlist"].includes(browse.view),
+    agent && (bound.role || nativeShortlist) && ["contacts", "shortlist"].includes(browse.view),
   );
+  const candidateView = ["contacts", "shortlist"].includes(browse.view);
   return (
     <div
       className={
@@ -667,22 +674,72 @@ export function CrmRecruitingPanel(
       {!nestedWorkspaceHeading ? (
         <header className="hire-section-header">
           <h1>
-            {bound.title ??
-              (bound.done
-                ? (page?.selectedRole?.roleLabel ??
-                  (read?.key === key && !read.loading ? t`Contacts` : null))
-                : null)}
+            {candidateView
+              ? t`Candidates`
+              : (bound.title ??
+                (bound.done
+                  ? (page?.selectedRole?.roleLabel ??
+                    (read?.key === key && !read.loading ? t`Contacts` : null))
+                  : null))}
           </h1>
+          {candidateView ? (
+            <>
+              <nav aria-label={t`Candidate lists`} className="flex gap-1">
+                {[
+                  ["contacts", t`Contacts`],
+                  ["shortlist", t`Shortlist`],
+                ].map(([view, label]) => {
+                  const next = new URLSearchParams(params);
+                  next.set("view", view!);
+                  next.delete("detail");
+                  return (
+                    <Link
+                      key={view}
+                      to={`?${next}`}
+                      aria-current={browse.view === view ? "page" : undefined}
+                      className={`rounded-md px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-ring ${browse.view === view ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {label}
+                    </Link>
+                  );
+                })}
+              </nav>
+              {(bound.title ?? page?.selectedRole?.roleLabel) ? (
+                <p>{bound.title ?? page?.selectedRole?.roleLabel}</p>
+              ) : null}
+              <RoleDetailsMenu />
+            </>
+          ) : null}
           {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
         </header>
       ) : null}
       {agent && !bound.done ? (
         <TabLoading />
-      ) : bound.role && !["sequence", "interview"].includes(browse.view) ? (
+      ) : nativeShortlist ||
+        (agent && bound.role && !["sequence", "interview"].includes(browse.view)) ? (
         agent
+      ) : browse.view === "shortlist" ? (
+        <section className="space-y-3 py-6">
+          <h2 className="font-medium">
+            <Trans>Link a recruiting role to manage its shortlist.</Trans>
+          </h2>
+          {props.onAskChat ? (
+            <Button
+              variant="outline"
+              onClick={() =>
+                props.onAskChat?.(
+                  t`Set up this CRM role’s recruiting workspace so I can manage its shortlist.`,
+                )
+              }
+            >
+              <Trans>Open role chat</Trans>
+            </Button>
+          ) : null}
+        </section>
       ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
         <>
           <CorrespondenceTabMount
+            onAskChat={props.onAskChat}
             threadId={threadId}
             onReviewSchedulingPlan={onReviewSchedulingPlan}
             view={browse.view}
@@ -731,6 +788,7 @@ function CorrespondenceTabMount({
   conversation,
   refreshSignal,
   onDraftReply,
+  onAskChat,
   loading,
   fallback,
 }: {
@@ -741,6 +799,7 @@ function CorrespondenceTabMount({
   conversation: { groupId: string } | { botId: string };
   refreshSignal: number;
   onDraftReply?: (email: RecruitingInboxEmail) => void;
+  onAskChat?: (text: string) => void;
   /** The role binding is still being read. */
   loading: boolean;
   fallback: ReactNode;
@@ -748,7 +807,7 @@ function CorrespondenceTabMount({
   if (!role && loading) return <TabLoading />;
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
-  if (view === "sequence") return <SequenceTab {...props} />;
+  if (view === "sequence") return <SequenceTab {...props} onAskChat={onAskChat} />;
   if (view === "interview")
     return (
       <InterviewTab

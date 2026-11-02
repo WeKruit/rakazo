@@ -141,8 +141,8 @@ it("retains the default side-panel bounds and responds to a newly loaded view pr
   expect(host.textContent).toBe("316");
 });
 
-it("opens recruiting detail at 600px within reactive bounds and preserves user resizing", () => {
-  window.innerWidth = 1500;
+it("opens recruiting detail at 720px within reactive bounds and preserves user resizing", () => {
+  window.innerWidth = 1600;
   const render = () =>
     root.render(
       <ResizableSidePanel open panel="recruiting-detail" botsSidebarWidth={480}>
@@ -151,22 +151,22 @@ it("opens recruiting detail at 600px within reactive bounds and preserves user r
     );
   act(render);
   const panel = () => host.querySelector<HTMLElement>("aside")!;
-  expect(panel().style.getPropertyValue("--panel-width")).toBe("600px");
+  expect(panel().style.getPropertyValue("--panel-width")).toBe("720px");
   expect(panel().classList.contains("max-w-none")).toBe(true);
   expect(panel().classList.contains("max-w-[384px]")).toBe(false);
   key("ArrowLeft");
-  expect(panel().style.getPropertyValue("--panel-width")).toBe("616px");
+  expect(panel().style.getPropertyValue("--panel-width")).toBe("736px");
   window.innerWidth = 1100;
   act(() => window.dispatchEvent(new Event("resize")));
   expect(panel().style.getPropertyValue("--panel-width")).toBe("320px");
   window.innerWidth = 1600;
   act(() => window.dispatchEvent(new Event("resize")));
-  expect(panel().style.getPropertyValue("--panel-width")).toBe("616px");
+  expect(panel().style.getPropertyValue("--panel-width")).toBe("736px");
   act(() => root.render(null));
   act(render);
-  expect(panel().style.getPropertyValue("--panel-width")).toBe("616px");
+  expect(panel().style.getPropertyValue("--panel-width")).toBe("736px");
   act(() => host.querySelector("hr")!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
-  expect(panel().style.getPropertyValue("--panel-width")).toBe("600px");
+  expect(panel().style.getPropertyValue("--panel-width")).toBe("720px");
 });
 
 it("keeps ordinary panels at their existing default and respects an existing width preference", () => {

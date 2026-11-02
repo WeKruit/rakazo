@@ -56,6 +56,11 @@ export function assertSchedulingCall(
   route: ConnectorRoute,
   args: Record<string, unknown>,
 ) {
+  if (operation === "confirm" && plan.requests?.notes) {
+    const body = object(args.body);
+    if (typeof body?.text !== "string" || !body.text.includes(plan.requests.notes))
+      throw new Error("Confirmation must preserve the reviewed notes verbatim in its text body");
+  }
   if (route.connectorId !== "mcp")
     throw new Error("This scheduling plan requires its exact assigned native source");
   if (operation === "book") {
@@ -125,6 +130,14 @@ export function schedulingPlanReview(
     `UTC interval: ${plan.calendar.start} – ${plan.calendar.end}; ${plan.calendar.lengthInMinutes} minutes`,
     `Original conversation: ${plan.originalEmail.subject}`,
     `Sending mailbox: ${plan.originalEmail.eaccount}`,
+    ...(plan.requests?.guests.length
+      ? [
+          `Requested additional guests (separate reviewed actions after booking): ${plan.requests.guests.join(", ")}`,
+        ]
+      : []),
+    ...(plan.requests?.notes
+      ? [`Notes for the later confirmation, verbatim: ${plan.requests.notes}`]
+      : []),
     operation === "confirm"
       ? "This message confirms the specific verified booking linked to this plan, in the original conversation."
       : "Saving this plan did not authorize this invitation. Review the exact invitation below.",

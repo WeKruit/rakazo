@@ -40,11 +40,12 @@ export type {
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Button, Tabs, TabsList, TabsTrigger } from "@rakazo/ui-web";
 import { RefreshCw, X } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { authClient } from "../lib/auth";
 import type { RecruitingPanelState } from "../lib/right-panel-state";
-
 import { RetryNotice } from "./recruiting/RetryNotice";
+import { RoleDetailsMenu } from "./recruiting/RoleDetailsMenu";
 import { TabLoading } from "./recruiting/shared";
 
 // Reset all fetched records when navigation changes the source thread, even before its reads finish.
@@ -83,18 +84,20 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...p
 }
 
 function NativeRecruitingPanel(props: Props) {
-  const userId = authClient.useSession().data?.user.id;
+  const user = authClient.useSession().data?.user;
   return (
     <RecruitingWorkspace
-      key={`${userId}:${props.threadId}:${props.botId ?? "group"}`}
+      key={`${user?.id}:${props.threadId}:${props.botId ?? "group"}`}
       {...props}
-      userId={userId}
+      userId={user?.id}
+      ownerName={user?.name}
     />
   );
 }
 
-function RecruitingWorkspace(props: Props & { userId?: string }) {
+function RecruitingWorkspace(props: Props & { userId?: string; ownerName?: string }) {
   const { t } = useLingui();
+  const [params] = useSearchParams();
   const model = useRecruitingWorkspace(props);
   const {
     onClose,
@@ -128,8 +131,37 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
     >
       {shortlistView || contactsView ? (
         <header className="hire-section-header">
-          <h1>{shortlistView ? <Trans>Shortlist</Trans> : <Trans>Contacts</Trans>}</h1>
-          {workspace ? <p>{workspace.role.title}</p> : null}
+          <h1>
+            <Trans>Candidates</Trans>
+          </h1>
+          <nav aria-label={t`Candidate lists`} className="flex gap-1">
+            {[
+              ["contacts", t`Contacts`],
+              ["shortlist", t`Shortlist`],
+            ].map(([view, label]) => {
+              const next = new URLSearchParams(params);
+              next.set("view", view!);
+              next.delete("detail");
+              return (
+                <Link
+                  key={view}
+                  to={`?${next}`}
+                  aria-current={
+                    (view === "shortlist" ? shortlistView : contactsView) ? "page" : undefined
+                  }
+                  className={`rounded-md px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-ring ${(view === "shortlist" ? shortlistView : contactsView) ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </Link>
+              );
+            })}
+          </nav>
+          {workspace ? (
+            <>
+              <p>{workspace.role.title}</p>
+              <RoleDetailsMenu />
+            </>
+          ) : null}
           {/* Contacts counts every person it lists, search results and CRM records alike. */}
           {shortlistView && candidatePage ? (
             <p>

@@ -8,6 +8,11 @@ const ShellPanelContent = lazyPanel(() =>
 import { ShellConversation } from "./shell/ShellConversation";
 
 const ShellOverlays = lazyPanel(() => import("./shell/ShellOverlays").then((m) => m.ShellOverlays));
+const RecruitingRolesDirectory = lazyPanel(() =>
+  withFeatureMessages(() => import("./recruiting/RecruitingRolesDirectory")).then(
+    (module) => module.RecruitingRolesDirectory,
+  ),
+);
 
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { useShellController } from "./shell/useShellController";
@@ -17,11 +22,14 @@ export { Composer, candidateReferenceText } from "./shell/Composer";
 
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ComputerReleaseReason, RecruitingAccountViewOutput } from "@rakazo/contracts";
+import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../lib/recruiting-read-view";
+import { rpc } from "../lib/rpc";
 
 const ComputerMaintenanceActions = lazyPanel(() =>
   import("../components/ComputerMaintenanceActions").then((m) => m.ComputerMaintenanceActions),
@@ -66,6 +74,8 @@ import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingReadCacheContext } from "./recruiting/shared";
 import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
+import { StackedConversation } from "./shell/StackedConversation";
+import { stackedConversationTarget } from "./shell/stacked-conversation-target";
 
 const CreateGroupForm = lazyPanel(() =>
   withFeatureMessages(() => import("./GroupPanel")).then((module) => module.CreateGroupForm),
@@ -77,6 +87,12 @@ const ComputerWorkspace = lazyPanel(() =>
 const HomeDashboard = lazyPanel(() =>
   withFeatureMessages(() => import("./recruiting/HomeDashboard")).then(
     (module) => module.HomeDashboard,
+  ),
+);
+
+const RecruitingAnalytics = lazyPanel(() =>
+  withFeatureMessages(() => import("./recruiting/RecruitingAnalytics")).then(
+    (module) => module.RecruitingAnalytics,
   ),
 );
 
@@ -106,15 +122,32 @@ export function ShellPage() {
     !model.showToolActivity &&
     model.panel !== "create-group" &&
     isAccountRecruitingView(accountParams.get("view")) &&
-    (!model.groupId || accountParams.has("role"));
+    ((!model.groupId &&
+      !(model.active && ["sequence", "interview"].includes(accountParams.get("view") ?? ""))) ||
+      accountParams.has("role"));
+  const analyticsView =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    accountParams.get("view") === "analytics";
+  const rolesDirectoryView =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    accountParams.get("view") === "roles";
   const roleCorrespondencePage =
     !model.showToolActivity &&
     model.panel !== "create-group" &&
     !model.crmMode &&
     Boolean(model.groupId) &&
     !accountParams.has("role") &&
-    ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
+    accountParams.get("view") === "inbox";
   const { t } = useLingui();
+  // A waiting conversation opened from the corner, stacked over the current page.
+  const [stacked, setStacked] = useState<{ groupId: string; messageId?: string } | null>(null);
+  const openStacked = useCallback(
+    (groupId: string, messageId?: string) =>
+      setStacked(messageId ? { groupId, messageId } : { groupId }),
+    [],
+  );
   const {
     navigate,
     session,
@@ -191,13 +224,38 @@ export function ShellPage() {
     computerScreenError,
     newRoleAttachmentKey,
     newRoleAttachments,
+    roleCreationError,
   } = model;
+  const stackedGroup = stacked ? groups.find((group) => group.id === stacked.groupId) : undefined;
+  // A link to a moment in another conversation, as Kruit cites it, opens stacked from the right.
+  useEffect(() => {
+    function openLinkedConversation(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = (event.target as Element | null)?.closest?.(
+        ".rk-chat-markdown a[href], a[href][data-stacked-conversation]",
+      );
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      const target = stackedConversationTarget(anchor.href, window.location.origin);
+      if (!target || !groups.some((group) => group.id === target.groupId)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openStacked(target.groupId, target.messageId);
+    }
+    document.addEventListener("click", openLinkedConversation, true);
+    return () => document.removeEventListener("click", openLinkedConversation, true);
+  }, [groups, openStacked]);
   const roleCreationForm = (
     <CreateGroupForm
-      key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
+      key={JSON.stringify([
+        showToolActivity ? "group" : roleSourceGroup?.id,
+        showToolActivity ? "" : newRoleDescription,
+        roleCreationError,
+      ])}
       bots={showToolActivity ? bots : roleCrewBots}
       recruiting={!showToolActivity}
       initialDescription={newRoleDescription}
+      initialError={roleCreationError}
       attachments={showToolActivity ? undefined : newRoleAttachments}
       attachmentNotice={attachmentNotice}
       onRemoveSkippedAttachment={removeSkippedAttachment}
@@ -268,6 +326,7 @@ export function ShellPage() {
     <AccountRecruitingView
       key={JSON.stringify([userId, bootstrapMe?.spaceId])}
       accountKey={JSON.stringify([userId, bootstrapMe?.spaceId])}
+      spaceId={bootstrapMe?.spaceId}
       groupId={model.groupId}
       groups={groups}
       bots={bots}
@@ -351,14 +410,38 @@ export function ShellPage() {
         <KruitDock
           groups={groups}
           groupId={model.groupId}
-          chatting={model.recruitingWorkspaceView === "conversation"}
-          onOpen={(id) => {
-            setPanel(null);
-            setMobileSidebarOpen(false);
-            navigate(`/app/g/${encodeURIComponent(id)}?view=conversation`);
-          }}
+          chatting={
+            model.recruitingWorkspaceView === "conversation" ||
+            model.workspaceBrief ||
+            (model.roleChatWorkspace && !model.roleChatHidden)
+          }
+          onOpen={(id) => openStacked(id)}
         />
       )}
+      {stackedGroup ? (
+        <StackedConversation
+          key={`${stackedGroup.id}:${stacked?.messageId ?? ""}`}
+          groupId={stackedGroup.id}
+          messageId={stacked?.messageId}
+          title={
+            stackedGroup.id.startsWith("recruiting-global-")
+              ? RECRUITING_GLOBAL_AGENT_NAME
+              : stackedGroup.name
+          }
+          bots={bots}
+          onBack={() => setStacked(null)}
+          onOpenFull={() => {
+            setStacked(null);
+            setPanel(null);
+            setMobileSidebarOpen(false);
+            navigate(
+              `/app/g/${encodeURIComponent(stackedGroup.id)}?view=conversation${
+                stacked?.messageId ? `&m=${encodeURIComponent(stacked.messageId)}` : ""
+              }`,
+            );
+          }}
+        />
+      ) : null}
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
       {computerOpen || booting || !botsSidebarCollapsed ? null : (
@@ -412,9 +495,10 @@ export function ShellPage() {
         />
       )}
 
-      {homeView && !accountView ? (
+      {homeView && !accountView && !analyticsView ? (
         <HomeDashboard
           userName={session.data?.user.name}
+          onOpenWork={model.openRecruitingView}
           onGlobalChat={() => {
             const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
             if (main) navigate(`/app/g/${main.id}?view=conversation`);
@@ -440,7 +524,46 @@ export function ShellPage() {
         />
       ) : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
-      {accountView ? (
+      {rolesDirectoryView ? (
+        <RecruitingRolesDirectory
+          key={JSON.stringify([userId, bootstrapMe?.spaceId])}
+          spaceId={bootstrapMe?.spaceId}
+          refreshSignal={recruitingRefresh}
+          onNavigate={navigate}
+          onOpenNavigation={() => {
+            setBotsSidebarCollapsedPref(false);
+            setMobileSidebarOpen(true);
+          }}
+        />
+      ) : analyticsView ? (
+        <main className="rk-scroll min-h-0 min-w-0 flex-1 overflow-y-auto bg-background">
+          <div className="mx-auto w-full max-w-[1440px] p-4 md:p-8">
+            <Button variant="ghost" onClick={() => model.openRecruitingView("sequence")}>
+              <Trans>Back to sequences</Trans>
+            </Button>
+            {model.groupId &&
+            !accountParams.has("role") &&
+            !model.currentWorkspaceRead?.workspace?.role.id ? (
+              <p role="status">
+                <Trans>Loading role…</Trans>
+              </p>
+            ) : (
+              <RecruitingAnalytics
+                scopeRoleId={
+                  !accountParams.has("role")
+                    ? model.currentWorkspaceRead?.workspace?.role.id
+                    : undefined
+                }
+                accountKey={JSON.stringify([userId, bootstrapMe?.spaceId])}
+                load={rpc.recruiting.analytics}
+                onOpenRole={(roleId) =>
+                  navigate(`/app?${new URLSearchParams({ view: "sequence", role: roleId })}`)
+                }
+              />
+            )}
+          </div>
+        </main>
+      ) : accountView ? (
         accountPage
       ) : (
         <ShellConversation
@@ -497,7 +620,7 @@ export function ShellPage() {
       model.messagingSettingsOpen ||
       model.settingsOpen ||
       (model.contextChat && model.botMenu) ||
-      (model.showToolActivity && model.commandPaletteOpen) ||
+      model.commandPaletteOpen ||
       (model.peerConversation && model.active) ? (
         <ShellOverlays model={model} />
       ) : null}

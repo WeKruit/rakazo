@@ -263,7 +263,9 @@ export function useShellController() {
     SpaceMemoryConfig | null | undefined
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
+  const pendingGroupCreations = useRef(new Map<string, Promise<Group>>());
   const shellRoster = useShellRoster({
+    pendingGroupCreations,
     userId,
     botId,
     groupId,
@@ -400,11 +402,13 @@ export function useShellController() {
   const viewportWidth = useViewportWidth();
   const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth(
     "rakazo:bots-sidebar-width",
-    showToolActivity ? 316 : 260,
+    showToolActivity ? 316 : 240,
   );
   const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
   const visibleSidebarWidth = botsSidebarCollapsed
-    ? 0
+    ? showToolActivity || viewportWidth < 768
+      ? 0
+      : 64
     : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
   const [roleChatWidth, setRoleChatWidth] = usePaneWidth(
     "rakazo:role-chat-width",
@@ -642,6 +646,7 @@ export function useShellController() {
     computerCacheRef,
     setScreenUrl,
     bootstrappedThread,
+    pendingGroupCreations,
     recruitingOutage,
     reconnectNeedsRecruitingRead,
     refreshRecruitingReads,
@@ -716,6 +721,7 @@ export function useShellController() {
     inGroup,
     snapshot,
     groupId,
+    routeBotId: botId,
     active,
     threadSnapshotCache,
     searchParams,
@@ -731,7 +737,6 @@ export function useShellController() {
     activeGroupId,
     roleChatOpen,
     roleChatSection,
-    setSearchParams,
     setMobileSidebarOpen,
     setPanel,
     recruitingTab,
@@ -1029,6 +1034,7 @@ export function useShellController() {
     jumpGeneration,
     setScrollRequest,
     activeGroupId,
+    pendingGroupCreations,
     jumpToMessageRef,
     activeBotId,
     snapshotRef,
@@ -1129,6 +1135,14 @@ export function useShellController() {
     focusPromptAbortRef,
     focusPromptBotIdRef,
     sendingRef,
+    newRoleSourceId,
+    pendingGroupCreations,
+    reopenRoleCreation: () => {
+      setPanel("create-group");
+      // The route may still be moving to the role; keep the form open through that change.
+      pendingExplicitPanel.current = true;
+    },
+    setPendingAttachments,
   });
   function cancelFocusPrompt() {
     focusPromptAbortRef.current?.abort();
@@ -1219,10 +1233,12 @@ export function useShellController() {
 
   useEffect(() => {
     const threadKey = inGroup ? groupId : active?.id;
+    // A new role's files stay with its form: a role that fails to start reopens with them.
+    const keep = (attachment: PendingAttachment) =>
+      attachment.threadKey === threadKey || attachment.threadKey.startsWith('["new-role",');
     setPendingAttachments((current) => {
-      const stale = current.filter((attachment) => attachment.threadKey !== threadKey);
-      revokePendingAttachmentPreviews(stale);
-      return attachmentsForThread(current, threadKey);
+      revokePendingAttachmentPreviews(current.filter((attachment) => !keep(attachment)));
+      return current.filter(keep);
     });
     clearReply();
     setAttachmentNotice([]);
@@ -1230,10 +1246,6 @@ export function useShellController() {
   }, [active?.id, clearReply, groupId, inGroup]);
 
   useEffect(() => {
-    if (!showToolActivity) {
-      setCommandPaletteOpen(false);
-      return;
-    }
     function onKey(event: KeyboardEvent) {
       if (!isCommandPaletteHotkey(event)) return;
       event.preventDefault();
@@ -1241,7 +1253,7 @@ export function useShellController() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showToolActivity]);
+  }, []);
 
   function dismissComposerError() {
     // The strip shows one message at a time, so only dismiss the run failure when it is the

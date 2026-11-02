@@ -403,6 +403,45 @@ describe("guardRecruitingTurnEnd", () => {
     expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
   });
 
+  it("lists a role's people under a given heading with the same lines as a round", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/person-1", name: "Person 1", title: "Lead", company: "Co" },
+        ]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "role-thread",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["linkedin:/in/person-1"],
+      heading: "Warehouse manager:",
+    });
+    expect(text).toBe(
+      "Warehouse manager:\n\n1. **[Person 1](https://www.linkedin.com/in/person-1)** · Lead · Co",
+    );
+  });
+
+  it("numbers a later page from its place in the whole list", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-11", name: "Person 11" }]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "role-thread",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-11"],
+      heading: "Warehouse manager · 11–11 / 81:",
+      firstNumber: 11,
+    });
+    expect(text).toContain("\n\n11. **Person 11**");
+  });
+
   it("says must-haves no one's row shows once, not under every person", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },

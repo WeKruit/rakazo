@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest";
 import { buildApprovalAskBlock } from "./approval-ask.js";
 
 describe("buildApprovalAskBlock", () => {
+  it.each([false, true])("shows the exact sender and fixed human outcomes (%s)", (select) => {
+    const block = buildApprovalAskBlock("sender-effect", "native_instantly_ensure_sender", {}, [], {
+      instantlySender: { email: "team@example.test", displayName: "Chosen Company", select },
+    });
+    expect(block.text).toBe("Use this sending address?");
+    expect(block.detail).toBe("Chosen Company <team@example.test>");
+    expect(block.actions).toEqual([
+      { id: "allow", label: "Use this address", outcome: "created" },
+      { id: "deny", label: "Change the address", outcome: "cancelled" },
+    ]);
+    expect(JSON.stringify(block)).not.toMatch(/instantly|always/i);
+  });
   it("confirms exact server-owned requirements in the original one-time card without model display fields", () => {
     const request = RecruitingApprovalToolInputSchema.parse({
       stage: "brief",
@@ -593,6 +605,51 @@ describe("buildApprovalAskBlock", () => {
       ].join("\n"),
     );
     expect(`${block.text}\n${block.detail}`).not.toMatch(/cal-com|Cal-com|5852837/);
+  });
+
+  it("shows a connected calendar's event as an interview booking, without the app's name", () => {
+    const block = buildApprovalAskBlock(
+      "event-effect",
+      "mcp__google-calendar__create_event",
+      {
+        calendarId: "primary",
+        summary: "Interview – Front Desk Supervisor",
+        start: { dateTime: "2026-11-03T14:00:00-06:00", timeZone: "America/Chicago" },
+        end: { dateTime: "2026-11-03T14:30:00-06:00", timeZone: "America/Chicago" },
+        attendees: [{ email: "adam@example.test", displayName: "Adam Test" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Adam Test");
+    expect(block.detail).toBe(
+      [
+        "Candidate: Adam Test <adam@example.test>",
+        "When: Tue, Nov 3, 2026, 2:00 PM CST (America/Chicago)",
+        "Length: 30 min",
+        "Title: Interview – Front Desk Supervisor",
+        "",
+        "The candidate gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+    expect(`${block.text}\n${block.detail}`).not.toMatch(/google|Google|primary/);
+  });
+
+  it("reads a calendar event time without an offset as wall time in its zone", () => {
+    const block = buildApprovalAskBlock(
+      "event-wall-time",
+      "mcp__google-calendar__create_event",
+      {
+        summary: "Interview with Adam Test",
+        start: { dateTime: "2026-11-04T14:00:00", timeZone: "America/Chicago" },
+        end: { dateTime: "2026-11-04T14:30:00", timeZone: "America/Chicago" },
+        attendees: [{ email: "adam.test@example.com", displayName: "Adam Test" }],
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.detail).toContain("When: Wed, Nov 4, 2026, 2:00 PM CST (America/Chicago)");
+    expect(block.detail).toContain("Length: 30 min");
   });
 
   it("shows an interview change as who, from and to, then the original booking", () => {

@@ -25,8 +25,12 @@ const base = {
 
 describe("reply suggestion", () => {
   it("returns one clean line from a thinking-off call without tools or history", async () => {
-    const seen: Array<{ tools: unknown[]; history: unknown[]; model: { thinkingLevel: string } }> =
-      [];
+    const seen: Array<{
+      tools: unknown[];
+      history: unknown[];
+      model: { thinkingLevel: string };
+      allowSilentEmpty?: boolean;
+    }> = [];
     const text = await suggestNextMessage({
       ...base,
       runtime: runtimeReplying('"Yes, find 20 more"\n', seen),
@@ -35,6 +39,7 @@ describe("reply suggestion", () => {
     expect(seen[0]?.tools).toEqual([]);
     expect(seen[0]?.history).toEqual([]);
     expect(seen[0]?.model.thinkingLevel).toBe("off");
+    expect(seen[0]?.allowSilentEmpty).toBe(true);
   });
 
   it("gives the model the last few earlier turns so the guess fits the current task", async () => {
@@ -43,7 +48,7 @@ describe("reply suggestion", () => {
       ...base,
       earlier: [
         { role: "user", text: "too old" },
-        ...Array.from({ length: 6 }, (_, index) => ({
+        ...Array.from({ length: 10 }, (_, index) => ({
           role: index % 2 ? ("assistant" as const) : ("user" as const),
           text: `turn ${index}`,
         })),
@@ -61,6 +66,7 @@ describe("reply suggestion", () => {
   it("drops empty, failed or overlong output", () => {
     expect(cleanSuggestion("")).toBeNull();
     expect(cleanSuggestion("I hit a problem: timeout")).toBeNull();
+    expect(cleanSuggestion("No response. Try again.")).toBeNull();
     expect(cleanSuggestion("x".repeat(200))).toBeNull();
     expect(cleanSuggestion("「看看前十个」")).toBe("看看前十个");
   });

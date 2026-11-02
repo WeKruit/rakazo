@@ -15,6 +15,7 @@ import {
   openThreadWindow,
   reconcileThreadScrollState,
   selectedAskActionLabel,
+  stuckWorkExpiresAt,
 } from "@rakazo/core";
 import React, { act, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -67,6 +68,14 @@ it("preserves server approval labels in completed mobile answers and retains nat
     { id: "always", label: "Always allow", expected: "Always allowed" },
     { id: "deny", label: "Deny", expected: "Denied" },
     { id: "allow", label: "Create space", outcome: "created", expected: "Created" },
+    { id: "allow", label: "Create address", outcome: "created", expected: "Address confirmed" },
+    { id: "allow", label: "Use this address", outcome: "created", expected: "Address confirmed" },
+    {
+      id: "deny",
+      label: "Change the address",
+      outcome: "cancelled",
+      expected: "Address change requested",
+    },
     { id: "deny", label: "Cancel", outcome: "cancelled", expected: "Cancelled" },
   ];
   for (const { expected, ...action } of cases) {
@@ -82,7 +91,7 @@ it("preserves server approval labels in completed mobile answers and retains nat
   }
 });
 
-it.each(["pending", "answered", "plain ask", "attachments"])(
+it.each(["pending", "answered", "plain ask", "attachments", "mail reply"])(
   "keeps native files and image previews beside %s mobile asks",
   async (scenario) => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -106,6 +115,7 @@ it.each(["pending", "answered", "plain ask", "attachments"])(
       React,
       memo: React.memo,
       useState,
+      useRouter: () => ({ push: vi.fn() }),
       useResolvedAppearance: () => "light",
       mobileTokens: () => ({}),
       useI18n: () => ({ t: (text: string) => text }),
@@ -120,6 +130,14 @@ it.each(["pending", "answered", "plain ask", "attachments"])(
       View: surface,
       Text: surface,
       Pressable: pressable,
+      MailReplyAskContent: ({ onAnswer }: { onAnswer: (answer: unknown) => Promise<void> }) => (
+        <button
+          type="button"
+          onClick={() => void onAnswer({ action: "send", body: "Exact reply", cc: [] })}
+        >
+          Send reply
+        </button>
+      ),
       AskBlock: ({ ask }: { ask: { text: string } }) => <p>{ask.text}</p>,
       AskActions: ({
         actions,
@@ -214,6 +232,28 @@ it.each(["pending", "answered", "plain ask", "attachments"])(
                     }),
                 status: scenario === "answered" ? ("answered" as const) : ("pending" as const),
                 ...(scenario === "answered" ? { answer: "allow" } : {}),
+                ...(scenario === "mail reply"
+                  ? {
+                      detail: "private-provider-detail",
+                      mailReply: {
+                        from: "owner@example.test",
+                        to: ["candidate@example.test"],
+                        cc: [],
+                        bcc: [],
+                        subject: "Re: Role",
+                        body: "Exact reply",
+                        inReplyTo: {
+                          emailId: "email",
+                          sourceId: "mail",
+                          threadId: null,
+                          subject: "Role",
+                          sender: "candidate@example.test",
+                        },
+                        status: "needs_approval" as const,
+                        sentAt: null,
+                      },
+                    }
+                  : {}),
               },
             ]),
         ...attachments,
@@ -287,6 +327,18 @@ it.each(["pending", "answered", "plain ask", "attachments"])(
             .click(),
         );
         expect(onAnswer).toHaveBeenCalledExactlyOnceWith(message, "allow");
+      } else if (scenario === "mail reply") {
+        expect(container.textContent).not.toContain("private-provider-detail");
+        await act(async () =>
+          [...container.querySelectorAll("button")]
+            .find((button) => button.textContent === "Send reply")!
+            .click(),
+        );
+        expect(onAnswer).toHaveBeenCalledExactlyOnceWith(message, {
+          action: "send",
+          body: "Exact reply",
+          cc: [],
+        });
       } else {
         expect(onAnswer).not.toHaveBeenCalled();
         if (scenario === "answered")
@@ -766,6 +818,7 @@ it("keeps each waiting agent's original question enabled in a mobile group", () 
       React,
       useCallback,
       answerableAskMessageIds,
+      stuckWorkExpiresAt,
       snap: snapshot,
       readOnly,
       messagesById: new Map(),

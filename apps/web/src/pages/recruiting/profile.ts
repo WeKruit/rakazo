@@ -333,6 +333,7 @@ export type SkillEvidenceSource = {
 
 /** One requirement line of Autumn's own assessment, its words kept verbatim. */
 export type RequirementRow = {
+  priority?: "hard" | "preferred";
   key: string;
   /** Supplied criterion name or exact matching definition; never an inferred technical name. */
   label: string | null;
@@ -376,6 +377,7 @@ function criterionName(reference: string, context?: ProfileCriterionContext) {
     return {
       label: criterion.expression.kind === "atom" ? criterion.expression.statement : null,
       criterionId: reference,
+      priority: criterion.priority,
     };
   }
   return /^R\d+$/i.test(reference) ? { label: null, criterionId: reference } : { label: reference };
@@ -532,6 +534,7 @@ export function savedProfileFields(profile: RecruitingSavedProfile | null | unde
   const summarize = (parts: readonly (string | null)[]) => parts.filter(Boolean).join(" · ");
   return [
     ...field("Profile image url", profile.profileImageUrl),
+    ...field("Email", profile.email),
     ...field("Current company url", current?.company_url),
     ...field("Current company industry", current?.company_industry),
     ...field("Current company size", current?.company_size),

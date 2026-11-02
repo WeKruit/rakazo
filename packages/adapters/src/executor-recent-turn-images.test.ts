@@ -43,6 +43,7 @@ type HistoryMessage = {
   replyToMessageId: null;
   replyQuote: null;
   replyTo: null;
+  clientNonce?: string;
 };
 
 function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
@@ -301,7 +302,7 @@ async function runWithModel(
 }
 
 describe("reply suggestion", () => {
-  it("after a reply, asks the model once for the user's next message and sends it live", async () => {
+  it("asks the model for the user's next message beside finalize and saves it", async () => {
     const { runtimeRun, events, finalizeRun } = await runWithModel(
       TEXT_ONLY_MODEL,
       undefined,
@@ -310,7 +311,7 @@ describe("reply suggestion", () => {
       { finalText: "Here are ten people.", replySuggestions: true },
     );
     await vi.waitFor(() =>
-      expect(events.publishTransient).toHaveBeenCalledWith(
+      expect(events.append).toHaveBeenCalledWith(
         expect.objectContaining({ type: "thread.suggestion", runId: "run-1" }),
       ),
     );
@@ -318,10 +319,39 @@ describe("reply suggestion", () => {
     expect(suggestionCall.runId).toBe("run-1:suggestion");
     expect(suggestionCall.tools).toEqual([]);
     expect(suggestionCall.prompt).toContain("Here are ten people.");
-    // The reply was final before the suggestion call started.
-    expect(finalizeRun.mock.invocationCallOrder[0]).toBeLessThan(
-      runtimeRun.mock.invocationCallOrder.at(-1)!,
+    // It starts once the reply text is final, without waiting for finalize.
+    expect(runtimeRun.mock.invocationCallOrder.at(-1)!).toBeLessThan(
+      finalizeRun.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("follows an auto-continued reply too, from what the user last wrote", async () => {
+    const { runtimeRun, events } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      finalText: "Here is the next step.",
+      replySuggestions: true,
+      sourceMessage: {
+        id: "auto",
+        threadId: "thread-1",
+        seq: 3,
+        role: "user",
+        runId: "run-1",
+        blocks: [{ kind: "text", text: "Continue with the next playbook step." }],
+        replyToMessageId: null,
+        replyQuote: null,
+        replyTo: null,
+        clientNonce: "autocontinue:run-0",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(events.append).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "thread.suggestion", runId: "run-1" }),
+      ),
+    );
+    const prompt = runtimeRun.mock.calls.at(-1)![0].prompt;
+    expect(prompt).toContain("User:\nwhat was in the screenshot?");
+    expect(prompt).toContain("Here is the next step.");
+    expect(prompt).not.toContain("Continue with the next playbook step.");
   });
 
   it("skips runs that a person did not start", async () => {

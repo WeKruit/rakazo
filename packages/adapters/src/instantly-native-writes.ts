@@ -1,11 +1,26 @@
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import type { MailReplyErrorCode } from "@rakazo/contracts";
+import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
+import {
+  confirmedSendingMailbox,
+  confirmedSendingMailboxes,
+  defaultSendingMailbox,
+  EnsureSenderInput,
+  ensureSendingIdentity,
+  requireSendingMailboxReady,
+  sendingMailboxState,
+} from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
 
@@ -42,6 +57,22 @@ const CampaignSetup = {
     .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
+const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
+const CloneRoleDraftInput = z.strictObject({
+  client_nonce: z.string().min(1).max(200),
+  role_id: z.string().min(1).max(100),
+  campaign_id: Uuid,
+  name: z.string().trim().min(1).max(200),
+});
+const CreateRoleDraftInput = RoleDraftInput.extend({ client_nonce: z.string().min(1).max(200) });
+const UpdateRoleDraftInput = RoleDraftInput.extend({
+  campaign_id: Uuid,
+  expected_revision: z.string().regex(/^[a-f0-9]{64}$/),
+});
+const ReadRoleDraftInput = z.strictObject({
+  role_id: z.string().min(1).max(100),
+  campaign_id: Uuid.optional(),
+});
 const Lead = z.strictObject({
   email: Email,
   first_name: z.string().max(200).optional(),
@@ -97,7 +128,7 @@ const EnsureRoleCampaignInput = z.strictObject({
     "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
   ),
   recipients: Recipients.describe(
-    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email who is not in the campaign yet is added first. Everyone else keeps the role's email.",
+    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -130,6 +161,12 @@ const AddShortlistLeadsInput = z.strictObject({
 });
 
 const EmailIdInput = z.strictObject({
+  check_sender: z
+    .boolean()
+    .optional()
+    .describe(
+      "Read-only check that this exact email can be replied to from its current sending mailbox.",
+    ),
   id: Uuid.describe(
     "Provider email id from list_mailbox_emails, search_contact_emails or get_thread_history.",
   ),
@@ -142,6 +179,11 @@ const ReplyToEmailInput = z.strictObject({
     "Your connected mailbox that sends the reply; omit to use the mailbox that holds the original email.",
   ),
   subject: z.string().min(1).max(500).optional().describe('Omit for "Re: <original subject>".'),
+  cc_address_email_list: z
+    .string()
+    .max(10_000)
+    .refine((value) => !/[\r\n\0]/.test(value))
+    .optional(),
   body: z.strictObject({
     text: z.string().min(1).max(20_000),
     html: z.string().min(1).max(50_000).optional(),
@@ -157,6 +199,36 @@ const tool = (name: string, schema: z.ZodType, readOnly: boolean, description: s
   description: `${LOCAL} ${description}`,
 });
 export const nativeInstantlyWrites = [
+  tool(
+    "ensure_sender",
+    EnsureSenderInput,
+    false,
+    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. First ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+  ),
+  tool(
+    "get_role_draft",
+    ReadRoleDraftInput,
+    true,
+    "Reads the exact role-bound campaign and connected sending mailboxes; never sends.",
+  ),
+  tool(
+    "clone_role_draft",
+    CloneRoleDraftInput,
+    false,
+    "Clones an exact role-associated sequence into a new zero-recipient draft, retaining original content and history. Never activates or sends.",
+  ),
+  tool(
+    "create_role_draft",
+    CreateRoleDraftInput,
+    false,
+    "Creates a zero-recipient draft for a role without a bound campaign. Never sends or adopts a campaign by name.",
+  ),
+  tool(
+    "update_role_draft",
+    UpdateRoleDraftInput,
+    false,
+    "Edits only the exact role-bound draft. Refuses active, paused, completed or unsupported sequences. Never sends.",
+  ),
   tool(
     "create_campaign",
     CreateCampaignInput,
@@ -319,12 +391,21 @@ function enrollable(status: unknown) {
     );
 }
 
-async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
+async function requireOwnMailbox(
+  rest: InstantlyRest,
+  eaccount: string,
+  allowPendingSender = false,
+) {
   try {
     await rest("GET", `/accounts/${encodeURIComponent(eaccount)}`);
+    return true;
   } catch (error) {
+    if (allowPendingSender && error instanceof InstantlyRestError && error.status === 404)
+      return false;
     if (error instanceof InstantlyRestError && error.status === 404)
       throw new Error(`${eaccount} is not one of your connected Instantly mailboxes`);
+    if (error instanceof IsolationError)
+      throw new Error(`${eaccount} is not one of this account's sending mailboxes`);
     throw error;
   }
 }
@@ -482,9 +563,16 @@ function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>)
   };
 }
 
-async function createCampaign(rest: InstantlyRest, input: z.output<typeof CreateCampaignInput>) {
-  await requireOwnMailbox(rest, input.eaccount);
-  return rest("POST", "/campaigns", campaignBody(input.name, input));
+async function createCampaign(
+  rest: InstantlyRest,
+  input: z.output<typeof CreateCampaignInput>,
+  allowPendingSender = false,
+) {
+  const connected = await requireOwnMailbox(rest, input.eaccount, allowPendingSender);
+  return rest("POST", "/campaigns", {
+    ...campaignBody(input.name, input),
+    email_list: connected ? [input.eaccount] : [],
+  });
 }
 
 /** The provider can store a body as blank (it drops one containing "&"), so read it back. */
@@ -546,11 +634,13 @@ export async function lastUsedMailbox(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
   serverId: string,
+  userId: string,
 ) {
   const effect = await prisma.externalEffect.findFirst({
     where: {
       spaceId,
       kind: "instantly_role_campaign",
+      run: { userId, spaceId },
       status: "completed",
       request: { path: ["serverId"], equals: serverId },
     },
@@ -568,13 +658,18 @@ async function defaultMailbox(
   context: AdapterContext,
   serverId: string,
 ) {
+  const confirmed = await defaultSendingMailbox(prisma, context);
+  if (confirmed) return confirmed;
   const accounts = await rest("GET", "/accounts?limit=100");
   const emails = (Array.isArray(accounts.items) ? (accounts.items as { email?: unknown }[]) : [])
     .map((item) => item.email)
     .filter((email): email is string => typeof email === "string");
-  const last = await lastUsedMailbox(prisma, context.spaceId, serverId);
+  const last = await lastUsedMailbox(prisma, context.spaceId, serverId, context.userId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked) throw new Error("No Instantly mailbox is connected; connect one in Instantly first");
+  if (!picked)
+    throw new Error(
+      "No sending mailbox is set up for this account yet; tell the recruiter instead of creating a campaign",
+    );
   return picked;
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -586,6 +681,7 @@ export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
   3: "Completed",
 };
 export type InstantlyActivationDisplay = {
+  senderState?: { state: string; warmup: string; readyAt: null };
   campaignName: string | null;
   status: string | null;
   mailbox: string | null;
@@ -635,6 +731,105 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
   );
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
+/** What one connection owns on the shared mail account: its roles' campaigns and senders. */
+export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
+
+const mailboxKey = (email: string) => email.trim().toLowerCase();
+
+/**
+ * This connection's bound campaigns and explicitly confirmed account senders.
+ * A campaign's existing mailbox authorizes its own reply thread only, not general sender access.
+ */
+export async function ownedInstantly(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  spaceId: string,
+  serverId: string,
+  userId: string,
+): Promise<{ campaigns: string[]; mailboxes: string[] }> {
+  // Run ownership is the indexed boundary; OFFSET 0 keeps each receipt lookup on (runId, status).
+  const effects = await prisma.$queryRaw<{ kind: string; result: unknown }[]>`
+    SELECT e.kind, e.result
+    FROM runs r
+    CROSS JOIN LATERAL (
+      SELECT e.kind, e.result
+      FROM external_effects e
+      WHERE e."runId" = r.id AND e."spaceId" = ${spaceId}
+        AND e.status = 'completed'
+        AND e.kind IN ('instantly_role_campaign', 'instantly_sender_account')
+        AND e.request->>'serverId' = ${serverId}
+      OFFSET 0
+    ) e
+    WHERE r."spaceId" = ${spaceId} AND r."userId" = ${userId}
+  `;
+  const campaigns = new Set<string>();
+  const mailboxes = new Set<string>();
+  for (const { kind, result } of effects) {
+    const value = (result ?? {}) as Partial<RoleBinding> & { email?: unknown };
+    if (kind === "instantly_role_campaign" && typeof value.campaignId === "string")
+      campaigns.add(value.campaignId);
+    const sender = kind === "instantly_sender_account" ? value.email : undefined;
+    if (typeof sender === "string" && sender.includes("@")) mailboxes.add(mailboxKey(sender));
+  }
+  return { campaigns: [...campaigns].sort(), mailboxes: [...mailboxes].sort() };
+}
+
+const CAMPAIGN_PATH = /^\/campaigns\/([0-9a-f-]{36})(?:\/(?:activate|pause))?$/i;
+
+/**
+ * The shared account's REST boundary: only this connection's own campaigns (and one it creates in
+ * this call) can be read or changed, only its own sending mailboxes are listed or used, and
+ * nothing searches or deduplicates across the account.
+ */
+export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): InstantlyRest {
+  const mine = new Set(owned.campaigns);
+  const refuse = (what = "campaign") => {
+    throw new IsolationError(`That ${what} does not belong to this account`);
+  };
+  const own = (id: unknown) => {
+    if (typeof id !== "string" || !mine.has(id)) refuse();
+  };
+  const sender = (email: unknown) =>
+    typeof email === "string" && owned.mailboxes.has(mailboxKey(email));
+  const senders = (list: unknown) => {
+    if (list !== undefined && (!Array.isArray(list) || !list.every(sender))) refuse("mailbox");
+  };
+  return async (method, path, body) => {
+    const [route, query = ""] = path.split("?");
+    const fields = (body ?? {}) as Record<string, unknown>;
+    if (route === "/campaigns" && method === "GET") return { items: [] };
+    if (route === "/accounts" && method === "GET") {
+      const listed = await rest(method, path, body);
+      const items = Array.isArray(listed.items) ? (listed.items as { email?: unknown }[]) : [];
+      return { items: items.filter((item) => sender(item.email)) };
+    }
+    if (route!.startsWith("/accounts/")) {
+      if (method !== "GET" || !sender(decodeURIComponent(route!.slice("/accounts/".length))))
+        refuse("mailbox");
+      return rest(method, path, body);
+    }
+    if (route === "/campaigns" && method === "POST") {
+      senders(fields.email_list);
+      const created = await rest(method, path, body);
+      if (typeof created.id === "string") mine.add(created.id);
+      return created;
+    }
+    const campaign = CAMPAIGN_PATH.exec(route!);
+    if (campaign) {
+      own(campaign[1]);
+      senders(fields.email_list);
+    } else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
+    else if (route === "/leads/list") own(fields.campaign);
+    else if (route === "/leads/add") {
+      own(fields.campaign_id);
+      if (fields.skip_if_in_workspace) refuse();
+    } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
+    else if (route === "/emails/reply") {
+      if (!sender(fields.eaccount)) refuse("mailbox");
+    } else if (!route!.startsWith("/emails") && !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)) refuse();
+    return rest(method, path, body);
+  };
+}
+
 export async function readRoleCampaignBinding(
   prisma: Pick<PrismaClient, "externalEffect">,
   spaceId: string,
@@ -863,6 +1058,19 @@ export async function describeCampaignActivation(
           : { firstEmail: null };
   return {
     ...("refusal" in plan ? { refusal: plan.refusal } : {}),
+    ...(campaign?.senderState &&
+    typeof campaign.senderState === "object" &&
+    !Array.isArray(campaign.senderState) &&
+    typeof (campaign.senderState as Record<string, unknown>).state === "string" &&
+    typeof (campaign.senderState as Record<string, unknown>).warmup === "string"
+      ? {
+          senderState: {
+            state: String((campaign.senderState as Record<string, unknown>).state),
+            warmup: String((campaign.senderState as Record<string, unknown>).warmup),
+            readyAt: null,
+          },
+        }
+      : {}),
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
     status:
       typeof campaign?.status === "number"
@@ -883,6 +1091,8 @@ export type InstantlyReplyDisplay = {
   subject: string;
   inReplyTo: string | null;
   body: string;
+  original?: Record<string, unknown>;
+  refusal?: MailReplyErrorCode;
 };
 /** Vendor-free facts for the reply confirmation card; the original is read with the native get_email tool. */
 export async function describeReplyToEmail(
@@ -895,7 +1105,10 @@ export async function describeReplyToEmail(
   const input = ReplyToEmailInput.safeParse(args);
   const original =
     input.success && typeof args.reply_to_uuid === "string"
-      ? await read("native_instantly_get_email", { id: args.reply_to_uuid }).catch(() => undefined)
+      ? await read("native_instantly_get_email", {
+          id: args.reply_to_uuid,
+          check_sender: true,
+        }).catch(() => undefined)
       : undefined;
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
   const originalSubject = text(original?.subject);
@@ -912,6 +1125,15 @@ export async function describeReplyToEmail(
           .join(", ")
       : null,
     body: input.success ? input.data.body.text : "",
+    original,
+    ...((original?.replySenderCheck as { ready?: boolean } | undefined)?.ready === true
+      ? {}
+      : {
+          refusal:
+            MailReplyErrorCodeSchema.safeParse(
+              (original?.replySenderCheck as { error?: unknown } | undefined)?.error,
+            ).data ?? "sender_unavailable",
+        }),
   };
 }
 
@@ -921,12 +1143,93 @@ async function readEmail(rest: InstantlyRest, id: string) {
   return email;
 }
 
-async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToEmailInput>) {
+export class MailReplySendingError extends Error {
+  constructor(readonly code: MailReplyErrorCode) {
+    super(code);
+  }
+}
+
+/** An existing campaign authorizes only replying to its own email, never claiming a default sender. */
+export async function requireReplySendingMailboxReady(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  original: Record<string, unknown>,
+  email: string,
+) {
+  if (typeof original.eaccount !== "string" || !sameAddress(original.eaccount, email))
+    throw new MailReplySendingError("sender_unavailable");
+  if (await confirmedSendingMailbox(prisma, context, email)) {
+    try {
+      return await requireSendingMailboxReady(prisma, rest, context, email);
+    } catch (error) {
+      throw new MailReplySendingError(
+        error instanceof IsolationError
+          ? "sender_unavailable"
+          : error instanceof Error && error.message.includes("display name changed")
+            ? "sender_changed"
+            : error instanceof Error && error.message.includes("not active yet")
+              ? "sender_not_ready"
+              : "sender_unavailable",
+      );
+    }
+  }
+  const roleId = await activeRoleId(prisma, context);
+  if (
+    !roleId ||
+    typeof original.campaign_id !== "string" ||
+    !original.campaign_id.trim() ||
+    typeof original.thread_id !== "string" ||
+    !original.thread_id.trim()
+  )
+    throw new MailReplySendingError("sender_unavailable");
+  const key = bindingKey(serverId, roleId);
+  let owned: Partial<RoleBinding> | null = null;
+  // Existing native associations have unique keys; never scan unrelated effect history for proof.
+  for (const idempotencyKey of [key, `${key}:campaign:${original.campaign_id}`]) {
+    const binding = await prisma.externalEffect.findUnique({
+      where: {
+        idempotencyKey,
+        spaceId: context.spaceId,
+        run: { userId: context.userId, spaceId: context.spaceId },
+        kind: "instantly_role_campaign",
+        status: "completed",
+        AND: [
+          { request: { path: ["serverId"], equals: serverId } },
+          { request: { path: ["roleId"], equals: roleId } },
+          { result: { path: ["campaignId"], equals: original.campaign_id } },
+        ],
+      },
+      select: { result: true },
+    });
+    owned = binding?.result as Partial<RoleBinding> | null;
+    if (typeof owned?.eaccount === "string" && sameAddress(owned.eaccount, email)) break;
+  }
+  if (typeof owned?.eaccount !== "string" || !sameAddress(owned.eaccount, email))
+    throw new MailReplySendingError("sender_unavailable");
+  let state: Awaited<ReturnType<typeof sendingMailboxState>>;
+  try {
+    state = await sendingMailboxState(rest, email);
+  } catch {
+    throw new MailReplySendingError("sender_unavailable");
+  }
+  if (!state.usable) throw new MailReplySendingError("sender_not_ready");
+  await context.reauthorize?.();
+  return state;
+}
+
+async function replyToEmail(
+  rest: InstantlyRest,
+  input: z.output<typeof ReplyToEmailInput>,
+  ready?: (email: string, original: Record<string, unknown>) => Promise<unknown>,
+) {
   const original = await readEmail(rest, input.reply_to_uuid);
   const eaccount =
     input.eaccount ?? (typeof original.eaccount === "string" ? original.eaccount : "");
   if (!eaccount) throw new Error("The original email names no mailbox; pass eaccount");
   await requireOwnMailbox(rest, eaccount);
+  await ready?.(eaccount, original);
   if (typeof original.eaccount === "string" && !sameAddress(original.eaccount, eaccount))
     throw new Error(`${input.reply_to_uuid} is not in the ${eaccount} mailbox`);
   const subject =
@@ -934,12 +1237,18 @@ async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToE
     (typeof original.subject === "string" && original.subject.trim()
       ? `Re: ${original.subject.replace(/^(re:\s*)+/iu, "")}`
       : "Re:");
-  return rest("POST", "/emails/reply", {
+  const text = input.body.text.replace(/\r\n?/g, "\n");
+  const html = `<p>${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\n", "<br />")}</p>`;
+  const sent = await rest("POST", "/emails/reply", {
     reply_to_uuid: input.reply_to_uuid,
     eaccount,
     subject,
-    body: input.body,
+    body: { text, html },
+    ...(input.cc_address_email_list !== undefined
+      ? { cc_address_email_list: input.cc_address_email_list }
+      : {}),
   });
+  return sent;
 }
 
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
@@ -1078,7 +1387,11 @@ async function ensureRoleCampaign(
   const adopt = (await sameTitleCampaigns(prisma, context, rest, role)).find(
     (entry) => entry.campaign.id !== existing?.binding.campaignId,
   )?.campaign;
-  const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
+  const pendingAllowed = (await confirmedSendingMailboxes(prisma, context)).some(
+    (sender) => sender.email === eaccount.toLowerCase(),
+  );
+  const campaign =
+    adopt ?? (await createCampaign(rest, { ...input, eaccount, name }, pendingAllowed));
   if (adopt && adopt.stop_on_reply !== true)
     await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
   if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
@@ -1141,13 +1454,22 @@ function withTemplate(steps: { delay: unknown; delay_unit?: unknown; variants: u
   ];
 }
 
+/** The lead key for an email the recruiter named for someone who is not a saved candidate. */
+const NAMED_EMAIL = "email:";
+const namedEmailKey = (address: string) => `${NAMED_EMAIL}${address.trim().toLowerCase()}`;
+const isNamedEmail = (candidate: { candidate_key: string; email?: string | null }) =>
+  candidate.candidate_key.startsWith(NAMED_EMAIL) &&
+  Boolean(candidate.email) &&
+  namedEmailKey(candidate.email!) === candidate.candidate_key;
+
 const notFound = (people: string[]) =>
   `Nothing was saved: ${people.join(", ")} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`;
 
 /**
  * Adds the named people who are this role's saved candidates to its campaign the way
- * add_shortlist_leads does (a sending campaign keeps them ready instead). A name or email that
- * matches no candidate, or more than one, is refused with one question for the recruiter.
+ * add_shortlist_leads does (a sending campaign keeps them ready instead), plus any email the
+ * recruiter typed for someone who is not a candidate. A name that matches no candidate, or more
+ * than one, is refused with one question for the recruiter.
  */
 async function addSavedRecipients(
   prisma: PrismaClient,
@@ -1192,7 +1514,13 @@ async function addSavedRecipients(
     const email = value.includes("@")
       ? person?.emails.find((e) => sameAddress(e.address, value))
       : person?.best;
-    if (!person) unknown.push(entry);
+    if (!person && !byEmail.length && Email.safeParse(value).success) {
+      // An address the recruiter typed for someone not in Results is theirs to send to; the send
+      // card still lists it before anything goes out.
+      const key = namedEmailKey(value);
+      if (!candidates.some((c) => c.candidate_key === key))
+        candidates.push({ candidate_key: key, email: value });
+    } else if (!person) unknown.push(entry);
     else if (!email) noEmail.push(person.name || entry);
     else if (!candidates.some((c) => c.candidate_key === person.key)) {
       const [first, ...last] = person.name.split(/\s+/).filter(Boolean);
@@ -1470,7 +1798,10 @@ async function addShortlistLeads(
       })
       .map((candidate) => candidate.candidateKey),
   );
-  const inRole = new Set(saved.map((candidate) => candidate.candidateKey));
+  const inRole = new Set([
+    ...saved.map((candidate) => candidate.candidateKey),
+    ...candidates.filter(isNamedEmail).map((candidate) => candidate.candidate_key),
+  ]);
   const notInRole = candidates.filter((c) => !inRole.has(c.candidate_key));
   const onHoldOrPassed = candidates.filter((c) => stopped.has(c.candidate_key));
   const eligible = candidates.filter(
@@ -1611,17 +1942,33 @@ async function activateCampaign(
   context: AdapterContext,
   serverId: string,
   input: z.output<typeof ActivateCampaignInput>,
+  confirmedSenderRequired = false,
 ) {
   const campaignId =
     input.campaign_id ??
     (await ensureRoleCampaign(prisma, rest, context, serverId, { timezone: "America/Chicago" }))
       .campaignId;
-  const campaign = await rest("GET", `/campaigns/${campaignId}`);
+  let campaign = await rest("GET", `/campaigns/${campaignId}`);
+  const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
+  if (confirmedSenderRequired) {
+    let senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+    if (!senders.length && bound?.binding.eaccount) {
+      await requireSendingMailboxReady(prisma, rest, context, bound.binding.eaccount);
+      await rest("PATCH", `/campaigns/${campaignId}`, { email_list: [bound.binding.eaccount] });
+      campaign = await rest("GET", `/campaigns/${campaignId}`);
+      senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+      if (senders.length !== 1 || senders[0] !== bound.binding.eaccount)
+        throw new Error("The confirmed sending address was not saved on this campaign.");
+    }
+    if (!senders.length || senders.some((email) => typeof email !== "string"))
+      throw new Error("Choose this account's confirmed sending address before sending.");
+    for (const email of senders)
+      await requireSendingMailboxReady(prisma, rest, context, String(email));
+  }
   if (!firstEmail(campaign))
     throw new Error(
       "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
     );
-  const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
   const leads = await allLeads(rest, campaignId);
   const templated = isTemplated(campaign);
   const plan = planSend(
@@ -1729,15 +2076,566 @@ async function leadEmails(rest: InstantlyRest, campaignId: string) {
   );
 }
 
-export async function runInstantlyWrite(
+function draftDelivery(campaign: Record<string, unknown>) {
+  const schedules = (
+    campaign.campaign_schedule as { schedules?: Record<string, unknown>[] } | undefined
+  )?.schedules;
+  const schedule = schedules?.length === 1 ? schedules[0] : undefined;
+  const timezone = typeof schedule?.timezone === "string" ? schedule.timezone : null;
+  const hours = timezone
+    ? ((["weekdays_9_to_5", "any_time"] as const).find(
+        (hours) =>
+          isDeepStrictEqual(
+            schedule?.timing,
+            campaignSchedule(hours, timezone).schedules[0]!.timing,
+          ) &&
+          isDeepStrictEqual(schedule?.days, campaignSchedule(hours, timezone).schedules[0]!.days),
+      ) ?? null)
+    : null;
+  return { timezone, hours };
+}
+
+function editableDraft(campaign: Record<string, unknown>) {
+  const list = campaign.sequences;
+  if (list == null || (Array.isArray(list) && list.length === 0)) return true;
+  if (!Array.isArray(list) || list.length !== 1 || isTemplated(campaign)) return false;
+  const steps = (list[0] as { steps?: unknown })?.steps;
+  return (
+    Array.isArray(steps) &&
+    steps.every(
+      (step) =>
+        step?.type === "email" &&
+        step.delay_unit === "days" &&
+        Number.isInteger(step.delay) &&
+        step.delay >= 0 &&
+        step.delay <= 366 &&
+        Array.isArray(step.variants) &&
+        step.variants.length === 1 &&
+        typeof step.variants[0]?.subject === "string" &&
+        typeof step.variants[0]?.body === "string" &&
+        // Only the plain paragraphs this writer can reproduce are editable; preserve rich drafts.
+        bodyHtml(htmlToPlainText(step.variants[0].body)) === step.variants[0].body,
+    )
+  );
+}
+
+/** Verify only supplied configuration; provider metadata is not part of the write. */
+function requireSavedConfiguration(
+  campaign: Record<string, unknown>,
+  expected: Record<string, unknown>,
+) {
+  if (Object.entries(expected).some(([key, value]) => !isDeepStrictEqual(campaign[key], value)))
+    throw new Error(
+      "The saved configuration does not match the requested changes. Reopen the sequence to review it.",
+    );
+}
+
+/** Hash only editable configuration, not telemetry or provider timestamps. */
+export function sequenceConfigurationRevision(campaign: Record<string, unknown>) {
+  return createHash("sha256")
+    .update(
+      stableJsonValue(
+        Object.fromEntries(
+          ["name", "sequences", "campaign_schedule", "email_list", "stop_on_reply"].map((key) => [
+            key,
+            campaign[key] ?? null,
+          ]),
+        ),
+      ),
+    )
+    .digest("hex");
+}
+
+async function reserveSequenceEffect(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  key: string,
+  input: object,
+  payload?: object,
+) {
+  const existing = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
+  if (existing) {
+    const request = existing.request as { input?: unknown; payload?: Record<string, unknown> };
+    if (
+      existing.spaceId !== context.spaceId ||
+      existing.kind !== "instantly_sequence_draft" ||
+      stableJsonValue(request.input) !== stableJsonValue(input)
+    )
+      throw new Error("This draft changed in another request. Reopen it before saving again.");
+    const result = existing.result as { campaignId?: string } | null;
+    if (typeof result?.campaignId === "string")
+      return { existing, campaignId: result.campaignId, payload: request.payload };
+    throw new Error(
+      "The previous draft request is still unconfirmed. Review the saved sequences before retrying.",
+    );
+  }
+  if (!context.runId) throw new Error("Open the role conversation before changing a draft");
+  try {
+    await prisma.externalEffect.create({
+      data: {
+        spaceId: context.spaceId,
+        runId: context.runId,
+        kind: "instantly_sequence_draft",
+        idempotencyKey: key,
+        status: "executing",
+        request: { input, ...(payload ? { payload } : {}) } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "P2002")
+      return reserveSequenceEffect(prisma, context, key, input, payload);
+    throw error;
+  }
+  return {
+    existing: null,
+    campaignId: null,
+    payload: payload as Record<string, unknown> | undefined,
+  };
+}
+
+/** Retain verified readback in the write receipt already being committed; no extra query. */
+function savedSequenceObservation(
+  context: AdapterContext,
+  serverId: string,
+  observedAt: string,
+  campaign: Record<string, unknown>,
+) {
+  return context.recruitingCampaignSourceRevision === undefined
+    ? {}
+    : {
+        __rakazoSequenceObservation: {
+          version: 1,
+          serverId,
+          sourceRevision: context.recruitingCampaignSourceRevision,
+          observedAt,
+          campaign: {
+            id: String(campaign.id),
+            name: String(campaign.name),
+            status: typeof campaign.status === "number" ? campaign.status : null,
+            eaccount: typeof campaign.eaccount === "string" ? campaign.eaccount : null,
+            stopOnReply:
+              typeof campaign.stopOnReply === "boolean"
+                ? campaign.stopOnReply
+                : typeof campaign.stop_on_reply === "boolean"
+                  ? campaign.stop_on_reply
+                  : null,
+          },
+        },
+      };
+}
+
+/** No network call runs under a database lock. Unknown delivery consumes the nonce. */
+async function createAssociatedDraft(
   prisma: PrismaClient,
   rest: InstantlyRest,
   context: AdapterContext,
   serverId: string,
+  roleId: string,
+  operation: "create" | "clone",
+  nonce: string,
+  input: object,
+  payload: Record<string, unknown>,
+) {
+  const key = `instantly-sequence-draft:${serverId}:${roleId}:${operation}:${nonce}`;
+  const reservation = await reserveSequenceEffect(prisma, context, key, input, payload);
+  let id = reservation.campaignId;
+  if (reservation.existing?.status === "completed" && id) {
+    await context.reauthorize?.();
+    return roleDraft(prisma, rest, context, serverId, { role_id: roleId, campaign_id: id });
+  }
+  const expected = reservation.payload ?? payload;
+  try {
+    if (!id) {
+      const created = await rest("POST", "/campaigns", payload);
+      id = Uuid.parse(created.id);
+    }
+    const binding = {
+      campaignId: id,
+      campaignName: String(expected.name),
+      eaccount:
+        Array.isArray(expected.email_list) && typeof expected.email_list[0] === "string"
+          ? expected.email_list[0]
+          : "eaccount" in input && typeof input.eaccount === "string"
+            ? input.eaccount
+            : ((await defaultSendingMailbox(prisma, context)) ?? ""),
+      leads: {},
+      created: true,
+    };
+    const associationKey = `${bindingKey(serverId, roleId)}:campaign:${id}`;
+    // Commit the returned id and role association together; no provider I/O runs in this transaction.
+    await prisma.$transaction(async (tx) => {
+      await tx.externalEffect.updateMany({
+        where: { idempotencyKey: key },
+        data: { status: "created", result: { campaignId: id! } },
+      });
+      await tx.externalEffect.upsert({
+        where: { idempotencyKey: associationKey },
+        create: {
+          spaceId: context.spaceId,
+          runId: context.runId!,
+          kind: "instantly_role_campaign",
+          idempotencyKey: associationKey,
+          status: "completed",
+          request: { roleId, serverId },
+          result: binding,
+        },
+        update: {},
+      });
+      if (operation === "create")
+        await tx.externalEffect.upsert({
+          where: { idempotencyKey: bindingKey(serverId, roleId) },
+          create: {
+            spaceId: context.spaceId,
+            runId: context.runId!,
+            kind: "instantly_role_campaign",
+            idempotencyKey: bindingKey(serverId, roleId),
+            status: "completed",
+            request: { roleId, serverId },
+            result: binding,
+          },
+          update: {},
+        });
+    });
+    // Receipt and exact role association survive revocation after the provider accepted creation.
+    await context.reauthorize?.();
+    const observedAt = new Date().toISOString();
+    const saved = await rest("GET", `/campaigns/${id}`);
+    const people = await rest("POST", "/leads/list", { campaign: id, limit: 1 });
+    if (saved.status !== DRAFT || !Array.isArray(people.items) || people.items.length !== 0)
+      throw new Error("The saved draft could not be verified. Reopen the sequence to review it.");
+    requireSavedConfiguration(saved, expected);
+    await prisma.externalEffect.updateMany({
+      where: { idempotencyKey: key },
+      data: {
+        status: "completed",
+        result: {
+          campaignId: id,
+          ...savedSequenceObservation(context, serverId, observedAt, saved),
+        },
+      },
+    });
+    return roleDraft(
+      prisma,
+      rest,
+      context,
+      serverId,
+      { role_id: roleId, campaign_id: id },
+      expected,
+    );
+  } catch (error) {
+    // ponytail: the provider has no idempotency keys; never re-POST an uncertain create. A
+    // known id resumes readback; an unknown id needs provider reconciliation, not a blind retry.
+    await prisma.externalEffect.updateMany({
+      where: { idempotencyKey: key, status: "executing" },
+      data: { status: "unknown" },
+    });
+    throw error;
+  }
+}
+
+/** An explicit secondary sequence never replaces the role's primary outreach binding. */
+async function roleDraftBinding(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  serverId: string,
+  roleId: string,
+  campaignId?: string,
+) {
+  const key = bindingKey(serverId, roleId);
+  const primary = await readBinding(prisma, context, key);
+  if (!campaignId || primary?.binding.campaignId === campaignId) return primary;
+  const selected = await readBinding(prisma, context, `${key}:campaign:${campaignId}`);
+  if (selected?.binding.campaignId !== campaignId) throw new IsolationError();
+  return selected;
+}
+
+async function roleDraft(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  args: z.output<typeof ReadRoleDraftInput>,
+  expected?: Record<string, unknown>,
+  verifiedReceipt?: string,
+) {
+  const role = await requireRole(prisma, context, args.role_id);
+  const existing = await roleDraftBinding(prisma, context, serverId, role.id, args.campaign_id);
+  if (args.campaign_id && args.campaign_id !== existing?.binding.campaignId)
+    throw new IsolationError();
+  const observedAt = new Date().toISOString();
+  if (existing)
+    context.onRecruitingCampaignRead?.({
+      roleId: role.id,
+      campaignId: existing.binding.campaignId,
+      observedAt,
+    });
+  const campaign = existing ? await rest("GET", `/campaigns/${existing.binding.campaignId}`) : null;
+  if (expected && campaign) requireSavedConfiguration(campaign, expected);
+  const accounts = await rest("GET", "/accounts?limit=100");
+  const mailboxes = (Array.isArray(accounts.items) ? accounts.items : []).flatMap((item) =>
+    typeof item?.email === "string" ? [item.email as string] : [],
+  );
+  for (const sender of await confirmedSendingMailboxes(prisma, context))
+    if (!mailboxes.includes(sender.email)) mailboxes.push(sender.email);
+  const associations = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: context.spaceId,
+      run: { userId: context.userId },
+      OR: [
+        {
+          kind: "instantly_role_campaign",
+          status: "completed",
+          AND: [
+            { request: { path: ["roleId"], equals: role.id } },
+            { request: { path: ["serverId"], equals: serverId } },
+          ],
+        },
+        {
+          kind: "instantly_sequence_draft",
+          status: { in: ["executing", "unknown"] },
+          idempotencyKey: { startsWith: `instantly-sequence-draft:${serverId}:${role.id}:` },
+        },
+      ],
+    },
+    select: { result: true, kind: true, status: true, idempotencyKey: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const unconfirmedDrafts = associations.filter(
+    (effect) =>
+      effect.kind === "instantly_sequence_draft" &&
+      ["executing", "unknown"].includes(effect.status) &&
+      effect.idempotencyKey !== verifiedReceipt,
+  ).length;
+  const campaigns = [
+    ...new Map(
+      associations.flatMap((effect) => {
+        const binding = effect.result as Partial<RoleBinding> | null;
+        return typeof binding?.campaignId === "string" && typeof binding.campaignName === "string"
+          ? [
+              [
+                binding.campaignId,
+                {
+                  id: binding.campaignId,
+                  name:
+                    campaign?.id === binding.campaignId && typeof campaign.name === "string"
+                      ? campaign.name
+                      : binding.campaignName,
+                },
+              ] as const,
+            ]
+          : [];
+      }),
+    ).values(),
+  ];
+  if (!campaign)
+    return {
+      roleId: role.id,
+      roleTitle: role.title,
+      mailboxes,
+      campaigns,
+      unconfirmedDrafts,
+      campaign: null,
+    };
+  const { timezone, hours } = draftDelivery(campaign);
+  const raw = Array.isArray(campaign.sequences) ? campaign.sequences : [];
+  const steps = editableDraft(campaign)
+    ? (
+        (raw[0]?.steps ?? []) as { variants: { subject: string; body: string }[]; delay: number }[]
+      ).map((step) => ({
+        subject: step.variants[0]!.subject,
+        body: htmlToPlainText(step.variants[0]!.body),
+        delay_days: step.delay as number,
+      }))
+    : [];
+  return {
+    roleId: role.id,
+    roleTitle: role.title,
+    sourceRevision: context.recruitingCampaignSourceRevision,
+    observedAt,
+    mailboxes,
+    campaigns,
+    unconfirmedDrafts,
+    campaign: {
+      id: existing!.binding.campaignId,
+      name: String(campaign.name ?? role.title),
+      status: campaign.status,
+      revision: sequenceConfigurationRevision(campaign),
+      observedDetails: campaignObservedDetails(campaign),
+      stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
+      editable:
+        campaign.status === DRAFT &&
+        editableDraft(campaign) &&
+        hours !== null &&
+        Array.isArray(campaign.email_list) &&
+        campaign.email_list.length === 1,
+      eaccount:
+        Array.isArray(campaign.email_list) && campaign.email_list.length === 1
+          ? campaign.email_list[0]
+          : null,
+      steps,
+      timezone,
+      send_hours: hours,
+    },
+  };
+}
+
+export async function runInstantlyWrite(
+  prisma: PrismaClient,
+  accountRest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
   toolName: string,
   args: unknown,
+  /** Set on the shared account: the campaigns and senders this connection owns. */
+  owned?: OwnedInstantly,
 ): Promise<unknown> {
+  if (owned && toolName === "native_instantly_create_campaign")
+    throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  const rest = owned ? ownedInstantlyRest(accountRest, owned) : accountRest;
   switch (toolName) {
+    case "native_instantly_ensure_sender":
+      return ensureSendingIdentity(prisma, accountRest, context, serverId, args);
+    case "native_instantly_get_role_draft":
+      return roleDraft(prisma, rest, context, serverId, ReadRoleDraftInput.parse(args));
+    case "native_instantly_clone_role_draft": {
+      const input = CloneRoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      await roleDraftBinding(prisma, context, serverId, role.id, input.campaign_id);
+      if (!context.runId) throw new Error("Start a role conversation before cloning a draft");
+      const original = await rest("GET", `/campaigns/${input.campaign_id}`);
+      if (
+        original.id !== input.campaign_id ||
+        !Array.isArray(original.sequences) ||
+        !original.campaign_schedule
+      )
+        throw new Error("The complete saved sequence could not be read");
+      // Copy template fields verbatim. Status, recipients, analytics and historical run state
+      // are not POSTed; the provider's create operation always makes a new inactive draft.
+      const fields = [
+        "campaign_schedule",
+        "sequences",
+        "email_list",
+        "stop_on_reply",
+        "stop_on_auto_reply",
+        "stop_for_company",
+        "open_tracking",
+        "link_tracking",
+        "text_only",
+        "insert_unsubscribe_header",
+        "daily_limit",
+        "daily_max_leads",
+        "email_gap",
+        "random_wait_max",
+        "allow_risky_contacts",
+      ];
+      const body = Object.fromEntries(
+        fields
+          .filter((field) => original[field] !== undefined)
+          .map((field) => [field, original[field]]),
+      );
+      return createAssociatedDraft(
+        prisma,
+        rest,
+        context,
+        serverId,
+        role.id,
+        "clone",
+        input.client_nonce,
+        input,
+        { ...body, name: input.name },
+      );
+    }
+    case "native_instantly_create_role_draft": {
+      const input = CreateRoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      const connected = await requireOwnMailbox(
+        rest,
+        input.eaccount,
+        Boolean(owned?.mailboxes.has(input.eaccount.toLowerCase())),
+      );
+      return createAssociatedDraft(
+        prisma,
+        rest,
+        context,
+        serverId,
+        role.id,
+        "create",
+        input.client_nonce,
+        input,
+        { ...campaignBody(input.name, input), email_list: connected ? [input.eaccount] : [] },
+      );
+    }
+    case "native_instantly_update_role_draft": {
+      const input = UpdateRoleDraftInput.parse(args);
+      const role = await requireRole(prisma, context, input.role_id);
+      const existing = await roleDraftBinding(
+        prisma,
+        context,
+        serverId,
+        role.id,
+        input.campaign_id,
+      );
+      if (existing?.binding.campaignId !== input.campaign_id) throw new IsolationError();
+      const effectKey = `instantly-sequence-draft:${serverId}:${role.id}:save:${input.campaign_id}:${input.expected_revision}`;
+      const previous = await prisma.externalEffect.findUnique({
+        where: { idempotencyKey: effectKey },
+      });
+      if (previous) {
+        await reserveSequenceEffect(prisma, context, effectKey, input);
+        return roleDraft(prisma, rest, context, serverId, input, campaignBody(input.name, input));
+      }
+      const campaign = await rest("GET", `/campaigns/${input.campaign_id}`);
+      if (campaign.status !== DRAFT) throw new Error("Only a draft can be edited here");
+      if (
+        !editableDraft(campaign) ||
+        draftDelivery(campaign).hours === null ||
+        !Array.isArray(campaign.email_list) ||
+        campaign.email_list.length !== 1
+      )
+        throw new Error("This sequence needs to be edited in its existing mail workspace");
+      if (sequenceConfigurationRevision(campaign) !== input.expected_revision)
+        throw new Error(
+          "This sequence changed since it was opened. Reopen it before saving again.",
+        );
+      const connected = await requireOwnMailbox(
+        rest,
+        input.eaccount,
+        Boolean(owned?.mailboxes.has(input.eaccount.toLowerCase())),
+      );
+      await reserveSequenceEffect(prisma, context, effectKey, input);
+      try {
+        // ponytail: this revision claim fences native editors. The provider has no CAS;
+        // an external writer racing final GET/PATCH needs provider ETag/If-Match support.
+        const expected = {
+          ...campaignBody(input.name, input),
+          email_list: connected ? [input.eaccount] : [],
+        };
+        await rest("PATCH", `/campaigns/${input.campaign_id}`, expected);
+        await context.reauthorize?.();
+        const observedAt = new Date().toISOString();
+        const output = await roleDraft(prisma, rest, context, serverId, input, expected, effectKey);
+        await prisma.externalEffect.updateMany({
+          where: { idempotencyKey: effectKey },
+          data: {
+            status: "completed",
+            result: {
+              campaignId: input.campaign_id,
+              ...(output.campaign
+                ? savedSequenceObservation(context, serverId, observedAt, output.campaign)
+                : {}),
+            },
+          },
+        });
+        await context.reauthorize?.();
+        return output;
+      } catch (error) {
+        await prisma.externalEffect.updateMany({
+          where: { idempotencyKey: effectKey, status: "executing" },
+          data: { status: "unknown" },
+        });
+        throw error;
+      }
+    }
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
       const campaign = await createCampaign(rest, input);
@@ -1759,20 +2657,36 @@ export async function runInstantlyWrite(
         ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
     }
-    case "native_instantly_get_campaign_analytics":
-      return rest(
-        "GET",
-        `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
-      );
+    case "native_instantly_get_campaign_analytics": {
+      const observedAt = new Date().toISOString();
+      return {
+        ...(await rest(
+          "GET",
+          `/campaigns/analytics/overview?id=${CampaignIdInput.parse(args).campaign_id}`,
+        )),
+        observedAt,
+      };
+    }
     case "native_instantly_get_campaign": {
+      const observedAt = new Date().toISOString();
       const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
+      const senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+      const binding =
+        owned && !senders.length
+          ? await bindingOfCampaign(prisma, context, serverId, String(campaign.id))
+          : null;
+      const mailbox = typeof senders[0] === "string" ? senders[0] : binding?.binding.eaccount;
+      const senderState =
+        owned && mailbox ? await sendingMailboxState(accountRest, mailbox) : undefined;
       return {
         id: campaign.id,
+        observedAt,
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
+        ...(senderState ? { senderState } : {}),
         recipients: await leadEmails(rest, String(campaign.id)),
         campaign_schedule: campaign.campaign_schedule,
         sequences: campaign.sequences,
@@ -1781,13 +2695,65 @@ export async function runInstantlyWrite(
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
     case "native_instantly_activate_campaign":
-      return activateCampaign(prisma, rest, context, serverId, ActivateCampaignInput.parse(args));
+      return activateCampaign(
+        prisma,
+        rest,
+        context,
+        serverId,
+        ActivateCampaignInput.parse(args),
+        Boolean(owned),
+      );
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
-    case "native_instantly_get_email":
-      return readEmail(rest, EmailIdInput.parse(args).id);
-    case "native_instantly_reply_to_email":
-      return replyToEmail(rest, ReplyToEmailInput.parse(args));
+    case "native_instantly_get_email": {
+      const input = EmailIdInput.parse(args);
+      const original = await readEmail(rest, input.id);
+      if (!input.check_sender) return original;
+      let error: MailReplyErrorCode | undefined;
+      if (owned) {
+        try {
+          await requireReplySendingMailboxReady(
+            prisma,
+            accountRest,
+            context,
+            serverId,
+            original,
+            String(original.eaccount ?? ""),
+          );
+        } catch (cause) {
+          error = cause instanceof MailReplySendingError ? cause.code : "sender_unavailable";
+        }
+      }
+      return { ...original, replySenderCheck: { ready: !error, ...(error ? { error } : {}) } };
+    }
+    case "native_instantly_reply_to_email": {
+      const input = ReplyToEmailInput.parse(args);
+      if (!owned) return replyToEmail(rest, input);
+      const original = await readEmail(rest, input.reply_to_uuid);
+      const mailbox = input.eaccount ?? String(original.eaccount ?? "");
+      await requireReplySendingMailboxReady(
+        prisma,
+        accountRest,
+        context,
+        serverId,
+        original,
+        mailbox,
+      );
+      const scopedReply = ownedInstantlyRest(accountRest, {
+        campaigns: owned.campaigns,
+        mailboxes: new Set([...owned.mailboxes, mailboxKey(mailbox)]),
+      });
+      return replyToEmail(scopedReply, input, (email, currentOriginal) =>
+        requireReplySendingMailboxReady(
+          prisma,
+          accountRest,
+          context,
+          serverId,
+          currentOriginal,
+          email,
+        ),
+      );
+    }
     case "native_instantly_ensure_role_campaign":
       return ensureRoleCampaign(
         prisma,

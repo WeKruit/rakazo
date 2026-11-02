@@ -21,6 +21,8 @@ const source = (kind: "calendar" | "instantly") => ({
   revision: 1,
   enabled: true,
   secretId: "secret",
+  endpoint: null,
+  transport: "streamable_http",
   provider: { kind, tools: [] },
   assignments: [{ botId: "main", allowAllTools: true, allowedTools: [] }],
 });
@@ -376,3 +378,229 @@ describe("live role correspondence", () => {
     expect(output.status).not.toBe("failed");
   });
 });
+
+it.each(["pending", "failed"])(
+  "queues the actual live page without awaiting %s persistence or re-dating cached rows",
+  async (publisher) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    const { prisma } = fixture();
+    const finishes: Array<() => void> = [];
+    const enqueue = vi.fn((_job: unknown) =>
+      publisher === "failed"
+        ? Promise.reject(new Error("private test publisher failure"))
+        : new Promise<void>((resolve) => finishes.push(resolve)),
+    );
+    const execute = vi.fn(async function* () {
+      vi.advanceTimersByTime(5000);
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            items: [
+              {
+                id: "00000000-0000-4000-8000-000000000003",
+                campaign_id: campaignId,
+                timestamp_created: "2026-10-30T10:00:00Z",
+                timestamp_email: "2026-10-30T10:00:00Z",
+                message_id: "message-3",
+                subject: "Actual provider reply",
+                from_address_email: "candidate@example.test",
+                to_address_email_list: "recruiter@example.test",
+                body: { text: "Interested" },
+                organization_id: "00000000-0000-4000-8000-000000000002",
+                eaccount: "recruiter@example.test",
+                ue_type: 2,
+              },
+            ],
+          },
+        },
+      };
+    });
+    const output = empty();
+    output.emails = [
+      {
+        id: "old",
+        sourceId: "old-source",
+        sourceName: "old",
+        providerMessageId: "old",
+        savedRead: null,
+        sender: null,
+        recipients: [],
+        subject: "old",
+        body: "Cached older body",
+        snippet: false,
+        date: null,
+        url: null,
+      },
+    ];
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute }, jobs: { enqueue } as never },
+      actor,
+      { roleId: "role", threadId: "thread", view: "inbox" },
+      [source("instantly")],
+      output,
+    );
+    expect(output.emails).toHaveLength(2);
+    expect(output.status).toBe("ready");
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(enqueue.mock.calls[0]![0]).toMatchObject({
+      name: "recruiting_inbox.project",
+      payload: {
+        observation: {
+          threadId: "thread",
+          roleId: "role",
+          sourceId: "instantly",
+          sourceRevision: 1,
+          botId: "main",
+          campaignId,
+          observedAt: "2026-10-30T12:00:00.000Z",
+          emails: [
+            expect.objectContaining({ body: "Interested", eaccount: "recruiter@example.test" }),
+          ],
+        },
+      },
+    });
+    for (const finish of finishes) finish();
+  },
+);
+
+it("recognizes a shortened provider list as a preview and reads only the selected email's actual full body", async () => {
+  const { prisma } = fixture();
+  const id = "00000000-0000-4000-8000-000000000009";
+  const fullBody = "Complete actual body. ".repeat(3000);
+  let preview = "Preview [truncated — use get_email for full content]";
+  const provider = {
+    id,
+    timestamp_created: "2026-10-30T12:00:00Z",
+    timestamp_email: "2026-10-30T12:00:00Z",
+    message_id: "message",
+    subject: "Reply",
+    from_address_email: "candidate@example.test",
+    to_address_email_list: "recruiter@example.test",
+    organization_id: "00000000-0000-4000-8000-000000000002",
+    campaign_id: campaignId,
+    eaccount: "recruiter@example.test",
+    thread_id: "provider-thread",
+    ue_type: 2,
+  };
+  const execute = vi.fn(async function* (call: {
+    route?: { toolName: string };
+    args: Record<string, unknown>;
+  }) {
+    yield {
+      type: "result" as const,
+      data: {
+        structuredContent:
+          call.route?.toolName === "native_instantly_get_email"
+            ? { ...provider, body: { text: fullBody } }
+            : {
+                items: [
+                  {
+                    ...provider,
+                    body: { text: preview },
+                  },
+                ],
+              },
+      },
+    };
+  });
+  const output = empty();
+  await refreshRecruitingCorrespondence(
+    { prisma, connectors: { execute } as never },
+    actor,
+    { roleId: "role", threadId: "thread", view: "inbox" },
+    [source("instantly")],
+    output,
+  );
+  expect(output.emails[0]).toMatchObject({ body: "Preview ", snippet: true });
+  const selected = output.emails[0]!;
+  const complete = empty();
+  const enqueue = vi.fn(async () => {});
+  await refreshRecruitingCorrespondence(
+    { prisma, connectors: { execute } as never, jobs: { enqueue } as never },
+    actor,
+    { roleId: "role", threadId: "thread", view: "inbox", message: selected },
+    [source("instantly")],
+    complete,
+  );
+  expect(execute).toHaveBeenCalledTimes(2);
+  expect(execute.mock.calls[1]![0]).toMatchObject({
+    route: { toolName: "native_instantly_get_email" },
+    args: { id },
+  });
+  expect(complete.emails[0]).toMatchObject({ body: fullBody, snippet: false });
+  preview = fullBody;
+  const bounded = empty();
+  await refreshRecruitingCorrespondence(
+    { prisma, connectors: { execute } as never },
+    actor,
+    { roleId: "role", threadId: "thread", view: "inbox" },
+    [source("instantly")],
+    bounded,
+  );
+  expect(bounded.emails[0]).toMatchObject({ body: fullBody.slice(0, 50000), snippet: true });
+  expect(enqueue).toHaveBeenCalledWith(
+    expect.objectContaining({
+      payload: {
+        observation: expect.objectContaining({
+          emails: [expect.objectContaining({ body: fullBody })],
+        }),
+      },
+    }),
+  );
+});
+
+it.each(["id", "campaign_id", "thread_id", "eaccount"])(
+  "refuses a full-body response with a changed %s",
+  async (field) => {
+    const { prisma } = fixture();
+    const selected = {
+      id: "instantly:00000000-0000-4000-8000-000000000009",
+      providerMessageId: "00000000-0000-4000-8000-000000000009",
+      providerThreadId: "thread",
+      sourceId: "instantly",
+      sourceName: "Mail",
+      campaignId,
+      eaccount: "recruiter@example.test",
+      savedRead: null,
+      sender: null,
+      recipients: [],
+      subject: "Reply",
+      body: "Preview",
+      snippet: true,
+      date: null,
+      url: null,
+    };
+    const row = {
+      id: selected.providerMessageId,
+      campaign_id: campaignId,
+      thread_id: "thread",
+      eaccount: selected.eaccount,
+      timestamp_created: "2026-10-30T12:00:00Z",
+      timestamp_email: "2026-10-30T12:00:00Z",
+      message_id: "message",
+      subject: "Reply",
+      from_address_email: "candidate@example.test",
+      to_address_email_list: "recruiter@example.test",
+      organization_id: "00000000-0000-4000-8000-000000000002",
+      body: { text: "Foreign body" },
+      [field]:
+        field === "eaccount" ? "foreign@example.test" : "00000000-0000-4000-8000-000000000099",
+    };
+    const execute = vi.fn(async function* () {
+      yield { type: "result" as const, data: { structuredContent: row } };
+    });
+    const output = empty();
+    const enqueue = vi.fn(async () => {});
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as never, jobs: { enqueue } as never },
+      actor,
+      { roleId: "role", threadId: "thread", view: "inbox", message: selected },
+      [source("instantly")],
+      output,
+    );
+    expect(output.emails).toEqual([]);
+    expect(enqueue).not.toHaveBeenCalled();
+  },
+);

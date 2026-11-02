@@ -4,6 +4,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+const artifacts = vi.hoisted(() => ({ create: vi.fn(), getById: vi.fn() }));
+vi.mock("../../lib/pending-attachments", () => ({
+  readFileAsBase64: vi.fn(async () => "dGVzdA=="),
+}));
 const notes = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
@@ -15,6 +19,7 @@ vi.mock("../../lib/read-retry", () => ({
 }));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
+    artifacts,
     recruiting: {
       notes,
       reminders: { list: vi.fn(async () => ({ items: [], overdueCount: 0 })) },
@@ -47,6 +52,7 @@ function note(id: string, extra: Partial<RecruitingCandidateNote> = {}): Recruit
     roleId: "role-1",
     candidateKey: `crm:${ADA}`,
     body: id,
+    attachments: [],
     createdBy: "user",
     authorName: "Riley",
     createdAt: ago(1),
@@ -220,4 +226,46 @@ it("locks the submitted draft while saving so later typing cannot be discarded",
   expect(box.disabled).toBe(false);
   expect(box.value).toBe("");
   expect(api.create).toHaveBeenCalledTimes(1);
+});
+
+it("uploads a native attachment only with a nonempty note and keeps the draft on upload failure", async () => {
+  notesMock([]);
+  artifacts.create
+    .mockRejectedValueOnce(new Error("Upload failed"))
+    .mockResolvedValue({ id: "native-artifact" });
+  const view = await mount(
+    <NotesTab
+      roleId="role-1"
+      candidateKeys={keys}
+      createKey="autumn:k1"
+      conversation={{ groupId: "group-1" }}
+    />,
+  );
+  const input = view.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const file = new File(["test"], "evidence.txt", { type: "text/plain" });
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(button(view, "Add note")?.disabled).toBe(true);
+  expect(artifacts.create).not.toHaveBeenCalled();
+  await type(view.querySelector("textarea")!, "Saved evidence");
+  await act(async () => button(view, "Add note")!.click());
+  expect(view.textContent).toContain("evidence.txt");
+  expect(view.querySelector("textarea")!.value).toBe("Saved evidence");
+  expect(notes.create).not.toHaveBeenCalled();
+  await act(async () => button(view, "Add note")!.click());
+  expect(artifacts.create.mock.calls[0]?.[0]).toMatchObject({
+    groupId: "group-1",
+    name: "evidence.txt",
+    mimeType: "text/plain",
+    contentBase64: "dGVzdA==",
+  });
+  expect(artifacts.create.mock.calls[1]?.[0].clientNonce).toBe(
+    artifacts.create.mock.calls[0]?.[0].clientNonce,
+  );
+  expect(notes.create).toHaveBeenCalledWith({
+    roleId: "role-1",
+    candidateKey: "autumn:k1",
+    body: "Saved evidence",
+    artifactIds: ["native-artifact"],
+  });
 });

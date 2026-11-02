@@ -1,5 +1,5 @@
 import type { Actor } from "@rakazo/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
   createRecruitingCandidateNote,
@@ -180,4 +180,41 @@ describe("recruiting candidate notes (db)", () => {
       await executeRecruitingNotesTool(prisma, alice, "bot-1", { operation: "delete", id }),
     ).toEqual({ ok: true });
   });
+});
+
+it("keeps native attachments and refuses foreign owner or space artifact references", async () => {
+  const { prisma: base } = fake();
+  const owned = { id: "owned", name: "evidence.pdf", mimeType: "application/pdf", size: 123 };
+  const findMany = vi.fn(
+    async ({ where }: { where: { id: { in: string[] }; userId: string; spaceId: string } }) =>
+      where.userId === "alice" && where.spaceId === "space"
+        ? [owned].filter((artifact) => where.id.in.includes(artifact.id))
+        : [],
+  );
+  const prisma = { ...base, artifact: { findMany } } as unknown as PrismaClient;
+  const note = await createRecruitingCandidateNote(prisma, alice, {
+    candidateKey: "autumn:k1",
+    body: "Saved evidence",
+    artifactIds: ["owned"],
+  });
+  expect(note.attachments).toEqual([owned]);
+  expect(findMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: { id: { in: ["owned"] }, userId: "alice", spaceId: "space" },
+    }),
+  );
+  await expect(
+    createRecruitingCandidateNote(prisma, alice, {
+      candidateKey: "autumn:k1",
+      body: "Foreign evidence",
+      artifactIds: ["foreign"],
+    }),
+  ).rejects.toBeInstanceOf(IsolationError);
+  await expect(
+    createRecruitingCandidateNote(
+      prisma,
+      { ...alice, spaceId: "other" },
+      { candidateKey: "autumn:k1", body: "Other space", artifactIds: ["owned"] },
+    ),
+  ).rejects.toBeInstanceOf(IsolationError);
 });

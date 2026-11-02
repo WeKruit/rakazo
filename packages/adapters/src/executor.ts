@@ -60,6 +60,7 @@ import {
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
+  MailReplySchema,
   MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   RecruitingApprovalToolCallSchema,
@@ -93,6 +94,7 @@ import {
   assertTransition,
   attachmentExtensionForMimeType,
   BLOCKED_TOOL_REFUSAL,
+  BOT_MESSAGE_MAX_HOPS,
   blockedToolEffect,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
@@ -124,6 +126,7 @@ import {
   isBackgroundRunTrigger,
   isCallClientNonce,
   isChineseText,
+  isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isRecruitingSpawnKey,
@@ -155,6 +158,7 @@ import {
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   REPLY_IN_CHINESE_NOTE,
+  REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -247,6 +251,7 @@ import {
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
+  mailReplyState,
   Prisma,
   parseComputerMode,
   pollOf,
@@ -255,6 +260,7 @@ import {
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
   prepareRecruitingSchedulingPlan,
+  publishMailReplyCard,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingGradeRowsError,
@@ -273,6 +279,7 @@ import {
   saveRecruitingCalibrationRound,
   saveRunThinking,
   searchHistory,
+  seesOperatorSpend,
   skipRateLimitedRun,
   unitVector,
   votePoll,
@@ -463,12 +470,19 @@ import {
   readInstantlyEmail,
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
+import { senderApprovalDisplay } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
   uniquifyInstalledToolName,
 } from "./lazy-tool-catalog.js";
+import {
+  gmailReplyRoute,
+  mailReplyFromAnchor,
+  mailReplyOutcomeInstruction,
+  readGmailReplyCard,
+} from "./mail-reply.js";
 import { requireMcpToolAssignment } from "./mcp-connector.js";
 import {
   buildMcpCredentialBlob,
@@ -560,6 +574,7 @@ import {
   linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
+import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -596,9 +611,10 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
-import { suggestNextMessage } from "./reply-suggestion.js";
+import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
+import { startRoleFromRecruiterMessage } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -685,7 +701,7 @@ import {
   sendDeclineRetry,
   turnRequestText,
 } from "./turn-end-guard.js";
-import { chooseTurnModel } from "./turn-model.js";
+import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
@@ -721,6 +737,9 @@ const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_naviga
 const runEgressWindow = new RateWindow(RUN_EGRESS_PER_MINUTE, 60_000);
 const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
   "Not run: this call would send a saved credential to an outside service. Credentials are never passed in tool arguments; continue without it.";
+
+/** People Kruit lists from a role when the recruiter named no number. */
+const SHOWN_ROLE_PEOPLE = 10;
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -872,6 +891,8 @@ export function lateNote(pending: Promise<string | undefined>) {
 
 /** The working title of a role saved before the recruiter has named it. */
 const NEW_ROLE_TITLE = "New role";
+/** Role conversations Kruit opens with start_role. */
+const KRUIT_ROLE_GROUP_PREFIX = "role-";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -1225,6 +1246,8 @@ export const REPORT_IN_FINAL_REPLY =
 export const STEERING_ACK =
   "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it.";
 
+export const INTAKE_ASK_FIRST =
+  "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_RECRUITER_LANGUAGE =
@@ -1312,8 +1335,25 @@ export function pastedJobTitle(text: string): string | null {
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
+/**
+ * A working title for a short role request that is not a full JD: its first line, when the
+ * message has more lines after it and that line reads as a name, not a sentence.
+ */
+export function requestTitle(text: string): string | null {
+  const lines = text
+    .split("\n")
+    .map((line) => line.replace(/^[#*\s]+|[*\s]+$/g, ""))
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  // A clock time ("17:20") is part of a name; any other colon or sentence mark is not.
+  const marks = first.replace(/\d[:：]\d/g, "");
+  if (lines.length < 2 || titleWidth(first) > TITLE_WIDTH || /[.,;:?!，。；：？！]/.test(marks))
+    return null;
+  return first;
+}
+
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never bind a role in global Main; to open a new role use start_role when offered.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -4810,6 +4850,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           botId: message.botId,
           runId: message.runId,
           blocks: message.blocks as MessageBlock[],
+          // A harness-written turn, such as an auto-continue prompt: not something the user said.
+          internal: Boolean(
+            "clientNonce" in message && message.clientNonce?.startsWith("autocontinue:"),
+          ),
         }));
         const currentTurnMessage = nativeSources?.currentAnswer
           ? {
@@ -5547,11 +5591,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
-        const approvedEffects = await deps.prisma.externalEffect.findMany({
-          where: { runId, status: "approved" },
+        const continuationEffects = await deps.prisma.externalEffect.findMany({
+          where: { runId, status: { in: ["approved", "denied"] } },
           orderBy: APPROVED_EFFECT_REPLAY_ORDER,
-          select: { id: true, kind: true, request: true },
+          select: { id: true, kind: true, status: true, request: true, result: true },
         });
+        const approvedEffects = continuationEffects.filter(
+          (effect) => effect.status === "approved",
+        );
+        const discardedReplies = continuationEffects.flatMap((effect) => {
+          if (effect.status !== "denied") return [];
+          const retained =
+            effect.result && typeof effect.result === "object" && !Array.isArray(effect.result)
+              ? effect.result.mailReplyApproval
+              : undefined;
+          const reply = MailReplySchema.safeParse(retained);
+          return reply.success ? [reply.data] : [];
+        });
+        // ponytail: this continuation's decision stops replacements, until a new human message arrives.
+        let replyDiscardActive = true;
         const approvedEffectReplays = createApprovedEffectReplayQueue(approvedEffects);
         const legacyCalibrations = approvedEffects.flatMap((effect) => {
           if (effect.kind !== "recruiting_request_approval") return [];
@@ -5669,6 +5727,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -5847,6 +5906,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         let contactLookupOwed: { target: number; remaining: number } | undefined;
         let askDeclineBounced = false;
+        // A question bounced once as already answered may be asked again: the reply may have been about something else.
+        const knownAskBounced = new Set<string>();
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -5909,6 +5970,64 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
+        // A plain list of one role's people in Kruit's conversation. A name or
+        // profile lookup finds one person; it is not a list to show.
+        const isGlobalRoleList = (args: Record<string, unknown>) =>
+          thread.groupId?.startsWith("recruiting-global-") === true &&
+          args.operation === "list" &&
+          typeof args.roleId === "string" &&
+          args.query === undefined;
+        // Kruit lists a role's people with the same lines a role team's round uses.
+        const showGlobalRolePeople = async (
+          args: Record<string, unknown>,
+          result: unknown,
+        ): Promise<object | undefined> => {
+          const page = result as {
+            items?: Array<{ candidateKey?: unknown }>;
+            total?: unknown;
+          } | null;
+          const items = page?.items;
+          if (!isGlobalRoleList(args) || typeof args.roleId !== "string" || !items?.length)
+            return undefined;
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: args.roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { title: true, sourceThreadId: true },
+          });
+          if (!role) return undefined;
+          const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
+          const shown = items.slice(0, size);
+          const first =
+            typeof args.page === "number" && args.cursor === undefined
+              ? (args.page - 1) * size + 1
+              : undefined;
+          const total = typeof page?.total === "number" ? page.total : undefined;
+          // Where this page sits, so the recruiter can ask for the next, previous or any page.
+          const range =
+            first !== undefined
+              ? ` · ${first}–${first + shown.length - 1}${total !== undefined ? ` / ${total}` : ""}`
+              : total !== undefined && total > shown.length
+                ? ` · 1–${shown.length} / ${total}`
+                : "";
+          const text = await recruitingRoundListText(deps.prisma, {
+            threadId: role.sourceThreadId,
+            spaceId: run.spaceId,
+            roleId: args.roleId,
+            candidateKeys: shown.flatMap((item) =>
+              typeof item.candidateKey === "string" ? [item.candidateKey] : [],
+            ),
+            knownOnly: true,
+            heading: `${role.title}${range}:`,
+            firstNumber: first ?? 1,
+          });
+          if (!text) return undefined;
+          await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+          const start = first ?? 1;
+          const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
+          return {
+            ...(result as object),
+            shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
+          };
+        };
         const showRoundList = async (text: string) => {
           const messageId = roundStream?.messageId;
           if (!messageId) {
@@ -5973,6 +6092,48 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .catch((error) =>
               getLogger().warn("round picks not streamed", { error: String(error) }),
             );
+        };
+        // The question streams into the live bubble as it is written, its choices under it, so
+        // the person reads it before the card (and the search plan written after it) is complete.
+        let questionStream:
+          | { callId: string; text: string; at: number; posting: Promise<void> }
+          | undefined;
+        const streamQuestion = (call: {
+          id: string;
+          name: string;
+          args: Record<string, unknown>;
+        }) => {
+          if (call.name !== "ask_user" || scripted || isBackgroundRunTrigger(run.trigger)) return;
+          const question = typeof call.args.question === "string" ? call.args.question.trim() : "";
+          if (!question) return;
+          const options = Array.isArray(call.args.options)
+            ? call.args.options.filter(
+                (option): option is string => typeof option === "string" && Boolean(option.trim()),
+              )
+            : [];
+          const text = [question, ...options.map((option) => `· ${option.trim()}`)].join("\n");
+          const previous = questionStream?.callId === call.id ? questionStream : undefined;
+          if (previous?.text === text || (previous && Date.now() - previous.at < 100)) return;
+          const posting = (questionStream?.posting ?? Promise.resolve())
+            .then(() =>
+              deps.events.publishTransient({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                type: "thread.progress",
+                runId,
+                payload: {
+                  text: visible(redactSecrets(text, runSecrets)),
+                  streaming: true,
+                  ...runTiming,
+                },
+              }),
+            )
+            .then(() => undefined)
+            .catch((error) => getLogger().warn("question not streamed", { error: String(error) }));
+          questionStream = { callId: call.id, text, at: Date.now(), posting };
+          // Text written after a bounced question replaces it instead of appending to it.
+          hasStreamedText = false;
         };
         const saveBriefAfterRound = async (roleId: string) => {
           const quote = currentTurnMessage?.blocks.flatMap((block) =>
@@ -7245,6 +7406,52 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (
+            connectorCall.route?.connectorId === "composio" &&
+            connectorCall.route.toolName.toUpperCase() === "COMPOSIO_MULTI_EXECUTE_TOOL" &&
+            Array.isArray(args.tools) &&
+            args.tools.some(
+              (item) =>
+                item &&
+                typeof item === "object" &&
+                !Array.isArray(item) &&
+                String(item.tool_slug).toUpperCase() === "GMAIL_REPLY_TO_THREAD",
+            )
+          )
+            return {
+              error:
+                "Draft each reply with GMAIL_REPLY_TO_THREAD directly so the recruiter can edit and send its individual Mail card.",
+              dispatched: false,
+            };
+          if (
+            connectorCall.route?.connectorId === "composio" &&
+            connectorCall.route.toolName.toUpperCase() === "GMAIL_REPLY_TO_THREAD"
+          ) {
+            try {
+              const saved =
+                boundDirectApprovalDetails(
+                  approvedEffectReplays.nextRequest(),
+                  CATALOG_APPROVAL_TOOL,
+                )?.route ??
+                catalogApprovalDetails(approvedEffectReplays.nextRequest(), CATALOG_APPROVAL_TOOL)
+                  ?.route;
+              connectorCall = {
+                ...connectorCall,
+                route: gmailReplyRoute(
+                  saved?.connectorId === "composio"
+                    ? {
+                        ...connectorCall.route,
+                        resourceId: saved.resourceId,
+                        resourceRevision: saved.resourceRevision,
+                      }
+                    : connectorCall.route,
+                  context,
+                ),
+              };
+            } catch (error) {
+              return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+            }
+          }
+          if (
             !catalogRemapped &&
             connectorCall.route?.resourceId &&
             connectorCall.route.connectorId &&
@@ -7595,6 +7802,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               return replyProofError(error);
             }
+            if (
+              connectorCall.route?.connectorId === "composio" &&
+              connectorCall.route.toolName.toUpperCase() === "GMAIL_REPLY_TO_THREAD" &&
+              deps.connector
+            ) {
+              try {
+                const retained = approvedEffects.find(
+                  (effect) => effect.request === nextApprovedRequest,
+                )?.result;
+                const metadata =
+                  retained && typeof retained === "object" && !Array.isArray(retained)
+                    ? retained.mailReplyApproval
+                    : undefined;
+                const expected = MailReplySchema.parse(metadata);
+                await readGmailReplyCard(
+                  deps.connector,
+                  connectorCall.route,
+                  args,
+                  context,
+                  expected,
+                );
+              } catch (error) {
+                return { error: sanitizeConnectorError(error, runSecrets), dispatched: false };
+              }
+            }
             approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
@@ -7903,7 +8135,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : connectorCall.route?.connectorId === "composio"
                 ? connectorCall.route.toolName.toUpperCase()
                 : undefined;
+          const mailReplyOperation = [
+            "reply_to_email",
+            "native_instantly_reply_to_email",
+            "GMAIL_REPLY_TO_THREAD",
+          ].includes(sendOperation ?? "");
           const recruiterSaidSend =
+            !mailReplyOperation &&
             !nextApprovedTool &&
             run.trigger === "user" &&
             Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
@@ -7951,6 +8189,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The card offers "send when I say send" unless the recruiter's own rule requires
           // approval for this send.
           const offerSendPreference =
+            !mailReplyOperation &&
             Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
             !(
               await Promise.all(
@@ -7971,6 +8210,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args,
               nativeMcpWriteServer?.endpoint,
             );
+          const senderConfirmation =
+            connectorCall.route?.connectorId === "mcp" &&
+            connectorCall.route.toolName === "native_instantly_ensure_sender" &&
+            (args.operation === "confirm" || args.operation === "select");
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
           // execute; a catalog call uses the tool it was just resolved to. Known one-time
@@ -8312,7 +8555,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (relevantWrite) calendarReadEpoch = `${relevantWrite.id}:${relevantWrite.status}`;
             }
           }
+          const approvedReplyMetadata = approvedEffects.find(
+            (effect) => effect.request === nextApprovedRequest,
+          )?.result;
+          const structuredReplyApproval =
+            approvedReplyMetadata &&
+            typeof approvedReplyMetadata === "object" &&
+            !Array.isArray(approvedReplyMetadata) &&
+            MailReplySchema.safeParse(approvedReplyMetadata.mailReplyApproval).data?.status ===
+              "sending";
+          const approvedReplyEffect =
+            nextApprovedTool &&
+            structuredReplyApproval &&
+            mailReplyOperation &&
+            crmContext.approvedEffectId
+              ? await deps.prisma.externalEffect.findFirst({
+                  where: {
+                    id: crmContext.approvedEffectId,
+                    runId,
+                    spaceId: run.spaceId,
+                    status: "approved",
+                  },
+                })
+              : null;
           const effectKey =
+            approvedReplyEffect?.idempotencyKey ??
             (calendarReadEpoch
               ? toolEffectIdempotencyKey(
                   runId,
@@ -8327,7 +8594,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const domainEffect = replyAdmission?.effect ?? crmImportAdmission?.effect;
+          const domainEffect =
+            replyAdmission?.effect ?? crmImportAdmission?.effect ?? approvedReplyEffect;
           const applied = domainEffect
             ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
@@ -8991,6 +9259,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (current) {
               const retryGate = resolveDuplicateEffectGate(current, name);
               if (retryGate.action === "return") {
+                if (current.status === "completed")
+                  deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, current.id);
                 if (
                   name === "recruiting_assess" &&
                   current.status === "completed" &&
@@ -9022,7 +9292,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return deliverRecruitingFeedbackResult(
                     retryGate.result as RecruitingFeedbackResult,
                   );
-                return retryGate.result;
+                return publicInboxReceiptResult(retryGate.result);
               }
               if (retryGate.action === "uncertain") {
                 if (atomicRecruitingMutation && current.status === "executing") {
@@ -9163,6 +9433,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : uncertainEffectResult(name);
               }
             }
+            if (replySelection)
+              approvalArgs = {
+                ...args,
+                role: replySelection.role.title,
+                candidateId:
+                  replySelection.candidateId ?? replySelection.crmImportReceipt?.candidate_id,
+              };
+            try {
+              await readReplyEvidence();
+            } catch (error) {
+              const result = replyProofError(error);
+              if (replyAdmission) return result;
+              return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                ? result
+                : uncertainEffectResult(name);
+            }
             let instantlyActivation:
               | Awaited<ReturnType<typeof describeCampaignActivation>>
               | undefined;
@@ -9170,7 +9456,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               approvalRoute?.connectorId === "mcp" &&
               (approvalRoute.toolName === "native_instantly_activate_campaign" ||
-                approvalRoute.toolName === "native_instantly_reply_to_email") &&
+                approvalRoute.toolName === "native_instantly_reply_to_email" ||
+                approvalRoute.toolName === "reply_to_email") &&
               approvalRoute.resourceId &&
               deps.connector
             ) {
@@ -9221,8 +9508,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
                 return undefined;
               };
-              if (approvalRoute.toolName === "native_instantly_reply_to_email")
-                instantlyReply = await describeReplyToEmail(read, args);
+              if (
+                ["native_instantly_reply_to_email", "reply_to_email"].includes(
+                  approvalRoute.toolName,
+                )
+              )
+                instantlyReply = await describeReplyToEmail(
+                  read,
+                  approvalRoute.toolName === "reply_to_email"
+                    ? {
+                        reply_to_uuid: args.reply_to_uuid,
+                        eaccount: args.eaccount,
+                        subject: args.subject,
+                        body: { text: args.body_text ?? args.body_html ?? "" },
+                        ...(args.cc_address_email_list
+                          ? { cc_address_email_list: args.cc_address_email_list }
+                          : {}),
+                      }
+                    : args,
+                );
               else
                 instantlyActivation = campaignId
                   ? await describeCampaignActivation(
@@ -9251,22 +9555,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? result
                   : uncertainEffectResult(name);
               }
-            }
-            if (replySelection)
-              approvalArgs = {
-                ...args,
-                role: replySelection.role.title,
-                candidateId:
-                  replySelection.candidateId ?? replySelection.crmImportReceipt?.candidate_id,
-              };
-            try {
-              await readReplyEvidence();
-            } catch (error) {
-              const result = replyProofError(error);
-              if (replyAdmission) return result;
-              return (await completeEffect(deps, applied!.effect.id, "intended", result))
-                ? result
-                : uncertainEffectResult(name);
             }
             if (name === "recruiting_crm_target" && args.operation === "bind") {
               try {
@@ -9375,6 +9663,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             await workspaceCheckpoint.flush();
+            const instantlySender = senderConfirmation
+              ? await senderApprovalDisplay(deps.prisma, context, args)
+              : undefined;
             const approvalBlock = buildApprovalAskBlock(
               applied!.effect.id,
               name,
@@ -9391,8 +9682,92 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 crmImportTarget: crmImportSelection?.target,
                 instantlyActivation,
                 instantlyReply,
+                instantlySender,
               },
             );
+            if (mailReplyOperation) {
+              try {
+                const route = connectorCall.route;
+                if (!route) throw new IsolationError();
+                approvalBlock.mailReply =
+                  route.connectorId === "composio" && deps.connector
+                    ? await readGmailReplyCard(deps.connector, route, args, context)
+                    : mailReplyFromAnchor(
+                        route,
+                        args,
+                        replyEvidence?.anchor ?? instantlyReply?.original ?? {},
+                      );
+                if (thread.activeRecruitingRoleId)
+                  approvalBlock.mailReply.inReplyTo.roleId = thread.activeRecruitingRoleId;
+                const proposed = approvalBlock.mailReply;
+                if (
+                  replyDiscardActive &&
+                  discardedReplies.some(
+                    (discarded) =>
+                      (discarded.from?.toLowerCase() ?? null) ===
+                        (proposed.from?.toLowerCase() ?? null) &&
+                      discarded.inReplyTo.sourceId === proposed.inReplyTo.sourceId &&
+                      (discarded.inReplyTo.roleId ?? null) ===
+                        (proposed.inReplyTo.roleId ?? null) &&
+                      discarded.inReplyTo.threadId === proposed.inReplyTo.threadId &&
+                      discarded.inReplyTo.emailId === proposed.inReplyTo.emailId,
+                  )
+                ) {
+                  const result = {
+                    status: "discarded",
+                    dispatched: false,
+                    message: mailReplyOutcomeInstruction({ status: "discarded" }),
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
+                if (instantlyReply?.refusal) {
+                  approvalBlock.mailReply = {
+                    ...approvalBlock.mailReply,
+                    status: "failed",
+                    canAnswer: false,
+                    error: instantlyReply.refusal,
+                  };
+                  approvalBlock.status = "answered";
+                  approvalBlock.actions = [];
+                  const result = {
+                    status: "failed",
+                    error: instantlyReply.refusal,
+                    dispatched: false,
+                    mailReplyApproval: approvalBlock.mailReply,
+                    message:
+                      "The reply card was created, but its sender check refused sending before dispatch. Nothing was sent. Do not retry this card.",
+                  };
+                  if (!(await completeEffect(deps, applied!.effect.id, "intended", result)))
+                    return uncertainEffectResult(name);
+                  await publishMessage(deps, run, "bot", [approvalBlock]);
+                  return result;
+                }
+                approvalBlock.actions = [
+                  { id: "allow", label: "Send" },
+                  { id: "deny", label: "Discard" },
+                ];
+                const previous =
+                  applied!.effect.result &&
+                  typeof applied!.effect.result === "object" &&
+                  !Array.isArray(applied!.effect.result)
+                    ? applied!.effect.result
+                    : {};
+                await deps.prisma.externalEffect.updateMany({
+                  where: { id: applied!.effect.id, status: "intended" },
+                  data: { result: { ...previous, mailReplyApproval: approvalBlock.mailReply } },
+                });
+              } catch (error) {
+                const result = {
+                  error: sanitizeConnectorError(error, runSecrets),
+                  dispatched: false,
+                };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+            }
             if (schedulingSelection && schedulingApprovalHash) {
               const review = redactSecrets(
                 schedulingPlanReview(schedulingSelection.plan, schedulingSelection.operation),
@@ -9444,6 +9819,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (applied?.duplicate) {
             const gate = resolveDuplicateEffectGate(applied.effect, name);
             if (gate.action === "return") {
+              if (applied.effect.status === "completed")
+                deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, applied.effect.id);
               if (
                 name === "recruiting_assess" &&
                 applied.effect.status === "completed" &&
@@ -9499,7 +9876,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ) {
                 return deliverRecruitingFeedbackResult(gate.result as RecruitingFeedbackResult);
               } else {
-                return gate.result;
+                return publicInboxReceiptResult(gate.result);
               }
             }
             if (gate.action === "paused") {
@@ -9543,6 +9920,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const early = await claimOrReturn("intended");
             if (early !== undefined) return early;
           }
+          let inboxDispatchStartedAt: string | undefined;
           const persistEffectResult = (result: unknown) =>
             applied
               ? completeEffect(
@@ -9550,10 +9928,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   applied.effect.id,
                   claimedEffect ? "executing" : "intended",
                   result,
+                  inboxDispatchStartedAt,
                 )
               : Promise.resolve(true);
-          const finish = async (result: unknown) =>
-            (await persistEffectResult(result)) ? result : uncertainEffectResult(name);
+          const finish = async (result: unknown) => {
+            if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
+            if (applied && toolResultError(result) === undefined)
+              deferRecruitingInboxReceipt(deps.jobs, connectorCall.route, applied.effect.id);
+            return result;
+          };
           // A people search reaches Results the moment it returns: the server saves it as its
           // own page and the agent gets the saved rows, so no save step sits before the panel.
           const savePeopleSearchAsItReturns = async (returned: unknown) => {
@@ -10623,17 +11006,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "recruiting_candidates") {
             try {
               if (!deps.artifacts) throw new IsolationError();
-              return finish(
-                redactConnectorPayload(
-                  await executeRecruitingCandidatesTool(
-                    { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
-                    { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
-                    args,
-                    context,
-                  ),
-                  runSecrets,
-                ),
+              // Kruit reads and shows a role's people one page at a time, never the whole pool.
+              const callArgs =
+                isGlobalRoleList(args) &&
+                (typeof args.limit !== "number" || args.limit > SHOWN_ROLE_PEOPLE)
+                  ? { ...args, limit: SHOWN_ROLE_PEOPLE }
+                  : args;
+              const result = await executeRecruitingCandidatesTool(
+                { prisma: deps.prisma, artifacts: deps.artifacts, connector: deps.connector },
+                { actor: researchActor.actor, runId, threadId: thread.id, botId: bot.id },
+                callArgs,
+                context,
               );
+              const shown = await showGlobalRolePeople(callArgs, result);
+              return finish(redactConnectorPayload(shown ?? result, runSecrets));
             } catch (error) {
               return finish(roleError(error));
             }
@@ -11960,7 +12346,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "start_role") {
             const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
             const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
-            if (!title || !request) return finish({ error: "title and message are required" });
+            if (!title) return finish({ error: "title is required" });
+            if (!request && !run.sourceMessageId)
+              return finish({ error: "message is required: the recruiter's requirements." });
             if (!thread.groupId?.startsWith("recruiting-global-"))
               return finish({ error: "start_role works only in the global conversation." });
             const team = await deps.prisma.chatGroupMember.findMany({
@@ -11969,7 +12357,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               orderBy: { createdAt: "asc" },
             });
             // One role per call, even when the call is retried.
-            const groupId = `role-${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const groupId = `${KRUIT_ROLE_GROUP_PREFIX}${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
             const group = await deps.prisma.$transaction((tx) =>
               createGroupInTransaction(
                 tx,
@@ -11983,21 +12371,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             if (!group.thread)
               return finish({ error: "The role conversation could not be opened." });
-            const sent = await messageBot(
-              deps,
-              { ...run, sourceMessageId: run.sourceMessageId },
-              { id: bot.id, name: bot.name },
-              {
-                bot_id: bot.id,
-                thread_id: group.thread.id,
-                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
-                target_label: `${title} team`,
-                message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
-                intent: "request",
-                deliveryKey: effectKey,
-              },
-            );
-            if (!sent.ok) return finish({ error: sent.error });
+            // The role starts from the recruiter's own message, so its team runs intake and
+            // saves the role as if it had been written there. A request with no recruiter
+            // message behind it (a routine) is handed over as a brief instead.
+            const started = await startRoleFromRecruiterMessage(deps, run, {
+              threadId: group.thread.id,
+              botId: bot.id,
+              deliveryKey: effectKey,
+            });
+            if (!started) {
+              if (!request)
+                return finish({
+                  error:
+                    "The recruiter's latest message has no request to hand over: pass message with their requirements in their own words.",
+                });
+              const sent = await messageBot(
+                deps,
+                { ...run, sourceMessageId: run.sourceMessageId },
+                { id: bot.id, name: bot.name },
+                {
+                  bot_id: bot.id,
+                  thread_id: group.thread.id,
+                  sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                  target_label: `${title} team`,
+                  message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
+                  intent: "request",
+                  deliveryKey: effectKey,
+                },
+              );
+              if (!sent.ok) return finish({ error: sent.error });
+            }
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
@@ -12220,6 +12623,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            // A new role's first question is the coordinator's own: a handoff first costs the
+            // recruiter a second agent's start-up before anything appears.
+            if (linkRole && !intakeHandoffRefused && recruitingBotKey(bot) === "main") {
+              intakeHandoffRefused = true;
+              return finish({ error: INTAKE_ASK_FIRST });
+            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
@@ -12305,11 +12714,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const connector = deps.connector;
             const executeOnce = async (): Promise<{ result: unknown } | { settled: unknown }> => {
               let result: unknown = { error: `unknown tool ${name}` };
+              if (isRecruitingInboxRead(connectorCall.route))
+                inboxDispatchStartedAt = new Date().toISOString();
               for await (const event of connector.execute(
                 { ...connectorCall, tool: name, args, executionId: effectKey },
                 schedulingSelection?.operation === "confirm" && applied
                   ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
-                  : context,
+                  : senderConfirmation && applied
+                    ? { ...context, senderConfirmationEffectId: applied.effect.id }
+                    : context,
               )) {
                 if (event.type === "result") {
                   result = event.data;
@@ -12614,9 +13027,72 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
           { exposedToolNames: new Set(tools.map((tool) => tool.name)) },
         );
+        // These calls run before the model's first step, so they report themselves like the
+        // model's own calls: the recruiter sees the file or link being read and the role saved.
+        const step = async (
+          name: string,
+          args: Record<string, unknown>,
+          executionId: string,
+        ): Promise<unknown> => {
+          const startedAt = Date.now();
+          const target = { spaceId: run!.spaceId, threadId: thread.id, botId: bot.id, runId };
+          await deps.events
+            .append({
+              ...target,
+              type: "agent.tool.called",
+              payload: {
+                name,
+                executionId,
+                startedAt: new Date(startedAt).toISOString(),
+                category: workActivityForTool(name, args),
+                ...stepDetail(name, args),
+                argsSummary: toolArgsSummary(args, runSecrets),
+              },
+            })
+            .catch(() => getLogger().warn("job step audit append failed", { name }));
+          const done = (completion: { result?: unknown; error?: unknown }) =>
+            appendToolCompletionAudit(
+              deps,
+              target,
+              { name, executionId, durationMs: Date.now() - startedAt, ...completion },
+              runSecrets,
+            );
+          try {
+            const result = await applyTool(name, args, executionId);
+            await done({ result });
+            return result;
+          } catch (error) {
+            await done({ error: String(error) });
+            throw error;
+          }
+        };
+        // A file the recruiter attaches in Kruit's conversation is read once here, before the
+        // model's first step, so opening a role from a JD needs no read step of the model's own.
+        async function globalFileNote() {
+          if (
+            !thread.groupId?.startsWith("recruiting-global-") ||
+            currentTurnMessage?.role !== "user" ||
+            !tools.some((tool) => tool.name === "artifact_read")
+          )
+            return undefined;
+          const file = currentTurnMessage.blocks.find(
+            (item): item is Extract<MessageBlock, { kind: "file" }> =>
+              item.kind === "file" && !/csv|sheet|excel/i.test(item.mimeType),
+          );
+          if (!file) return undefined;
+          const read = (await step(
+            "artifact_read",
+            { artifactId: file.artifactId, limit: 16_000 },
+            `${runId}:global-file`,
+          )) as { text?: unknown; hasMore?: unknown };
+          if (typeof read?.text !== "string" || !read.text.trim()) return undefined;
+          return `The recruiter's attached file (${file.name}) is already read; never read it again.${read.hasMore === true ? " Only its first part is below, which is enough to name a role." : ""} Its text:\n\n${read.text}`;
+        }
         async function startRoleFromJob() {
           if (
             thread.activeRecruitingRoleId ||
+            // Kruit's account-wide conversation never holds a role; it opens one with start_role.
+            thread.groupId?.startsWith("recruiting-global-") ||
             nativeSources?.currentAnswer ||
             currentTurnMessage?.role !== "user" ||
             !deps.artifacts ||
@@ -12645,45 +13121,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
-          // These calls run before the model's first step, so they report themselves like the
-          // model's own calls: the recruiter sees the file or link being read and the role saved.
-          const step = async (
-            name: string,
-            args: Record<string, unknown>,
-            executionId: string,
-          ): Promise<unknown> => {
-            const startedAt = Date.now();
-            const target = { spaceId: run!.spaceId, threadId: thread.id, botId: bot.id, runId };
-            await deps.events
-              .append({
-                ...target,
-                type: "agent.tool.called",
-                payload: {
-                  name,
-                  executionId,
-                  startedAt: new Date(startedAt).toISOString(),
-                  category: workActivityForTool(name, args),
-                  ...stepDetail(name, args),
-                  argsSummary: toolArgsSummary(args, runSecrets),
-                },
-              })
-              .catch(() => getLogger().warn("job step audit append failed", { name }));
-            const done = (completion: { result?: unknown; error?: unknown }) =>
-              appendToolCompletionAudit(
-                deps,
-                target,
-                { name, executionId, durationMs: Date.now() - startedAt, ...completion },
-                runSecrets,
-              );
-            try {
-              const result = await applyTool(name, args, executionId);
-              await done({ result });
-              return result;
-            } catch (error) {
-              await done({ error: String(error) });
-              throw error;
-            }
-          };
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -12704,11 +13141,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             });
           const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
-          if (request)
+          if (request) {
+            // A role Kruit opened (start_role) is already named after it: keep that title.
+            const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
+              ? (
+                  await deps.prisma.chatGroup.findUnique({
+                    where: { id: thread.groupId },
+                    select: { name: true },
+                  })
+                )?.name.trim()
+              : undefined;
+            const title =
+              named && named !== NEW_ROLE_TITLE
+                ? named.slice(0, 120)
+                : (requestTitle(request) ?? NEW_ROLE_TITLE);
             return {
-              saving: create(NEW_ROLE_TITLE, [], request),
-              note: `This role team's role is being saved now as "${NEW_ROLE_TITLE}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
+              saving: create(title, [], request),
+              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
             };
+          }
           try {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
@@ -12962,7 +13413,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           historyMessages
             .find((message) => message.id === run.sourceMessageId)
             ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
-        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards] =
+        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, fileNote] =
           await ownTime(
             "turnNotes",
             Promise.all([
@@ -12998,6 +13449,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
                     .catch(() => [])
                 : [],
+              globalFileNote().catch((error) => {
+                getLogger().warn("attached file not read before the turn", {
+                  error: String(error),
+                });
+                return undefined;
+              }),
             ]),
           );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
@@ -13037,7 +13494,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
-        const lastRecruiterBlocks = messages.findLast((message) => message.role === "user")?.blocks;
+        // History is newest first, so the first user row is the recruiter's latest message.
+        const lastRecruiterBlocks = messages.find((message) => message.role === "user")?.blocks;
         const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
           ? lastRecruiterBlocks
               .map((block) =>
@@ -13050,8 +13508,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
               .join(" ")
           : "";
-        const languageNote =
-          hideVendors && isChineseText(lastRecruiterText) ? REPLY_IN_CHINESE_NOTE : undefined;
+        const languageNote = !hideVendors
+          ? undefined
+          : isChineseText(lastRecruiterText)
+            ? REPLY_IN_CHINESE_NOTE
+            : isEnglishText(lastRecruiterText)
+              ? REPLY_IN_ENGLISH_NOTE
+              : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -13068,7 +13531,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
-        const prompt = [
+        const promptParts = [
           replyContext,
           nativeSources?.currentAnswer
             ? [blocksToAgentHistoryText(turnBlocks ?? []), missingImagesInstruction]
@@ -13077,9 +13540,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
+          fileNote,
           dispatchNote,
           languageNote,
           !linkRole &&
+          !fileNote &&
+          !thread.groupId?.startsWith("recruiting-global-") &&
           !thread.activeRecruitingRoleId &&
           currentTurnMessage?.role === "user" &&
           currentTurnMessage.blocks.some((block) => block.kind === "file") &&
@@ -13091,14 +13557,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
           handedIn ? HANDOFF_OPENING_NOTE : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
+          discardedReplies
+            .map(
+              (reply) =>
+                `${mailReplyOutcomeInstruction({ status: "discarded" })}\nDiscarded reply scope: ${JSON.stringify({ from: reply.from, ...reply.inReplyTo })}`,
+            )
+            .join("\n\n"),
           waitingCardsNote && `${waitingCardsNote} ${WAITING_CARDS_NEW_MESSAGE_NOTE}`,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
           voiceCall && !callEndRun ? voiceCallInstruction(disabledBuiltinTools) : undefined,
           // Per-turn, not in the system prompt: the timestamp changes every call and would break the cacheable prefix.
           formatCurrentTimeInstruction(),
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+        ];
+        let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
@@ -13225,6 +13696,106 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
 
+        // A recruiter clicked Send on a saved reply: replay the native approved request now,
+        // before any model call. The regular tool path still owns preflight, claim and receipt.
+        let sentReplyDirectly = false;
+        while (approvedEffectReplays.nextToolName()) {
+          const request = approvedEffectReplays.nextRequest();
+          const direct = boundDirectApprovalDetails(request, CATALOG_APPROVAL_TOOL);
+          const catalog = catalogApprovalDetails(request, CATALOG_APPROVAL_TOOL);
+          const operation = (direct?.route ?? catalog?.route)?.toolName;
+          const result = approvedEffects.find((effect) => effect.request === request)?.result;
+          if (
+            !result ||
+            typeof result !== "object" ||
+            Array.isArray(result) ||
+            MailReplySchema.safeParse(result.mailReplyApproval).data?.status !== "sending"
+          )
+            break;
+          if (
+            ![
+              "reply_to_email",
+              "native_instantly_reply_to_email",
+              "GMAIL_REPLY_TO_THREAD",
+            ].includes(operation ?? "")
+          )
+            break;
+          const replyDraft = MailReplySchema.parse(result.mailReplyApproval);
+          const name = catalog?.toolName ?? approvedEffectReplays.nextToolName()!;
+          const effect = approvedEffects.find((effect) => effect.request === request)!;
+          const outcome = await applyTool(
+            name,
+            catalog?.args ?? direct!.args,
+            `reply-approval:${effect.id}`,
+          );
+          const replayPending = approvedEffectReplays.nextRequest() === request;
+          const replayError = toolResultError(outcome);
+          if (replayPending || replayError) {
+            const failed = await deps.prisma.externalEffect.updateMany({
+              where: { id: effect.id, spaceId: run.spaceId, runId, status: "approved" },
+              data: {
+                status: "failed",
+                result: {
+                  error:
+                    replayError ??
+                    "The approved reply could not be verified. No email was dispatched.",
+                  dispatched: false,
+                } as never,
+              },
+            });
+            if (replayPending) approvedEffectReplays.take(approvedEffectReplays.nextToolName()!);
+            if (failed.count === 1)
+              await deps.events.append({
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+                type: "effect.recorded",
+                payload: { effectId: effect.id, tool: name },
+              });
+          }
+          // Remove the obsolete approval instruction even if publishing fails: never replay dispatch.
+          const currentReplyEffect = await deps.prisma.externalEffect.findFirst({
+            where: { id: effect.id, spaceId: run.spaceId, runId, run: { userId: run.userId } },
+          });
+          replyOutcome = mailReplyOutcomeInstruction(
+            currentReplyEffect
+              ? mailReplyState(replyDraft, currentReplyEffect)
+              : { status: "unknown" },
+          );
+          try {
+            const event = await publishMailReplyCard(
+              deps.prisma,
+              { userId: run.userId, spaceId: run.spaceId, email: "", isDeploymentOwner: false },
+              effect.id,
+            );
+            if (event) {
+              const blocks = MessageBlockSchema.array().safeParse(
+                (event.payload as { blocks?: unknown }).blocks,
+              );
+              const card = blocks.data?.find(
+                (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+              );
+              if (card?.kind === "ask" && card.mailReply)
+                replyOutcome = mailReplyOutcomeInstruction(card.mailReply);
+              await deps.events.notify?.(event.threadId, event.seq);
+            }
+          } catch (error) {
+            getLogger().warn("mail.reply.card_publish_failed", {
+              effectId: effect.id,
+              error: String(error),
+            });
+          }
+          sentReplyDirectly = true;
+        }
+        if (sentReplyDirectly) probeFoundNothing = true;
+        const prompt = [
+          ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
+          replyOutcome,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
         // Stop during setup must not still open the model. A reclaimed lease can
         // leave status "running" under a new owner, and the stream loop only
         // notices cancellation after the provider request has started.
@@ -13289,33 +13860,50 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .map((block) => block.text)
               .join("\n")
           : taskPrompt;
+        // The chat's effort mode applies to the recruiter's own turns. Only operator
+        // accounts can pick one; every other turn runs fast.
+        const effortMode = resolveEffortMode(
+          thread.effortMode,
+          run.trigger === "user" &&
+            Boolean(thread.effortMode) &&
+            (await seesOperatorSpend(deps.prisma, run.userId).catch(() => false)),
+        );
         // Light turns run on the fast model; the configured model becomes the first backup.
-        let turnModel = scripted
+        let turnModel: ReturnType<typeof chooseTurnModel> = scripted
           ? {
               model: { provider: runModelProvider, id: runModelId },
               routed: "configured" as const,
               reason: "scripted",
             }
-          : chooseTurnModel({
-              configured: { provider: runModelProvider, id: runModelId },
-              trigger: run.trigger,
-              answersQuestion: Boolean(nativeSources?.currentAnswer),
-              peerIntent: peerMessage?.intent,
-              userText: turnUserText,
-              hasAttachments:
-                (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
-                (currentTurnImages?.length ?? 0) > 0,
-              pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
-              // A role team whose role is not saved yet is still in intake: its questions
-              // are what the recruiter waits on, so they skip reasoning too.
-              recruitingIntake:
-                Boolean(linkRole) ||
-                firstRoundPending ||
-                (Boolean(thread.groupId) &&
-                  !thread.activeRecruitingRoleId &&
-                  recruitingSearch &&
-                  Boolean(recruitingBotKey(bot))),
-            });
+          : effortMode === "deep"
+            ? {
+                model: { provider: runModelProvider, id: runModelId },
+                routed: "configured" as const,
+                reason: "effort_deep",
+              }
+            : chooseTurnModel({
+                configured: { provider: runModelProvider, id: runModelId },
+                trigger: run.trigger,
+                answersQuestion: Boolean(nativeSources?.currentAnswer),
+                peerIntent: peerMessage?.intent,
+                userText: turnUserText,
+                hasAttachments:
+                  (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
+                  (currentTurnImages?.length ?? 0) > 0,
+                pendingToolLoop:
+                  Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+                // A role team whose role is not saved yet is still in intake: its questions
+                // are what the recruiter waits on, so they skip reasoning too.
+                recruitingIntake:
+                  Boolean(linkRole) ||
+                  firstRoundPending ||
+                  (Boolean(thread.groupId) &&
+                    // Kruit's account-wide conversation is never a role's intake.
+                    !thread.groupId?.startsWith("recruiting-global-") &&
+                    !thread.activeRecruitingRoleId &&
+                    recruitingSearch &&
+                    Boolean(recruitingBotKey(bot))),
+              });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
           provider,
@@ -13364,10 +13952,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             routeReason: turnModel.reason,
           };
         }
+        if (!scripted && run.trigger === "user")
+          runModel = {
+            ...runModel,
+            thinkingLevel: effortThinkingLevel(effortMode, runModel.thinkingLevel),
+          };
         // With the planned people in hand, the first step only shows the clearest few, at low
         // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
         // step only says what it is doing and starts its reads, so it runs at low thinking too.
-        if (plannedNote || handedIn) runModel = { ...runModel, firstStepThinkingLevel: "low" };
+        // A turn routed to no thinking (a new role's first question) stays without it.
+        if ((plannedNote || handedIn) && runModel.thinkingLevel !== "off")
+          runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
         try {
           setupMark("runtimeStart");
@@ -13598,7 +14193,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         resolveConnectedModel(run, provider, modelId, (values) =>
                           runSecrets.push(...values),
                         ),
-                  onToolCallDelta: streamRoundPicks,
+                  onToolCallDelta: (call) => {
+                    streamRoundPicks(call);
+                    streamQuestion(call);
+                  },
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     // Workloop: work running behind the conversation never asks the person after
@@ -13650,7 +14248,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       question,
                       intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                     );
-                    if (known) return `"${known.key}" → "${known.value}"`;
+                    if (known && !knownAskBounced.has(known.key)) {
+                      knownAskBounced.add(known.key);
+                      return `"${known.key}" → "${known.value}"`;
+                    }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
@@ -13720,7 +14321,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                               ["text", "file", "image"].includes(block.kind),
                             ),
                         );
-                        if (humanSteering) recruitingSourceMessageId = humanSteering.messageId;
+                        if (humanSteering) {
+                          recruitingSourceMessageId = humanSteering.messageId;
+                          replyDiscardActive = false;
+                        }
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -14360,11 +14964,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
 
           flushPendingTools();
-          // Only routine runs and check-in answers are instructed to emit NO_RESPONSE. Other
-          // allowSilentEmpty wakes (FYI, messaging) may finish truly empty.
-          let silentReply = quietRun
-            ? stripNoResponseReply(assembled, messageSegments)
-            : { assembled, blocks: messageSegments };
+          // The server's no-model completion uses the same silent token as quiet model replies.
+          let silentReply =
+            quietRun || probeFoundNothing
+              ? stripNoResponseReply(assembled, messageSegments)
+              : { assembled, blocks: messageSegments };
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -14384,7 +14988,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // only progress was posted, result when a final reply exists). Exact
             // NO_RESPONSE finals are treated as empty before this fallback runs.
             completionBlocks = completionMessageSegments(completionBlocks, {
-              allowSilentEmpty: allowSilentEmptyRun || publishedMidTurnUserMessage,
+              allowSilentEmpty:
+                allowSilentEmptyRun || probeFoundNothing || publishedMidTurnUserMessage,
               emptyResponseText,
               suppressOutput: handedOff || isBackgroundRunTrigger(run.trigger),
               skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
@@ -14503,6 +15108,72 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // Gray next-message text in the composer. It starts as soon as the reply text is final,
+          // beside the checkpoint and finalize below, so it is ready about when the reply lands.
+          // A follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last
+          // word too, so it gets a suggestion based on what the user last wrote.
+          const suggestionTurns = historyMessages.filter(
+            (message) =>
+              message.id !== currentTurnMessage?.id &&
+              ((message.role === "user" && !message.internal) || message.role === "bot") &&
+              blocksText(message.blocks).trim(),
+          );
+          const lastUserIndex =
+            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
+          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
+          const suggestionPending =
+            deps.replySuggestions &&
+            !scripted &&
+            (run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) &&
+            !messagingChannelRun &&
+            !handedOff &&
+            text.trim() &&
+            !blocks.some((block) => block.kind === "ask")
+              ? suggestNextMessage({
+                  runtime: deps.runtime,
+                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+                  earlier: (lastUserTurn
+                    ? suggestionTurns.slice(0, lastUserIndex)
+                    : suggestionTurns
+                  ).map((message) => ({
+                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                    text: blocksText(message.blocks),
+                  })),
+                  userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
+                  // Replies already sent in this turn come before this one.
+                  replyText: [
+                    ...(lastUserTurn
+                      ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
+                      : []),
+                    text,
+                  ]
+                    .filter((part) => part.trim())
+                    .join("\n\n"),
+                  runId,
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  threadId: thread.id,
+                  onUsage: (event) =>
+                    recordUsage(
+                      deps.prisma,
+                      event,
+                      {
+                        spaceId: run.spaceId,
+                        userId: run.userId,
+                        botId: bot.id,
+                        parentRunId: runId,
+                        runId,
+                        operationId: `suggestion:${runId}`,
+                        operationKind: "setup",
+                      },
+                      estimateCatalogTokenCostUsd,
+                    ),
+                }).catch((error) => {
+                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+                  return null;
+                })
+              : null;
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -14548,6 +15219,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
+          // only while this reply is the newest message and nothing is running.
+          if (suggestionPending && !completed.continuationRunId) {
+            void suggestionPending
+              .then((suggestion) =>
+                suggestion
+                  ? deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      type: "thread.suggestion",
+                      runId,
+                      payload: { text: suggestion },
+                    })
+                  : undefined,
+              )
+              .catch((error) =>
+                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+              );
+          }
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
@@ -14650,71 +15341,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...run,
               sourceMessageId: run.sourceMessageId,
             }).catch((error) => getLogger().error("delegated team outcome return", error));
-          }
-          // Gray next-message text in the composer, sent after the reply so it never delays it.
-          if (
-            deps.replySuggestions &&
-            !scripted &&
-            run.trigger === "user" &&
-            !messagingChannelRun &&
-            !handedOff &&
-            !completed.continuationRunId &&
-            !recruitingContinued &&
-            text.trim()
-          ) {
-            void suggestNextMessage({
-              runtime: deps.runtime,
-              model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-              earlier: historyMessages
-                .filter(
-                  (message) =>
-                    message.id !== currentTurnMessage?.id &&
-                    (message.role === "user" || message.role === "bot"),
-                )
-                .map((message) => ({
-                  role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                  text: message.blocks
-                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                    .join("\n"),
-                })),
-              userText: turnUserText,
-              replyText: text,
-              runId,
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `suggestion:${runId}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
-                ),
-            })
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.publishTransient({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion failed", { runId, reason: String(error) }),
-              );
           }
           const notifyBody = completionNotificationPreview(text);
           if (
@@ -16265,18 +16891,134 @@ const THREAD_LANE_RETRY_MS = 5_000;
  * Runs waiting for a person (an ask or a takeover) do not hold the turn, so automations
  * keep running while nobody answers.
  */
+type LaneRun = {
+  id: string;
+  threadId: string;
+  spaceId: string;
+  userId: string;
+  botId: string;
+  sourceMessageId: string | null;
+};
+
+/** Only server-authored delegation messages can release this child's exact ancestor turns. */
+async function threadLaneAncestors(
+  tx: Pick<PrismaClient, "message" | "run">,
+  run: LaneRun,
+): Promise<Array<{ id: string; status: string }>> {
+  const ancestors: Array<{ id: string; status: string }> = [];
+  let current = run;
+  const select = {
+    blocks: true,
+    role: true,
+    botId: true,
+    runId: true,
+  } as const;
+  // ponytail: follow at most the platform's existing bot-message hop limit; unknown/cyclic chains stay blocked.
+  for (let hop = 0; hop < BOT_MESSAGE_MAX_HOPS && current.sourceMessageId; hop++) {
+    const where = {
+      id: current.sourceMessageId,
+      threadId: run.threadId,
+      thread: { spaceId: run.spaceId, userId: run.userId },
+    };
+    const source = await tx.message.findFirst({ where, select });
+    const parsed = MessageBlockSchema.array().safeParse(source?.blocks);
+    if (!source || !parsed.success || parsed.data.length !== 1) break;
+    const block = parsed.data[0]!;
+    let parent = source;
+    if (block.kind === "handoff") {
+      if (
+        source.role !== "bot" ||
+        source.botId !== block.fromBotId ||
+        block.toBotId !== current.botId ||
+        block.report
+      )
+        break;
+    } else if (block.kind === "bot_message_received") {
+      if (
+        source.role !== "user" ||
+        source.runId !== current.id ||
+        !block.returnToMessageId ||
+        !["request", "question"].includes(block.intent ?? "request")
+      )
+        break;
+      const outbound = await tx.message.findFirst({
+        where: { ...where, id: block.returnToMessageId, role: "bot", botId: block.fromBotId },
+        select,
+      });
+      const echoed = MessageBlockSchema.array().safeParse(outbound?.blocks);
+      const sent = echoed.success && echoed.data.length === 1 ? echoed.data[0] : undefined;
+      if (
+        !outbound ||
+        sent?.kind !== "bot_message_sent" ||
+        sent.toBotId !== current.botId ||
+        sent.text !== block.text ||
+        (sent.intent ?? "request") !== (block.intent ?? "request")
+      )
+        break;
+      parent = outbound;
+    } else break;
+    const owner =
+      parent.runId && parent.botId
+        ? await tx.run.findFirst({
+            where: {
+              id: parent.runId,
+              threadId: run.threadId,
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: parent.botId,
+            },
+            select: {
+              id: true,
+              threadId: true,
+              spaceId: true,
+              userId: true,
+              botId: true,
+              sourceMessageId: true,
+              status: true,
+            },
+          })
+        : null;
+    if (
+      owner &&
+      (owner.id === current.id ||
+        owner.id === run.id ||
+        ancestors.some((ancestor) => ancestor.id === owner.id))
+    )
+      return [];
+    if (
+      !owner ||
+      owner.threadId !== run.threadId ||
+      owner.spaceId !== run.spaceId ||
+      owner.userId !== run.userId ||
+      owner.botId !== parent.botId
+    )
+      break;
+    ancestors.push({ id: owner.id, status: owner.status });
+    current = owner;
+  }
+  return ancestors;
+}
+
 async function threadLaneBusy(
-  tx: Pick<PrismaClient, "run">,
-  run: { id: string; threadId: string; createdAt: Date },
+  tx: Pick<PrismaClient, "run" | "message">,
+  run: LaneRun & { createdAt: Date; trigger: string },
 ): Promise<boolean> {
+  const ancestors = ["bot_message", "tool_background"].includes(run.trigger)
+    ? await threadLaneAncestors(tx, run)
+    : [];
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
-      id: { not: run.id },
+      id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
       OR: [
         { status: { in: ["leased", "running"] } },
-        { status: "queued", createdAt: { lt: run.createdAt } },
-        { status: "queued", createdAt: run.createdAt, id: { lt: run.id } },
+        // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.
+        ...(ancestors.some((ancestor) => ["leased", "running"].includes(ancestor.status))
+          ? []
+          : [
+              { status: "queued", createdAt: { lt: run.createdAt } },
+              { status: "queued", createdAt: run.createdAt, id: { lt: run.id } },
+            ]),
       ],
     },
   });
@@ -16578,11 +17320,35 @@ export async function recordEffect(
   return { duplicate: false, effect };
 }
 
+function publicInboxReceiptResult(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const record = result as Record<string, unknown>;
+  const meta = record._meta;
+  if (
+    !meta ||
+    typeof meta !== "object" ||
+    Array.isArray(meta) ||
+    !("rakazo/recruitingInbox" in meta)
+  )
+    return result;
+  const { "rakazo/recruitingInbox": internal, ...publicMeta } = meta;
+  const { _meta: _storedMeta, ...publicResult } = record;
+  const hadMeta =
+    internal &&
+    typeof internal === "object" &&
+    "providerMetaPresent" in internal &&
+    internal.providerMetaPresent === true;
+  return hadMeta || Object.keys(publicMeta).length
+    ? { ...publicResult, _meta: publicMeta }
+    : publicResult;
+}
+
 async function completeEffect(
   deps: ExecutorDeps,
   effectId: string,
   expectedStatus: "intended" | "executing",
   result: unknown,
+  inboxDispatchStartedAt?: string,
 ) {
   const storedResult =
     result &&
@@ -16591,7 +17357,26 @@ async function completeEffect(
     "details" in result
       ? (result as { details: unknown }).details
       : result;
-  return completeExternalEffect(deps.prisma, effectId, expectedStatus, storedResult as never);
+  // Save the server clock beside the provider envelope in the existing atomic receipt write.
+  const envelope =
+    storedResult && typeof storedResult === "object" && !Array.isArray(storedResult)
+      ? (storedResult as Record<string, unknown>)
+      : undefined;
+  const meta = envelope?._meta;
+  const persisted =
+    inboxDispatchStartedAt && envelope
+      ? {
+          ...envelope,
+          _meta: {
+            ...(meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {}),
+            "rakazo/recruitingInbox": {
+              dispatchStartedAt: inboxDispatchStartedAt,
+              providerMetaPresent: Object.hasOwn(envelope, "_meta"),
+            },
+          },
+        }
+      : storedResult;
+  return completeExternalEffect(deps.prisma, effectId, expectedStatus, persisted as never);
 }
 
 function uncertainEffectError(toolName: string): Error {

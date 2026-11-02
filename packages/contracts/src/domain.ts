@@ -42,6 +42,10 @@ export const ThinkingLevelSchema = z.enum([
 ]);
 export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 
+/** How hard a conversation's replies think: fast (the default) answers soonest, deep thinks most. */
+export const EffortModeSchema = z.enum(["fast", "balanced", "deep"]);
+export type EffortMode = z.infer<typeof EffortModeSchema>;
+
 export { AGENT_SECRET_NAME_PATTERN };
 
 export const AgentSecretSchema = z.object({
@@ -138,6 +142,8 @@ const GroupBotIds = z
   .refine((ids) => new Set(ids).size === ids.length, { error: "botIds must be distinct" });
 
 export const CreateGroupInput = z.object({
+  /** Client-made id, so the role opens before the server answers; a repeat returns the same role. */
+  id: z.uuid().optional(),
   name: z.string().trim().min(1).max(80),
   botIds: GroupBotIds,
   crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
@@ -1203,6 +1209,10 @@ export const ThreadSnapshotSchema = z.object({
   run: RunSchema.nullable(),
   activeRuns: z.array(RunSchema).optional(),
   computer: ComputerStatusSchema.optional(),
+  /** Guessed next user message after the newest reply, while that reply is still the newest. */
+  suggestion: z.object({ runId: Id, text: z.string() }).optional(),
+  /** This chat's effort mode; present only for accounts that may change it. */
+  effortMode: EffortModeSchema.optional(),
 });
 export type ThreadSnapshot = z.infer<typeof ThreadSnapshotSchema>;
 
@@ -1493,6 +1503,7 @@ export const VoiceStatusSchema = z.object({
 export type VoiceStatus = z.infer<typeof VoiceStatusSchema>;
 
 export const DeploymentSettingsSchema = z.object({
+  sendingMailboxLimit: z.number().int().min(1).max(100).default(2),
   ownerUserId: Id.nullable(),
   signupsEnabled: z.boolean(),
   signupAllowlist: z.array(z.string()),

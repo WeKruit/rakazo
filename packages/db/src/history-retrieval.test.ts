@@ -1,7 +1,12 @@
 import { boundDirectApprovalRequest, catalogApprovalRequest } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
-import { historyMessageText, readHistory, searchHistory } from "./history-retrieval.js";
+import {
+  historyMessageText,
+  messageLink,
+  readHistory,
+  searchHistory,
+} from "./history-retrieval.js";
 
 const scope = { spaceId: "space", userId: "user", threadId: "thread", botId: "bot" };
 const row = (seq: number, text = "Use batch exports") => ({
@@ -771,5 +776,13 @@ describe("local history retrieval", () => {
     await expect(searchHistory(prisma, scope, { query: "x", beforeSeq: -1 })).rejects.toThrow();
     await expect(searchHistory(prisma, scope, { query: " " })).rejects.toThrow();
     expect(mock.$queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("messageLink", () => {
+  it("opens a group or bot conversation at one message", () => {
+    expect(messageLink({ groupId: "g 1", ownerBotId: "b" }, "m-1")).toBe("/app/g/g%201?m=m-1");
+    expect(messageLink({ groupId: null, ownerBotId: "bot-1" }, "m-2")).toBe("/app/bot-1?m=m-2");
+    expect(messageLink({ groupId: null, ownerBotId: null }, "m-3")).toBeUndefined();
   });
 });

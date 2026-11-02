@@ -1,18 +1,27 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { inboxThreadKey } from "@rakazo/contracts";
 import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ChevronDown, Mail, Reply, UserRound } from "lucide-react";
-import { Fragment, useEffect, useId, useRef } from "react";
+import { Fragment, useContext, useEffect, useId, useRef, useState } from "react";
 import { ArtifactFileCard } from "../../components/ArtifactFileCard";
 import type { ArtifactTarget } from "../../lib/artifact-open";
+import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
+import { rpc } from "../../lib/rpc";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { ProfileImage } from "./ProfileImage";
 import { initials } from "./profile";
-import { formatDate } from "./shared";
+import { RetryNotice } from "./RetryNotice";
+import { formatDate, RecruitingReadCacheContext, TabLoading } from "./shared";
+import type { InboxReadControls } from "./useInboxReadState";
+import { emailThreadIdentity, incomingThreadEvidence } from "./useInboxReadState";
 
 /** Exact saved messages; candidateId is present on the existing role-wide mail projection. */
 export type EmailConversationItem = RecruitingInboxEmail["email"] & { candidateId?: string };
 
 export type EmailConversationProps = {
+  spaceId?: string;
+  roleId?: string;
+  readState?: InboxReadControls;
   artifactTarget?: ArtifactTarget;
   /** Caller owns the source read, message order, and any real thread scope. */
   items: readonly EmailConversationItem[];
@@ -74,7 +83,7 @@ function MessageBody({
       </dl>
       {email.partial ? (
         <p className="text-xs text-muted-foreground">
-          <Trans>Preview only. Ask for the complete message to read the full body.</Trans>
+          <Trans>Preview only. The complete message has not loaded.</Trans>
         </p>
       ) : null}
       <div className="break-words whitespace-pre-wrap text-sm leading-relaxed">
@@ -127,6 +136,9 @@ function MessageHeading({ email }: { email: EmailConversationItem }) {
  * unrelated subjects into a thread, or claim delivery/read status beyond the saved direction.
  */
 export function EmailConversation({
+  spaceId,
+  roleId,
+  readState,
   artifactTarget,
   items,
   candidateId,
@@ -142,9 +154,77 @@ export function EmailConversation({
   const headingId = useId();
   const openedFromHistory = useRef<string | null>(null);
   const selectedArticle = useRef<HTMLElement>(null);
-  const messages = candidateId
+  const root = useRef<HTMLElement>(null);
+  const opened = useRef<string | null>(null);
+  const cache = useContext(RecruitingReadCacheContext);
+  const [loadedBody, setLoadedBody] = useState<{
+    owner: typeof cache;
+    key: string;
+    email: EmailConversationItem;
+  }>();
+  const [bodyStatus, setBodyStatus] = useState<{ key: string; failed: boolean }>();
+  const [retryBody, setRetryBody] = useState(0);
+  const supplied = candidateId
     ? items.filter((email) => email.candidateId === undefined || email.candidateId === candidateId)
     : items;
+  const chosen = supplied.find((email) => email.id === selectedId) ?? supplied[0];
+  const chosenIdentity = chosen ? emailThreadIdentity(chosen) : null;
+  const bodyKey = JSON.stringify([
+    spaceId,
+    roleId,
+    chosen?.sourceId,
+    chosen?.providerMessageId,
+    chosen?.eaccount,
+    chosen?.campaignId,
+    chosen?.date,
+    chosen?.body,
+  ]);
+  const storedBody = savedRecruitingRead(cache, `mail-body:${bodyKey}`) as
+    | EmailConversationItem
+    | undefined;
+  const fullBody =
+    loadedBody && loadedBody.owner === cache && loadedBody.key === bodyKey
+      ? loadedBody.email
+      : storedBody;
+  const needsBody = chosen?.partial;
+  useEffect(() => {
+    let active = true;
+    if (
+      !needsBody ||
+      fullBody ||
+      !chosenIdentity ||
+      !chosen?.providerMessageId ||
+      !spaceId ||
+      !roleId
+    )
+      return;
+    setBodyStatus({ key: bodyKey, failed: false });
+    void rpc.recruiting
+      .globalInbox({
+        spaceId,
+        thread: { roleId, key: inboxThreadKey(chosenIdentity), emailId: chosen.providerMessageId },
+        limit: 1,
+      })
+      .then((page) => {
+        const email = page.items[0]?.email;
+        if (!email || email.providerMessageId !== chosen.providerMessageId || email.snippet)
+          throw new Error("Incomplete message");
+        if (!active) return;
+        const value = { ...chosen, ...email, id: chosen.id, partial: false };
+        rememberRecruitingRead(cache, `mail-body:${bodyKey}`, value);
+        setLoadedBody({ owner: cache, key: bodyKey, email: value });
+        setBodyStatus(undefined);
+      })
+      .catch(() => {
+        if (active) setBodyStatus({ key: bodyKey, failed: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [bodyKey, retryBody, cache, Boolean(needsBody), Boolean(fullBody)]);
+  const messages = supplied.map((email) =>
+    email.id === chosen?.id && fullBody ? { ...email, ...fullBody } : email,
+  );
   const selected = messages.find((email) => email.id === selectedId) ?? messages[0];
   // Only provider-supplied thread IDs group emails; an unthreaded message is its own choice.
   const hasThreads = messages.some((email) => email.threadId);
@@ -168,6 +248,50 @@ export function EmailConversation({
     hasThreads && selected
       ? messages.filter((email) => groupKey(email) === groupKey(selected))
       : messages;
+  const selectedIdentity = selected ? emailThreadIdentity(selected) : null;
+  const selectedEvidence = selectedIdentity
+    ? incomingThreadEvidence(visibleMessages).find(
+        (thread) => inboxThreadKey(thread) === inboxThreadKey(selectedIdentity),
+      )
+    : undefined;
+  const observed = selectedEvidence?.latestIncomingAt;
+  const openKey =
+    selectedEvidence && observed
+      ? JSON.stringify([inboxThreadKey(selectedEvidence), observed])
+      : null;
+  useEffect(() => {
+    if (
+      !root.current ||
+      !selectedEvidence ||
+      !observed ||
+      !readState?.ready ||
+      !openKey ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
+    let visible = false;
+    const readVisible = () => {
+      if (document.visibilityState !== "visible") {
+        opened.current = null;
+        return;
+      }
+      if (!visible || opened.current === openKey) return;
+      opened.current = openKey;
+      void readState.mark(selectedEvidence, observed, false);
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? false;
+      if (!visible) opened.current = null;
+      readVisible();
+    });
+    document.addEventListener("visibilitychange", readVisible);
+    observer.observe(root.current);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", readVisible);
+      opened.current = null;
+    };
+  }, [openKey, readState?.ready, readState?.mark]);
   useEffect(() => {
     if (openedFromHistory.current !== selected?.id) return;
     openedFromHistory.current = null;
@@ -175,6 +299,7 @@ export function EmailConversation({
   }, [selected?.id]);
   return (
     <section
+      ref={root}
       aria-labelledby={headingId}
       data-testid="email-conversation"
       className="min-w-0 rounded-xl border bg-card"
@@ -197,6 +322,34 @@ export function EmailConversation({
             ) : null}
           </div>
         </div>
+        {readState && selected && selectedEvidence && observed ? (
+          <div className="flex items-center gap-2">
+            {readState.unread(selected) === true ? (
+              <Badge>
+                <Trans>Unread</Trans>
+              </Badge>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!readState.ready || readState.pending}
+              onClick={() =>
+                void readState.mark(selectedEvidence, observed, readState.unread(selected) !== true)
+              }
+            >
+              {readState.unread(selected) === true ? (
+                <Trans>Mark read</Trans>
+              ) : (
+                <Trans>Mark unread</Trans>
+              )}
+            </Button>
+          </div>
+        ) : null}
+        {readState?.failed ? (
+          <span role="alert" className="text-xs text-muted-foreground">
+            <Trans>Read status unavailable.</Trans>
+          </span>
+        ) : null}
         {onOpenProfile || (onDraftReply && selected) ? (
           <div className="flex flex-wrap gap-2">
             {onOpenProfile ? (
@@ -255,6 +408,15 @@ export function EmailConversation({
                   <div className="flex gap-3 p-4">
                     <MessageHeading email={email} />
                   </div>
+                  {bodyStatus?.key === bodyKey ? (
+                    bodyStatus.failed ? (
+                      <RetryNotice onRetry={() => setRetryBody((value) => value + 1)}>
+                        <Trans>Could not load the complete message.</Trans>
+                      </RetryNotice>
+                    ) : (
+                      <TabLoading />
+                    )
+                  ) : null}
                   <MessageBody email={email} artifactTarget={artifactTarget} />
                 </article>
               ) : (

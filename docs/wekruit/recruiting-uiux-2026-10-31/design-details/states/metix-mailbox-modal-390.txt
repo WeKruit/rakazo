@@ -1,0 +1,45 @@
+匿名化布局节点清单（由测量派生，不是原始 AX 树）
+E0 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E1 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E2 MAIN None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E3 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E4 DIV None [匿名内容槽] {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E5 DIV None Sequences {'height': 44, 'width': 390, 'x': 0, 'y': 0}
+E6 DIV None Sequences {'height': 44, 'width': 390, 'x': 0, 'y': 0}
+E7 DIV None  {'height': 26, 'width': 32, 'x': 20, 'y': 9}
+E8 svg None  {'height': 24, 'width': 24, 'x': 20, 'y': 11}
+E9 DIV None [匿名内容槽] {'height': 800, 'width': 390, 'x': 0, 'y': 44}
+E10 DIV None [匿名内容槽] {'height': 40, 'width': 366, 'x': 12, 'y': 56}
+E11 DIV group [匿名内容槽] {'height': 40, 'width': 169.2, 'x': 12, 'y': 56}
+E12 BUTTON None Active {'height': 40, 'width': 72.52, 'x': 12, 'y': 56}
+E13 BUTTON None [匿名内容槽] {'height': 40, 'width': 88.69, 'x': 92.52, 'y': 56}
+E14 BUTTON None New sequence {'height': 40, 'width': 138.98, 'x': 239.02, 'y': 56}
+E15 svg None  {'height': 16, 'width': 16, 'x': 251.02, 'y': 68}
+E16 DIV None [匿名内容槽] {'height': 736, 'width': 390, 'x': 0, 'y': 108}
+E17 DIV None [匿名内容槽] {'height': 736, 'width': 390, 'x': 0, 'y': 108}
+E18 DIV None [匿名内容槽] {'height': 279.92, 'width': 342, 'x': 24, 'y': 316.03}
+E19 DIV None  {'height': 121.59, 'width': 192, 'x': 99, 'y': 316.03}
+E20 svg None  {'height': 121.59, 'width': 153.59, 'x': 118.2, 'y': 316.03}
+E21 H3 None [匿名内容槽] {'height': 27.55, 'width': 320, 'x': 35, 'y': 449.63}
+E22 BUTTON None New sequence {'height': 44, 'width': 135.17, 'x': 127.41, 'y': 551.95}
+E23 DIV None  {'height': 844, 'width': 390, 'x': 0, 'y': 0}
+E24 DIV dialog [匿名内容槽] {'height': 355.5, 'width': 358, 'x': 16, 'y': 244.25}
+E25 BUTTON None Close {'height': 32, 'width': 32, 'x': 325, 'y': 261.25}
+E26 svg None  {'height': 16, 'width': 16, 'x': 333, 'y': 269.25}
+E27 DIV None [匿名内容槽] {'height': 280.5, 'width': 356, 'x': 17, 'y': 245.25}
+E28 DIV None [匿名内容槽] {'height': 68, 'width': 324, 'x': 33, 'y': 265.25}
+E29 DIV None [匿名内容槽] {'height': 68, 'width': 288, 'x': 33, 'y': 265.25}
+E30 SPAN None  {'height': 36, 'width': 36, 'x': 33, 'y': 281.25}
+E31 svg None  {'height': 16, 'width': 16, 'x': 43, 'y': 291.25}
+E32 H2 None [匿名内容槽] {'height': 24, 'width': 240, 'x': 81, 'y': 265.25}
+E33 BUTTON None [匿名内容槽] {'height': 45.5, 'width': 324, 'x': 33, 'y': 353.25}
+E34 svg None  {'height': 16, 'width': 16, 'x': 50, 'y': 368}
+E35 svg None  {'height': 16, 'width': 16, 'x': 324, 'y': 368}
+E36 BUTTON None [匿名内容槽] {'height': 45.5, 'width': 324, 'x': 33, 'y': 406.75}
+E37 SPAN None  {'height': 16, 'width': 16, 'x': 50, 'y': 421.5}
+E38 svg None  {'height': 16, 'width': 16, 'x': 324, 'y': 421.5}
+E39 BUTTON None [匿名内容槽] {'height': 45.5, 'width': 324, 'x': 33, 'y': 460.25}
+E40 svg None  {'height': 16, 'width': 16, 'x': 50, 'y': 475}
+E41 svg None  {'height': 16, 'width': 16, 'x': 324, 'y': 475}
+E42 DIV None [匿名内容槽] {'height': 73, 'width': 356, 'x': 17, 'y': 525.75}
+E43 BUTTON None Maybe later {'height': 36, 'width': 106.73, 'x': 250.27, 'y': 544.75}

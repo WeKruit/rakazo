@@ -9,8 +9,9 @@ import { clearRecruitingReads, createRecruitingReadCache } from "../../lib/recru
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
+const roleCampaign = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence } },
+  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -112,6 +113,9 @@ beforeEach(() => {
     delayed(() => ({ crmTarget: { bindingEffectId: "binding", target } })),
   );
   crmData.mockImplementation((input: Input) => delayed(() => respond(input)));
+  roleCampaign.mockImplementation(() =>
+    delayed(() => ({ status: "none", serverId: null, campaign: null, leads: [] })),
+  );
   correspondence.mockImplementation(() =>
     delayed(() => ({
       roleId: "role-1",

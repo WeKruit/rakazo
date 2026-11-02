@@ -6,6 +6,8 @@ import {
   type PrismaClient,
 } from "@rakazo/db";
 
+import { hasPlatformMcpCredential } from "./mcp-connector.js";
+
 type ConnectBlock = ReturnType<typeof connectAskBlock>;
 type Scope = { spaceId: string; userId: string; botId: string; threadId: string };
 
@@ -119,7 +121,9 @@ export async function requestConnection(
   }
   const server = await loadConnectServer(prisma, scope, serverId);
   if (!server) return { error: "No enabled MCP server with that serverId exists." };
-  if (server.connected)
+  // A product-provided service is connected for everyone; it never needs a card.
+  const platform = hasPlatformMcpCredential({ ...server, secretId: null });
+  if (server.connected || (platform && server.assigned))
     return {
       status: "connected" as const,
       message: `${server.name} is already connected and assigned to you: use its tools now (connectors_search_tools group "${server.slug}"). Never tell the user it is not connected.`,

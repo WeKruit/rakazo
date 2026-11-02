@@ -814,10 +814,13 @@ export class PiAgentRuntime implements AgentRuntime {
         ]);
         try {
           await agent.prompt(initialPrompt, images?.length ? images : undefined);
-          while (interjected && !signal.aborted && !host.pausePending) {
-            interjected = false;
+          while (!signal.aborted && !host.pausePending && !host.toolCallBudget.exceeded) {
+            // A message claimed just as the last step ended was steered in after the loop
+            // stopped looking: answer it in this run, or it would count as answered unseen.
             await interjectClaim;
-            keepInterruptedAssistantMessage(agent.state.messages);
+            if (!interjected && !agent.hasQueuedMessages?.()) break;
+            if (interjected) keepInterruptedAssistantMessage(agent.state.messages);
+            interjected = false;
             const gap = cutMidReply
               ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
               : streamed.trim() && !streamed.endsWith("\n")
@@ -1742,6 +1745,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
           ...(options === undefined ? {} : { options }),
+          ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
           ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
         };
@@ -1884,19 +1888,26 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               );
             const { question, plannedSearches } = parsed.data;
             const known = await host.request.beforeAsk?.(question, plannedSearches);
-            if (known)
+            if (known) {
+              // Each bounce costs the person another model step before the card; say which check.
+              getLogger().info("ask.not_shown", {
+                runId: host.request.runId,
+                plannedSearches: plannedSearches?.length ?? null,
+                reason: typeof known === "string" ? "already_answered" : known.instead.slice(0, 80),
+              });
               return {
                 content: [
                   {
                     type: "text",
                     text:
                       typeof known === "string"
-                        ? `Already answered in this conversation: ${known}\nUse this answer and continue; never ask it again.`
+                        ? `The recruiter already replied after this question: ${known}\nIf that reply answers it, use it and continue without asking again. If it was about something else, ask the question again now.`
                         : known.instead,
                   },
                 ],
                 details: args,
               };
+            }
             // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
             if ((question.match(/\?/g)?.length ?? 0) > 1 || /(^|\n)\s*2[.)]\s/.test(question))
               throw new Error(
@@ -4204,9 +4215,24 @@ export function reliableStreamOptions(
       onPayload: async (payload, payloadModel) => {
         const shaped = (await callerPayload?.(payload, payloadModel)) ?? payload;
         if (!shaped || typeof shaped !== "object" || !("prompt_cache_key" in shaped)) return shaped;
-        const body = shaped as { prompt_cache_key?: unknown; tools?: unknown };
+        const body = shaped as { prompt_cache_key?: unknown; tools?: unknown; input?: unknown };
         if (!body.prompt_cache_key) return shaped;
-        return { ...body, prompt_cache_key: promptCacheKey(body.tools) };
+        const key = promptCacheKey(body.tools);
+        // Which part of the prefix changed when a new run misses the cache.
+        const first = Array.isArray(body.input) ? body.input[0] : undefined;
+        const digest = (value: unknown) =>
+          createHash("sha256")
+            .update(JSON.stringify(value ?? null))
+            .digest("hex")
+            .slice(0, 12);
+        getLogger().info("model.prompt.prefix", {
+          sessionId: next.sessionId,
+          promptCacheKey: key,
+          systemSha: digest(first),
+          systemChars: JSON.stringify(first ?? null).length,
+          inputItems: Array.isArray(body.input) ? body.input.length : null,
+        });
+        return { ...body, prompt_cache_key: key };
       },
     };
   }

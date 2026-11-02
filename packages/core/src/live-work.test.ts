@@ -19,8 +19,8 @@ import {
   workStageLabel,
   workStageMessages,
   workStepDetail,
-  writesChinese,
   workTimeline,
+  writesChinese,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
@@ -913,4 +913,9 @@ it("follows the language of the recruiter's own latest message", () => {
   expect(writesChinese([user("在专属岗位对话里继续"), user("ok, go ahead")])).toBe(false);
   expect(writesChinese([user("找人"), user("internal wake", true)])).toBe(true);
   expect(writesChinese([])).toBe(false);
+});
+
+it("keeps an invalid work timestamp unknown instead of rendering a NaN clock", () => {
+  expect(formatWorkClock(Number.NaN)).toBe("—");
+  expect(formatWorkClock(Number.POSITIVE_INFINITY)).toBe("—");
 });

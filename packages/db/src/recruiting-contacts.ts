@@ -4,8 +4,12 @@ import type {
   ListRecruitingContactsOutput,
   RecruitingContact,
   RecruitingContactFilters,
+  RecruitingSavedProfile,
 } from "@rakazo/contracts";
-import { ListRecruitingContactsInput as ListInputSchema } from "@rakazo/contracts";
+import {
+  ListRecruitingContactsInput as ListInputSchema,
+  RecruitingSavedProfileSchema,
+} from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
@@ -53,6 +57,7 @@ type PeopleOptions = {
   /** Each role entry, for display. */
   detail: boolean;
   skills: boolean;
+  query?: string;
 };
 
 /**
@@ -62,9 +67,14 @@ type PeopleOptions = {
 function peopleSql(actor: Actor, options: PeopleOptions) {
   const user = actor.userId;
   const space = actor.spaceId;
-  const { keys, activity, detail, skills } = options;
+  const { keys, activity, detail, skills, query } = options;
   const only = (column: Prisma.Sql) =>
-    keys ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})` : Prisma.empty;
+    keys
+      ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})`
+      : query
+        ? Prisma.sql`AND ${column} IN (SELECT person_key FROM matching_keys)`
+        : Prisma.empty;
+  const pattern = query ? like(query) : "";
   const crmOwner = Prisma.sql`cc."userId" = ${user} AND cc."spaceId" = ${space} AND cc."archivedAt" IS NULL`;
   const crmCandidates = keys
     ? Prisma.sql`AND "crmCandidateId" IN (
@@ -81,7 +91,23 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND NOT EXISTS (
           SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
     ),
-    -- Each role candidate's latest named row and the first time any saved page showed them.
+    ${
+      query
+        ? Prisma.sql`matching_keys AS MATERIALIZED (
+      SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
+      WHERE ${crmOwner} AND concat_ws(' ',cc.name,cc.title,cc.company,cc.location,cc.email) ILIKE ${pattern}
+      UNION
+      SELECT o."candidateKey" FROM recruiting_candidate_occurrences o
+      WHERE o."roleId" IN (SELECT id FROM roles)
+        AND concat_ws(' ',o.name,o.title,o.company,o.location) ILIKE ${pattern}
+      UNION
+      SELECT sp."personKey" FROM recruiting_saved_profiles sp
+      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern}
+    ),`
+        : Prisma.empty
+    }
+    -- Query matches narrow identities, not observations: canonical row selection still sees
+    -- every occurrence/source for each identity and the final predicate remains authoritative.
     occ AS (
       SELECT DISTINCT ON (o."roleId", o."candidateKey")
         o."roleId", o."candidateKey", o.name, o.title, o.company, o.location, o."linkedinUrl",
@@ -130,6 +156,7 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND a."crmRoleId" = cr."crmRoleId"
       LEFT JOIN roles ar ON ar.id = a."roleId"
       WHERE cr."userId" = ${user} AND cr."spaceId" = ${space} AND cr."archivedAt" IS NULL
+        ${keys || query ? Prisma.sql`AND rc."contactId" IN (SELECT cc.id FROM recruiting_crm_contacts cc WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})` : Prisma.empty}
     ),
 ${
   activity
@@ -218,12 +245,15 @@ ${
       GROUP BY person_key
     ),
     people AS (
-      SELECT f.*, t.email, t.role_ids, t.roles, t.shortlisted, t.added_at, t.last_contacted,
+      SELECT f.*, COALESCE(t.email, NULLIF(btrim(sp.profile->>'email'), '')) AS email,
+        t.role_ids, t.roles, t.shortlisted, t.added_at, t.last_contacted,
         t.last_replied, ${skills ? Prisma.sql`t.skills,` : Prisma.empty}
         COALESCE(t.crm_status,
           CASE t.product_status WHEN 0 THEN 'shortlisted' WHEN 1 THEN 'on_hold' WHEN 2 THEN 'passed' ELSE 'saved' END
         ) AS status
       FROM primary_entry f JOIN totals t USING (person_key)
+      LEFT JOIN recruiting_saved_profiles sp ON sp."personKey" = f.person_key
+        AND sp."ownerUserId" = ${user} AND sp."spaceId" = ${space}
     )`;
 }
 
@@ -347,7 +377,7 @@ export async function listRecruitingContacts(
     ].some((value) => value !== undefined);
   // Which people, in order: only the columns the sort and filters need, for everyone.
   const page = await prisma.$queryRaw<{ person_key: string; total: bigint | number }[]>(Prisma.sql`
-    WITH ${peopleSql(actor, { activity, detail: false, skills: Boolean(filters.skills) })}
+    WITH ${peopleSql(actor, { activity, detail: false, skills: Boolean(filters.skills), query: filters.query })}
     SELECT p.person_key, count(*) OVER () AS total
     FROM people p
     ${filterSql(actor, filters)}
@@ -365,7 +395,7 @@ export async function listRecruitingContacts(
   const byKey = new Map(detail.map((row) => [row.person_key, row]));
   const rows = order.flatMap((key) => byKey.get(key) ?? []);
   const keys = rows.map((row) => row.person_key);
-  // Only the page's people: their tags and school, each by its owner-scoped index.
+  // Only the page's people: tags and already-saved media, each by its owner-scoped index.
   const [tags, profiles] = keys.length
     ? await Promise.all([
         prisma.$queryRaw<{ person_key: string; tags: string[] }[]>(Prisma.sql`
@@ -374,35 +404,73 @@ export async function listRecruitingContacts(
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})
           GROUP BY 1`),
-        prisma.$queryRaw<{ person_key: string; school: string | null }[]>(Prisma.sql`
-          SELECT "personKey" AS person_key, profile->'education'->0->>'school_name' AS school
+        prisma.$queryRaw<
+          {
+            person_key: string;
+            provider: string;
+            fetched_at: Date;
+            profile: RecruitingSavedProfile;
+          }[]
+        >(Prisma.sql`
+          SELECT "personKey" AS person_key, provider, "fetchedAt" AS fetched_at, profile
           FROM recruiting_saved_profiles
           WHERE "spaceId" = ${actor.spaceId} AND "ownerUserId" = ${actor.userId}
             AND "personKey" IN (${Prisma.join(keys)})`),
       ])
     : [[], []];
   const tagsByKey = new Map(tags.map((row) => [row.person_key, row.tags]));
-  const schoolByKey = new Map(profiles.map((row) => [row.person_key, row.school]));
+  const profilesByKey = new Map(profiles.map((row) => [row.person_key, row]));
   const total = page.length ? Number(page[0]!.total) : 0;
   const iso = (date: Date | null) => (date ? date.toISOString() : null);
   return {
-    items: rows.map((row) => ({
-      personKey: row.person_key,
-      name: row.name,
-      title: row.title,
-      company: row.company,
-      location: row.location,
-      school: schoolByKey.get(row.person_key) ?? null,
-      linkedinUrl: row.linkedin_url,
-      email: row.email,
-      status: row.status,
-      noteKey: row.note_key,
-      roles: roleList(row.roles ?? []),
-      tags: tagsByKey.get(row.person_key) ?? [],
-      addedAt: iso(row.added_at),
-      lastContactedAt: iso(row.last_contacted),
-      lastRepliedAt: iso(row.last_replied),
-    })),
+    items: rows.map((row) => {
+      const saved = profilesByKey.get(row.person_key);
+      const profile = saved?.profile;
+      const parsed =
+        saved &&
+        RecruitingSavedProfileSchema.safeParse({
+          ...profile,
+          personKey: row.person_key,
+          provider: saved.provider,
+          fetchedAt: saved.fetched_at?.toISOString(),
+        });
+      const school = profile?.education[0];
+      const currentJob = profile?.experience.find((job) => job.is_current === true);
+      const company = row.company ?? currentJob?.company_name ?? null;
+      const normalize = (name: string | null) => name?.trim().replace(/\s+/g, " ").toLowerCase();
+      const employers =
+        profile?.experience.filter(
+          (job) => company && normalize(job.company_name) === normalize(company),
+        ) ?? [];
+      // A logo belongs to the displayed organization; conflicting retained assets stay unknown.
+      const unique = (values: (string | null)[]) => {
+        const urls = [...new Set(values.filter((value): value is string => Boolean(value)))];
+        return urls.length === 1 ? urls[0]! : null;
+      };
+      return {
+        personKey: row.person_key,
+        name: row.name,
+        title: row.title ?? currentJob?.title ?? null,
+        company,
+        location: row.location,
+        school: school?.school_name ?? null,
+        savedProfile: parsed?.success ? parsed.data : null,
+        profileImageUrl: profile?.profileImageUrl ?? null,
+        companyLogoUrl: unique(employers.map((job) => job.company_logo_url)),
+        companyWebsiteUrl: unique(employers.map((job) => job.company_url)),
+        schoolLogoUrl: school?.school_logo_url ?? null,
+        schoolWebsiteUrl: school?.school_url ?? null,
+        linkedinUrl: row.linkedin_url,
+        email: row.email,
+        status: row.status,
+        noteKey: row.note_key,
+        roles: roleList(row.roles ?? []),
+        tags: tagsByKey.get(row.person_key) ?? [],
+        addedAt: iso(row.added_at),
+        lastContactedAt: iso(row.last_contacted),
+        lastRepliedAt: iso(row.last_replied),
+      };
+    }),
     total,
     nextCursor: offset + page.length < total ? String(offset + page.length) : null,
   };

@@ -7,8 +7,12 @@ async function getRecruitingOverview(...args: Parameters<typeof streamRecruiting
   const events = [];
   for await (const event of streamRecruitingOverview(...args)) events.push(event);
   expect(events.at(-1)).toEqual({ kind: "done" });
+  // A role's later event replaces its earlier one, as on Home.
+  const roles = new Map(
+    events.flatMap((event) => (event.kind === "role" ? [[event.role.groupId, event.role]] : [])),
+  );
   return {
-    roles: events.flatMap((event) => (event.kind === "role" ? [event.role] : [])),
+    roles: [...roles.values()],
     failedGroups: events.flatMap((event) => (event.kind === "failed" ? [event.groupId] : [])),
   };
 }
@@ -144,12 +148,7 @@ describe("streamRecruitingOverview", () => {
     }) as RecruitingCorrespondence;
   const reads = (patch: Partial<OverviewReads> = {}): OverviewReads => ({
     roleId: async (group) => (group.id === "g3" ? null : `role-${group.id}`),
-    shortlistPage: async (_roleId, cursor) =>
-      ({
-        items: [{ shortlisted: true, shortlistedAt: cursor ? "2026-10-22T00:00:00Z" : null }],
-        total: 2,
-        nextCursor: cursor ? null : "next",
-      }) as Awaited<ReturnType<OverviewReads["shortlistPage"]>>,
+    shortlist: async () => ({ total: 2, dates: [null, "2026-10-22T00:00:00Z"] }),
     candidates: async () => ({
       items: [],
       nextCursor: null,
@@ -163,7 +162,7 @@ describe("streamRecruitingOverview", () => {
     ...patch,
   });
 
-  it("reads every bound role once, with every shortlist page and its future bookings", async () => {
+  it("reads every bound role once, with its shortlist dates and future bookings", async () => {
     const overview = await getRecruitingOverview(groups, reads(), new AbortController().signal);
     expect(overview.failedGroups).toEqual([]);
     expect(overview.roles.map((role) => role.groupId).sort()).toEqual(["g1", "g2"]);
@@ -204,9 +203,9 @@ describe("streamRecruitingOverview", () => {
     const overview = await getRecruitingOverview(
       groups,
       reads({
-        shortlistPage: vi.fn(async (roleId: string) => {
+        shortlist: vi.fn(async (roleId: string) => {
           if (roleId === "role-g2") throw new Error("down");
-          return { items: [], total: 0, nextCursor: null } as never;
+          return { total: 0, dates: [] };
         }),
       }),
       new AbortController().signal,
@@ -234,7 +233,43 @@ describe("streamRecruitingOverview", () => {
       seen.push(event.kind === "role" ? event.role.groupId : event.kind);
       if (seen.length === 1) release();
     }
-    expect(seen).toEqual(["g2", "g1", "done"]);
+    expect(seen[0]).toBe("g2");
+    expect(seen.at(-1)).toBe("done");
+  });
+
+  it("sends every role's saved numbers before any slow source answers", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const base = reads();
+    const stream = streamRecruitingOverview(
+      groups,
+      reads({ candidates: (group, signal) => held.then(() => base.candidates(group, signal)) }),
+      new AbortController().signal,
+    );
+    const seen = [];
+    for await (const event of stream) {
+      seen.push(event);
+      if (seen.length === 2) release();
+    }
+    // Both bound roles arrive from saved records first, still marked partial.
+    expect(seen.slice(0, 2)).toEqual([
+      {
+        kind: "role",
+        role: expect.objectContaining({ groupId: "g1", shortlisted: 2, incomplete: true }),
+      },
+      {
+        kind: "role",
+        role: expect.objectContaining({ groupId: "g2", shortlisted: 2, incomplete: true }),
+      },
+    ]);
+    // Then each role's full numbers replace them.
+    expect(seen.slice(2, 4)).toEqual([
+      expect.objectContaining({ role: expect.objectContaining({ replied: 1, incomplete: false }) }),
+      expect.objectContaining({ role: expect.objectContaining({ replied: 1, incomplete: false }) }),
+    ]);
+    expect(seen.at(-1)).toEqual({ kind: "done" });
   });
 
   it("keeps at most four CRM, campaign and calendar reads in flight across roles", async () => {

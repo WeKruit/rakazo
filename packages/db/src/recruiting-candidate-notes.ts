@@ -14,6 +14,7 @@ type Row = {
   roleId: string | null;
   candidateKey: string;
   body: string;
+  artifactIds: string[];
   createdByBotId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -28,13 +29,30 @@ const owned = (actor: Actor) => ({
 });
 const withOwner = { owner: { select: { name: true } } } as const;
 
-const view = (r: Row, botNames: ReadonlyMap<string, string>): RecruitingCandidateNote => {
+type Attachment = RecruitingCandidateNote["attachments"][number];
+async function ownedAttachments(
+  prisma: PrismaClient,
+  actor: Actor,
+  ids: readonly string[],
+): Promise<Attachment[]> {
+  if (!ids.length) return [];
+  return prisma.artifact.findMany({
+    where: { id: { in: [...new Set(ids)] }, userId: actor.userId, spaceId: actor.spaceId },
+    select: { id: true, name: true, mimeType: true, size: true },
+  });
+}
+const view = (
+  r: Row,
+  botNames: ReadonlyMap<string, string>,
+  attachments: readonly Attachment[],
+): RecruitingCandidateNote => {
   const authorName = r.createdByBotId ? botNames.get(r.createdByBotId) : r.owner?.name;
   return {
     id: r.id,
     roleId: r.roleId,
     candidateKey: r.candidateKey,
     body: r.body,
+    attachments: attachments.filter((item) => r.artifactIds.includes(item.id)),
     createdBy: r.createdByBotId ? "agent" : "user",
     ...(authorName ? { authorName } : {}),
     createdAt: r.createdAt.toISOString(),
@@ -53,7 +71,11 @@ async function botNames(prisma: PrismaClient, actor: Actor, rows: readonly Row[]
 }
 
 const one = async (prisma: PrismaClient, actor: Actor, row: Row) =>
-  view(row, await botNames(prisma, actor, [row]));
+  view(
+    row,
+    await botNames(prisma, actor, [row]),
+    await ownedAttachments(prisma, actor, row.artifactIds),
+  );
 
 async function requireOwnedRole(prisma: PrismaClient, actor: Actor, roleId: string) {
   const role = await prisma.recruitingRole.findFirst({
@@ -78,7 +100,12 @@ export async function listRecruitingCandidateNotes(
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
   const names = await botNames(prisma, actor, rows);
-  return { items: rows.map((row) => view(row, names)) };
+  const attachments = await ownedAttachments(
+    prisma,
+    actor,
+    rows.flatMap((row) => row.artifactIds),
+  );
+  return { items: rows.map((row) => view(row, names, attachments)) };
 }
 
 export async function createRecruitingCandidateNote(
@@ -88,6 +115,9 @@ export async function createRecruitingCandidateNote(
   botId?: string,
 ) {
   if (input.roleId) await requireOwnedRole(prisma, actor, input.roleId);
+  const artifactIds = [...new Set(input.artifactIds ?? [])];
+  if ((await ownedAttachments(prisma, actor, artifactIds)).length !== artifactIds.length)
+    throw new IsolationError();
   const row = await prisma.recruitingCandidateNote.create({
     data: {
       spaceId: actor.spaceId,
@@ -95,6 +125,7 @@ export async function createRecruitingCandidateNote(
       roleId: input.roleId ?? null,
       candidateKey: input.candidateKey,
       body: input.body,
+      artifactIds,
       createdByBotId: botId ?? null,
     },
     include: withOwner,
@@ -112,9 +143,15 @@ export async function updateRecruitingCandidateNote(
     select: { id: true },
   });
   if (!found) throw new IsolationError();
+  const artifactIds = input.artifactIds && [...new Set(input.artifactIds)];
+  if (
+    artifactIds &&
+    (await ownedAttachments(prisma, actor, artifactIds)).length !== artifactIds.length
+  )
+    throw new IsolationError();
   const row = await prisma.recruitingCandidateNote.update({
     where: { id: found.id },
-    data: { body: input.body },
+    data: { body: input.body, ...(artifactIds ? { artifactIds } : {}) },
     include: withOwner,
   });
   return one(prisma, actor, row);

@@ -42,3 +42,47 @@ describe("mergeRoleCandidates with a first-page CRM read", () => {
     expect(page.nextCursor).not.toBeNull();
   });
 });
+
+it("retains the already-owned saved profile in a role candidate summary without another lookup", async () => {
+  const profile = {
+    personKey: "person",
+    provider: "test",
+    fetchedAt: "2026-10-30T00:00:00Z",
+    headline: "Engineer",
+    profileImageUrl: null,
+    experience: [],
+    education: [],
+  };
+  const page = await mergeRoleCandidates(
+    { threadId: "thread", limit: 50 },
+    {
+      autumn: async () =>
+        ({
+          roleId: "role",
+          roleRevisionId: "revision",
+          items: [
+            {
+              candidateKey: "person",
+              name: "Avery Example",
+              title: "Engineer",
+              location: null,
+              linkedinUrl: null,
+              savedProfile: profile,
+              latestSource: null,
+              match: null,
+              ranking: undefined,
+              shortlisted: false,
+              shortlistedAt: null,
+            },
+          ],
+          nextCursor: null,
+          total: 1,
+          counts: { shortlisted: 0 },
+          crmTarget: null,
+        }) as never,
+      autumnLinkedinUrls: async () => [],
+      crm: async () => ({ status: "ok", rows: [] }),
+    },
+  );
+  expect(page.items[0]?.autumn?.savedProfile).toEqual(profile);
+});

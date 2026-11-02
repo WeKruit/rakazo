@@ -190,7 +190,23 @@ describe("optional native candidate output saving", () => {
       input,
       expect.objectContaining({
         sourceEffectId: "read",
-        rows,
+        rows: [
+          {
+            ...rows[0],
+            _profile_image_source_url: null,
+            _profile: {
+              headline: null,
+              profileImageUrl: null,
+              experience: [],
+              education: [],
+              email: null,
+              githubUrl: null,
+              websiteUrl: null,
+              stackOverflowUrl: null,
+            },
+          },
+          null,
+        ],
         outputArtifact: expect.objectContaining({ clientNonce: "recruiting-observation:read" }),
       }),
     );

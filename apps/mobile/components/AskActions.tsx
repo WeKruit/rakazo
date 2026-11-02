@@ -16,6 +16,9 @@ const KNOWN_ASK_ACTION_LABELS: Record<string, string> = {
   "Always allow": "Always allow",
   "Always allow this tool": "Always allow",
   Deny: "Deny",
+  "Create address": "Create address",
+  "Use this address": "Use this address",
+  "Change the address": "Change the address",
 };
 
 export function AskActions({

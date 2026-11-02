@@ -243,7 +243,51 @@ export const AskFormResponseSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("decline") }),
 ]);
 export type AskFormResponse = z.infer<typeof AskFormResponseSchema>;
-export const AskAnswerSchema = z.union([z.string().min(1), AskFormResponseSchema]);
+export const MailReplySendAnswerSchema = z.strictObject({
+  action: z.literal("send"),
+  body: z
+    .string()
+    .min(1)
+    .max(20_000)
+    .refine((value) => Boolean(value.trim())),
+  cc: z.array(z.email()).max(100),
+});
+export type MailReplySendAnswer = z.infer<typeof MailReplySendAnswerSchema>;
+export const MailReplyErrorCodeSchema = z.enum([
+  "sender_unavailable",
+  "sender_not_ready",
+  "sender_changed",
+  "send_failed",
+  "delivery_unconfirmed",
+]);
+export type MailReplyErrorCode = z.infer<typeof MailReplyErrorCodeSchema>;
+export const MailReplySchema = z.strictObject({
+  from: z.string().trim().toLowerCase().nullable(),
+  to: z.array(z.string()),
+  cc: z.array(z.string()),
+  bcc: z.array(z.string()),
+  subject: z.string(),
+  body: z.string(),
+  inReplyTo: z.strictObject({
+    emailId: Id,
+    sourceId: Id,
+    threadId: z.string().nullable(),
+    subject: z.string().nullable(),
+    sender: z.string().nullable(),
+    inboxKey: z.string().optional(),
+    roleId: Id.optional(),
+  }),
+  status: z.enum(["needs_approval", "sending", "sent", "discarded", "failed", "unknown"]),
+  sentAt: IsoDate.nullable(),
+  canAnswer: z.boolean().optional(),
+  error: z.string().optional(),
+});
+export type MailReply = z.infer<typeof MailReplySchema>;
+export const AskAnswerSchema = z.union([
+  z.string().min(1),
+  AskFormResponseSchema,
+  MailReplySendAnswerSchema,
+]);
 export type AskAnswer = z.infer<typeof AskAnswerSchema>;
 
 export function parseAskFormResponse(
@@ -287,6 +331,9 @@ const askQuestion = {
     .describe(
       "One question with a single question mark; a recommendation follows it as a statement, never as a second question.",
     ),
+};
+// Last, so the question and its choices stream to the person before the search plan is written.
+const askPlannedSearches = {
   plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
     "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers. Pass [] when the recruiter said not to look for people outside their own list.",
   ),
@@ -300,8 +347,9 @@ export const AskUserInputSchema = z.union([
       .max(4)
       .refine((values) => new Set(values).size === values.length),
     multiple: AskMultiple.optional(),
+    ...askPlannedSearches,
   }),
-  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema, ...askPlannedSearches }),
 ]);
 export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
 
@@ -419,6 +467,7 @@ export const AskBlockSchema = z
     kind: z.literal("ask"),
     text: z.string(),
     approvalEffectId: Id.optional(),
+    mailReply: MailReplySchema.optional(),
     approvalEvidenceHash: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -449,6 +498,17 @@ export const AskBlockSchema = z
       )
       .optional(),
   })
+  .refine(
+    (block) =>
+      !block.mailReply ||
+      Boolean(
+        block.approvalEffectId &&
+          block.actions?.every((action) => ["allow", "deny"].includes(action.id)) &&
+          block.actions.some((action) => action.id === "allow") &&
+          block.actions.some((action) => action.id === "deny"),
+      ),
+    "A mail reply belongs to one one-time native approval",
+  )
   .refine(
     (block) =>
       !block.requestedSchema ||
@@ -859,7 +919,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 9;
+export const EVENT_FORMAT_VERSION = 10;
 
 export const ProductEventSchema = z
   .object({

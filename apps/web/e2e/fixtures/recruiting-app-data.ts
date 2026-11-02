@@ -375,10 +375,35 @@ export async function mockRecruitingApp(
     emptyCalendar?: boolean;
     emptyMail?: boolean;
     multipleCampaigns?: boolean;
+    sequenceDraft?: boolean;
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
   } = {},
 ) {
+  const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
+    ? {
+        ...snapshot,
+        cursor: 1,
+        messages: [
+          {
+            id: "fixture-draft-message",
+            threadId: snapshot.threadId,
+            seq: 1,
+            role: "user",
+            createdAt: checkedAt,
+            blocks: [
+              {
+                kind: "file",
+                artifactId: "fixture-sequence-draft",
+                name: "sequence.json",
+                mimeType: "application/json",
+                size: 1,
+              },
+            ],
+          },
+        ],
+      }
+    : snapshot;
   const plans: RecruitingSchedulingPlan[] = [];
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
@@ -388,6 +413,85 @@ export async function mockRecruitingApp(
     localStorage.setItem("rakazo.uiLocale", locale);
     localStorage.setItem("rakazo:space-id", "fixture-space");
   }, options.locale ?? "en");
+  const inboxCursors = new Map<string, { lastReadAt: string | null; unread: boolean }>();
+  const inboxBaseline = new Date(Date.parse(checkedAt) - 60_000).toISOString();
+  const mailKey = (email: {
+    sourceId: string;
+    crm?: { organizationId: string } | null;
+    eaccount?: string | null;
+    providerThreadId?: string | null;
+    id: string;
+  }) =>
+    email.eaccount && email.providerThreadId
+      ? JSON.stringify([
+          email.sourceId,
+          email.crm?.organizationId ?? null,
+          email.eaccount,
+          email.providerThreadId,
+        ])
+      : `message:${email.id}`;
+  const fixtureAccountItem = (role: ReturnType<typeof accountRolesData>[number]) => {
+    const item = accountItem(role, 0);
+    if (options.emptyCalendar && item.correspondence) item.correspondence.events = [];
+    if (options.emptyMail && item.correspondence) item.correspondence.emails = [];
+    if (!options.nativeScheduling && item.candidates) item.candidates.crmStatus = "ok";
+    if (item.workspace)
+      item.workspace.crmTarget = options.nativeScheduling
+        ? null
+        : { bindingEffectId: "fixture-binding", target: crmTarget };
+    if (options.scheduling) item.scheduling = { plans, slots: [], partial: false };
+    if (options.scheduling && item.correspondence?.emails[0]) {
+      const email = item.correspondence.emails[0];
+      email.snippet = false;
+      email.sourceId = options.nativeScheduling ? "fixture-native-mail" : source.serverId;
+      email.savedRead = options.nativeScheduling
+        ? {
+            messageId: "fixture-message",
+            linkedRunId: "fixture-run",
+            effectId: "fixture-read",
+          }
+        : null;
+      if (!options.nativeScheduling) {
+        email.crm = {
+          serverRevision: source.serverRevision,
+          organizationId: source.organizationId,
+          crmRoleId: crmTarget.crmRoleId,
+          candidateId: people[0]!.candidateId,
+          threadId: email.providerThreadId ?? null,
+          direction: "received",
+        };
+        if (item.candidates?.items[0])
+          item.candidates.items[0] = {
+            ...item.candidates.items[0],
+            key: `crm:${people[0]!.candidateId}`,
+            autumn: null,
+            crm: {
+              serverId: source.serverId,
+              organizationId: source.organizationId,
+              candidateId: people[0]!.candidateId,
+              stage: people[0]!.stage,
+              contactStatus: people[0]!.contactStatus,
+              outreachStatus: people[0]!.outreachStatus,
+            },
+          };
+      }
+    }
+    if (options.multipleCampaigns && item.campaign)
+      item.campaigns = [
+        item.campaign,
+        {
+          ...item.campaign,
+          campaign: item.campaign.campaign
+            ? {
+                ...item.campaign.campaign,
+                id: "fixture-second-campaign",
+                name: "Platform follow-up",
+              }
+            : null,
+        },
+      ];
+    return item;
+  };
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (
@@ -441,6 +545,17 @@ export async function mockRecruitingApp(
     let method = url.pathname.slice(5);
     let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
+    const requestedSnapshot =
+      options.sequenceDraft && (input.botId === bot.id || input.threadId === bot.threadId)
+        ? {
+            threadId: bot.threadId!,
+            botId: bot.id,
+            cursor: 0,
+            messages: [],
+            olderCursor: null,
+            run: null,
+          }
+        : initialSnapshot;
     if (method === "recruiting/overview") {
       const role = accountRolesData()[0]!;
       return route.fulfill({
@@ -485,39 +600,146 @@ export async function mockRecruitingApp(
       input = { ...((viewInput.query as Record<string, unknown>) ?? {}), roleId: viewInput.roleId };
     }
     let value: unknown;
-    if (method === "recruiting/accountView") {
-      const roles = accountRolesData().slice(0, 1);
-      const selected = roles.filter((role) => !input.roleId || input.roleId === role.id);
+    if (method === "recruiting/globalInbox" || method === "recruiting/globalInboxSummary") {
+      const roles = accountRolesData();
+      const rows = roles.slice(0, 1).flatMap((role) => {
+        const item = fixtureAccountItem(role);
+        return (item.correspondence?.emails ?? []).map((email) => ({
+          roleId: role.id,
+          key: mailKey(email),
+          email,
+          latestIncomingAt: email.direction === "received" ? email.date : null,
+          person: item.candidates?.items.find((person) => person.email === email.sender) ?? null,
+        }));
+      });
+      const isUnread = (row: (typeof rows)[number]) => {
+        const state = inboxCursors.get(row.key);
+        return (
+          !!row.latestIncomingAt &&
+          (state?.unread ||
+            Date.parse(row.latestIncomingAt) > Date.parse(state?.lastReadAt ?? inboxBaseline))
+        );
+      };
+      const filtered = rows.filter(
+        (row) =>
+          (!input.roleId || row.roleId === input.roleId) &&
+          (!input.thread ||
+            (row.roleId === (input.thread as { roleId: string }).roleId &&
+              row.key === (input.thread as { key: string }).key)) &&
+          (!input.unreadOnly || isUnread(row)) &&
+          (!input.query ||
+            [row.email.subject, row.email.sender, row.email.body].some((value) =>
+              value?.toLowerCase().includes(String(input.query).toLowerCase()),
+            )),
+      );
       value = {
         roles,
-        items: selected.map((role) => {
-          const item = accountItem(role, 0);
-          if (options.emptyCalendar && item.correspondence) item.correspondence.events = [];
-          if (options.emptyMail && item.correspondence) item.correspondence.emails = [];
-          if (!options.nativeScheduling && item.candidates) item.candidates.crmStatus = "ok";
-          if (item.workspace)
-            item.workspace.crmTarget = options.nativeScheduling
-              ? null
-              : { bindingEffectId: "fixture-binding", target: crmTarget };
-          if (options.multipleCampaigns && item.campaign)
-            item.campaigns = [
-              item.campaign,
-              {
-                ...item.campaign,
-                campaign: item.campaign.campaign
-                  ? {
-                      ...item.campaign.campaign,
-                      id: "fixture-second-campaign",
-                      name: "Platform follow-up",
-                    }
-                  : null,
-              },
-            ];
-          return item;
-        }),
+        items: filtered.slice(0, Number(input.limit ?? 30)),
         nextCursor: null,
+        total: filtered.length,
+        unread: {
+          count: rows.filter(isUnread).length,
+          unknownThreads: 0,
+          scope: "indexed_stored_mail",
+        },
+        coverage: {
+          importsComplete: true,
+          crmComplete: true,
+          native: "observed",
+          providerComplete: false,
+          checkedAt,
+        },
       };
-    } else if (method === "bootstrap") value = bootstrap;
+      if (method === "recruiting/globalInboxSummary") {
+        const summary = value as { unread: unknown; coverage: unknown };
+        value = { unread: summary.unread, coverage: summary.coverage };
+      }
+    } else if (method === "recruiting/inboxReadState") {
+      value = {
+        initializedAt: inboxBaseline,
+        items: (
+          input.threads as {
+            sourceId: string;
+            organizationId: string | null;
+            mailbox: string;
+            threadId: string;
+          }[]
+        ).flatMap((thread) => {
+          const key = JSON.stringify([
+            thread.sourceId,
+            thread.organizationId,
+            thread.mailbox,
+            thread.threadId,
+          ]);
+          const state = inboxCursors.get(key);
+          return state ? [{ key, ...state }] : [];
+        }),
+      };
+    } else if (method === "recruiting/markInboxThread") {
+      const thread = input.thread as {
+        sourceId: string;
+        organizationId: string | null;
+        mailbox: string;
+        threadId: string;
+      };
+      const key = JSON.stringify([
+        thread.sourceId,
+        thread.organizationId,
+        thread.mailbox,
+        thread.threadId,
+      ]);
+      const prior = inboxCursors.get(key);
+      inboxCursors.set(key, {
+        lastReadAt: input.unread
+          ? (prior?.lastReadAt ?? null)
+          : new Date(
+              Math.max(
+                Date.parse(prior?.lastReadAt ?? inboxBaseline),
+                Date.parse(String(input.observedIncomingAt)),
+              ),
+            ).toISOString(),
+        unread: !!input.unread,
+      });
+      value = { ok: true };
+    } else if (method === "recruiting/accountView") {
+      const roles = accountRolesData().slice(0, 1);
+      const selected = roles.filter((role) => !input.roleId || input.roleId === role.id);
+      const items = selected.map(fixtureAccountItem);
+      if (input.view === "sequence" && input.sequenceSummary) {
+        const rows = items.flatMap((item) =>
+          (item.campaigns ?? (item.campaign ? [item.campaign] : []))
+            .filter(
+              (campaign) =>
+                campaign.campaign &&
+                (!input.sequenceQuery ||
+                  campaign.campaign.name
+                    .toLowerCase()
+                    .includes(String(input.sequenceQuery).toLowerCase())) &&
+                (input.sequenceStatus === undefined ||
+                  campaign.campaign.status === input.sequenceStatus),
+            )
+            .map((campaign) => ({ roleId: item.roleId, campaigns: [campaign] })),
+        );
+        const offset = Number(input.offset ?? input.cursor ?? 0);
+        const limit = Number(input.limit ?? 25);
+        value = {
+          roles,
+          items: rows.slice(offset, offset + limit),
+          total: rows.length,
+          nextCursor: offset + limit < rows.length ? String(offset + limit) : null,
+          sequenceSummary: {
+            contacted: null,
+            active: null,
+            opened: 4,
+            clicked: null,
+            replied: 2,
+            interested: null,
+            sent: 6,
+            partial: true,
+          },
+        };
+      } else value = { roles, items, nextCursor: null };
+    } else if (method === "bootstrap") value = { ...bootstrap, thread: initialSnapshot };
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };
     else if (method === "links/companySites")
@@ -536,11 +758,34 @@ export async function mockRecruitingApp(
           botSections: [],
         },
       };
-    else if (method === "threads/get") value = snapshot;
-    else if (method === "threads/head") value = { threadId: snapshot.threadId, cursor: 0 };
+    else if (method === "threads/get") value = requestedSnapshot;
+    else if (method === "threads/head")
+      value = { threadId: requestedSnapshot.threadId, cursor: requestedSnapshot.cursor };
     else if (method === "threads/messages")
-      value = { threadId: snapshot.threadId, messages: [], olderCursor: null };
+      value = {
+        threadId: snapshot.threadId,
+        messages: initialSnapshot.messages,
+        olderCursor: null,
+      };
     else if (method === "threads/markRead") value = { ok: true };
+    else if (method === "artifacts/get" && options.sequenceDraft)
+      value = {
+        contentBase64: Buffer.from(
+          JSON.stringify({
+            kind: "wekruit.outreach-sequence",
+            version: 1,
+            roleTitle: "Platform Engineer",
+            recipients: [
+              {
+                name: "Avery",
+                email: "avery@example.test",
+                linkedinUrl: null,
+                steps: [{ dayOffset: 0, subject: "A role", body: "Original saved draft" }],
+              },
+            ],
+          }),
+        ).toString("base64"),
+      };
     else if (
       [
         "agentSkills/list",
@@ -661,10 +906,23 @@ export async function mockRecruitingApp(
         actorName: entry.actorName,
         roleTitle: entry.roleTitle,
       };
-    } else if (method === "recruiting/roleCampaign")
+    } else if (method === "recruiting/sequenceDraft")
+      value = {
+        roleId: appRoleId,
+        roleTitle: "Staff Platform Engineer",
+        mailboxes: [],
+        campaigns: [],
+        campaign: null,
+      };
+    else if (method === "recruiting/roleCampaign")
       value =
         options.multipleCampaigns && !input.campaignId
-          ? { status: "unavailable", campaign: null, selectionRequired: true }
+          ? {
+              status: "unavailable",
+              serverId: "fixture-campaign-source",
+              campaign: null,
+              selectionRequired: true,
+            }
           : {
               status: "ready",
               serverId: "fixture-campaign-source",

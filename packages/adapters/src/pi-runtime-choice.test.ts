@@ -199,7 +199,7 @@ describe("Pi choice asks", () => {
     const request = { ...runRequest, beforeAsk: async () => '"Which city?" → "Seoul"' };
     for await (const event of runtime.run(request, runContext)) events.push(event);
     expect(events.some((event) => event.type === "ask")).toBe(false);
-    expect(JSON.stringify(fakeAgentState.result)).toContain("Already answered");
+    expect(JSON.stringify(fakeAgentState.result)).toContain("already replied after this question");
   });
 
   it("gives the run's question check the planned searches", async () => {

@@ -1,3 +1,4 @@
+import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import { z } from "zod";
 import type {
   BackgroundJob,
@@ -34,6 +35,22 @@ const payloadSchemas = {
     attempt: z.number().int().nonnegative().optional(),
   }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
+  "recruiting_profile.project": z.strictObject({ pageEffectId: z.string().min(1) }),
+  "recruiting_inbox.project": z.union([
+    z.strictObject({ effectId: z.string().min(1) }),
+    z.strictObject({
+      observation: z.strictObject({
+        threadId: z.string().min(1),
+        roleId: z.string().min(1),
+        sourceId: z.string().min(1),
+        sourceRevision: z.number().int().nonnegative(),
+        botId: z.string().min(1),
+        campaignId: z.string().min(1),
+        observedAt: z.iso.datetime({ offset: true }),
+        emails: RecruitingCorrespondenceSchema.shape.emails.min(1).max(100),
+      }),
+    }),
+  ]),
   "recruiting_agent_run.wait": z.object({
     threadId: z.string().min(1),
     botId: z.string().min(1),
@@ -73,6 +90,15 @@ export async function dispatchBackgroundJob(
 
 export function runJobKey(runId: string): string {
   return `run:${runId}`;
+}
+
+export function recruitingCandidateProfilesJob(pageEffectId: string): BackgroundJob {
+  return {
+    name: "recruiting_profile.project",
+    payload: { pageEffectId },
+    replaceKey: `recruiting_profile.project:${pageEffectId}`,
+    keepExisting: true,
+  };
 }
 
 export function routineJobKey(routineId: string): string {

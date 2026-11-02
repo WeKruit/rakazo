@@ -72,7 +72,7 @@ it("restores a reloaded Notes tab when Contacts loads its person without adding 
     location = `${route.pathname}${route.search}`;
     return (
       <RecruitingDetailProvider value={detail}>
-        <ContactsTab {...target.role} />
+        <ContactsTab {...target.role!} />
       </RecruitingDetailProvider>
     );
   }

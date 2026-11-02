@@ -7,10 +7,18 @@ import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children?: ReactNode }) => children,
+  Plural: ({ value, other }: { value: number; other: string }) => other.replace("#", String(value)),
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
   }),
+}));
+
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@rakazo/ui-web", async (original) => ({
+  ...(await original<typeof import("@rakazo/ui-web")>()),
+  toast: toastMock,
+  Toaster: () => null,
 }));
 
 import { KruitDock } from "./KruitDock";
@@ -43,26 +51,79 @@ it("opens Kruit from the button when nothing waits", async () => {
   expect(onOpen).toHaveBeenCalledWith(KRUIT);
 });
 
-it("pops a card for what waits, with a count on the button, and opens its conversation", async () => {
+it("shows a small reminder and lists what waits only when asked", async () => {
   const { host, onOpen } = await render([
     group(KRUIT),
     group("Designer", { attention: "approval" }),
     group("Open role", { attention: "question" }),
     group("Quiet"),
   ]);
-  expect(find(host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 2 waiting");
-  const card = host.querySelector('[role="status"]')!;
-  expect(card.textContent).toContain("Needs approval");
-  expect(card.textContent).toContain("Needs your response");
-  expect(card.textContent).not.toContain("Quiet");
+  const reminder = host.querySelector('[role="status"]')!;
+  expect(reminder.textContent).toContain("2 items need your attention");
+  expect(host.textContent).not.toContain("Designer");
+  await act(async () => find(host, "2 items").click());
+  expect(host.textContent).toContain("Needs approval");
+  expect(host.textContent).toContain("Needs your response");
+  expect(host.textContent).not.toContain("Quiet");
   await act(async () => find(host, "Designer").click());
   expect(onOpen).toHaveBeenCalledWith("Designer");
-  expect(host.querySelector('[role="status"]')).toBeNull();
-  await act(async () => find(host, "Kruit").click());
+  expect(host.textContent).not.toContain("Open role");
   expect(host.querySelector('[role="status"]')).not.toBeNull();
 });
 
-it("in a conversation shows no button, only cards from other conversations", async () => {
+it("opens a single wait straight from the reminder or the Kruit button", async () => {
+  const { host, onOpen } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+  ]);
+  await act(async () => find(host, "1 items").click());
+  expect(onOpen).toHaveBeenCalledTimes(1);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
+  await act(async () => find(host, "Minimize").click());
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(find(host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
+  await act(async () => find(host, "Kruit").click());
+  expect(onOpen).toHaveBeenCalledTimes(2);
+  expect(onOpen).toHaveBeenLastCalledWith("Designer");
+});
+
+it("opens the list in one click from the Kruit button when several wait", async () => {
+  const { host } = await render([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  await act(async () => find(host, "Minimize").click());
+  await act(async () => find(host, "Kruit").click());
+  expect(host.textContent).toContain("Needs approval");
+  expect(host.textContent).toContain("Open role");
+});
+
+it("floats bottom right and remembers where it was dragged", async () => {
+  localStorage.clear();
+  const { host } = await render([group(KRUIT)]);
+  const dock = host.firstElementChild as HTMLElement;
+  expect(dock.style.right).toBe("16px");
+  expect(dock.style.bottom).toBe("16px");
+  const logo = find(host, "Kruit");
+  const fire = (type: string, x: number, y: number, target: EventTarget = window) =>
+    act(async () => {
+      target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
+    });
+  Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  await fire("pointerdown", 900, 700, logo);
+  await fire("pointermove", 700, 500);
+  await fire("pointerup", 700, 500);
+  expect(JSON.parse(localStorage.getItem("kruit-dock-position")!)).toMatchObject({
+    right: expect.any(Number),
+    bottom: expect.any(Number),
+  });
+  expect(dock.style.right).not.toBe("16px");
+  localStorage.clear();
+});
+
+it("in a conversation starts minimized and shows only waits from other conversations", async () => {
   const own = await render([group(KRUIT), group("Designer", { attention: "approval" })], {
     groupId: "Designer",
     chatting: true,
@@ -73,6 +134,32 @@ it("in a conversation shows no button, only cards from other conversations", asy
     [group(KRUIT), group("Designer"), group("Open role", { attention: "question" })],
     { groupId: "Designer", chatting: true },
   );
-  expect(other.host.querySelector('[role="status"]')?.textContent).toContain("Open role");
-  expect(find(other.host, "Kruit")).toBeUndefined();
+  expect(other.host.querySelector('[role="status"]')).toBeNull();
+  expect(find(other.host, "Kruit").getAttribute("aria-label")).toBe("Kruit, 1 waiting");
+  await act(async () => find(other.host, "Kruit").click());
+  expect(other.onOpen).toHaveBeenCalledWith("Open role");
+});
+
+it("pops a top-right toast when something newly waits, not for what already waited", async () => {
+  toastMock.mockClear();
+  host = document.createElement("div");
+  document.body.append(host);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const onOpen = vi.fn();
+  const root = createRoot(host);
+  const show = (groups: Group[]) =>
+    act(async () => root.render(<KruitDock groups={groups} onOpen={onOpen} />));
+  await show([group(KRUIT), group("Designer", { attention: "approval" })]);
+  expect(toastMock).not.toHaveBeenCalled();
+  await show([
+    group(KRUIT),
+    group("Designer", { attention: "approval" }),
+    group("Open role", { attention: "question" }),
+  ]);
+  expect(toastMock).toHaveBeenCalledTimes(1);
+  const [title, options] = toastMock.mock.calls[0]!;
+  expect(title).toBe("Open role");
+  expect(options.description).toBe("Needs your response");
+  options.action.onClick();
+  expect(onOpen).toHaveBeenCalledWith("Open role");
 });

@@ -12,7 +12,12 @@ vi.mock("@rakazo/db", async (original) => ({
 }));
 
 const ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
-const context = { userId: "user-1", spaceId: "space-1", runId: "run-1" } as never;
+const context = {
+  userId: "user-1",
+  spaceId: "space-1",
+  runId: "run-1",
+  signal: new AbortController().signal,
+} as never;
 const trusted = {
   actor: { userId: "user-1", spaceId: "space-1" },
   runId: "run-1",

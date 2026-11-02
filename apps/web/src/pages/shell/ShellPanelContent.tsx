@@ -5,6 +5,7 @@ import { Button } from "@rakazo/ui-web";
 import { Maximize2, Settings, X } from "lucide-react";
 import type { ComponentProps } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { writeComposerDraft } from "../../lib/composer-draft";
 import { withFeatureMessages } from "../../lib/i18n";
 import { computerLabel, computerPlaceholder, DesktopKindEmptyState } from "./computer-presentation";
 import { firstThreadRoute } from "./useShellRoster";
@@ -141,12 +142,31 @@ export function ShellPanelContent({
   } = model;
   return (
     <>
-      {recruitingDetail.current && activeSnapshot?.threadId ? (
+      {recruitingDetail.current ? (
         <RecruitingDetailPanel
           controller={recruitingDetail}
-          onAskChat={(text) => openRoleChat(text)}
+          onAskChat={(text) => {
+            const conversation = recruitingDetail.current?.role?.conversation;
+            if (!conversation) return;
+            const group = "groupId" in conversation ? conversation.groupId : undefined;
+            const bot = "botId" in conversation ? conversation.botId : undefined;
+            if ((group && group === model.groupId) || (bot && bot === model.active?.id))
+              openRoleChat(text);
+            else {
+              writeComposerDraft(group ? `group:${group}` : `bot:${bot}`, text);
+              recruitingDetail.close();
+              navigate(
+                group
+                  ? `/app/g/${encodeURIComponent(group)}?view=conversation`
+                  : `/app/${encodeURIComponent(bot!)}?view=conversation`,
+              );
+            }
+          }}
           onDraftReply={
-            boundRoleCrmMode && !crmMode
+            boundRoleCrmMode &&
+            !crmMode &&
+            activeSnapshot?.threadId &&
+            recruitingDetail.current.role?.roleId === currentWorkspaceRead?.workspace?.role.id
               ? ({ email, ...context }) =>
                   void draftCrmReply({
                     ...context,
@@ -319,6 +339,7 @@ export function ShellPanelContent({
           ) : null}
           {panel === "recruiting" && activeSnapshot?.threadId ? (
             <RecruitingPanel
+              onAskChat={(text) => openRoleChat(text)}
               workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
               threadId={activeSnapshot.threadId}

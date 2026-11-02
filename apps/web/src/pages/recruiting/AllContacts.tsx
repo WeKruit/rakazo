@@ -27,48 +27,80 @@ import {
   Input,
   Textarea,
 } from "@rakazo/ui-web";
-import { ChevronDown, ListFilter, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ChevronDown, ListFilter, RefreshCw, Search, X } from "lucide-react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { ListPager } from "../../components/ListPager";
 import { writeComposerDraft } from "../../lib/composer-draft";
 import { rpc } from "../../lib/rpc";
+import { AddToSequenceDialog } from "./AddToSequenceDialog";
+import { CompanyLogo } from "./CompanyLogo";
+import type { RecruitingDetailTarget } from "./detail";
+import { pendingDetailTarget, useRecruitingDetail } from "./detail";
+import { LinkedInIcon } from "./LinkedInIcon";
+import { PersonAvatar } from "./ProfileImage";
+import { ProfileMailIcon } from "./ProfileMailIcon";
+import { ProfileSourceIcon } from "./ProfileSourceIcon";
+import { profileImageUrl, profileLinkUrl } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
-import { statusText, TabLoading } from "./shared";
+import { RecruitingReadCacheContext, statusText, TabLoading, useKeyedRead } from "./shared";
 
 const PAGE_SIZE = 50;
 const EXPORT_MAX = 5000;
 const DAY_MS = 86_400_000;
 
-type Facets = Awaited<ReturnType<typeof rpc.recruiting.contacts.facets>>;
+function websiteHost(value: string | null) {
+  const url = profileImageUrl(value);
+  return url ? new URL(url).hostname : null;
+}
+
 type TextKey = "location" | "company" | "title" | "school" | "skills";
 type DateKey = "added" | "contacted" | "replied";
 type FlagKey = "contacted" | "replied" | "shortlisted";
 
 /** Everyone across the account's roles and CRM in one filterable list. */
 export function AllContacts({
+  accountKey,
   groups,
   refreshSignal,
+  spaceId,
 }: {
+  accountKey: string;
   groups: readonly Group[];
   refreshSignal: number;
+  spaceId?: string;
 }) {
   const { t } = useLingui();
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const urlQuery = searchParams.get("query") ?? "";
+  const detail = useRecruitingDetail();
+  const [query, setQuery] = useState(urlQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(urlQuery.trim());
+  useEffect(() => setQuery(urlQuery), [urlQuery]);
   const [filters, setFilters] = useState<RecruitingContactFilters>({});
   const [text, setText] = useState<Partial<Record<TextKey, string>>>({});
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
-  const [page, setPage] = useState<{ key: string; data: ListRecruitingContactsOutput }>();
-  const [failed, setFailed] = useState(false);
-  const [facets, setFacets] = useState<Facets>();
+  const cache = useContext(RecruitingReadCacheContext);
+  const [enroll, setEnroll] = useState(false);
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());
   const [dialog, setDialog] = useState<"tag" | "activity">();
   const [dialogText, setDialogText] = useState("");
   const [notice, setNotice] = useState<{ error: boolean; text: string }>();
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!location.state?.recruitingSearch) return;
+    setQuery(urlQuery);
+    setDebouncedQuery(urlQuery.trim());
+    setFilters({});
+    setText({});
+    setDebouncedText({});
+    setDays({});
+    setOffset(0);
+  }, [location.key]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -99,44 +131,71 @@ export function AllContacts({
     } satisfies RecruitingContactFilters;
   }, [filters, debouncedText, debouncedQuery, days]);
   const filterKey = JSON.stringify(request);
-  const readKey = JSON.stringify([filterKey, offset, reload, refreshSignal]);
+  const readKey = JSON.stringify([accountKey, filterKey, offset, reload, refreshSignal]);
 
   // A new filter starts from the first page with nothing selected.
   useEffect(() => {
     setOffset(0);
     setSelected(new Map());
   }, [filterKey]);
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    rpc.recruiting.contacts
-      .list({
+  const { data, loading, failed } = useKeyedRead(
+    readKey,
+    () =>
+      rpc.recruiting.contacts.list({
         filters: request,
         limit: PAGE_SIZE,
         ...(offset ? { cursor: String(offset) } : {}),
-      })
-      .then((data) => {
-        if (!cancelled) setPage({ key: readKey, data });
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [readKey]);
+      }),
+    { cache, key: `contacts:${JSON.stringify([accountKey, filterKey, offset])}` },
+  );
+  const { data: facets } = useKeyedRead(
+    JSON.stringify([accountKey, refreshSignal, reload]),
+    () => rpc.recruiting.contacts.facets({}),
+    { cache, key: `contact-facets:${accountKey}` },
+  );
 
-  useEffect(() => {
-    void rpc.recruiting.contacts
-      .facets({})
-      .then(setFacets)
-      .catch(() => undefined);
-  }, [refreshSignal, reload]);
-
-  const data = page?.data;
-  const loading = page?.key !== readKey && !failed;
   const rows = data?.items ?? [];
   const allOnPage = rows.length > 0 && rows.every((row) => selected.has(row.personKey));
+  function profileTarget(index: number): RecruitingDetailTarget | undefined {
+    const person = rows[index];
+    const home = person?.roles.find((role) => role.threadId && role.groupId && role.candidateKey);
+    if (!person) return undefined;
+    const crm = Boolean(home?.candidateKey?.startsWith("crm:"));
+    return {
+      view: "contact",
+      collection: { label: t`Contacts`, index, total: rows.length },
+      crm,
+      role:
+        home && spaceId
+          ? { roleId: home.id, spaceId, conversation: { groupId: home.groupId! } }
+          : null,
+      person: {
+        candidateId:
+          home?.candidateKey?.replace(/^crm:/, "") ?? person.noteKey.replace(/^crm:/, ""),
+        searchCandidateKey: home?.candidateKey && !crm ? home.candidateKey : undefined,
+        name: person.name ?? person.email ?? t`Unnamed`,
+        email: person.email,
+        title: person.title,
+        company: person.company,
+        location: person.location,
+        linkedinUrl: person.linkedinUrl,
+        savedProfile: person.savedProfile,
+        profileImageUrl: person.profileImageUrl,
+        companyLogoUrl: person.companyLogoUrl,
+        companyWebsiteUrl: person.companyWebsiteUrl,
+        roles: person.roles,
+      },
+      walk: (step) => profileTarget(index + step),
+    };
+  }
+  useEffect(() => {
+    if (!detail?.pending) return;
+    for (let index = 0; index < rows.length; index++) {
+      const target = profileTarget(index);
+      const restored = target && pendingDetailTarget(target, detail.pending);
+      if (restored) return detail.restore(restored);
+    }
+  }, [rows, detail?.pending, spaceId]);
   const productRoles = (facets?.roles ?? []).filter((role) => !role.id.startsWith("crm:"));
   const globalGroup = groups.find((group) => group.id.startsWith("recruiting-global-"));
 
@@ -273,7 +332,9 @@ export function AllContacts({
         ]),
       ].map((line) => line.map(cell).join(","));
       const url = URL.createObjectURL(
-        new Blob([`﻿${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8" }),
+        new Blob([`﻿${lines.join("\r\n")}`], {
+          type: "text/csv;charset=utf-8",
+        }),
       );
       const link = document.createElement("a");
       link.href = url;
@@ -323,7 +384,10 @@ export function AllContacts({
         return t`Tagged ${people.length} contacts.`;
       }
       for (const person of people)
-        await rpc.recruiting.notes.create({ candidateKey: person.noteKey, body: value });
+        await rpc.recruiting.notes.create({
+          candidateKey: person.noteKey,
+          body: value,
+        });
       return t`Logged for ${people.length} contacts.`;
     });
 
@@ -360,9 +424,9 @@ export function AllContacts({
   ];
 
   return (
-    <section aria-label={t`All contacts`} className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1 sm:max-w-sm">
+    <section aria-label={t`All contacts`} className="min-w-0 space-y-3">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 bg-background py-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-sm">
           <Search
             size={15}
             aria-hidden
@@ -376,6 +440,15 @@ export function AllContacts({
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t`Refresh contacts`}
+          disabled={loading || busy}
+          onClick={() => setReload((value) => value + 1)}
+        >
+          <RefreshCw size={15} aria-hidden />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="outline" />}>
             <ListFilter size={15} aria-hidden />
@@ -436,7 +509,12 @@ export function AllContacts({
             {(Object.keys(textLabels) as TextKey[]).map((key) => (
               <DropdownMenuItem
                 key={key}
-                onClick={() => setText((current) => ({ ...current, [key]: current[key] ?? "" }))}
+                onClick={() =>
+                  setText((current) => ({
+                    ...current,
+                    [key]: current[key] ?? "",
+                  }))
+                }
               >
                 {textLabels[key]}
               </DropdownMenuItem>
@@ -449,7 +527,10 @@ export function AllContacts({
                   <DropdownMenuRadioGroup
                     value={String(days[key] ?? 0)}
                     onValueChange={(value) =>
-                      setDays((current) => ({ ...current, [key]: Number(value) || undefined }))
+                      setDays((current) => ({
+                        ...current,
+                        [key]: Number(value) || undefined,
+                      }))
                     }
                   >
                     {[7, 30, 90].map((count) => (
@@ -523,12 +604,7 @@ export function AllContacts({
             </DropdownMenuSub>
             <DropdownMenuItem
               disabled={!people.length || !globalGroup}
-              onClick={() =>
-                askAssistant(
-                  t`Add these people to an outreach sequence. Show me the recipients and the email before anything is sent:` +
-                    `\n${peopleLines(people)}`,
-                )
-              }
+              onClick={() => setEnroll(true)}
             >
               <Trans>Add to sequence</Trans>
             </DropdownMenuItem>
@@ -539,6 +615,34 @@ export function AllContacts({
         </DropdownMenu>
       </div>
 
+      {people.length ? (
+        <div
+          role="toolbar"
+          aria-label={t`Selected contacts`}
+          className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2"
+        >
+          <span className="text-sm">
+            <Trans>{people.length} selected</Trans>
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!globalGroup || busy}
+            onClick={() => setEnroll(true)}
+          >
+            <Trans>Add to sequence</Trans>
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setDialog("tag")}>
+            <Trans>Add tag</Trans>
+          </Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void exportCsv()}>
+            <Trans>Export selected</Trans>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>
+            <Trans>Clear selection</Trans>
+          </Button>
+        </div>
+      ) : null}
       {activeChips.length || Object.keys(text).length ? (
         <div className="flex flex-wrap items-center gap-2">
           {(Object.keys(text) as TextKey[]).map((key) => (
@@ -554,7 +658,10 @@ export function AllContacts({
                 aria-label={textLabels[key]}
                 value={text[key] ?? ""}
                 onChange={(event) =>
-                  setText((current) => ({ ...current, [key]: event.target.value }))
+                  setText((current) => ({
+                    ...current,
+                    [key]: event.target.value,
+                  }))
                 }
               />
               <Button
@@ -619,14 +726,17 @@ export function AllContacts({
             )}
           </p>
           {rows.length ? (
-            <div className="overflow-x-auto rounded-xl border border-border">
+            <div className="hire-contact-table-scroll max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
               <table className="w-full min-w-[1100px] text-left text-sm" aria-busy={loading}>
-                <thead className="bg-muted text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
                   <tr>
                     <th className="w-10 px-3 py-2">
                       <Checkbox
                         aria-label={t`Select all on this page`}
                         checked={allOnPage}
+                        indeterminate={
+                          !allOnPage && rows.some((row) => selected.has(row.personKey))
+                        }
                         onCheckedChange={(checked) =>
                           setSelected((current) => {
                             const next = new Map(current);
@@ -641,6 +751,9 @@ export function AllContacts({
                     </th>
                     <th className="px-3 py-2 font-medium">
                       <Trans>Name</Trans>
+                    </th>
+                    <th className="px-3 py-2 font-medium">
+                      <Trans>Profiles</Trans>
                     </th>
                     <th className="px-3 py-2 font-medium">
                       <Trans>Roles</Trans>
@@ -666,12 +779,29 @@ export function AllContacts({
                     <th className="px-3 py-2 font-medium">
                       <Trans>Last contacted</Trans>
                     </th>
+                    <th className="px-3 py-2 font-medium">
+                      <Trans>Date added</Trans>
+                    </th>
+                    <th className="px-3 py-2 font-medium">
+                      <Trans>Last replied</Trans>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((person) => {
+                  {rows.map((person, index) => {
                     const name = person.name ?? person.email ?? t`Unnamed`;
-                    const home = person.roles.find((role) => role.groupId && role.candidateKey);
+                    const linkedinUrl = profileImageUrl(person.linkedinUrl);
+                    const socialLinks = new Map<string, string>();
+                    for (const [label, value] of [
+                      ["GitHub", person.savedProfile?.githubUrl],
+                      [t`Website`, person.savedProfile?.websiteUrl],
+                      ["Stack Overflow", person.savedProfile?.stackOverflowUrl],
+                    ]) {
+                      const href = profileLinkUrl(value);
+                      if (href && href !== linkedinUrl && !socialLinks.has(href))
+                        socialLinks.set(href, label!);
+                    }
+                    const target = profileTarget(index);
                     return (
                       <tr key={person.personKey} className="border-t border-border align-top">
                         <td className="px-3 py-2">
@@ -689,36 +819,63 @@ export function AllContacts({
                           />
                         </td>
                         <td className="px-3 py-2 font-medium">
-                          {home ? (
-                            <button
-                              type="button"
-                              className="text-left hover:underline"
-                              onClick={() =>
-                                navigate(
-                                  `/app/g/${encodeURIComponent(home.groupId!)}?${new URLSearchParams(
-                                    {
-                                      view: "contacts",
-                                      detail: `contact.${home.candidateKey!.replace(/^crm:/, "")}`,
-                                    },
-                                  )}`,
-                                )
-                              }
-                            >
-                              {name}
-                            </button>
-                          ) : (
-                            name
-                          )}
-                          {person.linkedinUrl ? (
-                            <a
-                              className="block text-xs font-normal text-muted-foreground hover:underline"
-                              href={person.linkedinUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              LinkedIn
-                            </a>
-                          ) : null}
+                          <div className="flex w-56 min-w-0 items-center gap-2">
+                            <PersonAvatar name={name} src={person.profileImageUrl} size="sm" />
+                            {target && detail ? (
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                                title={name}
+                                aria-haspopup="dialog"
+                                onClick={() => detail.open(target)}
+                              >
+                                {name}
+                              </button>
+                            ) : (
+                              <span className="min-w-0 flex-1 truncate" title={name}>
+                                {name}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1">
+                            {person.email ? (
+                              <a
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={`mailto:${encodeURIComponent(person.email)}`}
+                                aria-label={t`Email ${name}`}
+                              >
+                                <ProfileMailIcon className="size-4" />
+                              </a>
+                            ) : null}
+                            {linkedinUrl ? (
+                              <a
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={linkedinUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={t`Open ${name} on LinkedIn`}
+                              >
+                                <LinkedInIcon className="size-4" />
+                              </a>
+                            ) : null}
+                            {[...socialLinks].map(([href, label]) => (
+                              <a
+                                key={href}
+                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`${name} · ${label}`}
+                              >
+                                <ProfileSourceIcon href={href} className="size-4" />
+                              </a>
+                            ))}
+                            {!person.email && !linkedinUrl && socialLinks.size === 0 ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex max-w-56 flex-wrap gap-1">
@@ -734,6 +891,18 @@ export function AllContacts({
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex max-w-40 flex-wrap gap-1">
+                            {!person.tags.length ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setSelected(new Map([[person.personKey, person]]));
+                                  setDialog("tag");
+                                }}
+                              >
+                                <Trans>Add tags</Trans>
+                              </Button>
+                            ) : null}
                             {person.tags.map((tag) => (
                               <span
                                 key={tag}
@@ -745,13 +914,53 @@ export function AllContacts({
                           </div>
                         </td>
                         <td className="max-w-56 px-3 py-2">{person.title ?? "—"}</td>
-                        <td className="px-3 py-2">{person.company ?? "—"}</td>
-                        <td className="px-3 py-2">{person.school ?? "—"}</td>
+                        <td className="px-3 py-2">
+                          {person.company ? (
+                            <div className="flex w-40 min-w-0 items-center gap-2">
+                              <CompanyLogo
+                                name={person.company}
+                                src={person.companyLogoUrl}
+                                host={websiteHost(person.companyWebsiteUrl)}
+                                small
+                              />
+                              <span className="truncate" title={person.company}>
+                                {person.company}
+                              </span>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {person.school ? (
+                            <div className="flex w-40 min-w-0 items-center gap-2">
+                              <CompanyLogo
+                                name={person.school}
+                                src={person.schoolLogoUrl}
+                                host={websiteHost(person.schoolWebsiteUrl)}
+                                small
+                              />
+                              <span className="truncate" title={person.school}>
+                                {person.school}
+                              </span>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td className="px-3 py-2">{person.location ?? "—"}</td>
                         <td className="px-3 py-2">{statusLabel(person.status)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {person.lastContactedAt
                             ? new Date(person.lastContactedAt).toLocaleDateString()
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {person.addedAt ? new Date(person.addedAt).toLocaleDateString() : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          {person.lastRepliedAt
+                            ? new Date(person.lastRepliedAt).toLocaleDateString()
                             : "—"}
                         </td>
                       </tr>
@@ -762,28 +971,29 @@ export function AllContacts({
             </div>
           ) : null}
           {data.total > PAGE_SIZE ? (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!offset || loading}
-                onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
-              >
-                <Trans>Previous</Trans>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!data.nextCursor || loading}
-                onClick={() => setOffset(Number(data.nextCursor))}
-              >
-                <Trans>Next</Trans>
-              </Button>
+            <div className="sticky bottom-0 z-10 flex min-h-12 items-center gap-2 border-t bg-background py-2">
+              <ListPager
+                page={Math.floor(offset / PAGE_SIZE)}
+                pageCount={Math.ceil(data.total / PAGE_SIZE)}
+                onPage={(next) => setOffset(next * PAGE_SIZE)}
+                disabled={loading}
+              />
             </div>
           ) : null}
         </>
       ) : null}
 
+      <AddToSequenceDialog
+        open={enroll}
+        onOpenChange={setEnroll}
+        people={people.map((person) => ({
+          key: person.personKey,
+          name: person.name ?? person.email ?? t`Unnamed`,
+          email: person.email,
+          linkedinUrl: person.linkedinUrl,
+        }))}
+        onContinue={askAssistant}
+      />
       <Dialog
         open={Boolean(dialog)}
         onOpenChange={(open) => {

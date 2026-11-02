@@ -4,9 +4,21 @@ import {
   profileAssets,
   profileContentFields,
   profileImageUrl,
+  profileLinkUrl,
 } from "./profileAssets";
 
 const field = (label: string, value: string) => ({ label, value, sourceUrls: [] });
+
+it("retains supplied HTTP profile links while keeping images HTTPS-only and rejecting unsafe URLs", () => {
+  expect(profileLinkUrl("http://person.example/")).toBe("http://person.example/");
+  expect(profileImageUrl("http://person.example/photo.png")).toBeNull();
+  for (const value of [
+    "javascript:alert(1)",
+    "https://user:secret@person.example/",
+    "https://person.example/ more",
+  ])
+    expect(profileLinkUrl(value)).toBeNull();
+});
 
 describe("sourced profile images", () => {
   it("uses supplied image columns with explicit organization identities", () => {

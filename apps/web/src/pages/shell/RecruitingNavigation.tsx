@@ -1,24 +1,20 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
-import { Badge, Button, cn, Input, Skeleton } from "@rakazo/ui-web";
+import { Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
-  Bookmark,
   CalendarDays,
-  Clock,
-  FolderOpen,
   Inbox,
-  ListChecks,
   MessageSquare,
   MoreHorizontal,
   PanelLeft,
   PlusCircle,
   Search,
   Send,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ListPager } from "../../components/ListPager";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { memoWithLatestHandlers } from "../../lib/memo-latest";
 import { retryTransientRead } from "../../lib/read-retry";
@@ -27,10 +23,11 @@ import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruitin
 import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
-import { useSequenceLabels } from "../recruiting/SequenceStats";
+import { ARCHIVED_GROUPS_PER_PAGE } from "./useShellRoster";
 
 export type RecruitingWorkspaceView =
   | "home"
+  | "roles"
   | "conversation"
   | "results"
   | "brief"
@@ -40,6 +37,7 @@ export type RecruitingWorkspaceView =
   | "sequence"
   | "inbox"
   | "interview"
+  | "analytics"
   | "workflow"
   | "routines"
   | "tasks";
@@ -64,6 +62,11 @@ function sameAccount(previousKey: string, nextKey: string) {
 
 /** The supplied WeKruit /hire navigation over native recruiting conversations. */
 /** The role waits on the recruiter: a confirmation, an answer, or a paused reply. */
+/** Opened from its proxy; the server has not created it yet. */
+function creating(group: Group) {
+  return !group.threadId;
+}
+
 function waitsOnUser(group: Group) {
   return Boolean(group.attention ?? group.needsInput);
 }
@@ -72,9 +75,11 @@ function waitsOnUser(group: Group) {
 export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNavigation({
   groups,
   archivedGroups,
+  archivedGroupTotal,
+  archivedGroupPage,
+  onArchivedGroupPage,
   archivedOpen,
   groupId,
-  pendingRoleName,
   query,
   canCreateRole,
   onQueryChange,
@@ -94,10 +99,28 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   loading = false,
   onPrefetchRole,
   onGlobalChat,
+  viewHref,
+  kruitHref,
+  kruitDisabled,
+  inboxUnread,
+  onAllRoles,
+  onViewAllRoles,
+  onSearch,
+  compact = false,
 }: {
   /** The role list has not arrived yet. */
   loading?: boolean;
   onGlobalChat?: () => void;
+  viewHref: (view: RecruitingWorkspaceView) => string;
+  kruitHref: string;
+  kruitDisabled?: boolean;
+  inboxUnread?:
+    | { status: "loading" | "failed" }
+    | { status: "ready"; count: number; partial: boolean };
+  onAllRoles?: () => void;
+  onViewAllRoles?: () => void;
+  onSearch?: () => void;
+  compact?: boolean;
   /** Hover or focus on a role: start reading its conversation before the click. */
   onPrefetchRole?: (id: string) => void;
   crmContext?: {
@@ -110,10 +133,12 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   onOpenCrmRole?: (selection: CrmBrowseSelection, groupId?: string) => void;
   groups: Group[];
   archivedGroups: Group[];
+  /** Every archived role; `archivedGroups` holds only the page in view. */
+  archivedGroupTotal: number;
+  archivedGroupPage: number;
+  onArchivedGroupPage: (page: number) => void;
   archivedOpen: boolean;
   groupId?: string;
-  /** A role being created: shown at once, before the server returns it. */
-  pendingRoleName?: string | null;
   query: string;
   canOpenDashboard: boolean;
   canCreateRole: boolean;
@@ -131,6 +156,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
 }) {
   const { t, i18n } = useLingui();
   const [crmRetry, setCrmRetry] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
   type CrmRole = Extract<RecruitingCrmDataOutput, { operation: "roles" }>["items"][number] & {
     selection: CrmBrowseSelection;
     organizationName: string;
@@ -150,12 +176,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     failed?: boolean;
     unavailable?: boolean;
   }>();
-  type UnassignedSequence = Extract<
-    RecruitingCrmDataOutput,
-    { operation: "unassignedSequences" }
-  >["items"][number] & { key: string };
-  const [sequences, setSequences] = useState<{ key: string; items: UnassignedSequence[] }>();
-  const [sequencesOpen, setSequencesOpen] = useState(false);
   useEffect(() => {
     if (!crmContext) return;
     let cancelled = false;
@@ -187,7 +207,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
       .then(async (result) => {
         if (cancelled || invalidated()) return;
         if (result.operation !== "memberships") throw new Error("Unexpected CRM response");
-        const sequenceReads: Promise<UnassignedSequence[]>[] = [];
         const lists = await Promise.all(
           result.sources.flatMap((source) =>
             source.status === "ready"
@@ -208,22 +227,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                     roles.source.organizationId !== membership.organizationId
                   )
                     throw new Error("CRM scope changed");
-                  // Saved sequences with no role are optional context; a failed read hides them.
-                  sequenceReads.push(
-                    rpc.recruiting
-                      .crmData({ ...target, ...selection, operation: "unassignedSequences" })
-                      .then((value) =>
-                        value.operation === "unassignedSequences" &&
-                        value.source.serverId === source.serverId &&
-                        value.source.organizationId === membership.organizationId
-                          ? value.items.map((item) => ({
-                              ...item,
-                              key: JSON.stringify([selection, item.id]),
-                            }))
-                          : [],
-                      )
-                      .catch(() => []),
-                  );
                   return roles.items.map((role) => ({
                     ...role,
                     selection: { ...selection, crmRoleId: role.crmRoleId },
@@ -236,9 +239,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         if (cancelled || invalidated()) return;
         const roles = lists.flat();
         rememberRecruitingRead(cache, cacheKey, roles, epoch);
-        void Promise.all(sequenceReads).then((found) => {
-          if (!cancelled && !invalidated()) setSequences({ key: crmKey, items: found.flat() });
-        });
         setCrm({
           key: crmKey,
           roles,
@@ -254,22 +254,41 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     };
   }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
-  const currentSequences = sequences?.key === crmKey ? sequences.items : [];
-  const sequenceLabels = useSequenceLabels();
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
   // Roles waiting on the recruiter come first; the rest keep their order.
   const visibleGroups = groups
     .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    .sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)));
+    .sort(
+      (a, b) =>
+        Number(creating(b)) - Number(creating(a)) ||
+        Number(waitsOnUser(b)) - Number(waitsOnUser(a)) ||
+        Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+    )
+    .slice(0, query.trim() ? undefined : 5);
+  const unlinkedCrmRoles = (currentCrm?.roles ?? []).filter(
+    (role) =>
+      !groups.some(
+        (group) =>
+          group.crmRoleReference?.sourceId === role.selection.serverId &&
+          group.crmRoleReference.organizationId === role.selection.organizationId &&
+          group.crmRoleReference.crmRoleId === role.crmRoleId,
+      ) &&
+      `${role.roleLabel} ${role.clientLabel}`
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase()),
+  );
+  const shownCrmRoles = unlinkedCrmRoles.slice(
+    0,
+    query.trim() ? undefined : Math.max(0, 5 - visibleGroups.length),
+  );
   const titleCounts = new Map<string, number>();
   for (const group of groups) {
     const title = group.name.trim().toLocaleLowerCase();
     titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   }
   const destinations = [
-    { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
-    { view: "contacts", label: t`Contacts`, Icon: Users },
+    { view: "contacts", label: t`Candidates`, Icon: Users },
     { view: "sequence", label: t`Sequence`, Icon: Send },
     { view: "inbox", label: t`Inbox`, Icon: Inbox },
     { view: "interview", label: t`Interview`, Icon: CalendarDays },
@@ -278,6 +297,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     <div
       className="hire-navigation flex min-h-0 flex-1 flex-col"
       data-testid="recruiting-navigation"
+      data-compact={compact || undefined}
     >
       <div className="hire-brand-row">
         <button
@@ -295,71 +315,186 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         <button
           type="button"
           className="hire-sidebar-collapse"
-          aria-label={t`Collapse navigation`}
+          aria-label={compact ? t`Expand navigation` : t`Collapse navigation`}
+          title={compact ? t`Expand navigation` : t`Collapse navigation`}
           onClick={onCollapse}
         >
           <PanelLeft size={17} aria-hidden="true" />
         </button>
       </div>
+      {onSearch ? (
+        <Button
+          variant="outline"
+          aria-label={t`Search`}
+          title={t`Search`}
+          className="hire-global-search mx-2 mb-2 justify-start gap-2 text-muted-foreground"
+          onClick={onSearch}
+        >
+          <Search size={15} aria-hidden />
+          <span className="hire-nav-label">
+            <Trans>Search</Trans>
+          </span>
+          <span className="hire-search-shortcut ms-auto text-xs" aria-hidden>
+            ⌘ K / Ctrl K
+          </span>
+        </Button>
+      ) : null}
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
-        <Button variant="ghost" onClick={onGlobalChat}>
+        <Button
+          variant="ghost"
+          aria-current={
+            ![
+              "roles",
+              "shortlist",
+              "contacts",
+              "sequence",
+              "inbox",
+              "interview",
+              "analytics",
+            ].includes(view)
+              ? "page"
+              : undefined
+          }
+          role="link"
+          aria-label={RECRUITING_GLOBAL_AGENT_NAME}
+          title={RECRUITING_GLOBAL_AGENT_NAME}
+          render={<a href={kruitHref} />}
+          nativeButton={false}
+          disabled={kruitDisabled}
+          onClick={(event) => {
+            if (
+              event.button === 0 &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.shiftKey &&
+              !event.altKey &&
+              onGlobalChat
+            ) {
+              event.preventDefault();
+              onGlobalChat();
+            }
+          }}
+        >
           <MessageSquare size={18} aria-hidden="true" />
-          {RECRUITING_GLOBAL_AGENT_NAME}
-        </Button>
-        <Button variant="ghost" disabled={!canCreateRole} onClick={onNewRole}>
-          <PlusCircle size={18} aria-hidden="true" />
-          <Trans>New Role</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "brief" ? "page" : undefined}
-          onClick={() => onView("brief")}
-        >
-          <FolderOpen size={18} aria-hidden="true" />
-          <Trans>Job Brief</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "feedback" ? "page" : undefined}
-          onClick={() => onView("feedback")}
-        >
-          <Sparkles size={18} aria-hidden="true" />
-          <Trans>Client feedback</Trans>
+          <span className="hire-nav-label">{RECRUITING_GLOBAL_AGENT_NAME}</span>
         </Button>
         {destinations.map(({ view: target, label, Icon }) => (
           <Button
             key={target}
             variant="ghost"
-            aria-current={view === target ? "page" : undefined}
-            onClick={() => onView(target)}
+            aria-current={
+              view === target ||
+              (target === "contacts" && view === "shortlist") ||
+              (target === "sequence" && view === "analytics")
+                ? "page"
+                : undefined
+            }
+            role="link"
+            aria-label={label}
+            title={label}
+            aria-description={
+              target === "inbox"
+                ? inboxUnread?.status === "ready"
+                  ? `${inboxUnread.count} ${t`unread threads in saved mail`}${inboxUnread.partial ? ` · ${t`Partial coverage`}` : ""}`
+                  : inboxUnread?.status === "failed"
+                    ? t`Unread status unavailable`
+                    : undefined
+                : undefined
+            }
+            render={<a href={viewHref(target)} />}
+            nativeButton={false}
+            onClick={(event) => {
+              if (
+                event.button === 0 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                onView(target);
+              }
+            }}
           >
             <Icon size={18} aria-hidden="true" />
-            {label}
+            <span className="hire-nav-label">{label}</span>
+            {target === "inbox" && inboxUnread?.status === "ready" && inboxUnread.count > 0 ? (
+              <span
+                aria-hidden="true"
+                className="hire-inbox-badge ms-auto text-xs tabular-nums"
+                title={t`Unread threads in saved mail`}
+              >
+                {inboxUnread.count}
+                {inboxUnread.partial ? "+" : ""}
+              </span>
+            ) : target === "inbox" && inboxUnread?.status === "failed" ? (
+              <span
+                aria-hidden="true"
+                className="ms-auto text-muted-foreground"
+                title={t`Unread status unavailable`}
+              >
+                —
+              </span>
+            ) : null}
           </Button>
         ))}
       </nav>
-      <div className="hire-role-heading">
-        <Trans>Role teams</Trans>
+      <div className="hire-role-heading flex items-center justify-between">
+        <Trans>Roles</Trans>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t`Search roles`}
+            aria-expanded={searchOpen || !!query}
+            onClick={() => setSearchOpen((value) => !value)}
+          >
+            <Search size={15} aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t`New role`}
+            disabled={!canCreateRole}
+            onClick={onNewRole}
+          >
+            <PlusCircle size={16} aria-hidden="true" />
+          </Button>
+        </div>
       </div>
-      <div className="relative mx-1 mb-2">
-        <Search
-          className="pointer-events-none absolute start-3 top-2 text-muted-foreground"
-          size={15}
-          aria-hidden="true"
-        />
-        <Input
-          aria-label={t`Search roles`}
-          placeholder={t`Search roles`}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          className="h-8 rounded-lg border-sidebar-border bg-transparent ps-9 text-xs"
-        />
-      </div>
+      {searchOpen || query ? (
+        <div className="relative mx-1 mb-2">
+          <Search
+            className="pointer-events-none absolute start-3 top-2 text-muted-foreground"
+            size={15}
+            aria-hidden="true"
+          />
+          <Input
+            aria-label={t`Search roles`}
+            placeholder={t`Search roles`}
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            autoFocus
+            className="h-8 rounded-lg border-sidebar-border bg-transparent ps-9 text-xs"
+          />
+          {query ? (
+            <Button
+              className="absolute end-0 top-0"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={t`Clear role search`}
+              onClick={() => onQueryChange("")}
+            >
+              ×
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
         {loading ? (
           <div role="status" aria-label={t`Loading roles…`} className="space-y-1 px-2.5">
             {[0, 1, 2].map((row) => (
-              <div key={row} className="flex min-h-[39px] items-center gap-3">
+              <div key={row} className="flex min-h-9 items-center gap-3">
                 <Skeleton className="size-2 rounded-full" />
                 <Skeleton className="h-3 flex-1" />
               </div>
@@ -383,31 +518,23 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           </p>
         ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
-          {pendingRoleName ? (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                aria-current="page"
-                aria-busy="true"
-                disabled
-                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal disabled:opacity-100"
-              >
-                <span
-                  className="size-2 shrink-0 animate-pulse rounded-full bg-link"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate" dir="auto">
-                  {pendingRoleName}
-                </span>
-              </Button>
-            </div>
-          ) : null}
+          <Button
+            variant="ghost"
+            className="hire-role-button w-full justify-start px-2.5 text-sm font-normal"
+            aria-current={!groupId && !crmSelection ? "page" : undefined}
+            onClick={onAllRoles ?? (() => onView(view))}
+          >
+            <Users size={15} aria-hidden="true" />
+            <Trans>All roles</Trans>
+          </Button>
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
               <Button
                 variant="ghost"
-                className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
-                aria-current={group.id === groupId && view === "results" ? "page" : undefined}
+                className="hire-role-button h-auto min-h-9 min-w-0 flex-1 justify-start gap-3 rounded-lg px-2.5 py-1.5 text-start text-sm font-normal disabled:opacity-100"
+                aria-current={group.id === groupId ? "page" : undefined}
+                aria-busy={creating(group) || undefined}
+                disabled={creating(group)}
                 onMouseEnter={() => onPrefetchRole?.(group.id)}
                 onFocus={() => onPrefetchRole?.(group.id)}
                 onClick={() => {
@@ -425,7 +552,29 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   onRoleMenu(group.id, event.currentTarget, { x: event.clientX, y: event.clientY });
                 }}
               >
-                <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
+                {creating(group) || waitsOnUser(group) ? (
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full bg-warning",
+                      creating(group) && "animate-pulse",
+                    )}
+                    title={
+                      creating(group)
+                        ? t`Creating role…`
+                        : group.attention === "approval"
+                          ? t`Needs confirmation`
+                          : t`Needs input`
+                    }
+                  >
+                    <span className="sr-only">
+                      {creating(group)
+                        ? t`Creating role…`
+                        : group.attention === "approval"
+                          ? t`Needs confirmation`
+                          : t`Needs input`}
+                    </span>
+                  </span>
+                ) : null}
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
@@ -437,23 +586,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   {(titleCounts.get(group.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? (
                     <time
                       dateTime={group.createdAt}
-                      className="block truncate text-xs font-normal text-muted-foreground"
+                      className="ms-1 text-xs font-normal text-muted-foreground"
                     >
                       {new Date(group.createdAt).toLocaleString(i18n.locale, {
                         dateStyle: "medium",
                         timeStyle: "short",
                       })}
                     </time>
-                  ) : null}
-                  {/* Below the name, so a long status never squeezes the role out of view. */}
-                  {waitsOnUser(group) ? (
-                    <Badge variant="secondary" className="mt-1 block w-fit font-normal">
-                      {group.attention === "approval" ? (
-                        <Trans>Needs confirmation</Trans>
-                      ) : (
-                        <Trans>Needs input</Trans>
-                      )}
-                    </Badge>
                   ) : null}
                 </span>
                 {waitsOnUser(group) ? null : group.unread ? (
@@ -467,6 +606,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               <Button
                 variant="ghost"
                 size="icon-sm"
+                disabled={creating(group)}
                 aria-label={t`Actions for ${group.name}`}
                 onClick={(event) => {
                   const bounds = event.currentTarget.getBoundingClientRect();
@@ -477,79 +617,43 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               </Button>
             </div>
           ))}
-          {currentCrm?.roles
-            .filter(
-              (role) =>
-                !groups.some(
-                  (group) =>
-                    group.crmRoleReference?.sourceId === role.selection.serverId &&
-                    group.crmRoleReference.organizationId === role.selection.organizationId &&
-                    group.crmRoleReference.crmRoleId === role.crmRoleId,
-                ) &&
-                `${role.roleLabel} ${role.clientLabel}`
-                  .toLocaleLowerCase()
-                  .includes(query.trim().toLocaleLowerCase()),
-            )
-            .map((role) => (
-              <div key={JSON.stringify(role.selection)} className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
-                  disabled={currentCrm.loading}
-                  aria-current={
-                    crmSelection?.serverId === role.selection.serverId &&
-                    crmSelection.organizationId === role.selection.organizationId &&
-                    crmSelection.crmRoleId === role.crmRoleId
-                      ? "page"
-                      : undefined
-                  }
-                  onClick={() => onOpenCrmRole?.(role.selection)}
-                >
-                  <span className="size-2 shrink-0 rounded-full bg-link" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate" dir="auto">
-                    {role.roleLabel} · {role.clientLabel}
-                  </span>
-                </Button>
-              </div>
-            ))}
+          {shownCrmRoles.map((role) => (
+            <div key={JSON.stringify(role.selection)} className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                className="hire-role-button h-auto min-h-9 min-w-0 flex-1 justify-start gap-3 rounded-lg px-2.5 py-1.5 text-start text-sm font-normal"
+                disabled={currentCrm?.loading}
+                aria-current={
+                  crmSelection?.serverId === role.selection.serverId &&
+                  crmSelection.organizationId === role.selection.organizationId &&
+                  crmSelection.crmRoleId === role.crmRoleId
+                    ? "page"
+                    : undefined
+                }
+                onClick={() => onOpenCrmRole?.(role.selection)}
+              >
+                <span className="min-w-0 flex-1 truncate" dir="auto">
+                  {role.roleLabel} · {role.clientLabel}
+                </span>
+              </Button>
+            </div>
+          ))}
         </nav>
-        {currentSequences.length > 0 ? (
-          <div className="mt-3 border-t border-border pt-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-between text-muted-foreground"
-              aria-expanded={sequencesOpen}
-              onClick={() => setSequencesOpen((open) => !open)}
-            >
-              <Trans>Sequences without a role</Trans>
-              <span>{currentSequences.length}</span>
-            </Button>
-            {sequencesOpen ? (
-              <ul aria-label={t`Sequences without a role`} className="space-y-1">
-                {currentSequences.map((sequence) => {
-                  const { people, replied } = sequence;
-                  return (
-                    <li key={sequence.key} className="rounded-lg px-3 py-2">
-                      <span className="block truncate text-sm" dir="auto">
-                        {sequence.name}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {[
-                          sequence.status ? sequenceLabels.sequence[sequence.status] : null,
-                          t`${people} people`,
-                          sequenceLabels.replies(replied),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
+        {query && !visibleGroups.length && !shownCrmRoles.length && !loading ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">
+            <Trans>No roles found</Trans>
+          </p>
         ) : null}
-        {archivedGroups.length > 0 ? (
+        {groups.length + unlinkedCrmRoles.length > 5 ? (
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-sm text-muted-foreground"
+            onClick={onViewAllRoles}
+          >
+            <Trans>View all roles</Trans>
+          </Button>
+        ) : null}
+        {archivedGroupTotal > 0 || archivedGroups.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">
             <Button
               variant="ghost"
@@ -559,7 +663,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
               onClick={onToggleArchived}
             >
               <Trans>Archived</Trans>
-              <span>{archivedGroups.length}</span>
+              <span>{Math.max(archivedGroupTotal, archivedGroups.length)}</span>
             </Button>
             {archivedOpen
               ? archivedGroups.map((group) => (
@@ -587,26 +691,15 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   </fieldset>
                 ))
               : null}
+            {archivedOpen ? (
+              <ListPager
+                page={archivedGroupPage}
+                pageCount={Math.ceil(archivedGroupTotal / ARCHIVED_GROUPS_PER_PAGE)}
+                onPage={onArchivedGroupPage}
+              />
+            ) : null}
           </div>
         ) : null}
-      </div>
-      <div className="hire-sidebar-bottom">
-        <Button
-          variant="ghost"
-          aria-current={view === "routines" ? "page" : undefined}
-          onClick={() => onView("routines")}
-        >
-          <Clock size={17} aria-hidden="true" />
-          <Trans>Routines</Trans>
-        </Button>
-        <Button
-          variant="ghost"
-          aria-current={view === "tasks" ? "page" : undefined}
-          onClick={() => onView("tasks")}
-        >
-          <ListChecks size={17} aria-hidden="true" />
-          <Trans>Tasks</Trans>
-        </Button>
       </div>
     </div>
   );

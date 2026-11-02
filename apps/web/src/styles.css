@@ -77,14 +77,29 @@ body,
 }
 
 /* The supplied WeKruit /hire workspace; native developer views keep their own chrome. */
+/* Every pane header shares one height so the divider reads as a single line. */
+[data-product-view="recruiting"] {
+  --hire-header-h: 64px;
+}
+[data-product-view="recruiting"] .hire-pane-header {
+  box-sizing: border-box;
+  height: var(--hire-header-h);
+  flex-shrink: 0;
+  padding-block: 0;
+  border-bottom: 1px solid var(--border);
+}
 [data-product-view="recruiting"] .hire-navigation {
-  padding: 18px 12px 12px;
+  padding: 0 12px 12px;
 }
 [data-product-view="recruiting"] .hire-brand-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 7px 31px;
+  box-sizing: border-box;
+  height: var(--hire-header-h);
+  margin: 0 -12px 16px;
+  padding: 0 19px;
+  border-bottom: 1px solid var(--border);
 }
 [data-product-view="recruiting"] .hire-brand {
   display: flex;
@@ -122,12 +137,13 @@ body,
 [data-product-view="recruiting"] .hire-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 [data-product-view="recruiting"] .hire-nav > button,
+[data-product-view="recruiting"] .hire-nav > a,
 [data-product-view="recruiting"] .hire-sidebar-bottom > button {
   width: 100%;
-  height: 39px;
+  height: 34px;
   justify-content: flex-start;
   gap: 12px;
   padding: 0 10px;
@@ -141,7 +157,45 @@ body,
   flex-shrink: 0;
   stroke-width: 1.9;
 }
+@media (min-width: 768px) {
+  [data-product-view="recruiting"] .hire-navigation[data-compact] {
+    padding: 0 10px 12px;
+  }
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-brand-row {
+    height: auto;
+    min-height: 92px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 -10px 12px;
+    padding: 12px 0;
+  }
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-brand > span,
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-nav-label,
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-search-shortcut,
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-role-heading,
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-role-heading ~ div {
+    display: none;
+  }
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-nav > a,
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-global-search {
+    position: relative;
+    justify-content: center;
+    min-width: 0;
+    height: 40px;
+    margin-inline: 0;
+    padding: 0;
+  }
+  [data-product-view="recruiting"] .hire-navigation[data-compact] .hire-inbox-badge {
+    position: absolute;
+    inset-inline-end: 1px;
+    top: 1px;
+    font-size: 9px;
+    line-height: 12px;
+  }
+}
 [data-product-view="recruiting"] .hire-nav > button[aria-current="page"],
+[data-product-view="recruiting"] .hire-nav > a[aria-current="page"],
 [data-product-view="recruiting"] .hire-role-button[aria-current="page"],
 [data-product-view="recruiting"] .hire-sidebar-bottom > button[aria-current="page"] {
   background: var(--sidebar-accent);
@@ -1275,14 +1329,34 @@ body,
   }
 }
 
-/* Contacts keeps wheel, touch and keyboard scrolling without nested scrollbar tracks. */
-.hire-contacts-view,
-.hire-contacts-view .candidate-viewport {
+/* The page keeps its scroll position; table controls appear on pointer or keyboard interaction. */
+.hire-contacts-view {
   scrollbar-width: none;
 }
-.hire-contacts-view::-webkit-scrollbar,
-.hire-contacts-view .candidate-viewport::-webkit-scrollbar {
+.hire-contacts-view::-webkit-scrollbar {
   display: none;
+}
+
+.hire-contact-table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.hire-contact-table-scroll:hover,
+.hire-contact-table-scroll:focus-within {
+  scrollbar-color: var(--scrollbar) transparent;
+}
+.hire-contact-table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.hire-contact-table-scroll::-webkit-scrollbar-track,
+.hire-contact-table-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.hire-contact-table-scroll:hover::-webkit-scrollbar-thumb,
+.hire-contact-table-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 3px;
 }
 
 /* A link typed or pasted into the chat composer. */

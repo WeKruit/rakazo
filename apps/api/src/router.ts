@@ -77,9 +77,12 @@ import {
   enqueueTakeoverContinuation,
   ensureComputerWorkspaceLayout,
   estimateCatalogTokenCostUsd,
+  executeRecruitingSequence,
   expireComputerControl,
   fillRecruitingRoleProfiles,
   forgetBotSecret,
+  getGlobalRecruitingInbox,
+  getGlobalRecruitingInboxSummary,
   hasActiveComputerControl,
   hasPlatformMcpCredential,
   hostCredentialSource,
@@ -145,7 +148,7 @@ import {
   validateStoredModelAuth,
   verifyMcpInstall,
 } from "@rakazo/adapters";
-import type { CrmMembershipReads } from "@rakazo/adapters/recruiting-reads";
+import type { CrmMembershipReads, CrmRoleListReads } from "@rakazo/adapters/recruiting-reads";
 import type { Auth, FirstPartySessionConfig, OidcConfig } from "@rakazo/auth";
 import {
   createOwnerVouchedAccount,
@@ -176,6 +179,7 @@ import {
   ComputerCommandSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
+  MailReplySendAnswerSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   parseTicketRef,
   SIDEBAR_PREVIEW_MAX_LENGTH,
@@ -239,17 +243,22 @@ import {
   issueMessagingLinkCode,
   listBoards,
   listRecruitingContacts,
+  listRecruitingInbox,
+  listRecruitingShortlistDates,
   listRoutinesDto,
   listSpaceBackupModels,
   listTicketComments,
   lockOwnedGroup,
   mapRoutine,
+  markRecruitingInbox,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   openVerifiedRecruitingCrmWorkspace,
   Prisma,
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
+  readRecruitingAnalytics,
+  readRecruitingAnalyticsPeople,
   recordClosedAskAnswer,
   recordDesktopActivity,
   recruitingContactFacets,
@@ -379,7 +388,7 @@ import { listRoutineRuns } from "./routine-runs.js";
 import { readRunTrace } from "./run-trace.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
-import { querySpaceSearch } from "./search.js";
+import { queryRecruitingSearchTargets, querySpaceSearch } from "./search.js";
 import { withSerializableRetry } from "./serializable-retry.js";
 import type { UpdaterProxyConfig } from "./server-update.js";
 import {
@@ -682,6 +691,8 @@ export interface RouterDeps {
   ticketChanges: TicketChangeNotifier;
   auth: Auth;
   jobs: JobPublisher;
+  /** Tracked derived-cache writes; never delay a verified provider response. */
+  deferSequenceObservation?: (work: () => Promise<void>) => void;
   sandbox: SandboxProvider;
   memory: MemoryStore;
   memoryProviders: MemoryProviderResolver;
@@ -1550,12 +1561,16 @@ export function createRouter(deps: RouterDeps) {
           create: {
             id: "default",
             ownerUserId: context.actor.userId,
+            sendingMailboxLimit: input.sendingMailboxLimit ?? 2,
             signupsEnabled: input.signupsEnabled ?? true,
             signupAllowlist: (input.signupAllowlist ?? []).join(","),
             signupPolicyInitialized: true,
             computerHost: input.computerHost ?? undefined,
           },
           update: {
+            ...(input.sendingMailboxLimit === undefined
+              ? {}
+              : { sendingMailboxLimit: input.sendingMailboxLimit }),
             ...(input.signupsEnabled === undefined ? {} : { signupsEnabled: input.signupsEnabled }),
             ...(input.signupAllowlist ? { signupAllowlist: input.signupAllowlist.join(",") } : {}),
             ...(input.signupsEnabled === undefined && input.signupAllowlist === undefined
@@ -2489,8 +2504,9 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       page: authed.groups.page.handler(async ({ context, input }) => {
+        const limit = input.limit ?? 200;
         const [items, total] = await Promise.all([
-          groupRepos.listGroups(context.actor, { ...input, limit: 200 }),
+          groupRepos.listGroups(context.actor, { ...input, limit }),
           deps.prisma.chatGroup.count({
             where: {
               spaceId: context.actor.spaceId,
@@ -2501,7 +2517,8 @@ export function createRouter(deps: RouterDeps) {
         ]);
         // Some persisted groups have fewer than two active members and are filtered out.
         // Advance by database rows, not returned rows, so a sparse page is not the last page.
-        return { items, nextOffset: input.offset + 200 < total ? input.offset + 200 : null };
+        const next = input.offset + limit;
+        return { items, nextOffset: next < total ? next : null, total };
       }),
       list: authed.groups.list.handler(async ({ context }) =>
         groupRepos.listGroups(context.actor, { limit: 200 }),
@@ -2673,6 +2690,16 @@ export function createRouter(deps: RouterDeps) {
         });
         return { ...snapshot, messages };
       }),
+      setEffort: authed.threads.setEffort.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
+        await deps.prisma.thread.update({
+          where: { id: target.threadId },
+          data: { effortMode: input.mode === "fast" ? null : input.mode },
+        });
+        return { ok: true as const };
+      }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
@@ -2685,6 +2712,7 @@ export function createRouter(deps: RouterDeps) {
           input.around,
           input.includePeerRuns,
           input.includePeerReceipts,
+          input.mailReplyFor,
         );
         return {
           ...page,
@@ -3199,6 +3227,10 @@ export function createRouter(deps: RouterDeps) {
           username: input.username,
         });
         if (!answered) {
+          if (MailReplySendAnswerSchema.safeParse(input.answer).success)
+            throw new ORPCError("CONFLICT", {
+              message: "This reply is no longer awaiting approval",
+            });
           // The wait already ended (it expired or was stopped). The answer starts the work the
           // way a message does, replying to the card so the run still sees the question.
           const closed = await findClosedAskAnswer(deps.prisma, {
@@ -3969,12 +4001,89 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      globalInboxSummary: authed.recruiting.globalInboxSummary.handler(
+        async ({ context, input }) => {
+          if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
+          return getGlobalRecruitingInboxSummary(
+            { prisma: deps.prisma, stillAuthorized: context.stillAuthorized },
+            context.actor,
+          );
+        },
+      ),
+      globalInbox: authed.recruiting.globalInbox.handler(async ({ context, input }) => {
+        if (input.spaceId !== context.actor.spaceId) throw new ORPCError("NOT_FOUND");
+        return getGlobalRecruitingInbox(
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            jobs: deps.jobs,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+          },
+          context.actor,
+          input,
+        );
+      }),
+      inboxReadState: authed.recruiting.inboxReadState.handler(async ({ context, input }) => {
+        if (
+          input.spaceId !== context.actor.spaceId ||
+          (context.stillAuthorized && !(await context.stillAuthorized()))
+        )
+          throw new ORPCError("NOT_FOUND");
+        const result = await listRecruitingInbox(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
+      }),
+      markInboxThread: authed.recruiting.markInboxThread.handler(async ({ context, input }) => {
+        if (
+          input.spaceId !== context.actor.spaceId ||
+          (context.stillAuthorized && !(await context.stillAuthorized()))
+        )
+          throw new ORPCError("NOT_FOUND");
+        await markRecruitingInbox(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return { ok: true as const };
+      }),
+      analyticsPeople: authed.recruiting.analyticsPeople.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const result = await readRecruitingAnalyticsPeople(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
+      }),
+      analytics: authed.recruiting.analytics.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const result = await readRecruitingAnalytics(deps.prisma, context.actor, input);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return result;
+      }),
+      sequenceDraft: authed.recruiting.sequenceDraft.handler(async ({ context, input }) =>
+        executeRecruitingSequence(
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            stillAuthorized: async () => !context.stillAuthorized || context.stillAuthorized(),
+            deferSequenceObservation: deps.deferSequenceObservation,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input.command,
+        ),
+      ),
       accountView: authed.recruiting.accountView.handler(async ({ context, input }) =>
         readRecruitingAccountView(
           {
             prisma: deps.prisma,
             artifacts: deps.artifacts,
             connectors: deps.connectors,
+            jobs: deps.jobs,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
@@ -4050,6 +4159,7 @@ export function createRouter(deps: RouterDeps) {
           { limit: input.limit, cursor: input.cursor },
           {
             connectors: deps.connectors,
+            jobs: deps.jobs,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
@@ -4061,6 +4171,7 @@ export function createRouter(deps: RouterDeps) {
         getRecruitingRoleCampaign(
           {
             prisma: deps.prisma,
+            deferSequenceObservation: deps.deferSequenceObservation,
             connectors: deps.connectors,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
@@ -4069,7 +4180,12 @@ export function createRouter(deps: RouterDeps) {
           },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
-          { campaignId: input.campaignId, campaignOffset: input.campaignOffset },
+          {
+            campaignId: input.campaignId,
+            campaignOffset: input.campaignOffset,
+            leadCursor: input.leadCursor,
+            serverId: input.serverId,
+          },
         ),
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
@@ -4120,9 +4236,11 @@ export function createRouter(deps: RouterDeps) {
           return target;
         };
         const crmMemberships: CrmMembershipReads = new Map();
+        const crmRoleLists: CrmRoleListReads = new Map();
         const readDeps = async (group: { id: string }, signal: AbortSignal) => ({
           prisma: deps.prisma,
           crmMemberships,
+          crmRoleLists,
           artifacts: deps.artifacts,
           connectors: deps.connectors,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
@@ -4138,20 +4256,16 @@ export function createRouter(deps: RouterDeps) {
               (await targetOf(group)).threadId === group.threadId
                 ? getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: group.threadId })
                 : null,
-            shortlistPage: (roleId, cursor) =>
-              listRecruitingCandidates(deps, actor, {
-                roleId,
-                shortlisted: true,
-                sort: "recent",
-                limit: 200,
-                ...(cursor ? { cursor } : {}),
-              }),
+            shortlist: (roleId) => listRecruitingShortlistDates(deps.prisma, actor, roleId),
             candidates: async (group, signal) => {
               const { target, ...read } = await readDeps(group, signal);
-              return getRecruitingRoleCandidates(read, actor, target, {
-                threadId: group.threadId,
-                limit: 1,
-              });
+              return getRecruitingRoleCandidates(
+                read,
+                actor,
+                target,
+                { threadId: group.threadId, limit: 1 },
+                { summary: true },
+              );
             },
             campaign: async (group, signal) => {
               const { target, artifacts: _, ...read } = await readDeps(group, signal);
@@ -4206,7 +4320,9 @@ export function createRouter(deps: RouterDeps) {
         ),
       ),
       fillRoleProfiles: authed.recruiting.fillRoleProfiles.handler(({ context, input }) =>
-        fillRecruitingRoleProfiles(deps.prisma, context.actor, input.roleId),
+        fillRecruitingRoleProfiles(deps.prisma, context.actor, input.roleId, undefined, {
+          dryRun: input.dryRun,
+        }),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
@@ -7187,6 +7303,14 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     search: {
+      recruitingTargets: authed.search.recruitingTargets.handler(async ({ context, input }) => {
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        const items = await queryRecruitingSearchTargets(deps.prisma, context.actor, input.q);
+        if (context.stillAuthorized && !(await context.stillAuthorized()))
+          throw new ORPCError("NOT_FOUND");
+        return { items };
+      }),
       query: authed.search.query.handler(async ({ context, input }) => ({
         hits: await querySpaceSearch(deps.prisma, context.actor, input.q),
       })),
@@ -7898,6 +8022,7 @@ async function computerScreenContext(
 async function deploymentDto(prisma: PrismaClient, sandboxProvider: string) {
   const settings = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
   return {
+    sendingMailboxLimit: settings?.sendingMailboxLimit ?? 2,
     ownerUserId: settings?.ownerUserId ?? null,
     signupsEnabled: settings?.signupsEnabled ?? true,
     signupAllowlist: settings?.signupAllowlist

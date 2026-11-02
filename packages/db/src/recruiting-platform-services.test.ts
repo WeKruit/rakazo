@@ -302,8 +302,34 @@ describe("ensurePlatformServices", () => {
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: [expect.objectContaining({ botId: "scheduling-bot" })],
+        data: [expect.objectContaining({ botId: "scheduling-bot", serverId: "calendar" })],
       }),
     );
+  });
+
+  it("connects every crew to the product's outreach mail, with no key from the user", async () => {
+    // The crew lookup for this service includes Scheduling, so the fixture answers with it.
+    const f = fixture({ scheduling: [{ id: "scheduling-bot" }] });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.mcpServer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        slug: "instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+      }),
+    });
+    expect(
+      f.tx.mcpServer.create.mock.calls.find(([c]) => c.data.slug === "instantly")?.[0].data,
+    ).not.toHaveProperty("secretId");
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: ["scheduling-bot"].map((botId) =>
+        expect.objectContaining({
+          botId,
+          serverId: "instantly",
+          allowAllTools: false,
+          allowedTools: ["get_email", "list_emails", "reply_to_email"],
+        }),
+      ),
+      skipDuplicates: true,
+    });
   });
 });

@@ -51,6 +51,7 @@ import {
   CreateRoutineInput,
   CreateScratchpadItemInput,
   DeploymentSettingsSchema,
+  EffortModeSchema,
   ExportManifestSchema,
   ExternalConversationPolicySchema,
   GroupDetailSchema,
@@ -182,6 +183,12 @@ import {
   RecruitingAccountViewOutputSchema,
 } from "./recruiting-account.js";
 import {
+  RecruitingAnalyticsInputSchema,
+  RecruitingAnalyticsOutputSchema,
+  RecruitingAnalyticsPeopleInputSchema,
+  RecruitingAnalyticsPeopleOutputSchema,
+} from "./recruiting-analytics.js";
+import {
   ListRecruitingContactsInput,
   ListRecruitingContactsOutput,
   RecruitingContactFacetsOutput,
@@ -189,23 +196,38 @@ import {
 } from "./recruiting-contacts.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
 import {
+  GlobalRecruitingInboxInputSchema,
+  GlobalRecruitingInboxOutputSchema,
+  GlobalRecruitingInboxSummaryOutputSchema,
+} from "./recruiting-global-inbox.js";
+import {
+  ListRecruitingInboxInputSchema,
+  MarkRecruitingInboxInputSchema,
+  RecruitingInboxReadStateSchema,
+} from "./recruiting-inbox.js";
+import {
   RecruitingSchedulingPlanInputSchema,
   RecruitingSchedulingPlanSchema,
   RecruitingSchedulingSlotSchema,
 } from "./recruiting-scheduling.js";
+import {
+  RecruitingSequenceInputSchema,
+  RecruitingSequenceOutputSchema,
+} from "./recruiting-sequences.js";
 import {
   RoutineHistorySchema,
   RoutineRunCursorSchema,
   RunsListOutputSchema,
   RunTraceSchema,
 } from "./runs.js";
-import { SearchQueryOutputSchema } from "./search.js";
+import { RecruitingSearchTargetsOutputSchema, SearchQueryOutputSchema } from "./search.js";
 
 const listPageFields = { offset: z.number().int().min(0).max(1000000).optional() };
 
 const sidebarPage = z.object({
   offset: z.number().int().min(0).default(0),
   archived: z.boolean().default(false),
+  limit: z.number().int().min(1).max(200).optional(),
 });
 
 const TurnMs = z.number().int().nonnegative().max(86_400_000);
@@ -263,6 +285,19 @@ export const RecruitingQuestionSchema = z.strictObject({
   canAnswer: z.boolean(),
 });
 export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
+
+export const MailReplyMessageFilterSchema = z
+  .strictObject({
+    sourceId: Id,
+    mailbox: z.string().trim().toLowerCase().min(1).max(512),
+    threadId: Id.optional(),
+    emailIds: z.array(Id).min(1).max(50).optional(),
+  })
+  .refine(
+    (input) => Boolean(input.threadId || input.emailIds?.length),
+    "Provide an original email or mail thread",
+  );
+export type MailReplyMessageFilter = z.infer<typeof MailReplyMessageFilterSchema>;
 
 const threadTarget = z
   .object({
@@ -420,6 +455,7 @@ export const appContract = {
     update: oc
       .input(
         z.object({
+          sendingMailboxLimit: z.number().int().min(1).max(100).optional(),
           signupsEnabled: z.boolean().optional(),
           signupAllowlist: z.array(z.string()).optional(),
           computerHost: z.enum(["docker", "this-mac"]).nullable().optional(),
@@ -539,11 +575,13 @@ export const appContract = {
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),
-    page: oc
-      .input(sidebarPage)
-      .output(
-        z.object({ items: z.array(GroupSchema).max(200), nextOffset: z.number().int().nullable() }),
-      ),
+    page: oc.input(sidebarPage).output(
+      z.object({
+        items: z.array(GroupSchema).max(200),
+        nextOffset: z.number().int().nullable(),
+        total: z.number().int().nonnegative().optional(),
+      }),
+    ),
     list: oc.output(z.array(GroupSchema).max(200)),
     listArchived: oc.output(z.array(GroupSchema).max(200)),
     get: oc.input(groupId).output(GroupDetailSchema),
@@ -574,6 +612,7 @@ export const appContract = {
       .input(
         threadTarget.safeExtend({
           before: z.number().int().nonnegative().optional(),
+          mailReplyFor: MailReplyMessageFilterSchema.optional(),
           includePeerRuns: z.boolean().optional(),
           includePeerReceipts: z.boolean().optional(),
           around: z
@@ -596,6 +635,10 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Set how hard this chat's replies think; FORBIDDEN for accounts outside the operator. */
+    setEffort: oc
+      .input(threadTarget.safeExtend({ mode: EffortModeSchema }))
+      .output(z.object({ ok: z.literal(true) })),
     /** Change a message still waiting for the working reply; CONFLICT once the run read it. */
     updateQueued: oc
       .input(
@@ -763,6 +806,25 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    inboxReadState: oc
+      .input(ListRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(RecruitingInboxReadStateSchema),
+    markInboxThread: oc
+      .input(MarkRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(z.object({ ok: z.literal(true) })),
+    analytics: oc.input(RecruitingAnalyticsInputSchema).output(RecruitingAnalyticsOutputSchema),
+    globalInbox: oc
+      .input(GlobalRecruitingInboxInputSchema.safeExtend({ spaceId: Id }))
+      .output(GlobalRecruitingInboxOutputSchema),
+    globalInboxSummary: oc
+      .input(z.strictObject({ spaceId: Id }))
+      .output(GlobalRecruitingInboxSummaryOutputSchema),
+    analyticsPeople: oc
+      .input(RecruitingAnalyticsPeopleInputSchema)
+      .output(RecruitingAnalyticsPeopleOutputSchema),
+    sequenceDraft: oc
+      .input(threadTarget.safeExtend({ command: RecruitingSequenceInputSchema }))
+      .output(RecruitingSequenceOutputSchema),
     accountView: oc
       .input(RecruitingAccountViewInputSchema)
       .output(RecruitingAccountViewOutputSchema),
@@ -805,9 +867,13 @@ export const appContract = {
             .object({
               campaignId: Id.optional(),
               campaignOffset: z.number().int().min(0).max(1_000_000).optional(),
+              leadCursor: z.string().min(1).max(1600).optional(),
+              serverId: Id.optional(),
             })
             .refine(
-              (input) => input.campaignOffset === undefined || input.campaignId !== undefined,
+              (input) =>
+                (input.campaignOffset === undefined && input.leadCursor === undefined) ||
+                input.campaignId !== undefined,
               "Campaign offset requires an exact campaign selection",
             ),
         ),
@@ -878,14 +944,30 @@ export const appContract = {
       .input(threadTarget.safeExtend(RecruitingCrmSyncInputFields))
       .output(RecruitingCrmSyncOutputSchema),
     /** Fill people's saved work history and photo from the role's earlier people searches. */
-    fillRoleProfiles: oc.input(z.strictObject({ roleId: RecruitingId })).output(
-      z.strictObject({
-        people: z.number().int().nonnegative(),
-        filled: z.number().int().nonnegative(),
-        photos: z.number().int().nonnegative(),
-        missing: z.number().int().nonnegative(),
-      }),
-    ),
+    fillRoleProfiles: oc
+      .input(z.strictObject({ roleId: RecruitingId, dryRun: z.boolean().optional() }))
+      .output(
+        z.strictObject({
+          people: z.number().int().nonnegative(),
+          filled: z.number().int().nonnegative(),
+          photos: z.number().int().nonnegative(),
+          missing: z.number().int().nonnegative(),
+          inventory: z.strictObject({
+            dryRun: z.boolean(),
+            missingBefore: z.record(
+              z.enum(["photo", "work", "education", "employerLogo", "schoolLogo"]),
+              z.number().int().nonnegative(),
+            ),
+            recoverable: z.record(
+              z.enum(["photo", "work", "education", "employerLogo", "schoolLogo"]),
+              z.number().int().nonnegative(),
+            ),
+            sourceCalls: z.number().int().nonnegative(),
+            sourcePageSize: z.literal(400),
+            sourceCoverage: z.literal("owned_saved_results"),
+          }),
+        }),
+      ),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),
@@ -1427,6 +1509,9 @@ export const appContract = {
   },
   search: {
     query: oc.input(z.object({ q: z.string().max(200) })).output(SearchQueryOutputSchema),
+    recruitingTargets: oc
+      .input(z.strictObject({ q: z.string().trim().min(1).max(200) }))
+      .output(RecruitingSearchTargetsOutputSchema),
   },
   links: {
     /**

@@ -1,0 +1,61 @@
+# metix 匿名化逐节点测量索引
+
+每组完整E/T节点、几何、计算样式与逐边框细节均在JSON中，避免在Markdown重复同一份数据。非界面静态文字的内容槽已匿名化。布局图不是原截图。
+
+| 状态 | E节点 | T样本 | 完整测量 | 布局图 |
+|---|---|---|---|---|
+| metix-availability-thread-1440 | 279 | 223 | [JSON](states/metix-availability-thread-1440.json) | [SVG](diagrams/metix-availability-thread-1440.svg) |
+| metix-candidates-1024 | 391 | 325 | [JSON](states/metix-candidates-1024.json) | [SVG](diagrams/metix-candidates-1024.svg) |
+| metix-candidates-1440 | 433 | 361 | [JSON](states/metix-candidates-1440.json) | [SVG](diagrams/metix-candidates-1440.svg) |
+| metix-candidates-390 | 179 | 145 | [JSON](states/metix-candidates-390.json) | [SVG](diagrams/metix-candidates-390.svg) |
+| metix-inbox-1024 | 227 | 179 | [JSON](states/metix-inbox-1024.json) | [SVG](diagrams/metix-inbox-1024.svg) |
+| metix-inbox-1440 | 236 | 192 | [JSON](states/metix-inbox-1440.json) | [SVG](diagrams/metix-inbox-1440.svg) |
+| metix-inbox-1806 | 269 | 0 | [JSON](states/metix-inbox-1806.json) | [SVG](diagrams/metix-inbox-1806.svg) |
+| metix-inbox-390 | 183 | 158 | [JSON](states/metix-inbox-390.json) | [SVG](diagrams/metix-inbox-390.svg) |
+| metix-inbox-768 | 183 | 159 | [JSON](states/metix-inbox-768.json) | [SVG](diagrams/metix-inbox-768.svg) |
+| metix-inbox-list-390 | 143 | 132 | [JSON](states/metix-inbox-list-390.json) | [SVG](diagrams/metix-inbox-list-390.svg) |
+| metix-inbox-selected-1440 | 269 | 216 | [JSON](states/metix-inbox-selected-1440.json) | [SVG](diagrams/metix-inbox-selected-1440.svg) |
+| metix-interview-1024 | 132 | 41 | [JSON](states/metix-interview-1024.json) | [SVG](diagrams/metix-interview-1024.svg) |
+| metix-interview-1440 | 132 | 41 | [JSON](states/metix-interview-1440.json) | [SVG](diagrams/metix-interview-1440.svg) |
+| metix-interview-390 | 76 | 15 | [JSON](states/metix-interview-390.json) | [SVG](diagrams/metix-interview-390.svg) |
+| metix-interview-datepicker-1440 | 212 | 44 | [JSON](states/metix-interview-datepicker-1440.json) | [SVG](diagrams/metix-interview-datepicker-1440.svg) |
+| metix-interview-short-height | 132 | 41 | [JSON](states/metix-interview-short-height.json) | [SVG](diagrams/metix-interview-short-height.svg) |
+| metix-interview-status-menu-1440 | 151 | 56 | [JSON](states/metix-interview-status-menu-1440.json) | [SVG](diagrams/metix-interview-status-menu-1440.svg) |
+| metix-mailbox-modal-1440 | 90 | 42 | [JSON](states/metix-mailbox-modal-1440.json) | [SVG](diagrams/metix-mailbox-modal-1440.svg) |
+| metix-mailbox-modal-390 | 44 | 19 | [JSON](states/metix-mailbox-modal-390.json) | [SVG](diagrams/metix-mailbox-modal-390.svg) |
+| metix-outreach-1440 | 168 | 118 | [JSON](states/metix-outreach-1440.json) | [SVG](diagrams/metix-outreach-1440.svg) |
+| metix-outreach-390 | 120 | 95 | [JSON](states/metix-outreach-390.json) | [SVG](diagrams/metix-outreach-390.svg) |
+| metix-profile-1440 | 571 | 431 | [JSON](states/metix-profile-1440.json) | [SVG](diagrams/metix-profile-1440.svg) |
+| metix-profile-390 | 551 | 413 | [JSON](states/metix-profile-390.json) | [SVG](diagrams/metix-profile-390.svg) |
+| metix-profile-criteria-expanded-1440 | 606 | 453 | [JSON](states/metix-profile-criteria-expanded-1440.json) | [SVG](diagrams/metix-profile-criteria-expanded-1440.svg) |
+| metix-profile-stable-1440 | 588 | 431 | [JSON](states/metix-profile-stable-1440.json) | [SVG](diagrams/metix-profile-stable-1440.svg) |
+| metix-reply-1440 | 316 | 237 | [JSON](states/metix-reply-1440.json) | [SVG](diagrams/metix-reply-1440.svg) |
+| metix-reply-390 | 228 | 176 | [JSON](states/metix-reply-390.json) | [SVG](diagrams/metix-reply-390.svg) |
+| metix-schedule-exit-390 | 265 | 178 | [JSON](states/metix-schedule-exit-390.json) | [SVG](diagrams/metix-schedule-exit-390.svg) |
+| metix-schedule-mobile-calendar-390 | 254 | 176 | [JSON](states/metix-schedule-mobile-calendar-390.json) | [SVG](diagrams/metix-schedule-mobile-calendar-390.svg) |
+| metix-schedule-mobile-customize-390 | 283 | 191 | [JSON](states/metix-schedule-mobile-customize-390.json) | [SVG](diagrams/metix-schedule-mobile-customize-390.svg) |
+| metix-schedule-mobile-pick-times-390 | 294 | 195 | [JSON](states/metix-schedule-mobile-pick-times-390.json) | [SVG](diagrams/metix-schedule-mobile-pick-times-390.svg) |
+| metix-schedule-mobile-selected-390 | 258 | 177 | [JSON](states/metix-schedule-mobile-selected-390.json) | [SVG](diagrams/metix-schedule-mobile-selected-390.svg) |
+| metix-schedule-multiple-advanced-1440 | 344 | 223 | [JSON](states/metix-schedule-multiple-advanced-1440.json) | [SVG](diagrams/metix-schedule-multiple-advanced-1440.svg) |
+| metix-schedule-selected-1440 | 389 | 253 | [JSON](states/metix-schedule-selected-1440.json) | [SVG](diagrams/metix-schedule-selected-1440.svg) |
+| metix-schedule-short-height | 344 | 223 | [JSON](states/metix-schedule-short-height.json) | [SVG](diagrams/metix-schedule-short-height.svg) |
+| metix-schedule-step1-1440 | 369 | 244 | [JSON](states/metix-schedule-step1-1440.json) | [SVG](diagrams/metix-schedule-step1-1440.svg) |
+| metix-schedule-step2-1024 | 336 | 213 | [JSON](states/metix-schedule-step2-1024.json) | [SVG](diagrams/metix-schedule-step2-1024.svg) |
+| metix-schedule-step2-1440 | 378 | 249 | [JSON](states/metix-schedule-step2-1440.json) | [SVG](diagrams/metix-schedule-step2-1440.svg) |
+| metix-schedule-step2-390 | 254 | 176 | [JSON](states/metix-schedule-step2-390.json) | [SVG](diagrams/metix-schedule-step2-390.svg) |
+| metix-score-menu-1440 | 443 | 374 | [JSON](states/metix-score-menu-1440.json) | [SVG](diagrams/metix-score-menu-1440.svg) |
+| metix-sequence-context-1440 | 94 | 49 | [JSON](states/metix-sequence-context-1440.json) | [SVG](diagrams/metix-sequence-context-1440.svg) |
+| metix-sequence-context-390 | 44 | 22 | [JSON](states/metix-sequence-context-390.json) | [SVG](diagrams/metix-sequence-context-390.svg) |
+| metix-sequence-context-expanded-1440 | 137 | 85 | [JSON](states/metix-sequence-context-expanded-1440.json) | [SVG](diagrams/metix-sequence-context-expanded-1440.svg) |
+| metix-sequence-editor-1440 | 325 | 202 | [JSON](states/metix-sequence-editor-1440.json) | [SVG](diagrams/metix-sequence-editor-1440.svg) |
+| metix-sequence-editor-390 | 234 | 133 | [JSON](states/metix-sequence-editor-390.json) | [SVG](diagrams/metix-sequence-editor-390.svg) |
+| metix-sequence-editor-scrolled-390 | 234 | 133 | [JSON](states/metix-sequence-editor-scrolled-390.json) | [SVG](diagrams/metix-sequence-editor-scrolled-390.svg) |
+| metix-sequence-editor-settings-1440 | 325 | 202 | [JSON](states/metix-sequence-editor-settings-1440.json) | [SVG](diagrams/metix-sequence-editor-settings-1440.svg) |
+| metix-sequence-empty-1440 | 69 | 28 | [JSON](states/metix-sequence-empty-1440.json) | [SVG](diagrams/metix-sequence-empty-1440.svg) |
+| metix-sequence-empty-390 | 43 | 22 | [JSON](states/metix-sequence-empty-390.json) | [SVG](diagrams/metix-sequence-empty-390.svg) |
+| metix-sequence-recipients-1440 | 126 | 70 | [JSON](states/metix-sequence-recipients-1440.json) | [SVG](diagrams/metix-sequence-recipients-1440.svg) |
+| metix-sequence-sender-menu-1440 | 146 | 92 | [JSON](states/metix-sequence-sender-menu-1440.json) | [SVG](diagrams/metix-sequence-sender-menu-1440.svg) |
+| metix-sequence-timezone-1440 | 1802 | 1400 | [JSON](states/metix-sequence-timezone-1440.json) | [SVG](diagrams/metix-sequence-timezone-1440.svg) |
+| metix-sequence-variables-1440 | 335 | 202 | [JSON](states/metix-sequence-variables-1440.json) | [SVG](diagrams/metix-sequence-variables-1440.svg) |
+| metix-shortlist-empty-1440 | 63 | 26 | [JSON](states/metix-shortlist-empty-1440.json) | [SVG](diagrams/metix-shortlist-empty-1440.svg) |
+| metix-shortlist-empty-390 | 17 | 4 | [JSON](states/metix-shortlist-empty-390.json) | [SVG](diagrams/metix-shortlist-empty-390.svg) |

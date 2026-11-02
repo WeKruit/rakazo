@@ -1,0 +1,91 @@
+{
+  "revision": "55fadc80c7c6105dfd2e10fdfe7c76ac29f0d17d",
+  "kind": "local origin/main source snapshot; not production schema introspection",
+  "files": [
+    {
+      "path": "apps/api/src/router.ts",
+      "sha256": "54c4e3fdff6962c076c9d9f4ecbdfdeff1cf1db2927e4c3b5e76c8c4f89ecda6",
+      "bytes": 327444
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/AccountRecruitingView.tsx",
+      "sha256": "7ef4390460c4257aa2c12d49c82a9edef321776595f0f9729722563b86b504b7",
+      "bytes": 34710
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/CandidateDirectory.tsx",
+      "sha256": "1e1ec4d5f513da835e7d7a8927dd004ee388d65329dd1e5b66e21e66fa66a559",
+      "bytes": 18757
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/CompanyLogo.tsx",
+      "sha256": "e42475259fda650c244bc07ed72f93cd67548c9fad78aa15ddda71054af206f4",
+      "bytes": 4893
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/ProfileImage.tsx",
+      "sha256": "26e9cfcd55e6ff77c6c9f7c781e42be94d0ebcaea52031c7348bf93a4956266a",
+      "bytes": 1773
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/SequenceOverview.tsx",
+      "sha256": "4538d77628a645bd535d0e00c0332505b3c8d3b3fa3c1cdd96b1550501b1b45c",
+      "bytes": 6490
+    },
+    {
+      "path": "apps/web/src/pages/recruiting/profileAssets.ts",
+      "sha256": "dd77a29b55e3e229bafe783f85f73f0b6ff4a52e5de104524e525a7103378010",
+      "bytes": 5693
+    },
+    {
+      "path": "packages/adapters/src/recruiting-account.ts",
+      "sha256": "4904145ae30ff57358277d00eef7bbcd1c5846b12567c3844851e0d624e4e745",
+      "bytes": 14993
+    },
+    {
+      "path": "packages/adapters/src/recruiting-profiles.ts",
+      "sha256": "0e92aa454e947eedf26d42de9abedc91ac1d2d62a706c231d4921dcdb3bf9462",
+      "bytes": 34883
+    },
+    {
+      "path": "packages/adapters/src/recruiting-reads.ts",
+      "sha256": "e36aad6779e54c381660831847e338ec919f2be87311f43e463ba89b6d2f3d8d",
+      "bytes": 173771
+    },
+    {
+      "path": "packages/adapters/src/recruiting-scheduling.ts",
+      "sha256": "fe8935f74485aa2f1419c79f46ae127b5540e5096d3722d57075719fdf827b37",
+      "bytes": 5205
+    },
+    {
+      "path": "packages/contracts/src/recruiting-account.ts",
+      "sha256": "05d44ef41a98c6aa2183b9200b582dc9afaff32e9c76a7ac111cdfbf3fc3754c",
+      "bytes": 2638
+    },
+    {
+      "path": "packages/contracts/src/recruiting-scheduling.ts",
+      "sha256": "bb53b21c4cba4d2e8ac709f097ccf43f3897c1fef2a08eeaf6e993174d3a95de",
+      "bytes": 4849
+    },
+    {
+      "path": "packages/contracts/src/recruiting.ts",
+      "sha256": "553392676a9f1075ec90488cc340136ffbc33e331bc0f83baa5bcdb42811334d",
+      "bytes": 103855
+    },
+    {
+      "path": "packages/db/prisma/schema.prisma",
+      "sha256": "6dbb45d16368498f1f606cadea296d02eb09af3d24b7f90504b391b38ce1574a",
+      "bytes": 80180
+    },
+    {
+      "path": "packages/db/src/recruiting-history-import.ts",
+      "sha256": "4b693d6547f82dba79779c0ff10bab1579bab42fa5e4b0d3b2ad19187b1dae26",
+      "bytes": 3026
+    },
+    {
+      "path": "packages/db/src/recruiting-scheduling.ts",
+      "sha256": "d10bbc09e54effbbee38f67c69b0ec39a298a5e8f79149d648476c1e4ff4ee2f",
+      "bytes": 42768
+    }
+  ]
+}

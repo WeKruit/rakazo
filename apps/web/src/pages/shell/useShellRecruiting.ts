@@ -25,7 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { NavigateFunction, SetURLSearchParams } from "react-router-dom";
+import type { NavigateFunction } from "react-router-dom";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { newClientId } from "../../lib/client-id";
 import { readFileAsBase64, revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
@@ -58,6 +58,7 @@ export function useShellRecruiting({
   inGroup,
   snapshot,
   groupId,
+  routeBotId,
   active,
   threadSnapshotCache,
   searchParams,
@@ -73,7 +74,6 @@ export function useShellRecruiting({
   activeGroupId,
   roleChatOpen,
   roleChatSection,
-  setSearchParams,
   setMobileSidebarOpen,
   setPanel,
   recruitingTab,
@@ -103,6 +103,8 @@ export function useShellRecruiting({
   inGroup: boolean;
   snapshot: ThreadSnapshot | null;
   groupId: string | undefined;
+  /** The bot named in the URL; account pages such as /app?view=inbox have none. */
+  routeBotId: string | undefined;
   active: Bot | undefined;
   threadSnapshotCache: RefObject<Map<string, ThreadSnapshot>>;
   searchParams: URLSearchParams;
@@ -118,7 +120,6 @@ export function useShellRecruiting({
   activeGroupId: RefObject<string | undefined>;
   roleChatOpen: boolean;
   roleChatSection: RefObject<HTMLElement | null>;
-  setSearchParams: SetURLSearchParams;
   setMobileSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setPanel: (next: Panel | ((current: Panel) => Panel)) => void;
   recruitingTab: { threadId: string; tab: RecruitingPanelState["tab"] } | null;
@@ -165,6 +166,7 @@ export function useShellRecruiting({
     null;
   const workspaceViews: readonly RecruitingWorkspaceView[] = [
     "home",
+    "roles",
     "conversation",
     "results",
     "brief",
@@ -174,6 +176,7 @@ export function useShellRecruiting({
     "sequence",
     "inbox",
     "interview",
+    "analytics",
     "workflow",
     "routines",
     "tasks",
@@ -220,9 +223,9 @@ export function useShellRecruiting({
     !showToolActivity &&
     !crmMode &&
     !workspaceNewRole &&
-    inGroup &&
+    (inGroup || (Boolean(active) && ["sequence", "interview"].includes(recruitingWorkspaceView))) &&
     recruitingWorkspaceView !== "conversation" &&
-    !["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
+    recruitingWorkspaceView !== "inbox";
   const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
   const [bindingRead, setBindingRead] = useState<{
     key: string;
@@ -365,6 +368,7 @@ export function useShellRecruiting({
   // A failed binding read keeps the role's own results on screen with a retry for its CRM part.
   const boundRoleCrmMode =
     boundRoleView &&
+    !["sequence", "interview"].includes(recruitingWorkspaceView) &&
     !currentBindingRead?.failed &&
     (!currentBindingRead ||
       currentBindingRead.workspace === undefined ||
@@ -412,7 +416,9 @@ export function useShellRecruiting({
     !boundRoleCrmMode &&
     !workspaceNewRole &&
     ["brief", "feedback"].includes(recruitingWorkspaceView);
-  function openRecruitingView(view: RecruitingWorkspaceView) {
+  function recruitingViewHref(view: RecruitingWorkspaceView) {
+    if (view === "tasks" || view === "routines")
+      return `/app?${new URLSearchParams({ view, role: searchParams.get("role") ?? "all" })}`;
     if (
       [
         "brief",
@@ -424,20 +430,34 @@ export function useShellRecruiting({
         "interview",
         "routines",
         "tasks",
+        "analytics",
       ].includes(view)
     ) {
-      navigate(`/app?${new URLSearchParams({ view, role: "all" })}`);
-    } else {
-      setSearchParams(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.set("view", view);
-          next.delete("role");
-          return next;
-        },
-        { replace: true },
-      );
+      if (crmMode) {
+        const next = new URLSearchParams(searchParams);
+        next.set("view", view);
+        next.delete("detail");
+        return `${inGroup && groupId ? `/app/g/${groupId}` : active?.id ? `/app/${active.id}` : "/app"}?${next}`;
+      }
+      const scope = searchParams.get("role");
+      // One Inbox: inside a role it opens the account Inbox filtered to that role.
+      if (view === "inbox")
+        return `/app?${new URLSearchParams({ view, role: scope ?? currentBindingRead?.workspace?.role.id ?? "all" })}`;
+      // Only an open bot conversation keeps its own view; account pages open the account view.
+      if (!scope && !inGroup && routeBotId && active?.id === routeBotId && knownThreadId)
+        return `/app/${active.id}?${new URLSearchParams({ view })}`;
+      return groupId && !groupId.startsWith("recruiting-global-") && !scope
+        ? `/app/g/${groupId}?${new URLSearchParams({ view })}`
+        : `/app?${new URLSearchParams({ view, role: scope ?? "all" })}`;
     }
+    if (view === "home") return "/app?view=home";
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    next.delete("role");
+    return `${inGroup && groupId ? `/app/g/${groupId}` : active?.id ? `/app/${active.id}` : "/app"}?${next}`;
+  }
+  function openRecruitingView(view: RecruitingWorkspaceView) {
+    navigate(recruitingViewHref(view));
     setMobileSidebarOpen(false);
     setPanel(null);
   }
@@ -584,9 +604,7 @@ export function useShellRecruiting({
           activeGroupId.current === groupId &&
           snapshotRef.current?.threadId === draft.threadId &&
           draft.threadId === activeSnapshot?.threadId &&
-          ((recruitingWorkspaceView === "inbox" &&
-            draft.candidateId === searchParams.get("crmCandidate")) ||
-            draft.candidateId === selectedReplyCandidate.current) &&
+          draft.candidateId === selectedReplyCandidate.current &&
           draft.source.serverId === bound.target.mcpServerId &&
           draft.source.serverRevision === bound.target.serverRevision &&
           draft.source.organizationId === bound.target.organizationId &&
@@ -622,7 +640,7 @@ export function useShellRecruiting({
         ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
       ].join("\n");
       openRoleChat(
-        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare an editable reply card with the sender, original email, recipients, Cc and reply body. Do not send until I choose Send on the card.`}`,
       );
     } catch (error) {
       if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
@@ -1147,6 +1165,7 @@ export function useShellRecruiting({
     roleChatHidden,
     workspaceBrief,
     openRecruitingView,
+    recruitingViewHref,
     activeRecruitingTab,
     changeRecruitingTab,
     composerRef,

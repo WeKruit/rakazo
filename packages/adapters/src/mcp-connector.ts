@@ -15,6 +15,7 @@ import {
   RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
+  RecruitingSequenceOutputSchema,
 } from "@rakazo/contracts";
 import {
   abortableDelay,
@@ -29,6 +30,7 @@ import {
   getRecruitingWorkspaceCrmTarget,
   IsolationError,
   loadVerifiedRecruitingSchedulingPlan,
+  rememberRecruitingSequenceObservation,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import addressparser from "nodemailer/lib/addressparser";
@@ -48,8 +50,11 @@ import {
   InstantlyRestError,
   instantlyRest,
   isNativeInstantlyWrite,
+  MailReplySendingError,
   nativeInstantlyWrites,
+  ownedInstantly,
   readRoleCampaignBinding,
+  requireReplySendingMailboxReady,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -532,7 +537,14 @@ export function firstPartyMcpUrl(value: string | undefined): string | undefined 
 }
 
 function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" | "endpoint">) {
-  if (server.secretId || server.transport !== "streamable_http") return undefined;
+  if (server.transport !== "streamable_http") return undefined;
+  // Outreach mail ships with the product: when the deployment has its account, every user's
+  // connection uses it, including one that still holds a key saved before.
+  if (server.endpoint === INSTANTLY_MCP) {
+    const key = process.env.INSTANTLY_API_KEY?.trim();
+    return key ? { key, label: "Outreach email", replacesSecret: true } : undefined;
+  }
+  if (server.secretId) return undefined;
   if (server.endpoint === "https://api.autumn.ai/mcp")
     return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
   if (server.endpoint === "https://mcp.fullenrich.com/mcp")
@@ -686,6 +698,21 @@ export function hasPlatformMcpCredential(
   return Boolean(credential?.key || credential?.keyless);
 }
 
+/**
+ * True when this Instantly connection runs on the deployment's shared account, so every campaign,
+ * lead and email must be proven to belong to the caller before it is read or changed.
+ */
+export function sharedInstantlyAccount(
+  server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
+): boolean {
+  return (
+    server.endpoint === INSTANTLY_MCP && Boolean(platformMcpCredential(server)?.replacesSecret)
+  );
+}
+
+/** Remote tools a shared-account connection may call; each one is campaign-scoped below. */
+const SHARED_INSTANTLY_REMOTE = ["get_email", "list_emails", "reply_to_email"];
+
 export async function loadMcpCredentialRecord(
   prisma: PrismaClient,
   secrets: SecretStore,
@@ -693,13 +720,14 @@ export async function loadMcpCredentialRecord(
   context: AdapterContext,
   onRef?: (ref: string, recordId: string) => void,
 ) {
-  const secret = server.secretId
-    ? await prisma.secret.findFirst({
-        where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
-      })
-    : null;
-  if (secret) onRef?.(secret.ciphertext, secret.id);
   const platformService = platformMcpCredential(server);
+  const secret =
+    server.secretId && !platformService?.replacesSecret
+      ? await prisma.secret.findFirst({
+          where: { id: server.secretId, spaceId: context.spaceId, userId: context.userId },
+        })
+      : null;
+  if (secret) onRef?.(secret.ciphertext, secret.id);
   const deploymentKey = platformService?.key;
   if (platformService && !deploymentKey && !platformService.keyless)
     throw new Error(`${platformService.label} is not configured on this server`);
@@ -760,6 +788,7 @@ export class McpConnector implements ConnectorProvider {
     private readonly prisma: PrismaClient,
     private readonly secrets: SecretStore,
     private readonly options: {
+      deferSequenceObservation?: (work: () => Promise<void>) => void;
       stdioEnabled?: boolean;
       allowedCommands?: string[];
       network?: RemoteTransportDependencies;
@@ -896,8 +925,10 @@ export class McpConnector implements ConnectorProvider {
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
               (tool) =>
-                assignment.allowAllTools ||
-                (assignment.allowedTools as unknown[]).includes(tool.name),
+                (assignment.allowAllTools ||
+                  (assignment.allowedTools as unknown[]).includes(tool.name)) &&
+                (!sharedInstantlyAccount(assignment.server) ||
+                  SHARED_INSTANTLY_REMOTE.includes(tool.name)),
             )
             .map((tool) => ({
               name: `mcp__${assignment.server.slug}__${tool.name}`,
@@ -1073,6 +1104,13 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
+      if (
+        sharedInstantlyAccount(assignment.server) &&
+        !SHARED_INSTANTLY_REMOTE.includes(call.route.toolName)
+      )
+        throw new IsolationError(
+          "This mail tool would reach other accounts' mail; use the role's campaign tools",
+        );
       if (this.refusedConnection(assignment.server, context)) {
         yield {
           type: "error",
@@ -1141,6 +1179,8 @@ export class McpConnector implements ConnectorProvider {
         args = { ...args, campaign_id: campaignId };
       }
 
+      let replyMailbox: string | undefined;
+      let replyOriginal: Record<string, unknown> | undefined;
       if (emailScope && call.route.toolName === "reply_to_email") {
         await requireMcpToolAssignment(this.prisma, context, call.route, "get_email");
         if (typeof args.reply_to_uuid !== "string" || !UUID.test(args.reply_to_uuid))
@@ -1161,6 +1201,8 @@ export class McpConnector implements ConnectorProvider {
           throw new IsolationError(
             "Reply anchor does not belong to the current role campaign and mailbox",
           );
+        replyMailbox = email.eaccount;
+        replyOriginal = email as unknown as Record<string, unknown>;
       }
 
       if (crmTarget) {
@@ -1217,6 +1259,28 @@ export class McpConnector implements ConnectorProvider {
       ) {
         await this.assertInstantlyScope(context, assignment.server.id, emailScope);
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
+      }
+      if (replyMailbox && sharedInstantlyAccount(assignment.server)) {
+        if (!replyOriginal) throw new IsolationError();
+        const credential = await this.authorizeInstantlyRest(call, context, []);
+        const rest = instantlyRest(
+          createSafeRemoteFetch(this.options.network?.fetch, this.options.network?.resolveHostname),
+          credential.key,
+          context.signal,
+        );
+        await requireReplySendingMailboxReady(
+          this.prisma,
+          rest,
+          context,
+          assignment.server.id,
+          replyOriginal,
+          replyMailbox,
+        );
+        await context.reauthorize?.();
+        await this.assertInstantlyScope(context, assignment.server.id, emailScope);
+        const current = await this.authorizeInstantlyRest(call, context, []);
+        if (current.secretId !== credential.secretId || current.digest !== credential.digest)
+          throw new IsolationError();
       }
       callStarted = true;
       calledAt = Date.now();
@@ -1492,6 +1556,7 @@ export class McpConnector implements ConnectorProvider {
       ].includes(call.route!.toolName);
       const rest = instantlyRest(safeFetch, credential.key, context.signal);
       const assertScope = async () => {
+        await context.reauthorize?.();
         if (scopedEmailOperation)
           await this.assertInstantlyScope(context, credential.server.id, emailScope);
         const current = await this.authorizeInstantlyRest(call, context, redactions);
@@ -1502,17 +1567,30 @@ export class McpConnector implements ConnectorProvider {
       const result = await runInstantlyWrite(
         this.prisma,
         async (method, path, body) => {
-          if (scopedEmailOperation && method !== "GET") {
+          if (method !== "GET") {
             await assertScope();
             if (call.route!.toolName === "native_instantly_reply_to_email")
               await this.assertSchedulingConfirmationDispatch(call, context);
           }
           return rest(method, path, body);
         },
-        context,
+        { ...context, recruitingCampaignSourceRevision: credential.server.revision },
         credential.server.id,
         call.route!.toolName,
         call.args,
+        sharedInstantlyAccount(credential.server)
+          ? emailScope
+            ? { campaigns: new Set(emailScope.campaignIds), mailboxes: new Set<string>() }
+            : await ownedInstantly(
+                this.prisma,
+                context.spaceId,
+                credential.server.id,
+                context.userId,
+              ).then((owned) => ({
+                campaigns: new Set(owned.campaigns),
+                mailboxes: new Set(owned.mailboxes),
+              }))
+          : undefined,
       );
       if (call.route!.toolName === "native_instantly_get_email") await assertScope();
       if (emailScope && call.route!.toolName === "native_instantly_get_email") {
@@ -1524,10 +1602,55 @@ export class McpConnector implements ConnectorProvider {
         )
           throw new IsolationError("Email does not belong to the current role campaign");
       }
+      const sequence = RecruitingSequenceOutputSchema.safeParse(result);
+      if (
+        !context.onRecruitingCampaignRead &&
+        context.botId &&
+        context.runId &&
+        sequence.success &&
+        sequence.data.campaign &&
+        sequence.data.observedAt
+      ) {
+        const snapshot = {
+          botId: context.botId,
+          roleId: sequence.data.roleId,
+          serverId: credential.server.id,
+          sourceRevision: credential.server.revision,
+          observedAt: sequence.data.observedAt,
+          campaign: {
+            ...sequence.data.campaign,
+            stopOnReply: sequence.data.campaign.stopOnReply ?? null,
+          },
+        };
+        this.options.deferSequenceObservation?.(async () => {
+          await assertScope();
+          const run = await this.prisma.run.findFirst({
+            where: {
+              id: context.runId,
+              userId: context.userId,
+              spaceId: context.spaceId,
+              botId: context.botId,
+            },
+            select: { threadId: true },
+          });
+          if (!run) throw new IsolationError();
+          await rememberRecruitingSequenceObservation(
+            this.prisma,
+            { userId: context.userId, spaceId: context.spaceId },
+            { ...snapshot, threadId: run.threadId },
+          );
+        });
+      }
+      const publicResult =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? Object.fromEntries(
+              Object.entries(result).filter(([key]) => key !== "__rakazoSequenceObservation"),
+            )
+          : result;
       yield {
         type: "result",
         data: redactConnectorPayload(
-          { structuredContent: { source: "local_native_instantly_rest", result } },
+          { structuredContent: { source: "local_native_instantly_rest", result: publicResult } },
           redactions,
         ),
       };
@@ -1544,7 +1667,10 @@ export class McpConnector implements ConnectorProvider {
               : " Check the current assigned connection and requested scope.";
       yield {
         type: "error",
-        message: `Instantly ${call.route!.toolName} failed.${detail}`,
+        message:
+          error instanceof MailReplySendingError
+            ? error.code
+            : `Instantly ${call.route!.toolName} failed.${detail}`,
         // A network failure mid-request may still have reached the provider.
         ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
       };
@@ -1647,7 +1773,7 @@ export class McpConnector implements ConnectorProvider {
       server,
       context,
     );
-    if (!secret || !plaintext)
+    if (!plaintext)
       throw new Error(
         `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
       );
@@ -1664,7 +1790,7 @@ export class McpConnector implements ConnectorProvider {
       throw new Error("An unambiguous existing API key is required");
     redactions.push(key);
     context.signal.throwIfAborted();
-    return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
+    return { server, key, secretId: secret?.id ?? null, digest: credentialDigest(plaintext) };
   }
 
   /** Resolve only this run's current workspace, never another role owned by the same user. */
@@ -1694,8 +1820,33 @@ export class McpConnector implements ConnectorProvider {
     return target;
   }
 
-  /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
+  /**
+   * The campaigns a mail operation may touch. On the shared account an operation outside a role
+   * still stays inside this connection's own campaigns, never the whole account.
+   */
   private async instantlyCampaignScope(
+    context: AdapterContext,
+    serverId: string,
+  ): Promise<{ campaignIds: string[]; workspaceKey: string } | null> {
+    const scope = await this.roleCampaignScope(context, serverId);
+    if (scope) return scope;
+    const server = await this.prisma.mcpServer.findFirst({
+      where: { id: serverId, userId: context.userId, spaceId: context.spaceId },
+      select: { secretId: true, transport: true, endpoint: true },
+    });
+    if (!server || !sharedInstantlyAccount(server)) return null;
+    const { campaigns: campaignIds } = await ownedInstantly(
+      this.prisma,
+      context.spaceId,
+      serverId,
+      context.userId,
+    );
+    if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
+    return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
+  }
+
+  /** Existing campaign identity only; reading mail must never create or infer a campaign by name. */
+  private async roleCampaignScope(
     context: AdapterContext,
     serverId: string,
   ): Promise<{ campaignIds: string[]; workspaceKey: string } | null> {

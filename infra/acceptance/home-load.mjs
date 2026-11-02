@@ -4,7 +4,7 @@
 //
 //   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… [RAKAZO_SESSION_FILE=…] \
 //   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000] \
-//     [--view-ms 15000] [--view-complete-ms 45000]
+//     [--view-ms 15000] [--view-complete-ms 45000] [--views contacts,sequence,inbox,interview]
 //
 // Measures, from navigation start: the greeting (page shell), the sidebar's role list, and the
 // first Overview numbers. Then opens Contacts, Sequence, Inbox and Interview for all roles, the
@@ -36,7 +36,12 @@ const budgets = {
 // every role on the page must finish within --view-complete-ms.
 const viewBudget = option("--view-ms", 15_000);
 const completeBudget = option("--view-complete-ms", 45_000);
-const views = ["contacts", "sequence", "inbox", "interview"];
+const viewsAt = args.indexOf("--views");
+const views =
+  viewsAt >= 0 ? args[viewsAt + 1].split(",") : ["contacts", "sequence", "inbox", "interview"];
+// People and companies on these pages can be called Autumn or Apollo, so only supplier-only names count.
+const VENDORS =
+  /\b(?:exa|coresignal|fullenrich|contactout|leadmagic|instantly|composio|juicebox|serper)\b/i;
 const origin = (process.env.RAKAZO_ORIGIN ?? process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
 const { RAKAZO_EMAIL: email, RAKAZO_PASSWORD: password } = process.env;
 if (
@@ -132,6 +137,7 @@ try {
   }
   const homeFailed = failed;
   for (const view of views) {
+    const mainTestId = view === "sequence" ? "account-sequences" : "account-recruiting-view";
     const opened = Date.now();
     await page.goto(`${origin}/app?view=${view}&role=all`, {
       waitUntil: "commit",
@@ -139,15 +145,22 @@ try {
     const until = (complete, timeout) =>
       page
         .waitForFunction(
-          (complete) => {
-            const main = document.querySelector('[data-testid="account-recruiting-view"]');
+          ({ complete, mainTestId }) => {
+            const main = document.querySelector(`[data-testid="${mainTestId}"]`);
             if (
               main === null ||
               document.querySelector('nav[aria-label="Role conversations"] button') === null ||
               document.body.innerText.includes("Loading roles")
             )
               return false;
-            const loading = [...main.querySelectorAll('[role="status"]')];
+            // A loading status is a spinner or a line ending in "…"; a static note such as an
+            // empty state also uses role="status" but is not still loading.
+            const loading = [...main.querySelectorAll('[role="status"]')].filter(
+              (node) =>
+                node.matches('[data-slot="spinner"]') ||
+                node.querySelector('[data-slot="spinner"]') !== null ||
+                /…\s*$/.test(node.textContent ?? ""),
+            );
             if (complete) return loading.length === 0;
             // Shown: no page-level loading, and a role (or the empty state) is on screen.
             return (
@@ -156,7 +169,7 @@ try {
                 main.querySelectorAll("section[aria-label]").length === 0)
             );
           },
-          complete,
+          { complete, mainTestId },
           { timeout, polling: 100 },
         )
         .then(() => Date.now() - opened)
@@ -164,15 +177,21 @@ try {
     const ms = await until(false, viewBudget);
     const done = ms === null ? null : await until(true, Math.max(1, completeBudget - ms));
     const broken = await page
-      .getByTestId("account-recruiting-view")
+      .getByTestId(mainTestId)
       .getByText(/^Could not (load|read)/)
       .first()
       .isVisible()
       .catch(() => false);
-    const ok = ms !== null && done !== null && !broken;
+    // Platform suppliers stay behind the product; only connections the recruiter made may show.
+    const text = await page
+      .getByTestId(mainTestId)
+      .innerText()
+      .catch(() => "");
+    const vendor = text.match(VENDORS)?.[0];
+    const ok = ms !== null && done !== null && !broken && !vendor;
     failed ||= !ok;
     console.log(
-      `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never showed" : `shown ${ms} ms`}${ms !== null ? (done === null ? ", roles never finished loading" : `, all roles ${done} ms`) : ""}${broken ? ", shows a load error" : ""} (budget ${viewBudget} ms, all roles ${completeBudget} ms)`,
+      `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never showed" : `shown ${ms} ms`}${ms !== null ? (done === null ? ", roles never finished loading" : `, all roles ${done} ms`) : ""}${broken ? ", shows a load error" : ""}${vendor ? `, shows supplier name "${vendor}"` : ""} (budget ${viewBudget} ms, all roles ${completeBudget} ms)`,
     );
   }
   if (errors.length) console.log(`server errors: ${[...new Set(errors)].join(", ")}`);

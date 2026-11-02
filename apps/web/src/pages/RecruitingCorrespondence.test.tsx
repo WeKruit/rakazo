@@ -15,8 +15,18 @@ const crmData = vi.hoisted(() => vi.fn());
 const openDetail = vi.hoisted(() => vi.fn());
 vi.mock("./recruiting/detail", () => ({ useRecruitingDetail: () => ({ open: openDetail }) }));
 vi.mock("../lib/artifact-open", () => ({ fetchArtifactBytes }));
+vi.mock("../lib/auth", () => ({
+  authClient: { useSession: () => ({ data: { user: { id: "reader" } } }) },
+}));
 vi.mock("../lib/rpc", () => ({
-  rpc: { recruiting: { correspondence: readCorrespondence, getWorkspace, crmData } },
+  rpc: {
+    recruiting: {
+      correspondence: readCorrespondence,
+      getWorkspace,
+      crmData,
+      inboxReadState: () => Promise.resolve({ initializedAt: "2026-11-01T00:00:00Z", items: [] }),
+    },
+  },
 }));
 vi.mock("../components/ArtifactFileCard", () => ({
   ArtifactFileCard: (props: { artifactId: string; name: string }) => {
@@ -788,6 +798,12 @@ it("keeps canonical mailbox, campaign and recorded thread selections exact in th
     }),
   );
   await view.click("Draft reply");
+  expect(view.conversation).toHaveBeenLastCalledWith(
+    expect.stringContaining("editable reply card"),
+  );
+  expect(view.conversation).toHaveBeenLastCalledWith(
+    expect.stringContaining("choose Send on the card"),
+  );
   expect(view.conversation).toHaveBeenLastCalledWith(expect.stringContaining("Do not send"));
   const choose = async (label: string, index: number) => {
     const select = view.container.querySelector<HTMLSelectElement>(

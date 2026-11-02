@@ -343,10 +343,23 @@ export async function createApp(
   const memory = new MarkdownMemoryStore(prisma);
   const firstPartyOidc = env.oidc;
   let firstPartyToken: ReturnType<typeof createFirstPartyAccessToken> | undefined;
+  const sequenceObservationWrites = new Set<Promise<void>>();
+  const deferSequenceObservation = (work: () => Promise<void>) => {
+    const pending = Promise.resolve()
+      .then(work)
+      .catch((error) => {
+        getLogger().warn("recruiting.sequence_observation_failed", {
+          error: error instanceof Error ? error.name : "Unknown error",
+        });
+      })
+      .finally(() => sequenceObservationWrites.delete(pending));
+    sequenceObservationWrites.add(pending);
+  };
   const mcp = new McpConnector(
     prisma,
     secrets,
     {
+      deferSequenceObservation,
       stdioEnabled: env.mcpStdioEnabled,
       allowedCommands: env.mcpStdioAllowedCommands,
       network: remoteConnectors,
@@ -612,13 +625,12 @@ export async function createApp(
       })
     : undefined;
   reconciler?.start();
-  if (env.firstPartyMcpUrl)
-    startRecruitingCrmAutoSync({
-      prisma,
-      connectors: stack.connector,
-      firstPartyMcpUrl: env.firstPartyMcpUrl,
-      signal: shutdown.signal,
-    });
+  startRecruitingCrmAutoSync({
+    prisma,
+    connectors: stack.connector,
+    firstPartyMcpUrl: env.firstPartyMcpUrl,
+    signal: shutdown.signal,
+  });
 
   // Auth, webhook and worker composition retain their explicit privileged client.
   // The protected RPC client has no privileged fallback when actor context is missing.
@@ -636,6 +648,7 @@ export async function createApp(
       })
     : events;
   const router = createRouter({
+    deferSequenceObservation,
     cloudAgent,
     codexCatalog,
     prisma: actorPrisma,
@@ -1171,6 +1184,7 @@ export async function createApp(
       await teamChatBridge?.stop();
       await email?.drain?.();
       await reconciler?.stop();
+      await Promise.all([...sequenceObservationWrites]);
       await jobs.close();
       await secrets.close();
       await realtime.close();

@@ -106,3 +106,39 @@ it("shows older candidates' criteria by name with a one-line preview", () => {
   expect(view.querySelector(".truncate")?.textContent).toBe(REASONING);
   expect(view.querySelector(".line-clamp-3")?.textContent).toBe(SUMMARY);
 });
+
+it("starts with three criteria and expands the same saved assessment in place", () => {
+  host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() =>
+    root.render(
+      <AssessmentCard
+        score={null}
+        rank={null}
+        summary={null}
+        quick={{ headline: null, highlights: [], concerns: [], keyWorks: [], entities: [] }}
+        rows={Array.from({ length: 5 }, (_, index) => ({
+          key: String(index),
+          label: `Criterion ${index + 1}`,
+          status: "unknown" as const,
+          text: "Saved evidence",
+          sourceUrls: [],
+        }))}
+        sourceUrls={[]}
+      />,
+    ),
+  );
+  expect(host.textContent).toContain("Criterion 3");
+  expect(host.textContent).not.toContain("Criterion 4");
+  const expand = [...host.querySelectorAll("button")].find(
+    (item) => item.textContent === "Show all 5 criteria",
+  )!;
+  expect(expand).toBeDefined();
+  act(() => expand.click());
+  expect(host.textContent).toContain("Criterion 5");
+  expect(expand.getAttribute("aria-expanded")).toBe("true");
+  act(() => expand.click());
+  expect(host.textContent).not.toContain("Criterion 4");
+  act(() => root.unmount());
+});

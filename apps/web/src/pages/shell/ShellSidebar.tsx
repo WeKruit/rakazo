@@ -9,8 +9,9 @@ import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { authClient } from "../../lib/auth";
 import { desktopBridge } from "../../lib/desktop";
 import { withFeatureMessages } from "../../lib/i18n";
-import { clearSpaceSelection } from "../../lib/rpc";
+import { clearSpaceSelection, rpc } from "../../lib/rpc";
 import { savedThreads } from "../../lib/saved-threads";
+import { useKeyedRead } from "../recruiting/shared";
 
 import { RecruitingNavigation } from "../shell/RecruitingNavigation";
 import type { useShellController } from "../shell/useShellController";
@@ -26,6 +27,9 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     navigate,
     groups,
     archivedGroups,
+    archivedGroupTotal,
+    archivedGroupPage,
+    openArchivedGroupPage,
     archivedOpen,
     setArchivedOpen,
     query,
@@ -56,16 +60,50 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     recruitingCacheScope,
     effectiveCrmSelection,
     openRecruitingView,
+    recruitingViewHref,
     transcriptArtifactTarget,
     openCrmRole,
     startNewRole,
-    pendingRoleName,
     restoreGroup,
     setBotsSidebarCollapsedPref,
     openSettings,
     userName,
     initials,
   } = model;
+  const inboxScope = JSON.stringify([model.userId, bootstrapMe?.spaceId]);
+  const inboxSummary = useKeyedRead(
+    !showToolActivity && model.userId && bootstrapMe?.spaceId
+      ? JSON.stringify([inboxScope, recruitingRefresh])
+      : null,
+    () => rpc.recruiting.globalInboxSummary({ spaceId: bootstrapMe!.spaceId }),
+    { cache: recruitingReadCache.current, key: `global-inbox:${inboxScope}` },
+  );
+  const selectedRoleId = model.searchParams.get("role");
+  const roleScope = useKeyedRead(
+    selectedRoleId && selectedRoleId !== "all" && bootstrapMe?.spaceId
+      ? JSON.stringify([model.userId, bootstrapMe.spaceId, "nav-role", selectedRoleId])
+      : null,
+    () => rpc.recruiting.accountView({ view: "roles", roleId: selectedRoleId!, limit: 1 }),
+  );
+  const selectedRole = roleScope.data?.roles.find((role) => role.id === selectedRoleId);
+  const global = groups.find((group) => group.id.startsWith("recruiting-global-"));
+  const roleGroup = selectedRoleId
+    ? selectedRole?.groupId
+    : groupId && !groupId.startsWith("recruiting-global-")
+      ? groupId
+      : undefined;
+  const crmChatParams = new URLSearchParams(model.searchParams);
+  crmChatParams.set("view", "conversation");
+  crmChatParams.delete("detail");
+  const kruitHref = model.searchParams.has("crmServer")
+    ? `${groupId ? `/app/g/${groupId}` : model.active?.id ? `/app/${model.active.id}` : "/app"}?${crmChatParams}`
+    : roleGroup
+      ? `/app/g/${roleGroup}?view=conversation`
+      : selectedRole?.botId
+        ? `/app/${selectedRole.botId}?view=conversation`
+        : global
+          ? `/app/g/${global.id}?view=conversation`
+          : "/app?view=home";
   const newRoleSource =
     activeGroup ?? groups.find((group) => group.id.startsWith("recruiting-global-"));
   const readCache = recruitingReadCache.current;
@@ -86,13 +124,15 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
       data-testid="bots-sidebar"
       data-bots-sidebar-density={botsSidebarDensity}
       data-collapsed={botsSidebarCollapsed ? "true" : "false"}
-      inert={botsSidebarCollapsed && !mobileSidebarOpen ? true : undefined}
+      inert={showToolActivity && botsSidebarCollapsed && !mobileSidebarOpen ? true : undefined}
       style={{ "--bots-sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
       className={`absolute inset-y-0 start-0 z-40 flex w-[calc(100%-48px)] max-w-[316px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar transition-[transform,width,opacity] md:relative md:z-auto md:translate-x-0 ${
         mobileSidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"
       } ${
         botsSidebarCollapsed
-          ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
+          ? showToolActivity
+            ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
+            : "md:w-16 md:max-w-16"
           : "md:w-(--bots-sidebar-width) md:max-w-none"
       }`}
     >
@@ -104,30 +144,71 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             </div>
           ) : null}
           <RecruitingNavigation
+            onViewAllRoles={() => {
+              setPanel(null);
+              setMobileSidebarOpen(false);
+              navigate("/app?view=roles");
+            }}
+            compact={botsSidebarCollapsed && !mobileSidebarOpen}
+            onSearch={() => {
+              model.setCommandPaletteOpen(true);
+              setMobileSidebarOpen(false);
+            }}
             loading={!initialBotsLoaded}
             onPrefetchRole={(id) =>
               prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)
             }
             crmContext={crmContext}
-            crmSelection={effectiveCrmSelection}
-            onOpenCrmRole={(selection) => void openCrmRole(selection)}
+            crmSelection={selectedRoleId === "all" ? undefined : effectiveCrmSelection}
+            onOpenCrmRole={(selection) =>
+              void openCrmRole(
+                selection,
+                ["contacts", "shortlist", "sequence", "inbox", "interview", "analytics"].includes(
+                  recruitingWorkspaceView,
+                )
+                  ? recruitingWorkspaceView
+                  : "results",
+              )
+            }
             groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
             archivedGroups={archivedGroups}
+            archivedGroupTotal={archivedGroupTotal}
+            archivedGroupPage={archivedGroupPage}
+            onArchivedGroupPage={(page) => void openArchivedGroupPage(page).catch(() => undefined)}
             archivedOpen={archivedOpen}
-            groupId={groupId}
-            pendingRoleName={pendingRoleName}
+            groupId={roleGroup ?? undefined}
             query={query}
             view={recruitingWorkspaceView}
             onView={openRecruitingView}
-            onGlobalChat={() => {
-              const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
-              if (main) {
-                setPanel(null);
-                setMobileSidebarOpen(false);
-                navigate(`/app/g/${main.id}?view=conversation`);
-              }
+            viewHref={recruitingViewHref}
+            kruitHref={kruitHref}
+            inboxUnread={
+              inboxSummary.failed
+                ? { status: "failed" }
+                : inboxSummary.data
+                  ? {
+                      status: "ready",
+                      count: inboxSummary.data.unread.count,
+                      partial:
+                        !inboxSummary.data.coverage.providerComplete ||
+                        inboxSummary.data.unread.unknownThreads > 0,
+                    }
+                  : { status: "loading" }
+            }
+            kruitDisabled={!!selectedRoleId && selectedRoleId !== "all" && !selectedRole}
+            onAllRoles={() => {
+              setPanel(null);
+              setMobileSidebarOpen(false);
+              navigate(
+                `/app?${new URLSearchParams({ view: ["contacts", "shortlist", "sequence", "inbox", "interview", "analytics"].includes(recruitingWorkspaceView) ? recruitingWorkspaceView : "contacts", role: "all" })}`,
+              );
             }}
-            onCollapse={() => setBotsSidebarCollapsedPref(true)}
+            onGlobalChat={() => {
+              setPanel(null);
+              setMobileSidebarOpen(false);
+              navigate(kruitHref);
+            }}
+            onCollapse={() => setBotsSidebarCollapsedPref(!botsSidebarCollapsed)}
             canOpenDashboard={Boolean(activeSnapshot?.threadId)}
             canCreateRole={
               Boolean(newRoleSource && canCreateRoleFrom(newRoleSource.id)) ||
@@ -138,7 +219,9 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             onOpenRole={(id) => {
               setPanel(null);
               setMobileSidebarOpen(false);
-              navigate(`/app/g/${id}?view=results`);
+              navigate(
+                `/app/g/${id}?${new URLSearchParams({ view: ["contacts", "shortlist", "sequence", "inbox", "interview", "analytics"].includes(recruitingWorkspaceView) ? recruitingWorkspaceView : "results" })}`,
+              );
             }}
             onNewRole={() => {
               if (newRoleSource && canCreateRoleFrom(newRoleSource.id))
@@ -157,18 +240,6 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
         </>
       ) : null}
       {showToolActivity ? <DeveloperSidebar model={model} /> : null}
-      <button
-        type="button"
-        onClick={() => setPluginsOpen(true)}
-        className="mx-3 mb-1 flex items-center gap-3 rounded-xl px-2.5 py-2 hover:bg-sidebar-accent"
-      >
-        <span className="grid h-[30px] w-[30px] place-items-center rounded-lg bg-accent text-foreground/80">
-          <LayoutGrid size={15} strokeWidth={1.8} />
-        </span>
-        <span className="text-[14px] font-medium text-foreground/90">
-          <Trans>Integrations</Trans>
-        </span>
-      </button>
       <DeferredPopover
         open={menuOpen}
         onOpenChange={setMenuOpen}
@@ -177,12 +248,23 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] text-foreground/75">
               {initials}
             </span>
-            <span className="text-[14.5px] text-foreground/90">{userName}</span>
+            <span
+              className={
+                botsSidebarCollapsed && !showToolActivity
+                  ? "md:sr-only"
+                  : "text-[14.5px] text-foreground/90"
+              }
+            >
+              {userName}
+            </span>
           </>
         }
         triggerProps={{
           "data-testid": "user-menu-trigger",
-          className: "flex items-center gap-[11px] px-[18px] py-3.5",
+          className:
+            botsSidebarCollapsed && !showToolActivity
+              ? "flex items-center justify-center py-3.5"
+              : "flex items-center gap-[11px] px-[18px] py-3.5",
         }}
         side="top"
         align="start"
@@ -214,6 +296,17 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
         >
           <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
           {showToolActivity ? <Trans>Artifacts</Trans> : <Trans>Files</Trans>}
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start font-normal"
+          onClick={() => {
+            setMenuOpen(false);
+            setPluginsOpen(true);
+          }}
+        >
+          <LayoutGrid className="text-muted-foreground" strokeWidth={1.75} />
+          <Trans>Integrations</Trans>
         </Button>
         <Button
           variant="ghost"
@@ -263,7 +356,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
           min={220}
           max={botsSidebarMaxWidth}
           onResize={setBotsSidebarWidth}
-          onReset={() => setBotsSidebarWidth(showToolActivity ? 316 : 260)}
+          onReset={() => setBotsSidebarWidth(showToolActivity ? 316 : 240)}
         />
       ) : null}
     </aside>

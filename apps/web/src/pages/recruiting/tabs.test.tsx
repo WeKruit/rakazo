@@ -323,9 +323,9 @@ it("shows only exact role campaign associations and withholds unscoped messages"
   const view = await mount(<SequenceTab {...props} />);
   expect(view.textContent).toContain("Staff outreach");
   expect(view.querySelector("tbody td")?.textContent).toBe("1");
-  expect(view.querySelector('section[aria-label="Role campaigns"]')?.textContent).not.toContain(
-    "Active",
-  );
+  expect(
+    view.querySelector('section[aria-label="Role campaigns"] tbody')?.textContent,
+  ).not.toContain("Active");
   expect(view.textContent).toContain("Replied · 1");
   const ada = [...view.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("Ada"),
@@ -398,24 +398,46 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
     leads: [],
   };
   let finishOld!: (value: unknown) => void;
-  roleCampaign.mockImplementation(async (input: { campaignId?: string }) => {
-    if (input.campaignId === "first-campaign")
-      return {
-        status: "ready",
-        leadsComplete: true,
-        campaign: { id: "first-campaign", name: "First outreach", status: 1 },
-        leads: [{ email: "ada@example.test", status: 1, interestStatus: 2 }],
-      };
-    if (input.campaignId)
-      return new Promise((resolve) => {
-        finishOld = resolve;
-      });
-    return selectionRequired;
-  });
+  roleCampaign.mockResolvedValue(selectionRequired);
+  /* role detail uses saved CRM records, so no selected campaign reaches the native RPC. */
   crmData.mockImplementation(
-    async (input: { operation: string; offset?: number; cursor?: string; crmRoleId?: string }) => {
+    async (input: {
+      operation: string;
+      campaignId?: string;
+      offset?: number;
+      cursor?: string;
+      crmRoleId?: string;
+    }) => {
+      if (input.operation === "campaignLeads") {
+        if (input.campaignId === "later-campaign")
+          return new Promise((resolve) => {
+            finishOld = resolve;
+          });
+        return {
+          operation: "campaignLeads",
+          source,
+          checkedAt,
+          campaignId: input.campaignId,
+          offset: 0,
+          nextOffset: null,
+          items: [
+            {
+              id: "lead",
+              candidateId: ADA,
+              person: { name: "Ada", email: "ada@example.test", profileImageUrl: null },
+              status: 1,
+              interestStatus: 2,
+              openCount: 1,
+              replyCount: 0,
+              lastContactAt: checkedAt,
+              lastReplyAt: null,
+              syncedAt: checkedAt,
+            },
+          ],
+        };
+      }
       if (input.operation === "candidates") return { ...candidatesPage, items: [], total: 0 };
-      const later = input.cursor === "opaque-next";
+      const later = input.campaignId === "later-campaign" || input.cursor === "opaque-next";
       return {
         operation: "roleCampaigns",
         source,
@@ -430,9 +452,9 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
             syncedAt: checkedAt,
           },
         ],
-        offset: later ? 25 : 0,
-        nextOffset: later ? null : 25,
-        nextCursor: later ? null : "opaque-next",
+        offset: later && !input.campaignId ? 25 : 0,
+        nextOffset: input.campaignId || later ? null : 25,
+        nextCursor: input.campaignId || later ? null : "opaque-next",
       };
     },
   );
@@ -445,15 +467,20 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
     selector().value = "first-campaign";
     selector().dispatchEvent(new Event("change", { bubbles: true }));
   });
-  expect(roleCampaign).toHaveBeenLastCalledWith({
-    groupId: "group-1",
-    campaignId: "first-campaign",
-    campaignOffset: 0,
-  });
+  expect(crmData).toHaveBeenCalledWith(
+    expect.objectContaining({
+      operation: "roleCampaigns",
+      campaignId: "first-campaign",
+      crmRoleId: ROLE,
+    }),
+  );
+  expect(roleCampaign.mock.calls.some(([input]) => input.campaignId)).toBe(false);
   expect(
     [...view.querySelectorAll("dl > div")].map((node) => node.textContent).join(" "),
   ).toContain("Active1");
-  const loadMore = view.querySelector<HTMLButtonElement>('[aria-label="Role campaigns"] button')!;
+  const loadMore = view.querySelector<HTMLButtonElement>(
+    '[aria-label="Role campaigns"] footer button',
+  )!;
   await act(async () => loadMore.click());
   await settle();
   expect([...selector().options].map((option) => option.textContent)).toContain("Later outreach");
@@ -461,11 +488,14 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
     selector().value = "later-campaign";
     selector().dispatchEvent(new Event("change", { bubbles: true }));
   });
-  expect(roleCampaign).toHaveBeenLastCalledWith({
-    groupId: "group-1",
-    campaignId: "later-campaign",
-    campaignOffset: 25,
-  });
+  expect(crmData).toHaveBeenCalledWith(
+    expect.objectContaining({
+      operation: "roleCampaigns",
+      campaignId: "later-campaign",
+      crmRoleId: ROLE,
+    }),
+  );
+  expect(roleCampaign.mock.calls.some(([input]) => input.campaignId)).toBe(false);
   // Same conversation, different role/source scope must not retain selected provider data.
   await view.rerender(
     <SequenceTab {...props} roleId="role-2" crmTarget={{ ...target, crmRoleId: BEN }} />,
@@ -475,10 +505,20 @@ it("selects an exact campaign from its actual loaded page and resets on role cha
   expect(roleCampaign).toHaveBeenLastCalledWith({ groupId: "group-1" });
   await act(async () =>
     finishOld({
-      status: "ready",
-      leadsComplete: true,
-      campaign: { id: "later-campaign", name: "Old selected", status: 1 },
-      leads: [{ email: "old@example.test", status: 1, interestStatus: 2 }],
+      operation: "campaignLeads",
+      source,
+      checkedAt,
+      campaignId: "later-campaign",
+      offset: 0,
+      nextOffset: null,
+      items: [
+        {
+          id: "old-lead",
+          person: { name: "Old selected", email: "old@example.test", profileImageUrl: null },
+          status: 1,
+          interestStatus: 2,
+        },
+      ],
     }),
   );
   const metrics = () =>

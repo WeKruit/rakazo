@@ -21,7 +21,11 @@ import type {
   ThreadMessagePage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
-import { GROUP_MEMBER_MIN, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import {
+  EffortModeSchema,
+  GROUP_MEMBER_MIN,
+  MessageBlock as MessageBlockSchema,
+} from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
   AUTOMATION_RUN_TRIGGERS,
@@ -60,6 +64,7 @@ import {
   QueuedMessageError,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   STOPPED_TURN,
+  seesOperatorSpend,
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
@@ -552,7 +557,66 @@ export async function threadHead(prisma: PrismaClient, target: ThreadTarget) {
   return { threadId: target.threadId, cursor: latest?.seq ?? -1 };
 }
 
+/** The saved next-message suggestion for the newest reply, so it survives a reload. */
+export async function latestReplySuggestion(
+  prisma: PrismaClient,
+  messages: ReadonlyArray<{ id: string; role: string; runId?: string | null; internal?: boolean }>,
+): Promise<{ runId: string; text: string } | null> {
+  const last = messages.findLast(
+    (message) =>
+      !message.internal &&
+      (message.role === "user" || message.role === "bot") &&
+      !message.id.startsWith("progress:"),
+  );
+  if (last?.role !== "bot" || !last.runId) return null;
+  const runId = last.runId;
+  // Never fails the thread read: no suggestion is the fallback.
+  const event = await Promise.resolve()
+    .then(() =>
+      prisma.event.findFirst({
+        where: { runId, type: "thread.suggestion" },
+        orderBy: { seq: "desc" },
+        select: { payload: true },
+      }),
+    )
+    .catch(() => null);
+  const text = (event?.payload as { text?: unknown } | undefined)?.text;
+  return typeof text === "string" && text ? { runId, text } : null;
+}
+
 export async function threadSnapshot(
+  deps: { prisma: PrismaClient },
+  target: ThreadTarget,
+): Promise<ThreadSnapshot> {
+  const [snapshot, effortMode] = await Promise.all([
+    readThreadSnapshot(deps, target),
+    threadEffortMode(deps.prisma, target.threadId),
+  ]);
+  const suggestion = await latestReplySuggestion(deps.prisma, snapshot.messages);
+  return {
+    ...snapshot,
+    ...(suggestion ? { suggestion } : {}),
+    ...(effortMode ? { effortMode } : {}),
+  };
+}
+
+/** The chat's effort mode when its owner may choose one; undefined otherwise or on a read error. */
+async function threadEffortMode(prisma: PrismaClient, threadId: string) {
+  try {
+    const thread = await prisma.thread.findUnique({
+      where: { id: threadId },
+      select: { effortMode: true, userId: true },
+    });
+    if (!thread || !(await seesOperatorSpend(prisma, thread.userId))) return undefined;
+    return EffortModeSchema.catch("fast").parse(thread.effortMode ?? "fast");
+  } catch (error) {
+    // The picker is optional; opening the chat must not fail on it.
+    getLogger().warn("thread effort mode read failed", { threadId, error });
+    return undefined;
+  }
+}
+
+async function readThreadSnapshot(
   deps: { prisma: PrismaClient },
   target: ThreadTarget,
 ): Promise<ThreadSnapshot> {

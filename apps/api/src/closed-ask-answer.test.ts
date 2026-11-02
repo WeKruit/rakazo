@@ -153,6 +153,18 @@ describe("answering a card whose wait expired", () => {
     expect(notify).toHaveBeenCalledWith("thread-1", 7);
   });
 
+  it("never turns a closed mail Send click into a new chat message or run", async () => {
+    const { handler, enqueue, notify } = setup({ runStatus: "cancelled" });
+    const response = await answer(handler, {
+      botId: "sourcer",
+      answer: { action: "send", body: "Edited reply", cc: ["copy@example.test"] },
+    });
+    expect(response.status).toBe(409);
+    expect(sendThreadMessage).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("sends a group answer to the agent that asked", async () => {
     const { handler } = setup({ runStatus: "cancelled", group: true });
     const response = await answer(handler, { groupId: "group-1", answer: "remote" });

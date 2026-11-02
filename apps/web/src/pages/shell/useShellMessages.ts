@@ -53,6 +53,7 @@ export function useShellMessages({
   jumpGeneration,
   setScrollRequest,
   activeGroupId,
+  pendingGroupCreations,
   jumpToMessageRef,
   activeBotId,
   snapshotRef,
@@ -96,6 +97,7 @@ export function useShellMessages({
   jumpGeneration: RefObject<number>;
   setScrollRequest: Dispatch<SetStateAction<{ messageId: string; nonce: number } | null>>;
   activeGroupId: RefObject<string | undefined>;
+  pendingGroupCreations: RefObject<Map<string, Promise<unknown>>>;
   jumpToMessageRef: RefObject<
     (target: { botId?: string; groupId?: string; messageId: string }) => Promise<void>
   >;
@@ -431,6 +433,8 @@ export function useShellMessages({
           return false;
         }
         if (groupTarget) {
+          // A role opened from its proxy takes messages once the server has created it.
+          await pendingGroupCreations.current.get(groupTarget);
           // A network failure retries the same send (same nonce) before the draft comes back.
           const sent = await retrySend(
             () =>

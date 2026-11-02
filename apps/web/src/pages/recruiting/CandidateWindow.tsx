@@ -111,7 +111,7 @@ function SmallCandidateWindow({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users must focus the scrollable candidate viewport.
         tabIndex={0}
         {...events}
-        className={`candidate-viewport max-h-[70vh] max-w-full overflow-auto rounded-xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-ring ${className}`}
+        className={`candidate-viewport hire-contact-table-scroll max-h-[70vh] max-w-full overflow-auto rounded-xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-ring ${className}`}
       >
         <table aria-rowcount={itemKeys.length + 1} className={tableClassName}>
           {header}

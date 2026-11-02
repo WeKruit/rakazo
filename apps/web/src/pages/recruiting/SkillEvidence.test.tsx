@@ -43,6 +43,10 @@ const button = (view: HTMLElement, text: string) =>
 const NO_QUICK = { headline: null, highlights: [], keyWorks: [], concerns: [], entities: [] };
 /** Opens every assessment row so its full evidence is in the DOM. */
 async function expandRows(view: HTMLElement) {
+  const more = [...view.querySelectorAll("button")].find((item) =>
+    /^Show all \d+ criteria$/.test(item.textContent ?? ""),
+  );
+  if (more) await act(async () => more.click());
   for (const row of view.querySelectorAll<HTMLButtonElement>("li > button:not([disabled])"))
     await act(async () => row.click());
 }
@@ -172,6 +176,8 @@ it("leads with the supplied criterion name, preserves all assessment states, and
       keywords={["C++"]}
     />,
   );
+  expect(view.querySelectorAll("li")).toHaveLength(3);
+  expect(button(view, "Show all 4 criteria")).toBeDefined();
   await expandRows(view);
   const rows = [...view.querySelectorAll("li")];
   // The status is the row icon's accessible name; the evidence opens under the criterion.

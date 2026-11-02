@@ -13,7 +13,7 @@ import { UNATTENDED_MEMORY_WRITE_REFUSAL } from "@rakazo/core";
 import { approvalEffectKey, toolEffectIdempotencyKey } from "@rakazo/core/node/approval-effect-key";
 import type * as DatabaseModule from "@rakazo/db";
 import type { PauseRunForInput } from "@rakazo/db";
-import { IsolationError, RecruitingConflictError } from "@rakazo/db";
+import { editMailReplyRequest, IsolationError, RecruitingConflictError } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogExecuteToolName, isApprovalPausedResult } from "./approval-effect.js";
 import { builtinAgentTools, MAX_SHARED_MEMORY_CHARS } from "./builtin-tools.js";
@@ -113,6 +113,7 @@ type Effect = {
   request: unknown;
   result?: unknown;
   reviewDecision?: string;
+  updatedAt?: Date;
   runId?: string;
 };
 
@@ -241,14 +242,28 @@ function fixture({
     createdAt: new Date(),
   };
   const externalEffect = {
+    findFirst: vi.fn(
+      async ({ where }: { where: { id?: string; status?: string } }) =>
+        effects.find(
+          (effect) =>
+            (!where.id || effect.id === where.id) &&
+            (!where.status || effect.status === where.status),
+        ) ?? null,
+    ),
     findMany: vi.fn(
       async ({
         where,
       }: {
-        where?: { id?: string; runId?: string; status?: string; kind?: string };
+        where?: { id?: string; runId?: string; status?: string | { in: string[] }; kind?: string };
       } = {}) =>
         effects.filter((effect) => {
-          if (where?.status && effect.status !== where.status) return false;
+          if (
+            where?.status &&
+            !(typeof where.status === "string"
+              ? effect.status === where.status
+              : where.status.in.includes(effect.status))
+          )
+            return false;
           if (where?.kind && effect.kind !== where.kind) return false;
           if (where?.runId && effect.runId && effect.runId !== where.runId) return false;
           if (where?.id && effect.id !== where.id) return false;
@@ -262,7 +277,7 @@ function fixture({
         ) ?? null,
     ),
     create: vi.fn(async ({ data }: { data: Omit<Effect, "id"> }) => {
-      const effect = { ...data, id: `effect-${effects.length + 1}` };
+      const effect = { ...data, updatedAt: new Date(), id: `effect-${effects.length + 1}` };
       effects.push(effect);
       return { ...effect };
     }),
@@ -312,9 +327,23 @@ function fixture({
     thread: {
       findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })),
       findUnique: vi.fn(async () => ({ activeRecruitingRoleId: null as string | null })),
+      update: vi.fn(async () => ({ nextMessageSeq: 1, nextEventSeq: 1, userId: "user-1" })),
     },
-    message: { findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []) },
-    event: { findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []) },
+    message: {
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "card-message",
+        ...data,
+      })),
+    },
+    event: {
+      findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "card-event",
+        ...data,
+      })),
+    },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
     connection: { findMany: vi.fn(async () => []) },
     botMcpServer: {
@@ -353,7 +382,20 @@ function fixture({
     return true;
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
-  const execute = vi.fn(async function* (call: ConnectorCall): AsyncGenerator<ConnectorEvent> {
+  const senderChecks = vi.fn(async function* (
+    _call: ConnectorCall,
+  ): AsyncGenerator<ConnectorEvent> {
+    yield {
+      type: "result",
+      data: connectorResults.native_instantly_get_email ?? {
+        structuredContent: { result: { ...replyAnchor, replySenderCheck: { ready: true } } },
+      },
+    };
+  });
+  const execute = vi.fn(async function* (
+    call: ConnectorCall,
+    _context?: unknown,
+  ): AsyncGenerator<ConnectorEvent> {
     if (transportUncertain) {
       yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
       return;
@@ -367,6 +409,15 @@ function fixture({
   let calls: { name?: string; args: Record<string, unknown>; executionId: string }[] = [
     { args: { id: "item-1" }, executionId: "call-1" },
   ];
+  const claimSteering = vi.fn(
+    async () =>
+      [] as Array<{
+        id: string;
+        messageId: string;
+        text: string;
+        blocks: Array<{ kind: "text"; text: string }>;
+      }>,
+  );
   const runtimeRun = vi.fn(async function* (
     request: AgentRunRequest,
   ): AsyncGenerator<AgentRuntimeEvent> {
@@ -407,7 +458,10 @@ function fixture({
         catalog || call.route?.toolName === "__catalog_execute"
           ? resolveCatalogCall(call, catalogEntries(providerTools))
           : undefined,
-      execute,
+      execute: (call: ConnectorCall, context: never) =>
+        call.route?.toolName === "native_instantly_get_email" && call.args.check_sender === true
+          ? senderChecks(call)
+          : execute(call, context),
     },
     sandbox: { describe: () => ({ capabilities: { graphical: false } }) },
     memory: {
@@ -431,7 +485,13 @@ function fixture({
       commit,
     },
     memoryProviders: { resolve: async () => null },
-    events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
+    events: {
+      append: vi.fn(async () => undefined),
+      notify: vi.fn(async () => undefined),
+      claimSteering,
+      pauseRunForInput,
+      finalizeRun,
+    },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets,
     autoReview: autoReviewProvider,
@@ -439,20 +499,25 @@ function fixture({
   } as unknown as Parameters<typeof createRunExecutor>[0]);
   return {
     prisma,
+    providerTools,
     effects,
     results,
     execute,
+    senderChecks,
+    claimSteering,
     commit,
     sharedMemoryState,
     pauseRunForInput,
+    finalizeRun,
     runtimeRun,
     setCalls(next: typeof calls) {
       calls = next;
     },
-    async run({ allowFailure = false } = {}) {
+    async run({ allowFailure = false, expectModel = true } = {}) {
       run.status = "queued";
       await executor.continueRun(run.id, "worker-1");
-      expect(runtimeRun).toHaveBeenCalled();
+      if (expectModel) expect(runtimeRun).toHaveBeenCalled();
+      else expect(runtimeRun).not.toHaveBeenCalled();
       expect(prisma.attempt.update).not.toHaveBeenCalled();
       if (!allowFailure)
         expect(finalizeRun).not.toHaveBeenCalledWith(
@@ -1689,9 +1754,8 @@ describe.each([
 });
 
 const sendActions = [
-  { id: "allow", label: "Confirm and send" },
-  { id: "always", label: "Send when I say send" },
-  { id: "deny", label: "Cancel" },
+  { id: "allow", label: "Send" },
+  { id: "deny", label: "Discard" },
 ];
 const onceActions = [
   { id: "allow", label: "Allow once" },
@@ -1741,12 +1805,12 @@ describe("recruiter-instructed email send", () => {
     return f;
   }
 
-  it("sends without a card when the recruiter says send after seeing the exact text", async () => {
+  it("requires the Send click even after the recruiter says send and saw the exact text", async () => {
     const f = await instructedSend(
       "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
     );
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
   });
 
   it("keeps the card when the exact text was never shown", async () => {
@@ -1773,12 +1837,12 @@ describe("recruiter-instructed email send", () => {
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
   });
 
-  it("sends on the recruiter's word when they chose send when I say send", async () => {
+  it("requires the Send click even with a previously saved send preference", async () => {
     const f = await instructedSend("我会回复 candidate@example.test 周二可以。", "发吧", [
       { effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" },
     ]);
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
   });
 
   it("keeps the card for a send the recruiter did not ask for, even with that choice saved", async () => {
@@ -2073,6 +2137,219 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
     body: { text: replyArgs.body_text },
     ue_type: 3,
   };
+
+  it("tells the agent that the existing card was discarded rather than never created", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      status: "discarded",
+      dispatched: false,
+      message: expect.stringContaining("already created"),
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.senderChecks).toHaveBeenCalledOnce();
+  });
+  it("puts the existing discard decision in the continuation before any replacement tool call", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.setCalls([]);
+    f.runtimeRun.mockClear();
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("user explicitly discarded");
+    expect(prompt).toContain("Stop working on this reply");
+    expect(prompt).toContain(replyArgs.reply_to_uuid);
+    expect(prompt).toContain("resource-1");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.effects).toHaveLength(1);
+  });
+  it("does not replace a discarded card with a new draft for the same source and anchor", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.providerTools[0]!.name = "replacement_reply";
+    f.setCalls([
+      {
+        ...(catalog ? {} : { name: "replacement_reply" }),
+        args: { ...replyArgs, body_text: "A replacement draft" },
+        executionId: "replacement",
+      },
+    ]);
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({ status: "discarded", dispatched: false });
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("allows a new pending draft after a new human request arrives in the same run", async () => {
+    const f = replyFixture();
+    await f.run();
+    f.effects[0]!.status = "denied";
+    f.setCalls([
+      { args: { ...replyArgs, body_text: "A newly requested draft" }, executionId: "new-request" },
+    ]);
+    f.claimSteering.mockResolvedValueOnce([
+      {
+        id: "steering",
+        messageId: "new-human",
+        text: "Please draft a new reply",
+        blocks: [{ kind: "text", text: "Please draft a new reply" }],
+      },
+    ]);
+    const model = f.runtimeRun.getMockImplementation()!;
+    f.runtimeRun.mockImplementationOnce(async function* (request) {
+      await request.claimSteering?.([]);
+      yield* model(request);
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledTimes(2);
+    expect(f.effects[1]).toMatchObject({
+      status: "intended",
+      result: { mailReplyApproval: { body: "A newly requested draft" } },
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("keeps a blocked sender on the original card without offering Send or pausing for approval", async () => {
+    const f = replyFixture();
+    f.senderChecks.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        data: {
+          structuredContent: {
+            result: {
+              ...replyAnchor,
+              replySenderCheck: { ready: false, error: "sender_unavailable" },
+            },
+          },
+        },
+      };
+    });
+    await f.run();
+    expect(f.senderChecks).toHaveBeenCalledOnce();
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.effects[0]).toMatchObject({
+      status: "completed",
+      result: {
+        dispatched: false,
+        error: "sender_unavailable",
+        mailReplyApproval: { status: "failed", error: "sender_unavailable", canAnswer: false },
+      },
+    });
+    const cards = f.prisma.message.create.mock.calls
+      .flatMap(([input]) => input.data.blocks as any[])
+      .filter((block) => block.kind === "ask");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      status: "answered",
+      actions: [],
+      mailReply: { status: "failed", error: "sender_unavailable", canAnswer: false },
+    });
+  });
+  it("records a clicked reply as failed without dispatch when its original source is no longer authorized", async () => {
+    const f = replyFixture();
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    effect.status = "approved";
+    effect.result = { mailReplyApproval: { ...draft, status: "sending" } };
+    replyProof.mockResolvedValue(null);
+    f.runtimeRun.mockClear();
+    await f.run({ expectModel: false });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(effect).toMatchObject({ status: "failed", result: { dispatched: false } });
+    expect(f.effects).toHaveLength(1);
+  });
+
+  it.each(["approved", "executing", "uncertain", "completed"])(
+    "settles a consumed blocked replay only while still approved: %s",
+    async (statusAtSettlement) => {
+      const f = replyFixture();
+      await f.run();
+      const effect = f.effects[0]!;
+      const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+        .mailReplyApproval;
+      effect.status = "approved";
+      effect.result = {
+        mailReplyApproval: { ...draft, status: "sending" },
+        schedulingApprovalEvidence: { invalid: true },
+      };
+      const update = f.prisma.externalEffect.updateMany.getMockImplementation()!;
+      f.prisma.externalEffect.updateMany.mockImplementation(async (input) => {
+        if (input.where.id === effect.id && input.data.status === "failed")
+          effect.status = statusAtSettlement;
+        return update(input);
+      });
+      f.runtimeRun.mockClear();
+      await f.run({ expectModel: false });
+      expect(f.execute).not.toHaveBeenCalled();
+      expect(f.effects).toHaveLength(1);
+      if (statusAtSettlement === "approved")
+        expect(effect).toMatchObject({
+          status: "failed",
+          result: { dispatched: false, error: expect.any(String) },
+        });
+      else expect(effect.status).toBe(statusAtSettlement);
+      expect(f.prisma.externalEffect.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: effect.id, spaceId: "space-1", runId: "run-1", status: "approved" },
+          data: expect.objectContaining({ status: "failed" }),
+        }),
+      );
+    },
+  );
+  it("dispatches a clicked edited reply through the same effect before any model call", async () => {
+    const editedBody = "The recruiter edited this sentence.";
+    const f = replyFixture({
+      structuredContent: {
+        ...sentEmail,
+        body: { text: editedBody },
+        cc_address_email_list: "copy@example.test",
+      },
+    });
+    await f.run();
+    const effect = f.effects[0]!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    const originalId = effect.id;
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: editedBody,
+      cc: ["copy@example.test"],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: editedBody,
+        cc: ["copy@example.test"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    await f.run({ expectModel: false });
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.execute.mock.calls[0]?.[0].args).toEqual({
+      ...replyArgs,
+      body_text: editedBody,
+      cc_address_email_list: "copy@example.test",
+    });
+    expect(f.effects).toHaveLength(1);
+    expect(effect).toMatchObject({
+      id: originalId,
+      status: "completed",
+      result: { status: "sent_recorded" },
+    });
+    expect(f.finalizeRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        outcome: "completed",
+        blocks: [],
+      }),
+    );
+  });
 
   it.each([
     null,
@@ -3106,7 +3383,12 @@ describe("candidate-linked native reply", () => {
     await f.run();
     f.effects[0]!.status = "approved";
     f.prisma.externalEffect.findMany.mockImplementation(async ({ where } = {}) =>
-      where?.status === "approved" ? [] : f.effects,
+      where?.status &&
+      (typeof where.status === "string"
+        ? where.status === "approved"
+        : where.status.in.includes("approved"))
+        ? []
+        : f.effects,
     );
     f.execute.mockImplementation(async function* () {
       yield {
@@ -3894,5 +4176,94 @@ describe("unattended memory writes after external text", () => {
       expect.objectContaining({ where: expect.objectContaining({ type: "agent.tool.called" }) }),
     );
     expect(f.results.at(-1)).toEqual({ ok: true, path: "MEMORY.md", revision: 1 });
+  });
+});
+
+describe("editable Gmail reply approval", () => {
+  it("keeps the pinned mailbox/anchor and sends edited text once without a model roundtrip", async () => {
+    const args = {
+      thread_id: "gmail-thread",
+      recipient_email: "candidate@example.test",
+      message_body: "Initial Gmail reply",
+      user_id: "me",
+    };
+    const f = fixture({
+      name: "GMAIL_REPLY_TO_THREAD",
+      readOnly: false,
+      inputSchema: { type: "object" },
+      route: { connectorId: "composio", toolName: "GMAIL_REPLY_TO_THREAD" },
+      connectorResults: {
+        GMAIL_GET_PROFILE: { data: { emailAddress: "sender@example.test" } },
+        GMAIL_FETCH_MESSAGE_BY_THREAD_ID: {
+          data: {
+            messages: [
+              {
+                messageId: "gmail-anchor",
+                sender: "candidate@example.test",
+                to: ["sender@example.test"],
+                subject: "Original Gmail subject",
+              },
+            ],
+          },
+        },
+        GMAIL_REPLY_TO_THREAD: { data: { id: "gmail-sent", threadId: "gmail-thread" } },
+      },
+    });
+    f.prisma.connection.findMany.mockResolvedValue([
+      {
+        id: "gmail-connection",
+        connectorId: "composio",
+        provider: "gmail",
+        providerRef: "gmail-account",
+        displayName: "Gmail",
+        status: "connected",
+      },
+    ] as never);
+    f.setCalls([{ args, executionId: "gmail-draft" }]);
+    await f.run();
+    const effect = f.effects.find((item) => item.kind === "GMAIL_REPLY_TO_THREAD")!;
+    const draft = (effect.result as { mailReplyApproval: import("@rakazo/contracts").MailReply })
+      .mailReplyApproval;
+    expect(draft).toMatchObject({
+      from: "sender@example.test",
+      subject: "Original Gmail subject",
+      inReplyTo: { emailId: "gmail-anchor", sourceId: "gmail-connection" },
+    });
+    effect.request = editMailReplyRequest(effect.request, draft, {
+      action: "send",
+      body: "Edited Gmail sentence",
+      cc: ["copy@example.test"],
+    });
+    effect.result = {
+      mailReplyApproval: {
+        ...draft,
+        body: "Edited Gmail sentence",
+        cc: ["copy@example.test"],
+        status: "sending",
+      },
+    };
+    effect.status = "approved";
+    f.runtimeRun.mockClear();
+    f.execute.mockClear();
+    await f.run({ expectModel: false });
+    const sends = f.execute.mock.calls.filter(
+      ([call]) => call.route?.toolName === "GMAIL_REPLY_TO_THREAD",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.[0]).toMatchObject({
+      route: {
+        connectorId: "composio",
+        resourceId: "gmail-connection",
+        resourceRevision: "gmail-account",
+      },
+      args: {
+        ...args,
+        message_body: "Edited Gmail sentence",
+        is_html: false,
+        cc: ["copy@example.test"],
+      },
+    });
+    expect(f.effects.filter((item) => item.kind === "GMAIL_REPLY_TO_THREAD")).toHaveLength(1);
+    expect(effect.status).toBe("completed");
   });
 });

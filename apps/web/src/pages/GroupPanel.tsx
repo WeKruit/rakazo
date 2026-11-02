@@ -75,6 +75,7 @@ export function CreateGroupForm({
   bots,
   recruiting = false,
   initialDescription = "",
+  initialError = null,
   attachments = [],
   attachmentNotice = [],
   onRemoveSkippedAttachment,
@@ -86,6 +87,8 @@ export function CreateGroupForm({
   bots: Bot[];
   recruiting?: boolean;
   initialDescription?: string;
+  /** Why the last submission did not go through, after it came back for another try. */
+  initialError?: string | null;
   attachments?: readonly { id: string; file: File; previewUrl?: string }[];
   attachmentNotice?: readonly SkippedAttachment[];
   onRemoveSkippedAttachment?: (id: string) => void;
@@ -104,7 +107,7 @@ export function CreateGroupForm({
     ? bots.filter((bot) => !bot.archivedAt).map((bot) => bot.id)
     : selection;
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
 
   const roleName = recruiting ? t`New role` : name.trim();
   const canCreate =

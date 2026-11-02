@@ -1,13 +1,21 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
+import {
+  Badge,
+  Button,
+  Input,
+  NativeSelect,
+  NativeSelectOption,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@rakazo/ui-web";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CalendarTimeIssue, InterviewCalendarEvent } from "./interviewCalendarModel";
 import {
   calendarDay,
   calendarInstant,
   calendarMinute,
-  calendarWeek,
   layoutCalendarEvents,
   shiftCalendarDay,
   validCalendarZone,
@@ -23,6 +31,9 @@ export function InterviewCalendar({
   initialDate,
   contextLabel,
   now,
+  showActivity = true,
+  highlightedEventIds = [],
+  onSelectEvent,
 }: {
   events: readonly InterviewCalendarEvent[];
   /** Display timezone; defaults to the browser's named timezone, with UTC as a safe fallback. */
@@ -30,8 +41,12 @@ export function InterviewCalendar({
   initialDate?: Date;
   contextLabel?: string;
   now?: Date;
+  showActivity?: boolean;
+  highlightedEventIds?: readonly string[];
+  onSelectEvent?: (event: InterviewCalendarEvent) => void;
 }) {
   const { t, i18n } = useLingui();
+  const dateInputId = useId();
   const locale = i18n?.locale || "en";
   const [clock, setClock] = useState(() => new Date());
   const currentTime = now ?? clock;
@@ -40,8 +55,8 @@ export function InterviewCalendar({
     timeZone ? validCalendarZone(timeZone) || "UTC" : localZone,
   );
   const [anchor, setAnchor] = useState(() => calendarDay(initialDate ?? currentTime, zone));
-  const [dayIndex, setDayIndex] = useState(() => calendarWeek(anchor).indexOf(anchor));
-  const [status, setStatus] = useState("all");
+  const [dayIndex, setDayIndex] = useState(0);
+  const [status, setStatus] = useState<string[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const scroll = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -50,7 +65,10 @@ export function InterviewCalendar({
   const dayButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const today = calendarDay(currentTime, zone);
   const currentMinute = calendarMinute(currentTime, zone);
-  const days = calendarWeek(anchor);
+  const days = useMemo(
+    () => Array.from({ length: 5 }, (_, index) => shiftCalendarDay(anchor, index)),
+    [anchor],
+  );
   const weekKey = days[0]!;
   const selectedDay = days[dayIndex]!;
   const zones = [
@@ -58,23 +76,16 @@ export function InterviewCalendar({
       zone,
       localZone,
       "UTC",
+      ...Intl.supportedValuesOf("timeZone"),
       ...events.flatMap((event) => validCalendarZone(event.timeZone) || []),
     ]),
   ];
-  const statuses = [...new Set(events.flatMap((event) => (event.status ? [event.status] : [])))];
+  const statuses = [...new Set(events.map((event) => event.status ?? ""))];
   const filtered = useMemo(
-    () =>
-      events.filter(
-        (event) =>
-          status === "all" ||
-          (status === "missing" ? !event.status : event.status === status.slice(2)),
-      ),
+    () => events.filter((event) => status === null || status.includes(event.status ?? "")),
     [events, status],
   );
-  const layout = useMemo(
-    () => layoutCalendarEvents(filtered, calendarWeek(anchor), zone),
-    [filtered, anchor, zone],
-  );
+  const layout = useMemo(() => layoutCalendarEvents(filtered, days, zone), [filtered, days, zone]);
   const selected = filtered.find((event) => event.id === selectedId);
   const weekEvents = [
     ...new Map(layout.segments.map(({ event }) => [event.id, event])).values(),
@@ -89,14 +100,8 @@ export function InterviewCalendar({
     if (timeZone) setZone(validCalendarZone(timeZone) || "UTC");
   }, [timeZone]);
   useEffect(() => {
-    if (
-      status !== "all" &&
-      !events.some((event) =>
-        status === "missing" ? !event.status : event.status === status.slice(2),
-      )
-    ) {
-      setStatus("all");
-    }
+    if (status?.length && !events.some((event) => status.includes(event.status ?? "")))
+      setStatus(null);
   }, [events, status]);
   useEffect(() => {
     // Start near the first visible record, while keeping every hour available by scrolling.
@@ -171,7 +176,7 @@ export function InterviewCalendar({
       clock_change: t`Clock change; see source times`,
     })[issue];
   const moveWeek = (offset: number) => {
-    setAnchor(shiftCalendarDay(weekKey, offset * 7));
+    setAnchor(shiftCalendarDay(weekKey, offset * 5));
     setSelectedId(null);
   };
   const moveDay = (index: number) => {
@@ -182,7 +187,7 @@ export function InterviewCalendar({
   return (
     <section
       aria-label={t`Calendar`}
-      className="@container/interview min-w-0 space-y-3 rounded-xl border bg-card p-3"
+      className="@container/interview min-w-0 space-y-3 rounded-xl bg-muted/30 p-3"
       data-testid="interview-calendar"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -198,7 +203,7 @@ export function InterviewCalendar({
           <Button
             size="icon-sm"
             variant="outline"
-            aria-label={t`Previous week`}
+            aria-label={t`Previous five days`}
             onClick={() => moveWeek(-1)}
           >
             <ChevronLeft size={16} aria-hidden />
@@ -206,9 +211,10 @@ export function InterviewCalendar({
           <Button
             size="sm"
             variant="outline"
+            disabled={anchor === today}
             onClick={() => {
               setAnchor(today);
-              setDayIndex(calendarWeek(today).indexOf(today));
+              setDayIndex(0);
               setSelectedId(null);
             }}
           >
@@ -217,7 +223,7 @@ export function InterviewCalendar({
           <Button
             size="icon-sm"
             variant="outline"
-            aria-label={t`Next week`}
+            aria-label={t`Next five days`}
             onClick={() => moveWeek(1)}
           >
             <ChevronRight size={16} aria-hidden />
@@ -226,37 +232,68 @@ export function InterviewCalendar({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <p
-          className="min-w-0 basis-full text-sm font-medium @3xl/interview:flex-1"
+          className="min-w-0 basis-full text-sm font-medium @xl/interview:flex-1"
           aria-live="polite"
         >
-          {dayLabel(days[0]!)} – {dayLabel(days[6]!)}
+          {dayLabel(days[0]!)} – {dayLabel(days[4]!)}
         </p>
-        <NativeSelect
-          className="max-w-full"
-          size="sm"
-          aria-label={t`Event status`}
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value);
-            setSelectedId(null);
-          }}
-        >
-          <NativeSelectOption value="all">{t`All statuses`}</NativeSelectOption>
-          {statuses.map((value) => (
-            <NativeSelectOption key={value} value={`s:${value}`}>
-              {value}
-            </NativeSelectOption>
-          ))}
-          {events.some((event) => !event.status) ? (
-            <NativeSelectOption value="missing">{t`Status not recorded`}</NativeSelectOption>
-          ) : null}
-        </NativeSelect>
+        <Popover>
+          <PopoverTrigger
+            render={<Button size="sm" variant="outline" aria-label={t`Event status`} />}
+          >
+            {status === null ? (
+              <Trans>All statuses</Trans>
+            ) : (
+              <Trans>{status.length} statuses</Trans>
+            )}
+          </PopoverTrigger>
+          <PopoverContent align="end">
+            <fieldset aria-label={t`Event statuses`} className="space-y-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label={t`All statuses`}
+                  checked={status === null}
+                  onChange={(event) => {
+                    setStatus(event.target.checked ? null : []);
+                    setSelectedId(null);
+                  }}
+                />
+                <Trans>All statuses</Trans>
+              </label>
+              {statuses.map((value) => (
+                <label key={value} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label={value || t`Status not recorded`}
+                    checked={status === null || status.includes(value)}
+                    onChange={(event) => {
+                      setStatus((current) => {
+                        const selected = current ?? statuses;
+                        const next = event.target.checked
+                          ? [...selected, value]
+                          : selected.filter((item) => item !== value);
+                        return statuses.every((item) => next.includes(item)) ? null : next;
+                      });
+                      setSelectedId(null);
+                    }}
+                  />
+                  {value || t`Status not recorded`}
+                </label>
+              ))}
+            </fieldset>
+          </PopoverContent>
+        </Popover>
         <NativeSelect
           className="max-w-full"
           size="sm"
           aria-label={t`Display timezone`}
           value={zone}
           onChange={(event) => {
+            if (anchor === today) {
+              setAnchor(calendarDay(currentTime, event.target.value));
+              setDayIndex(0);
+            }
             setZone(event.target.value);
             setSelectedId(null);
           }}
@@ -268,8 +305,30 @@ export function InterviewCalendar({
           ))}
         </NativeSelect>
       </div>
+      <label
+        htmlFor={dateInputId}
+        className="flex items-center gap-2 text-xs text-muted-foreground"
+      >
+        <Trans>Start date</Trans>
+        <Input
+          id={dateInputId}
+          type="date"
+          name="calendar-start-date"
+          aria-label={t`Calendar start date`}
+          className="w-auto"
+          value={anchor}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))) {
+              setAnchor(value);
+              setDayIndex(0);
+              setSelectedId(null);
+            }
+          }}
+        />
+      </label>
       <fieldset
-        className="flex min-w-0 gap-1 overflow-x-auto @3xl/interview:hidden"
+        className="flex min-w-0 gap-1 overflow-x-auto @xl/interview:hidden"
         aria-label={t`Choose day`}
       >
         {days.map((day, index) => (
@@ -285,10 +344,10 @@ export function InterviewCalendar({
             onClick={() => setDayIndex(index)}
             onKeyDown={(event) => {
               let next: number | null = null;
-              if (event.key === "ArrowRight") next = (index + 1) % 7;
-              if (event.key === "ArrowLeft") next = (index + 6) % 7;
+              if (event.key === "ArrowRight") next = (index + 1) % 5;
+              if (event.key === "ArrowLeft") next = (index + 4) % 5;
               if (event.key === "Home") next = 0;
-              if (event.key === "End") next = 6;
+              if (event.key === "End") next = 4;
               if (next !== null) {
                 event.preventDefault();
                 moveDay(next);
@@ -299,16 +358,18 @@ export function InterviewCalendar({
           </Button>
         ))}
       </fieldset>
-      <div className="grid min-w-0 gap-3 @5xl/interview:grid-cols-[minmax(0,1fr)_18.75rem]">
+      <div
+        className={`grid min-w-0 gap-4 ${showActivity ? "@5xl/interview:grid-cols-[minmax(0,1fr)_18.75rem]" : ""}`}
+      >
         <div className="min-w-0 overflow-hidden rounded-lg border">
-          <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] border-b bg-card @3xl/interview:grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]">
+          <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] border-b bg-card @xl/interview:grid-cols-[3.5rem_repeat(5,minmax(0,1fr))]">
             <span className="p-2 text-xs text-muted-foreground">
               {zone === "UTC" ? "UTC" : t`Time`}
             </span>
             {days.map((day, index) => (
               <h4
                 key={day}
-                className={`${index === dayIndex ? "block" : "hidden"} min-w-0 border-s px-1 py-2 text-center text-xs @3xl/interview:block ${day === today ? "bg-muted font-semibold" : "font-normal"}`}
+                className={`${index === dayIndex ? "block" : "hidden"} min-w-0 border-s px-1 py-2 text-center text-xs @xl/interview:block ${day === today ? "bg-muted font-semibold" : "font-normal"}`}
               >
                 <time dateTime={day}>{dayLabel(day)}</time>
               </h4>
@@ -320,26 +381,30 @@ export function InterviewCalendar({
               data-testid="calendar-empty-guidance"
             >
               <p className="text-sm font-medium">
-                <Trans>No timed events in this week.</Trans>
+                {status === null ? (
+                  <Trans>No timed events in this date range.</Trans>
+                ) : (
+                  <Trans>No events match these statuses in this date range.</Trans>
+                )}
               </p>
               <p className="text-xs text-muted-foreground">
                 <Trans>
-                  Change the week or status to review saved records. Empty space does not confirm
-                  availability.
+                  Change the date range or status to review saved records. Empty space does not
+                  confirm availability.
                 </Trans>
               </p>
             </div>
           ) : null}
           <section
             ref={scroll}
-            className="rk-scroll h-[calc(100dvh-17rem)] min-h-64 overflow-y-auto focus-visible:outline-2 focus-visible:outline-ring"
+            className="rk-scroll h-[calc(100dvh-17rem)] min-h-64 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-ring"
             data-testid="calendar-hours"
             aria-label={t`Calendar hours`}
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus and scroll the calendar hours.
             tabIndex={0}
           >
             <div
-              className="grid grid-cols-[3.5rem_minmax(0,1fr)] @3xl/interview:grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]"
+              className="grid grid-cols-[3.5rem_minmax(0,1fr)] @xl/interview:grid-cols-[3.5rem_repeat(5,minmax(0,1fr))]"
               style={{ height: 1440 * MINUTE_HEIGHT }}
             >
               <div aria-hidden className="relative text-right text-xs text-muted-foreground">
@@ -357,7 +422,7 @@ export function InterviewCalendar({
                 <section
                   key={day}
                   aria-label={dayLabel(day, "long")}
-                  className={`${index === dayIndex ? "block" : "hidden"} relative min-w-0 border-s @3xl/interview:block`}
+                  className={`${index === dayIndex ? "block" : "hidden"} relative min-w-0 border-s @xl/interview:block`}
                 >
                   {HOURS.map((hour) => (
                     <span
@@ -391,7 +456,7 @@ export function InterviewCalendar({
                         key={row.key}
                         type="button"
                         data-event-id={row.event.id}
-                        className={`absolute min-h-6 overflow-hidden rounded-md border px-1 py-0.5 text-start text-xs focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-ring ${row.event.kind === "availability" ? "border-dashed bg-muted text-muted-foreground" : "border-primary/20 bg-secondary text-foreground"} ${selectedId === row.event.id ? "z-10 ring-2 ring-ring" : ""}`}
+                        className={`absolute min-h-6 overflow-hidden rounded-md border px-1 py-0.5 text-start text-xs focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-ring ${row.event.kind === "availability" ? "border-dashed bg-muted text-muted-foreground" : "border-primary/20 bg-secondary text-foreground"} ${selectedId === row.event.id || highlightedEventIds.includes(row.event.id) ? "z-10 ring-2 ring-ring" : ""}`}
                         style={{
                           top: row.startMinute * MINUTE_HEIGHT,
                           left: `${(row.lane / row.lanes) * 100}%`,
@@ -406,15 +471,23 @@ export function InterviewCalendar({
                             : {}),
                         }}
                         aria-label={`${title(row.event)} · ${fullTime(row.event.start)}${row.event.end ? ` – ${fullTime(row.event.end)}` : ` · ${t`End not recorded`}`}`}
-                        aria-pressed={selectedId === row.event.id}
+                        aria-pressed={
+                          selectedId === row.event.id || highlightedEventIds.includes(row.event.id)
+                        }
                         onClick={(click) => {
+                          if (onSelectEvent) {
+                            onSelectEvent(row.event);
+                            return;
+                          }
                           opener.current = click.currentTarget;
                           setSelectedId(row.event.id);
                         }}
                       >
                         <span className="block truncate font-medium">
                           {row.continuesBefore ? "← " : ""}
-                          {title(row.event)}
+                          {row.event.kind === "availability"
+                            ? `${time(row.event.start)}${row.event.end ? `–${time(row.event.end)}` : ""}`
+                            : title(row.event)}
                           {row.continuesAfter ? " →" : ""}
                         </span>
                         <span className="block truncate">
@@ -438,7 +511,7 @@ export function InterviewCalendar({
             </div>
           </section>
         </div>
-        {selected ? (
+        {showActivity && selected ? (
           <aside
             ref={rail}
             aria-label={t`Event details`}
@@ -556,21 +629,15 @@ export function InterviewCalendar({
               </a>
             ) : null}
           </aside>
-        ) : (
+        ) : showActivity ? (
           <aside
             ref={rail}
             aria-label={t`Saved calendar events`}
             className="min-w-0 rounded-lg border bg-card p-3 text-sm"
           >
             <h4 className="font-semibold">
-              <Trans>Saved events</Trans>
+              <Trans>All activity</Trans>
             </h4>
-            <p className="mt-1 text-xs text-muted-foreground">
-              <Trans>
-                Select an event to see its source details. Candidate links are not included in these
-                calendar records.
-              </Trans>
-            </p>
             {weekEvents.length ? (
               <ul className="mt-3 divide-y">
                 {weekEvents.map((event) => (
@@ -600,11 +667,11 @@ export function InterviewCalendar({
               </ul>
             ) : (
               <p className="mt-4 text-xs text-muted-foreground">
-                <Trans>No saved events to show for this week and status.</Trans>
+                <Trans>No activity in this date range.</Trans>
               </p>
             )}
           </aside>
-        )}
+        ) : null}
       </div>
       {layout.unplaced.length ? (
         <details className="rounded-lg border p-3 text-sm">
