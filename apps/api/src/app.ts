@@ -461,6 +461,7 @@ export async function createApp(
   const auth = createAuth(prisma, {
     passwordAuth: env.passwordAuth,
     oidc: env.oidc,
+    google: env.google,
     secret: env.authSecret,
     baseURL: env.authUrl,
     webOrigin: env.webOrigin,
@@ -750,6 +751,7 @@ export async function createApp(
         ? { name: env.oidc.name, availability: auth.ssoAvailability() ?? "checking" }
         : null,
       passwordAuth: env.passwordAuth !== false,
+      google: Boolean(env.google),
       passwordReset: env.passwordAuth !== false && Boolean(email),
       resetUrl:
         env.passwordAuth !== false && email ? new URL("/reset-password", env.webOrigin).href : null,
