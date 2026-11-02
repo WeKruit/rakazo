@@ -104,13 +104,20 @@ it("does not read until scoped, debounces all sources, and opens exact owned tar
   );
   expect(calls.contacts).not.toHaveBeenCalled();
   await type(" Engineer ");
-  expect(calls.contacts).toHaveBeenCalledWith({
-    filters: { query: "Engineer" },
-    sort: "name",
-    limit: 8,
-  });
-  expect(calls.mail).toHaveBeenCalledWith({ spaceId: "space-1", query: "Engineer", limit: 8 });
-  expect(calls.targets).toHaveBeenCalledWith({ q: "Engineer" });
+  const options = { signal: expect.any(AbortSignal) };
+  expect(calls.contacts).toHaveBeenCalledWith(
+    {
+      filters: { query: "Engineer" },
+      sort: "name",
+      limit: 8,
+    },
+    options,
+  );
+  expect(calls.mail).toHaveBeenCalledWith(
+    { spaceId: "space-1", query: "Engineer", limit: 8 },
+    options,
+  );
+  expect(calls.targets).toHaveBeenCalledWith({ q: "Engineer" }, options);
   expect(container.textContent).toContain("Avery");
   act(() =>
     [...container.querySelectorAll("button")]
@@ -146,6 +153,8 @@ it("has no unscoped requests and preserves campaign/source and contact keys in l
   );
   await type("test");
   expect(calls.targets).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("Searching…");
+  expect(container.textContent).not.toContain("No results");
   expect(
     recruitingTargetHref({ ...role, kind: "sequence", campaignId: "c&1", serverId: "source-1" }),
   ).toBe("/app/g/group-1?view=sequence&campaign=c%261&campaignServer=source-1");
@@ -155,4 +164,72 @@ it("has no unscoped requests and preserves campaign/source and contact keys in l
   const params = new URL(recruitingContactHref(person, "A&B"), "https://example.test").searchParams;
   expect(params.get("detail")).toBe("contact.person-1");
   expect(params.get("query")).toBe("A&B");
+});
+
+it("shows completed contacts while targets and mail remain pending and discards obsolete results", async () => {
+  let targets!: (value: unknown) => void;
+  let mail!: (value: unknown) => void;
+  calls.targets.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        targets = resolve;
+      }),
+  );
+  calls.mail.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        mail = resolve;
+      }),
+  );
+  await act(async () =>
+    root.render(
+      <RecruitingGlobalSearch open onOpenChange={vi.fn()} spaceId="space-1" onNavigate={vi.fn()} />,
+    ),
+  );
+  await type("old");
+  expect(container.textContent).toContain("Avery");
+  expect(container.textContent).toContain("Searching…");
+  expect(container.textContent).not.toContain("No results");
+  const oldSignal = calls.targets.mock.calls[0]![1].signal as AbortSignal;
+  calls.targets.mockResolvedValueOnce({ items: [] });
+  calls.contacts.mockResolvedValueOnce({ items: [], nextCursor: null });
+  calls.mail.mockResolvedValueOnce({ items: [], nextCursor: null });
+  await type("new");
+  expect(oldSignal.aborted).toBe(true);
+  expect(container.textContent).toContain("No results");
+  await act(async () => {
+    targets({ items: [{ ...role, title: "Stale role" }] });
+    mail({ items: [{ key: "stale", roleId: "role-1", email: { subject: "Stale mail" } }] });
+  });
+  expect(container.textContent).not.toContain("Stale");
+  expect(container.textContent).toContain("No results");
+});
+
+it("waits for every scope before displaying an empty result and cancels on space changes", async () => {
+  let targets!: (value: unknown) => void;
+  calls.contacts.mockResolvedValueOnce({ items: [], nextCursor: null });
+  calls.targets.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        targets = resolve;
+      }),
+  );
+  await act(async () =>
+    root.render(
+      <RecruitingGlobalSearch open onOpenChange={vi.fn()} spaceId="space-1" onNavigate={vi.fn()} />,
+    ),
+  );
+  await type("test");
+  expect(container.textContent).toContain("Searching…");
+  expect(container.textContent).not.toContain("No results");
+  const oldSignal = calls.targets.mock.calls[0]![1].signal as AbortSignal;
+  await act(async () =>
+    root.render(
+      <RecruitingGlobalSearch open onOpenChange={vi.fn()} spaceId="space-2" onNavigate={vi.fn()} />,
+    ),
+  );
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => targets({ items: [{ ...role, title: "Other space" }] }));
+  expect(container.textContent).not.toContain("Other space");
+  expect(container.textContent).not.toContain("Avery");
 });

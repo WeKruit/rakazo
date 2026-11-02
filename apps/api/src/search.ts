@@ -17,7 +17,7 @@ export async function queryRecruitingSearchTargets(
   const pattern = `%${needle.replace(/[\\%_]/g, "\\$&")}%`;
   return prisma.$queryRaw<RecruitingSearchTarget[]>(Prisma.sql`
     WITH owned_roles AS MATERIALIZED (
-      SELECT r.id, r.title, t."groupId", t."botId"
+      SELECT r.id, r.title, r."sourceThreadId", t."groupId", t."botId"
       FROM recruiting_roles r JOIN threads t ON t.id=r."sourceThreadId"
       LEFT JOIN chat_groups g ON g.id=t."groupId"
       LEFT JOIN bots b ON b.id=t."botId"
@@ -37,12 +37,18 @@ export async function queryRecruitingSearchTargets(
         'sequence'::text kind, e.result->>'campaignName' AS title,
         r.id AS "roleId", r.title AS "roleTitle", r."groupId", r."botId",
         e.result->>'campaignId' AS "campaignId", e.request->>'serverId' AS "serverId"
-      FROM external_effects e JOIN runs run ON run.id=e."runId"
-      JOIN owned_roles r ON r.id=e.request->>'roleId'
+      FROM owned_roles r JOIN runs run ON run."threadId"=r."sourceThreadId"
+      -- ponytail: keep the existing runId index path; unrelated Space effects never enter deduplication.
+      JOIN LATERAL (
+        SELECT e.* FROM external_effects e
+        WHERE e."runId"=run.id AND e.request->>'roleId'=r.id
+          AND e."spaceId"=${actor.spaceId} AND e.kind='instantly_role_campaign'
+          AND e.status='completed'
+        OFFSET 0
+      ) e ON true
       JOIN mcp_servers s ON s.id=e.request->>'serverId'
-      WHERE e."spaceId"=${actor.spaceId} AND run."userId"=${actor.userId}
-        AND run."spaceId"=${actor.spaceId} AND e.kind='instantly_role_campaign'
-        AND e.status='completed' AND s."userId"=${actor.userId}
+      WHERE run."userId"=${actor.userId} AND run."spaceId"=${actor.spaceId}
+        AND s."userId"=${actor.userId}
         AND s."spaceId"=${actor.spaceId} AND s.enabled
         AND e.result->>'campaignId' IS NOT NULL
       ORDER BY r.id,e.request->>'serverId',e.result->>'campaignId',e."updatedAt" DESC
