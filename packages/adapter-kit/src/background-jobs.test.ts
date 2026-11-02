@@ -28,6 +28,7 @@ function handlers(): BackgroundJobHandlers {
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
     "recruiting_profile.project": vi.fn(async () => undefined),
+    "recruiting_inbox.project": vi.fn(async () => undefined),
     "thread.reply_check": vi.fn(async () => undefined),
     "notification.retry": vi.fn(async () => undefined),
     "poll.close": vi.fn(async () => undefined),
@@ -35,6 +36,56 @@ function handlers(): BackgroundJobHandlers {
 }
 
 describe("background job contracts", () => {
+  it("accepts only a canonical inbox receipt id, never caller scope or raw mail", async () => {
+    const target = handlers();
+    await dispatchBackgroundJob(target, "recruiting_inbox.project", { effectId: "receipt" });
+    expect(target["recruiting_inbox.project"]).toHaveBeenCalledWith({ effectId: "receipt" });
+    expect(() =>
+      parseBackgroundJob("recruiting_inbox.project", { effectId: "receipt", userId: "other" }),
+    ).toThrow();
+    expect(() =>
+      parseBackgroundJob("recruiting_inbox.project", { effectId: "receipt", mail: "private" }),
+    ).toThrow();
+  });
+  it("accepts a bounded server-normalized live observation and rejects raw provider fields", async () => {
+    const email = {
+      id: "source:mail",
+      sourceId: "source",
+      sourceName: "Mail",
+      providerMessageId: "mail",
+      savedRead: null,
+      sender: null,
+      recipients: [],
+      subject: "Saved",
+      body: "Typed observation",
+      snippet: false,
+      date: null,
+      url: null,
+    };
+    const observation = {
+      threadId: "thread",
+      roleId: "role",
+      sourceId: "source",
+      sourceRevision: 1,
+      botId: "main",
+      campaignId: "campaign",
+      observedAt: "2026-10-23T00:00:00.000Z",
+      emails: [email],
+    };
+    expect(parseBackgroundJob("recruiting_inbox.project", { observation }).payload).toEqual({
+      observation,
+    });
+    expect(() =>
+      parseBackgroundJob("recruiting_inbox.project", {
+        observation: { ...observation, token: "credential" },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseBackgroundJob("recruiting_inbox.project", {
+        observation: { ...observation, emails: Array.from({ length: 101 }, () => email) },
+      }),
+    ).toThrow();
+  });
   it("queues only a candidate page reference and preserves an existing in-flight projection", async () => {
     const job = recruitingCandidateProfilesJob("page-effect-1");
     expect(job).toEqual({

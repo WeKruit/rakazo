@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { AdapterContext, ConnectorProvider } from "@rakazo/adapter-kit";
+import type { AdapterContext, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { hasPlatformMcpCredential } from "./mcp-connector.js";
@@ -36,6 +37,7 @@ export async function refreshRecruitingCorrespondence(
   deps: {
     prisma: PrismaClient;
     connectors: Pick<ConnectorProvider, "execute">;
+    jobs?: JobPublisher;
     signal?: AbortSignal;
     stillAuthorized?: () => Promise<boolean>;
   },
@@ -61,7 +63,12 @@ export async function refreshRecruitingCorrespondence(
       ))
   )
     return;
-  const execute = async (source: Source, tool: string, args: Record<string, unknown>) => {
+  const execute = async (
+    source: Source,
+    tool: string,
+    args: Record<string, unknown>,
+    onStart?: (startedAt: string, botId: string, operationId: string) => void,
+  ) => {
     const permission = source.assignments.find((permission) => allows(permission, tool));
     if (!permission || !source.enabled) return undefined;
     const fence = async () => {
@@ -118,6 +125,7 @@ export async function refreshRecruitingCorrespondence(
         signal: deps.signal ?? AbortSignal.timeout(30_000),
       };
       let result: unknown;
+      onStart?.(new Date().toISOString(), permission.botId, context.operationId);
       for await (const event of deps.connectors.execute(
         {
           tool,
@@ -268,15 +276,24 @@ export async function refreshRecruitingCorrespondence(
           let fetched = 0;
           const seenCursors = new Set<string>();
           do {
+            const read: { value?: { observedAt: string; botId: string; operationId: string } } = {};
             const body = record(
-              await execute(source, tool, {
-                campaign_id: campaignId,
-                limit: 100,
-                ...(cursor ? { starting_after: cursor } : {}),
-              }),
+              await execute(
+                source,
+                tool,
+                {
+                  campaign_id: campaignId,
+                  limit: 100,
+                  ...(cursor ? { starting_after: cursor } : {}),
+                },
+                (observedAt, botId, operationId) => {
+                  read.value = { observedAt, botId, operationId };
+                },
+              ),
             );
             if (!Array.isArray(body?.items)) throw new Error("Invalid mail page");
             fetched += body.items.length;
+            const observed: RecruitingCorrespondence["emails"] = [];
             for (const value of body.items) {
               const email = readInstantlyEmail(value);
               if (!email || email.campaign_id !== campaignId) {
@@ -307,6 +324,35 @@ export async function refreshRecruitingCorrespondence(
                 url: null,
               });
               emails.set(row.id, row);
+              observed.push(row);
+            }
+            const checked = read.value;
+            if (deps.jobs && checked && observed.length) {
+              // Only this page's verified rows are durable input; publishing never holds the role read.
+              for (let offset = 0; offset < observed.length; offset += 100)
+                void deps.jobs
+                  .enqueue({
+                    name: "recruiting_inbox.project",
+                    payload: {
+                      observation: {
+                        threadId: scope.threadId,
+                        roleId: scope.roleId,
+                        sourceId: source.id,
+                        sourceRevision: source.revision,
+                        botId: checked.botId,
+                        campaignId,
+                        observedAt: checked.observedAt,
+                        emails: observed.slice(offset, offset + 100),
+                      },
+                    },
+                    replaceKey: `recruiting_inbox.project:${checked.operationId}:${offset}`,
+                    keepExisting: true,
+                  })
+                  .catch((error) =>
+                    getLogger().warn("recruiting.inbox_observation_enqueue_failed", {
+                      error: error instanceof Error ? error.name : "Unknown error",
+                    }),
+                  );
             }
             cursor =
               typeof body.next_starting_after === "string" ? body.next_starting_after : undefined;

@@ -4067,6 +4067,7 @@ export function createRouter(deps: RouterDeps) {
             prisma: deps.prisma,
             artifacts: deps.artifacts,
             connectors: deps.connectors,
+            jobs: deps.jobs,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
@@ -4142,6 +4143,7 @@ export function createRouter(deps: RouterDeps) {
           { limit: input.limit, cursor: input.cursor },
           {
             connectors: deps.connectors,
+            jobs: deps.jobs,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,

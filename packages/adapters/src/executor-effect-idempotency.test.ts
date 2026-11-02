@@ -523,6 +523,95 @@ function fixture(
   };
 }
 
+describe("asynchronous mailbox receipt projection", () => {
+  it.each([undefined, {}, { providerTrace: "retained" }])(
+    "publishes canonical mail with private timing and unchanged provider metadata %j without waiting for the display queue",
+    async (providerMeta) => {
+      const f = fixture("mail-receipt-projection");
+      const tool = {
+        name: "mcp__mail__get_email",
+        description: "Read email",
+        readOnly: true,
+        inputSchema: { type: "object" },
+        route: {
+          connectorId: "mcp",
+          resourceId: "mail",
+          resourceRevision: 1,
+          toolName: "get_email",
+        },
+      };
+      f.connector.discoverTools.mockResolvedValue([tool]);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        { effect: "always_allow", matchKind: "tool", matchValue: tool.name },
+      ]);
+      const pending: Array<() => void> = [];
+      let dispatchedAt: string | undefined;
+      const providerResult = {
+        structuredContent: { id: "saved-email" },
+        ...(providerMeta ? { _meta: providerMeta } : {}),
+      };
+      f.connector.execute.mockImplementation(async function* () {
+        dispatchedAt = new Date().toISOString();
+        yield {
+          type: "result" as const,
+          data: providerResult,
+        };
+      });
+      const enqueue = vi.fn((job: { name: string; payload: { effectId?: string } }) => {
+        if (job.name !== "recruiting_inbox.project") return Promise.resolve();
+        expect(f.effects.find((effect) => effect.id === job.payload.effectId)?.status).toBe(
+          "completed",
+        );
+        return new Promise<void>((resolve) => pending.push(resolve));
+      });
+      f.executorDeps.jobs.enqueue = enqueue as never;
+      f.setCalls([
+        {
+          name: tool.name,
+          args: { id: "saved-email" },
+          executionId: "read-email",
+        },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(enqueue).toHaveBeenCalledWith({
+        name: "recruiting_inbox.project",
+        payload: { effectId: f.effects[0]!.id },
+        replaceKey: `recruiting_inbox.project:${f.effects[0]!.id}`,
+        keepExisting: true,
+      });
+      const receipt = f.effects[0]!.result;
+      expect(receipt).toMatchObject({
+        _meta: {
+          "rakazo/recruitingInbox": { dispatchStartedAt: expect.any(String) },
+        },
+      });
+      const clock = (
+        receipt as {
+          _meta: { "rakazo/recruitingInbox": { dispatchStartedAt: string } };
+        }
+      )._meta["rakazo/recruitingInbox"].dispatchStartedAt;
+      expect(Date.parse(clock)).toBeLessThanOrEqual(Date.parse(dispatchedAt!));
+      expect(f.results[0]).toEqual(providerResult);
+      f.setCalls([
+        {
+          name: tool.name,
+          args: { id: "saved-email" },
+          executionId: "replayed-email",
+        },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledOnce();
+      expect(
+        enqueue.mock.calls.filter(([job]) => job.name === "recruiting_inbox.project"),
+      ).toHaveLength(2);
+      expect(f.effects[0]!.result).toEqual(receipt);
+      expect(f.results[1]).toEqual(providerResult);
+      for (const resolve of pending) resolve();
+    },
+  );
+});
+
 describe("native Cal.com booking approvals", () => {
   it.each(
     (["direct", "catalog"] as const).flatMap((mode) =>

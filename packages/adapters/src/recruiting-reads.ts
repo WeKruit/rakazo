@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
-import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ArtifactStore,
+  BackgroundJobPayloads,
+  ConnectorProvider,
+  ConnectorRoute,
+  JobPublisher,
+} from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type {
   Actor,
@@ -64,6 +71,8 @@ import { extractDocumentText, isExtractedDocumentMimeType } from "@rakazo/core/n
 import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import {
+  createGroupRepos,
+  createRepos,
   IsolationError,
   projectRecruitingInboxMessages,
   RecruitingConflictError,
@@ -1277,6 +1286,8 @@ export async function getRecruitingCorrespondence(
     limit?: number;
     cursor?: string;
     savedReceipts?: {
+      /** Worker-only exact receipt selection; the canonical owner/thread fences still apply. */
+      effectId?: string;
       before?: { at: string; id: string };
       onNext: (cursor: { at: string; id: string } | null) => void;
     };
@@ -1732,6 +1743,7 @@ export async function getRecruitingCorrespondence(
     const retained = await prisma.externalEffect.findMany({
       where: {
         ...scope,
+        ...(page.savedReceipts?.effectId ? { id: page.savedReceipts.effectId } : {}),
         OR: querySources.flatMap((source) =>
           (source.provider?.tools ?? readTools).flatMap((tool) => [
             {
@@ -2177,6 +2189,17 @@ export async function getRecruitingCorrespondence(
       // The Inbox header shows the latest readable check, whichever read it was.
       const checkedAt = effect.updatedAt.toISOString();
       if (checkedAt > output.checkedAt) output.checkedAt = checkedAt;
+      const metadata = correspondenceRecord(correspondenceRecord(result)?._meta);
+      const dispatchStartedAt = correspondenceRecord(
+        metadata?.["rakazo/recruitingInbox"],
+      )?.dispatchStartedAt;
+      // Historical receipts have no dispatch clock; retain their existing observation semantics.
+      const observationAt =
+        isRecruitingInboxRead(call.route) &&
+        typeof dispatchStartedAt === "string" &&
+        Number.isFinite(Date.parse(dispatchStartedAt))
+          ? new Date(dispatchStartedAt)
+          : effect.updatedAt;
       const body = mcpObject(result);
       if (provider.kind === "crm") {
         const data = correspondenceRecord(body?.data);
@@ -2711,8 +2734,8 @@ export async function getRecruitingCorrespondence(
         }
         parsed = true;
         const observedAt = instantlyObservedAt.get(id);
-        if (listRead && observedAt && observedAt >= effect.updatedAt) continue;
-        instantlyObservedAt.set(id, effect.updatedAt);
+        if (listRead && observedAt && observedAt >= observationAt) continue;
+        instantlyObservedAt.set(id, observationAt);
         const fullText =
           email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
         const text = fullText || email.content_preview || "";
@@ -2726,7 +2749,7 @@ export async function getRecruitingCorrespondence(
           sourceName: source.name,
           sourceId: source.id,
           providerMessageId: email.id,
-          ...instantlyEmailObservation(email, effect.updatedAt),
+          ...instantlyEmailObservation(email, observationAt),
           ...(email.thread_id !== undefined ? { providerThreadId: email.thread_id } : {}),
           ...(email.campaign_id !== undefined ? { campaignId: email.campaign_id } : {}),
           ...(email.eaccount !== undefined ? { eaccount: email.eaccount } : {}),
@@ -3141,6 +3164,7 @@ function mailItem(row: ReturnType<typeof RecruitingCrmMailReadSchema.parse>["mes
 export type RecruitingCrmReadDeps = {
   prisma: PrismaClient;
   connectors: Pick<ConnectorProvider, "execute">;
+  jobs?: JobPublisher;
   firstPartyMcpUrl?: string;
   signal?: AbortSignal;
   stillAuthorized?: () => Promise<boolean>;
@@ -4885,4 +4909,289 @@ export async function indexSavedRecruitingInbox(
   }
   await authorize();
   await prisma.$executeRaw`UPDATE recruiting_inbox_index_progress SET native_cursor=NULL WHERE user_id=${actor.userId} AND space_id=${actor.spaceId}`;
+}
+
+export function isRecruitingInboxRead(route: ConnectorRoute | undefined): boolean {
+  return Boolean(
+    route?.connectorId === "mcp" &&
+      route.resourceId &&
+      ["get_email", "list_emails", ...NATIVE_INSTANTLY_READS].includes(route.toolName),
+  );
+}
+
+/** A resolved read leaves the canonical receipt first; never wait for its display projection. */
+export function deferRecruitingInboxReceipt(
+  jobs: JobPublisher,
+  route: ConnectorRoute | undefined,
+  effectId: string,
+): void {
+  if (!isRecruitingInboxRead(route)) return;
+  void jobs
+    .enqueue({
+      name: "recruiting_inbox.project",
+      payload: { effectId },
+      replaceKey: `recruiting_inbox.project:${effectId}`,
+      keepExisting: true,
+    })
+    .catch(() => getLogger().warn("recruiting.inbox_projection_enqueue_failed"));
+}
+
+/** Project a retained receipt or verified live observation without the full-pass cursor. */
+export async function projectRecruitingInboxJob(
+  deps: { prisma: PrismaClient; events: Pick<ThreadEvents, "append"> },
+  input: BackgroundJobPayloads["recruiting_inbox.project"],
+): Promise<void> {
+  const { prisma } = deps;
+  const observation = "observation" in input ? input.observation : undefined;
+  const threadSelect = {
+    id: true,
+    userId: true,
+    spaceId: true,
+    groupId: true,
+    botId: true,
+    activeRecruitingRoleId: true,
+  } as const;
+  const effect =
+    "effectId" in input
+      ? await prisma.externalEffect.findUnique({
+          where: { id: input.effectId },
+          select: {
+            status: true,
+            spaceId: true,
+            request: true,
+            run: {
+              select: {
+                userId: true,
+                spaceId: true,
+                botId: true,
+                threadId: true,
+                initialRecruitingRoleRevision: { select: { roleId: true } },
+                thread: { select: threadSelect },
+              },
+            },
+          },
+        })
+      : null;
+  if (!observation && effect?.status !== "completed") return;
+  const thread = observation
+    ? await prisma.thread.findUnique({ where: { id: observation.threadId }, select: threadSelect })
+    : effect?.run.thread;
+  if (!thread) return;
+  const ownerUserId = effect?.run.userId ?? thread.userId;
+  const ownerSpaceId = effect?.run.spaceId ?? thread.spaceId;
+  const botId = effect?.run.botId ?? observation?.botId;
+  const roleId = observation?.roleId ?? thread.activeRecruitingRoleId;
+  const call = effect ? correspondenceCall(effect.request) : null;
+  const sourceId = observation?.sourceId ?? call?.route.resourceId;
+  const sourceRevision = observation?.sourceRevision ?? call?.route.resourceRevision;
+  const toolName = observation ? "list_emails" : call?.route.toolName;
+  if (
+    !roleId ||
+    !botId ||
+    thread.activeRecruitingRoleId !== roleId ||
+    (effect &&
+      (effect.spaceId !== ownerSpaceId ||
+        thread.spaceId !== ownerSpaceId ||
+        thread.userId !== ownerUserId ||
+        (effect.run.initialRecruitingRoleRevision &&
+          effect.run.initialRecruitingRoleRevision.roleId !== roleId))) ||
+    (!observation && call?.route.connectorId !== "mcp") ||
+    !sourceId ||
+    !toolName ||
+    !["get_email", "list_emails", ...NATIVE_INSTANTLY_READS].includes(toolName) ||
+    typeof sourceRevision !== "number" ||
+    !Number.isSafeInteger(sourceRevision)
+  )
+    return;
+  try {
+    const actor = await recruiting.requireMembership(prisma, ownerUserId, ownerSpaceId);
+    const authorize = async (): Promise<RecruitingThreadTarget> => {
+      await recruiting.requireMembership(prisma, ownerUserId, ownerSpaceId);
+      let target: RecruitingThreadTarget;
+      if (thread.groupId) {
+        const group = await createGroupRepos(prisma).getGroupTarget(actor, thread.groupId);
+        if (
+          group.thread?.id !== thread.id ||
+          !group.members.some((member) => member.bot.id === botId)
+        )
+          throw new IsolationError();
+        target = {
+          kind: "group",
+          groupId: group.id,
+          threadId: thread.id,
+          memberBotIds: group.members.map((member) => member.bot.id),
+        };
+      } else {
+        if (!thread.botId || thread.botId !== botId) throw new IsolationError();
+        const bot = await createRepos(prisma).getBot(actor, thread.botId);
+        if (bot.thread?.id !== thread.id) throw new IsolationError();
+        target = { kind: "bot", botId: bot.id, threadId: thread.id };
+      }
+      const current = await prisma.thread.findFirst({
+        where: {
+          id: thread.id,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          activeRecruitingRoleId: roleId,
+        },
+        select: { id: true },
+      });
+      const sources = await prisma.mcpServer.findMany({
+        where: {
+          id: sourceId,
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+          revision: sourceRevision,
+        },
+        select: {
+          id: true,
+          endpoint: true,
+          transport: true,
+          enabled: true,
+          revision: true,
+          assignments: {
+            where: { botId: botId, userId: actor.userId, spaceId: actor.spaceId },
+            select: { botId: true, allowAllTools: true, allowedTools: true },
+          },
+        },
+      });
+      const source = sources.find(
+        (source) => source.id === sourceId && source.enabled && source.revision === sourceRevision,
+      );
+      if (
+        !current ||
+        !source ||
+        source.transport !== "streamable_http" ||
+        correspondenceProvider(source.endpoint, "inbox")?.kind !== "instantly" ||
+        !source.assignments.some(
+          (assignment) => assignment.botId === botId && correspondenceAllows(assignment, toolName),
+        )
+      )
+        throw new IsolationError();
+      if (observation) {
+        const binding = await prisma.externalEffect.findUnique({
+          where: { idempotencyKey: `instantly-role-campaign:${sourceId}:${roleId}` },
+          select: {
+            kind: true,
+            status: true,
+            spaceId: true,
+            request: true,
+            result: true,
+            run: { select: { userId: true, spaceId: true, threadId: true } },
+          },
+        });
+        const result = correspondenceRecord(binding?.result);
+        const request = correspondenceRecord(binding?.request);
+        const mailbox =
+          typeof result?.eaccount === "string" ? result.eaccount.trim().toLowerCase() : null;
+        if (
+          binding?.kind !== "instantly_role_campaign" ||
+          binding.status !== "completed" ||
+          binding.spaceId !== actor.spaceId ||
+          binding.run.userId !== actor.userId ||
+          binding.run.spaceId !== actor.spaceId ||
+          binding.run.threadId !== thread.id ||
+          request?.roleId !== roleId ||
+          request?.serverId !== sourceId ||
+          result?.campaignId !== observation.campaignId ||
+          !mailbox ||
+          observation.emails.some(
+            (email) =>
+              email.sourceId !== sourceId ||
+              email.campaignId !== observation.campaignId ||
+              email.eaccount?.trim().toLowerCase() !== mailbox ||
+              !email.providerMessageId ||
+              email.id !== `${sourceId}:${email.providerMessageId}`,
+          )
+        )
+          throw new IsolationError();
+      }
+      return target;
+    };
+    const target = await authorize();
+    const mail = observation
+      ? {
+          roleId,
+          emails: observation.emails.map((email) => ({
+            ...email,
+            observedAt: observation.observedAt,
+          })),
+        }
+      : await getRecruitingCorrespondence(prisma, actor, target, "inbox", undefined, undefined, {
+          limit: 200,
+          savedReceipts: {
+            effectId: "effectId" in input ? input.effectId : undefined,
+            onNext: () => {},
+          },
+        });
+    if (mail.roleId !== roleId) return;
+    const groups = new Map<string, RecruitingCorrespondence["emails"]>();
+    for (const email of mail.emails) {
+      if (!email.observedAt) throw new Error("Saved mail is missing its receipt observation time");
+      const group = groups.get(email.observedAt) ?? [];
+      group.push(email);
+      groups.set(email.observedAt, group);
+    }
+    for (const [observedAt, emails] of groups)
+      for (let offset = 0; offset < emails.length; offset += 200)
+        await projectRecruitingInboxMessages(
+          prisma,
+          actor,
+          { roleId, emails: emails.slice(offset, offset + 200), observedAt: new Date(observedAt) },
+          async () => {
+            await authorize();
+          },
+        );
+    if (mail.emails.length) {
+      // Notify only after the saved projection commits; the owner may be viewing global Inbox.
+      // The origin role already has a live observation; invalidating it would trigger another GET.
+      if (!observation)
+        await deps.events.append({
+          spaceId: actor.spaceId,
+          threadId: thread.id,
+          botId,
+          type: "recruiting.changed",
+          payload: { roleId },
+        });
+      const global = await prisma.thread.findFirst({
+        where: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          groupId: recruiting.recruitingGlobalGroupId(actor),
+          group: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+        },
+        select: {
+          id: true,
+          group: {
+            select: {
+              members: {
+                where: { bot: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null } },
+                select: { botId: true },
+                orderBy: { id: "asc" },
+                take: 1,
+              },
+            },
+          },
+        },
+      });
+      const globalBotId = global?.group?.members[0]?.botId;
+      if (global && global.id !== thread.id && globalBotId)
+        await deps.events.append({
+          spaceId: actor.spaceId,
+          threadId: global.id,
+          botId: globalBotId,
+          type: "recruiting.changed",
+          payload: { roleId },
+        });
+    }
+  } catch (error) {
+    // A retired role/source is no longer a projection target; transient failures retain queue retry.
+    if (
+      error instanceof IsolationError ||
+      (error instanceof ORPCError && error.code === "NOT_FOUND")
+    )
+      return;
+    throw error;
+  }
 }
