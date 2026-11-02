@@ -5842,6 +5842,107 @@ describe("native recruiting assessment effect delivery", () => {
     );
   });
 
+  it("reads a file attached in a role that already has its role, before the model's first step", async () => {
+    const f = fixture("role-attached-notes");
+    Object.assign(f.thread, { activeRecruitingRoleId: "role-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "role-attached-notes",
+        blocks: [
+          { kind: "text", text: "Hiring manager notes" },
+          {
+            kind: "file",
+            artifactId: "notes-file",
+            name: "notes.pdf",
+            mimeType: "application/pdf",
+            size: 100,
+          },
+          {
+            kind: "file",
+            artifactId: "list-file",
+            name: "people.csv",
+            mimeType: "text/csv",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Must have shipped robotics firmware.",
+      hasMore: true,
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Must have shipped robotics firmware.");
+    expect(prompt).toContain("(notes.pdf) is already read; never read it again.");
+    expect(prompt).toContain("read on from offset 16000");
+    // A candidate list stays with the model, which parses it as CSV.
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ artifactId: "notes-file", limit: 16_000 }),
+    );
+  });
+
+  it("reads the recruiter's attached file for a specialist handed the work", async () => {
+    const f = fixture("handed-attached-file");
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "handoff-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "handoff-1",
+        seq: 2,
+        role: "bot",
+        botId: "bot-2",
+        runId: "main-run",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: "bot-2",
+            toBotId: "bot-1",
+            text: "Book the interview in the attached availability.",
+            hop: 1,
+          },
+        ],
+        createdAt: new Date(2),
+      },
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "main-run",
+        blocks: [
+          {
+            kind: "file",
+            artifactId: "times-file",
+            name: "availability.txt",
+            mimeType: "text/plain",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(1),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockClear();
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Tuesday 2-4pm Pacific",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("(availability.txt) is already read; never read it again.");
+    expect(prompt).toContain("Tuesday 2-4pm Pacific");
+    expect(vi.mocked(artifactReadFromTool)).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
     for (const key of [
       "linkedin:/in/stevenfeng7",

@@ -13066,27 +13066,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
             throw error;
           }
         };
-        // A file the recruiter attaches in Kruit's conversation is read once here, before the
-        // model's first step, so opening a role from a JD needs no read step of the model's own.
-        async function globalFileNote() {
-          if (
-            !thread.groupId?.startsWith("recruiting-global-") ||
-            currentTurnMessage?.role !== "user" ||
-            !tools.some((tool) => tool.name === "artifact_read")
-          )
-            return undefined;
-          const file = currentTurnMessage.blocks.find(
-            (item): item is Extract<MessageBlock, { kind: "file" }> =>
-              item.kind === "file" && !/csv|sheet|excel/i.test(item.mimeType),
+        // The recruiter's attached files are read once here, before the model's first step, so
+        // no agent spends a step reading them: Kruit, a role team or a specialist handed the work.
+        // Spreadsheets stay with the model, which parses them with csv:true.
+        const fileReads = new Map<string, Promise<{ text?: unknown; hasMore?: unknown }>>();
+        const readAttachedFile = (file: Extract<MessageBlock, { kind: "file" }>) => {
+          let read = fileReads.get(file.artifactId);
+          if (!read) {
+            read = step(
+              "artifact_read",
+              { artifactId: file.artifactId, limit: 16_000 },
+              `${runId}:file:${file.artifactId}`,
+            ) as Promise<{ text?: unknown; hasMore?: unknown }>;
+            fileReads.set(file.artifactId, read);
+          }
+          return read;
+        };
+        // Files whose text a server-written note already carries (startRoleFromJob's JD).
+        const filesInNotes = new Set<string>();
+        async function attachedFileReads() {
+          if (!tools.some((tool) => tool.name === "artifact_read")) return [];
+          // A specialist handed the work reads the recruiter's latest message, not the handoff.
+          const source =
+            currentTurnMessage?.role === "user"
+              ? currentTurnMessage
+              : handedIn
+                ? historyMessages.find((message) => message.role === "user" && !message.internal)
+                : undefined;
+          const files = (source?.blocks ?? [])
+            .filter(
+              (item): item is Extract<MessageBlock, { kind: "file" }> =>
+                item.kind === "file" && !/csv|sheet|excel/i.test(item.mimeType),
+            )
+            .slice(0, 3);
+          return Promise.all(
+            files.map(async (file) => ({ file, read: await readAttachedFile(file) })),
           );
-          if (!file) return undefined;
-          const read = (await step(
-            "artifact_read",
-            { artifactId: file.artifactId, limit: 16_000 },
-            `${runId}:global-file`,
-          )) as { text?: unknown; hasMore?: unknown };
-          if (typeof read?.text !== "string" || !read.text.trim()) return undefined;
-          return `The recruiter's attached file (${file.name}) is already read; never read it again.${read.hasMore === true ? " Only its first part is below, which is enough to name a role." : ""} Its text:\n\n${read.text}`;
         }
         async function startRoleFromJob() {
           if (
@@ -13164,17 +13179,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // A JD sent as a file is read here, like a pasted one, so the model's first step is
             // the question instead of reading the file and writing the role itself.
             if (file) {
-              const read = (await step(
-                "artifact_read",
-                { artifactId: file.artifactId, limit: 16_000 },
-                `${runId}:job-file`,
-              )) as { text?: unknown };
+              const read = await readAttachedFile(file);
               // Only a file that reads as a JD; a candidate list or other file stays with the model.
               const title =
                 typeof read?.text === "string" && !/csv|sheet|excel/i.test(file.mimeType)
                   ? pastedJobTitle(read.text)
                   : null;
               if (!title || typeof read.text !== "string") return undefined;
+              filesInNotes.add(file.artifactId);
               const quote =
                 texts
                   .map((item) => item.text)
@@ -13413,7 +13425,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           historyMessages
             .find((message) => message.id === run.sourceMessageId)
             ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
-        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, fileNote] =
+        const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, attached] =
           await ownTime(
             "turnNotes",
             Promise.all([
@@ -13449,16 +13461,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
                     .catch(() => [])
                 : [],
-              globalFileNote().catch((error) => {
+              attachedFileReads().catch((error) => {
                 getLogger().warn("attached file not read before the turn", {
                   error: String(error),
                 });
-                return undefined;
+                return [];
               }),
             ]),
           );
         const waitingCardsNote = waitingApprovalNote(waitingCards);
         linkRole = jobRole;
+        const fileNote =
+          attached
+            .filter(
+              ({ file, read }) =>
+                !filesInNotes.has(file.artifactId) &&
+                typeof read?.text === "string" &&
+                read.text.trim(),
+            )
+            .map(
+              ({ file, read }) =>
+                `The recruiter's attached file (${file.name}) is already read; never read it again.${read.hasMore === true ? " Only its first part is below; read on from offset 16000 only if your next step needs the rest." : ""} Its text:\n\n${String(read.text)}`,
+            )
+            .join("\n\n") || undefined;
         // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
         // them instead of answering (or declining) them itself.
         const currentTurnText =
