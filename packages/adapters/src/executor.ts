@@ -1234,7 +1234,7 @@ const FILE_JOB_NOTE =
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
 /** Model-facing: a turn that recorded its round leaves a newer request to the turn answering it. */
 export const newerRequestElsewhere = (text: string) =>
-  `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of what it did; do not act on, mention or answer the newer message, and do not say that anything was not run.`;
+  `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of what it did, in the person's language; when it did nothing the person has not already seen, reply exactly ${NO_RESPONSE}. Do not act on, mention or answer the newer message, and do not say that anything was not run.`;
 /** Model-facing: a backgrounded turn must not question the person after they moved on. */
 export const askAfterNewerMessage = (text: string) =>
   `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. End the turn with a final reply of one or two lines on what this work did, without mentioning or answering that message.`;
@@ -13520,8 +13520,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
-        // History is newest first, so the first user row is the recruiter's latest message.
-        const lastRecruiterBlocks = messages.find((message) => message.role === "user")?.blocks;
+        // History is newest first, so the first user row is the recruiter's latest message (a
+        // teammate's message also arrives as a user row, and is skipped).
+        const lastRecruiterBlocks = messages.find(
+          (message) =>
+            message.role === "user" &&
+            !(
+              Array.isArray(message.blocks) &&
+              message.blocks.some(
+                (block) =>
+                  block &&
+                  typeof block === "object" &&
+                  "kind" in block &&
+                  block.kind === "bot_message_received",
+              )
+            ),
+        )?.blocks;
         const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
           ? lastRecruiterBlocks
               .map((block) =>
