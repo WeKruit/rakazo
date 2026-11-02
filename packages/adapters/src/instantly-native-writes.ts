@@ -736,8 +736,8 @@ export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: Readon
 const mailboxKey = (email: string) => email.trim().toLowerCase();
 
 /**
- * Every campaign this mail connection's roles are bound to, and every sending mailbox it has
- * confirmed: one recorded as a sender for this connection, or one its own campaigns already use.
+ * This connection's bound campaigns and explicitly confirmed account senders.
+ * A campaign's existing mailbox authorizes its own reply thread only, not general sender access.
  */
 export async function ownedInstantly(
   prisma: Pick<PrismaClient, "externalEffect">,
@@ -1171,7 +1171,13 @@ export async function requireReplySendingMailboxReady(
     }
   }
   const roleId = await activeRoleId(prisma, context);
-  if (!roleId || typeof original.campaign_id !== "string" || typeof original.thread_id !== "string")
+  if (
+    !roleId ||
+    typeof original.campaign_id !== "string" ||
+    !original.campaign_id.trim() ||
+    typeof original.thread_id !== "string" ||
+    !original.thread_id.trim()
+  )
     throw new MailReplySendingError("sender_unavailable");
   const binding = await prisma.externalEffect.findFirst({
     where: {

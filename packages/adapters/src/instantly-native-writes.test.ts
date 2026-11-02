@@ -473,3 +473,24 @@ it.each([false, true])(
     expect(owned.mailboxes.size).toBe(0);
   },
 );
+
+it("requires positive read-only sender proof and does not echo an unsupported sender error", async () => {
+  const read = vi.fn(async () => ({
+    ...ORIGINAL,
+    replySenderCheck: { ready: false, error: "private-provider-id" },
+  }));
+  const result = await describeReplyToEmail(read, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(read).toHaveBeenCalledWith("native_instantly_get_email", {
+    id: ORIGINAL.id,
+    check_sender: true,
+  });
+  expect(result.refusal).toBe("sender_unavailable");
+  const missing = await describeReplyToEmail(async () => ORIGINAL, {
+    reply_to_uuid: ORIGINAL.id,
+    body: { text: "Exact reply" },
+  });
+  expect(missing.refusal).toBe("sender_unavailable");
+});
