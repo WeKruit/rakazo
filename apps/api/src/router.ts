@@ -1099,14 +1099,20 @@ export function createRouter(deps: RouterDeps) {
       });
     }
   }
-  /** The chat's effort mode for an operator account; undefined for everyone else. */
+  /** The chat's effort mode for an operator account; undefined for everyone else or on a read error. */
   async function threadEffortMode(userId: string, threadId: string) {
-    if (!(await seesOperatorSpend(deps.prisma, userId))) return undefined;
-    const thread = await deps.prisma.thread.findUnique({
-      where: { id: threadId },
-      select: { effortMode: true },
-    });
-    return EffortModeSchema.catch("fast").parse(thread?.effortMode ?? "fast");
+    try {
+      if (!(await seesOperatorSpend(deps.prisma, userId))) return undefined;
+      const thread = await deps.prisma.thread.findUnique({
+        where: { id: threadId },
+        select: { effortMode: true },
+      });
+      return EffortModeSchema.catch("fast").parse(thread?.effortMode ?? "fast");
+    } catch (error) {
+      // The picker is optional; opening the chat must not fail on it.
+      getLogger().warn("thread effort mode read failed", { threadId, error });
+      return undefined;
+    }
   }
   /** One admission path for a composer message and for an answer that starts work again. */
   async function sendAsActor(
