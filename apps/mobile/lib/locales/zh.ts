@@ -855,4 +855,5 @@ export const ZH_MESSAGES: Record<string, string> = {
   Vote: "投票",
   "Closes in {time}": "{time} 后结束",
   "Could not record your vote": "无法记录你的投票",
+  "{credits} remaining": "剩余 {credits}",
 };
