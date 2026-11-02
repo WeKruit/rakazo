@@ -9,6 +9,7 @@ import {
   AGENT_RUN_ULTRA_MAX_COST_USD,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
+  lookedUpContacts,
   prepareAgentRun,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
@@ -1316,5 +1317,24 @@ describe("savedContactLookups", () => {
     expect(saved.searched.get("linkedin:/in/no-match")).toEqual(
       new Set(["contactout", "leadmagic"]),
     );
+  });
+
+  it("reads every receipt in few pages and shares one read between parallel lists", async () => {
+    const findMany = vi.fn(async () => []);
+    const mcpServers = vi.fn(async () => [{ id: "enrich", revision: 1 }]);
+    const prisma = { externalEffect: { findMany }, mcpServer: { findMany: mcpServers } } as never;
+    const actor = { userId: "user", spaceId: "space" };
+    const [first, second] = await Promise.all([
+      lookedUpContacts(prisma, actor),
+      lookedUpContacts(prisma, actor),
+    ]);
+    expect(mcpServers).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+    // Each caller adds to its own copy.
+    expect(first.emails).not.toBe(second.emails);
+    // A later read sees receipts saved since.
+    await lookedUpContacts(prisma, actor);
+    expect(findMany).toHaveBeenCalledTimes(2);
   });
 });
