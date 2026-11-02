@@ -320,6 +320,45 @@ const local = url && ["localhost", "127.0.0.1", "::1", "[::1]"].includes(new URL
           expect((await readSavedRecruitingSequences(tx, actor, input)).total).toBe(1);
           await tx.$executeRaw`UPDATE mcp_servers SET revision=4 WHERE id='crm'`;
           expect((await readSavedRecruitingSequences(tx, actor, input)).total).toBe(0);
+          await tx.$executeRaw`UPDATE mcp_servers SET enabled=true WHERE id='native'`;
+          await tx.$executeRaw`UPDATE mcp_servers SET revision=3 WHERE id='crm'`;
+          await tx.$executeRaw`UPDATE recruiting_roles SET "currentRevisionId"=NULL WHERE id IN ('role-1','role-2','role-3','role-4','role-5')`;
+          await tx.$executeRaw`DELETE FROM external_effects WHERE kind='instantly_role_campaign' AND request->>'roleId' IN ('role-3','role-4','role-5')`;
+          await tx.$executeRaw`INSERT INTO recruiting_crm_workspace_attachments VALUES
+            ('role-4','owner','space','crm',3,'org','crm-role'),
+            ('role-5','owner','space','crm',2,'org','crm-role')`;
+          const noBrief = await readSavedRecruitingSequences(tx, actor, input);
+          expect(noBrief.roles.map((role) => role.id)).toEqual(
+            expect.arrayContaining(["role-1", "role-2", "role-4"]),
+          );
+          expect(noBrief.roles.map((role) => role.id)).not.toEqual(
+            expect.arrayContaining(["role-3"]),
+          );
+          expect(noBrief.roles.map((role) => role.id)).not.toEqual(
+            expect.arrayContaining(["role-5"]),
+          );
+          expect(
+            await readSavedRecruitingSequences(tx, actor, { ...input, roleId: "role-4" }),
+          ).toMatchObject({
+            total: 1,
+            items: [
+              {
+                roleId: "role-4",
+                campaigns: [
+                  { sourceKind: "crm", campaign: { id: "crm-campaign", name: "CRM sequence" } },
+                ],
+              },
+            ],
+          });
+          expect(
+            await readSavedRecruitingSequences(tx, actor, { ...input, roleId: "role-2" }),
+          ).toMatchObject({ total: 2 });
+          expect(
+            await readSavedRecruitingSequences(tx, actor, { ...input, roleId: "role-3" }),
+          ).toMatchObject({ total: 0, items: [] });
+          expect(
+            await readSavedRecruitingSequences(tx, actor, { ...input, roleId: "role-5" }),
+          ).toMatchObject({ total: 0, items: [] });
         },
         { timeout: 20_000 },
       );
