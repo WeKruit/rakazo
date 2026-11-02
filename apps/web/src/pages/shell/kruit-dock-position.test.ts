@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { expect, it } from "vitest";
-import { clampOffset, findFreeOffset, type Rect } from "./kruit-dock-position";
+import { clampOffset, controlRects, findFreeOffset, type Rect } from "./kruit-dock-position";
 
 const viewport = { width: 1000, height: 800 };
 const box = { width: 48, height: 48 };
@@ -59,4 +60,11 @@ it("keeps a dragged position inside the window", () => {
     right: 8,
     bottom: 744,
   });
+});
+
+it("treats marked page text as an obstacle", () => {
+  document.body.innerHTML = "<div data-dock-avoid>Saved mail</div><p>plain</p>";
+  const marked = document.querySelector("[data-dock-avoid]") as HTMLElement;
+  marked.getBoundingClientRect = () => new DOMRect(0, 0, 100, 20);
+  expect(controlRects(null)).toHaveLength(1);
 });

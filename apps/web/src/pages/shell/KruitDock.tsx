@@ -198,23 +198,31 @@ function useFloatingDock(hidden: boolean, layout: string) {
     if (hidden) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const later = () => {
-      clearTimeout(timer);
+      if (timer) return;
       timer = setTimeout(() => {
+        timer = undefined;
         if (document.hidden || dragging.current) return;
         if ("requestIdleCallback" in window) window.requestIdleCallback(settle, { timeout: 1500 });
         else settle();
-      }, 1000);
+      }, 300);
     };
     const observer = new MutationObserver((records) => {
       if (!placed.current && records.some((record) => !ref.current?.contains(record.target)))
         later();
     });
-    observer.observe(document.body, { subtree: true, childList: true });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "open"],
+    });
+    window.addEventListener("scroll", later, { capture: true, passive: true });
     window.addEventListener("resize", later);
     return () => {
       clearTimeout(timer);
       observer.disconnect();
       window.removeEventListener("resize", later);
+      window.removeEventListener("scroll", later, { capture: true });
     };
   }, [hidden, settle]);
 

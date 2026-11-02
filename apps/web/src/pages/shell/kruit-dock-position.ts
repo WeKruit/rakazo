@@ -8,7 +8,7 @@ const STEP = 16;
 const GAP = 8;
 
 export const INTERACTIVE =
-  'button, a[href], input, textarea, select, summary, [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"], fieldset';
+  'button, a[href], input, textarea, select, summary, [role="button"], [role="tab"], [role="menuitem"], [contenteditable="true"], fieldset, [data-dock-avoid]';
 
 export function clampOffset(offset: DockOffset, box: Box, viewport: Box): DockOffset {
   const clamp = (value: number, max: number) => Math.max(8, Math.min(value, Math.max(8, max)));
