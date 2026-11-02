@@ -181,7 +181,7 @@ export function useCrmData<O extends CrmOperation>(
 
 /** First page size of every paged workbench list; more rows load on request. */
 export const FIRST_PAGE = 25;
-type PagedOperation = "candidates" | "important" | "roleCampaigns" | "roleMail";
+type PagedOperation = "candidates" | "important" | "roleCampaigns" | "roleMail" | "campaignLeads";
 type PagedItem = { candidateId: string } | { id: string };
 /** A cursor is preferred when the API returns one; older APIs page by offset only. */
 type PagedPage = {
