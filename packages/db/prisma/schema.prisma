@@ -349,6 +349,7 @@ model DeploymentSettings {
   usageCreditsPerUsd              Float    @default(100)
   usageGrossMargin                Float    @default(0.5)
   sendingMailboxLimit             Int      @default(2)
+  senderSelfSetup                 Boolean  @default(false)
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 

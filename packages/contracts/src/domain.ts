@@ -1508,6 +1508,7 @@ export type VoiceStatus = z.infer<typeof VoiceStatusSchema>;
 
 export const DeploymentSettingsSchema = z.object({
   sendingMailboxLimit: z.number().int().min(1).max(100).default(2),
+  senderSelfSetup: z.boolean().default(false),
   ownerUserId: Id.nullable(),
   signupsEnabled: z.boolean(),
   signupAllowlist: z.array(z.string()),
