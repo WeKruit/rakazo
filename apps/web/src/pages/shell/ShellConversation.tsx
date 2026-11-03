@@ -695,6 +695,19 @@ export function ShellConversation({
                         </span>
                       </div>
                     </div>
+                  ) : inGroup && groupId && !groupId.startsWith("recruiting-global-") ? (
+                    <div className="min-w-0">
+                      <p className="text-xs leading-snug text-muted-foreground">
+                        <Trans>Role conversation</Trans>
+                      </p>
+                      <h1
+                        className="recruiting-heading min-w-0 truncate text-[20px] leading-snug text-foreground sm:text-[22px]"
+                        dir="auto"
+                        title={activeGroup?.name ?? activeSnapshot?.groupName}
+                      >
+                        {activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`}
+                      </h1>
+                    </div>
                   ) : (
                     <h1
                       className="recruiting-heading min-w-0 truncate text-[20px] leading-none text-foreground sm:text-[27px]"

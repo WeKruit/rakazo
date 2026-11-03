@@ -120,6 +120,8 @@ it("floats bottom right and remembers where it was dragged", async () => {
     bottom: expect.any(Number),
   });
   expect(dock.style.right).not.toBe("16px");
+  // The dropped spot is final at once: no leftover drag transform adds the offset a second time.
+  expect(dock.style.transform).toBe("");
   localStorage.clear();
 });
 

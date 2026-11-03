@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
-import type { AdapterContext, ConnectorProvider, JobPublisher } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  ArtifactStore,
+  ConnectorProvider,
+  JobPublisher,
+} from "@rakazo/adapter-kit";
 import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import { RecruitingCorrespondenceSchema } from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingSchedulingPlans } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { saveEmailAttachments } from "./email-attachments.js";
 import { readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { hasPlatformMcpCredential } from "./mcp-connector.js";
@@ -38,6 +44,7 @@ export async function refreshRecruitingCorrespondence(
     prisma: PrismaClient;
     connectors: Pick<ConnectorProvider, "execute">;
     jobs?: JobPublisher;
+    artifacts?: ArtifactStore;
     signal?: AbortSignal;
     stillAuthorized?: () => Promise<boolean>;
   },
@@ -66,6 +73,35 @@ export async function refreshRecruitingCorrespondence(
       ))
   )
     return;
+  // Saved files open at once; a file not saved yet is saved behind the read and shows next time.
+  let groupId: Promise<string | null> | undefined;
+  const inboxAttachments = async (
+    source: Source,
+    email: NonNullable<ReturnType<typeof readInstantlyEmail>>,
+  ) => {
+    const botId = source.assignments.find((permission) =>
+      allows(permission, scope.message ? "get_email" : "list_emails"),
+    )?.botId;
+    if (!deps.artifacts || !botId || !email.attachment_json?.files.length) return [];
+    groupId ??= deps.prisma.thread
+      .findFirst({
+        where: { id: scope.threadId, userId: actor.userId, spaceId: actor.spaceId },
+        select: { groupId: true },
+      })
+      .then((thread) => thread?.groupId ?? null);
+    const owner = {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId,
+      groupId: await groupId,
+      sourceId: source.id,
+    };
+    const store = { prisma: deps.prisma, artifacts: deps.artifacts };
+    const saved = await saveEmailAttachments(store, owner, email, { download: false });
+    if (saved.length < email.attachment_json.files.length)
+      void saveEmailAttachments(store, owner, email, { download: true }).catch(() => undefined);
+    return saved;
+  };
   const execute = async (
     source: Source,
     tool: string,
@@ -349,6 +385,8 @@ export async function refreshRecruitingCorrespondence(
                 url: null,
               });
               if (!scope.message) row.body = row.body.slice(0, 50000);
+              const attachments = await inboxAttachments(source, email);
+              if (attachments.length) row.attachments = attachments;
               emails.set(row.id, row);
               observed.push(row);
             }

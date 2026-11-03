@@ -220,3 +220,26 @@ test("search criteria text matches the chat text size", async ({ page }, testInf
   ).toBeGreaterThanOrEqual(12);
   await captureScreenshot(page, testInfo, "search-criteria");
 });
+
+test("a message typed right after a card click is sent after the click's answer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = await recruitingChatFixture(page);
+  fixture.releaseSend();
+  await page.goto("/app/g/group-fixture");
+  await page.getByRole("button", { name: "Approve calibration", exact: true }).click();
+  await expect
+    .poll(() => fixture.calls.some((call) => call.procedure === "threads/answer"))
+    .toBe(true);
+  const composer = page.getByRole("combobox", { name: "Message Senior Perception Engineer" });
+  await composer.fill("Also look in Austin.");
+  await composer.press("Enter");
+  // The answer is still on its way, so the message waits for it instead of answering the card.
+  await page.waitForTimeout(1_000);
+  expect(fixture.calls.some((call) => call.procedure === "threads/send")).toBe(false);
+  fixture.releaseAnswer();
+  await expect
+    .poll(() => fixture.calls.some((call) => call.procedure === "threads/send"))
+    .toBe(true);
+});

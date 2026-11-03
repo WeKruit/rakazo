@@ -1,7 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
 import { answerableAskMessageIds, threadTailPhase, userVisibleMessages } from "@rakazo/core";
-import { Button, Textarea } from "@rakazo/ui-web";
+import { Button, cn, Textarea } from "@rakazo/ui-web";
 import { ArrowLeft, Maximize2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingState, Shimmer } from "../../components/ai/primitives";
@@ -21,12 +21,15 @@ const asyncNoop = async () => undefined;
 /**
  * Another conversation stacked over the open workspace from the right, so a waiting card can be
  * answered without leaving the page. Back closes it and leaves the workspace as it was.
+ * Docked, it is a labelled pane beside the open chat instead (Kruit beside a role chat).
  */
 export function StackedConversation({
   groupId,
   messageId,
   title,
+  subtitle,
   bots,
+  docked = false,
   onBack,
   onOpenFull,
 }: {
@@ -34,7 +37,10 @@ export function StackedConversation({
   /** Opens at this message instead of the latest ones, until the recruiter sends. */
   messageId?: string;
   title: string;
+  /** Says what this conversation is, under the title. */
+  subtitle?: string;
   bots: Bot[];
+  docked?: boolean;
   onBack: () => void;
   onOpenFull: () => void;
 }) {
@@ -51,6 +57,8 @@ export function StackedConversation({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  // A message typed right after a card click goes after the click's answer.
+  const answering = useRef<Promise<unknown>>(Promise.resolve());
   const current = useRef(groupId);
   current.current = groupId;
 
@@ -113,12 +121,13 @@ export function StackedConversation({
   const shown = source && userVisibleMessages(source);
 
   useEffect(() => {
+    if (docked) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onBack();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onBack]);
+  }, [onBack, docked]);
 
   const answerable = answerableAskMessageIds(snapshot);
   const pending = pendingSince !== null && Date.now() - pendingSince < PENDING_MS;
@@ -135,6 +144,7 @@ export function StackedConversation({
     setSending(true);
     setActionError(null);
     try {
+      await answering.current;
       await rpc.threads.send({ groupId, text });
       setDraft("");
       setFocused(undefined);
@@ -150,16 +160,33 @@ export function StackedConversation({
   return (
     <section
       aria-label={title}
-      className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col border-s border-border bg-background shadow-2xl animate-in slide-in-from-right duration-200"
+      data-docked-conversation={docked ? "" : undefined}
+      className={
+        docked
+          ? "hidden w-96 shrink-0 flex-col border-e border-border bg-background lg:flex"
+          : "fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col border-s border-border bg-background shadow-2xl animate-in slide-in-from-right duration-200"
+      }
     >
-      <header className="flex min-h-14 items-center gap-2 border-b border-border px-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />
-          <Trans>Back</Trans>
-        </Button>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug" title={title}>
-          {title}
-        </h2>
+      <header
+        className={cn(
+          "flex items-center gap-2 border-b border-border px-3",
+          docked ? "min-h-16" : "min-h-14",
+        )}
+      >
+        {docked ? null : (
+          <Button variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft aria-hidden="true" />
+            <Trans>Back</Trans>
+          </Button>
+        )}
+        <div className={docked ? "min-w-0 flex-1 px-1" : "min-w-0 flex-1"}>
+          <h2 className="truncate text-sm font-semibold leading-snug" title={title} dir="auto">
+            {title}
+          </h2>
+          {subtitle ? (
+            <p className="truncate text-xs leading-snug text-muted-foreground">{subtitle}</p>
+          ) : null}
+        </div>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -186,13 +213,15 @@ export function StackedConversation({
               message={message}
               canAnswer={answerable.includes(message.id)}
               onAnswer={async (target, answer: AskAnswer, username?: string) => {
-                await rpc.threads.answer({
+                const answered = rpc.threads.answer({
                   groupId,
                   runId: target.runId ?? "",
                   messageId: target.id,
                   answer,
                   ...(username ? { username } : {}),
                 });
+                answering.current = answered.catch(noop);
+                await answered;
                 setPendingSince(Date.now());
                 await load().catch(noop);
               }}

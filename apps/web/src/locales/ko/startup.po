@@ -476,6 +476,7 @@ msgstr ""
 #: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/recruiting/RecruitingRolesDirectory.tsx
+#: src/pages/Shell.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "All roles"
 msgstr ""
