@@ -7,6 +7,11 @@ import { DISCOVERY_CACHE_TTL_MS, DISCOVERY_REFRESH_OPERATION } from "./mcp-conne
 export const DISCOVERY_PREWARM_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const DISCOVERY_PREWARM_BOTS = 50;
 const DISCOVERY_PREWARM_TIMEOUT_MS = 60_000;
+/**
+ * Bots warmed at once. All fifty at once queued about 150 worker database checkouts for 11 s
+ * every refresh, which slowed page reads sharing the database and the container's CPU.
+ */
+export const DISCOVERY_PREWARM_CONCURRENCY = 8;
 /** Refreshed before the cached tool lists expire, so a run never lists a server itself. */
 export const DISCOVERY_PREWARM_REFRESH_MS = DISCOVERY_CACHE_TTL_MS - 2 * 60_000;
 
@@ -30,21 +35,30 @@ export async function prewarmToolDiscovery(
     take: DISCOVERY_PREWARM_BOTS,
   });
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(DISCOVERY_PREWARM_TIMEOUT_MS)]);
-  const outcomes = await Promise.allSettled(
-    bots.map((bot) =>
-      connector.discoverTools({
-        operationId: DISCOVERY_REFRESH_OPERATION,
-        traceId: `discovery-prewarm:${bot.botId}`,
-        spaceId: bot.spaceId,
-        userId: bot.userId,
-        botId: bot.botId,
-        signal: timeout,
-      }),
-    ),
+  let next = 0;
+  let failed = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(DISCOVERY_PREWARM_CONCURRENCY, bots.length) }, async () => {
+      while (next < bots.length && !timeout.aborted) {
+        const bot = bots[next++]!;
+        await connector
+          .discoverTools({
+            operationId: DISCOVERY_REFRESH_OPERATION,
+            traceId: `discovery-prewarm:${bot.botId}`,
+            spaceId: bot.spaceId,
+            userId: bot.userId,
+            botId: bot.botId,
+            signal: timeout,
+          })
+          .catch(() => {
+            failed += 1;
+          });
+      }
+    }),
   );
   getLogger().info("discovery.prewarm", {
     bots: bots.length,
-    failed: outcomes.filter((outcome) => outcome.status === "rejected").length,
+    failed,
     ms: Math.round(performance.now() - startedAt),
   });
 }
