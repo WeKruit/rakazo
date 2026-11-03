@@ -187,6 +187,8 @@ import {
   RecruitingAnalyticsOutputSchema,
   RecruitingAnalyticsPeopleInputSchema,
   RecruitingAnalyticsPeopleOutputSchema,
+  RecruitingSearchQualityInputSchema,
+  RecruitingSearchQualityOutputSchema,
 } from "./recruiting-analytics.js";
 import {
   ListRecruitingContactsInput,
@@ -888,6 +890,10 @@ export const appContract = {
       .input(threadTarget.safeExtend({ round: z.number().int().positive() }))
       .output(z.strictObject({ round: z.number().int().positive(), approvedAt: IsoDate })),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
+    /** The recruiter's good-example and not-a-fit verdicts per calibration round. */
+    searchQuality: oc
+      .input(RecruitingSearchQualityInputSchema)
+      .output(RecruitingSearchQualityOutputSchema),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [
         z.strictObject({

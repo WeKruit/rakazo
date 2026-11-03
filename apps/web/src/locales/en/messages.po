@@ -5544,6 +5544,13 @@ msgstr "Rotate key"
 msgid "Round {0}"
 msgstr "Round {0}"
 
+#. placeholder {0}: round.round
+#. placeholder {1}: round.goodExample
+#. placeholder {2}: round.notFit
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Round {0} · {1} good examples · {2} not a fit"
+msgstr "Round {0} · {1} good examples · {2} not a fit"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Rounds"
 msgstr "Rounds"

@@ -19,6 +19,7 @@ const db = vi.hoisted(() => ({
   crmWorkspace: vi.fn(),
   adopt: vi.fn(),
   feedback: vi.fn(),
+  quality: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -31,6 +32,7 @@ vi.mock("@rakazo/db", async (original) => ({
   },
   recordRecruitingContextAdoption: db.adopt,
   listRecruitingFeedback: db.feedback,
+  readRecruitingSearchQuality: db.quality,
 }));
 
 const run = { id: "run", spaceId: "space", userId: "owner", botId: "bot", threadId: "thread" };
@@ -120,6 +122,7 @@ describe("recruiting run context", () => {
     db.workspace.mockResolvedValue(workspace);
     db.crmSource.mockReset().mockResolvedValue(null);
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
+    db.quality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
   });
 
   it("includes exact CRM job material only as escaped external reference data", async () => {
@@ -334,6 +337,34 @@ describe("recruiting run context", () => {
       expect(JSON.stringify(current)).toBe(savedBefore);
     },
   );
+
+  it("tells the agent how the recruiter judged each round and to rethink a round they mostly turned down", async () => {
+    const { deps } = fixture();
+    const noVerdict = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "turn",
+    });
+    expect(noVerdict!.text).not.toContain("Search quality");
+    db.quality.mockResolvedValueOnce({
+      rounds: [
+        { round: 1, shown: 10, goodExample: 2, notFit: 6, accepted: false },
+        { round: 2, shown: 10, goodExample: 1, notFit: 5, accepted: false },
+      ],
+      goodExample: 3,
+      notFit: 11,
+    });
+    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "turn",
+    });
+    expect(db.quality).toHaveBeenCalledWith(
+      deps.prisma,
+      expect.objectContaining({ userId: run.userId, spaceId: run.spaceId }),
+      { roleId: workspace.role.id },
+    );
+    expect(loaded!.text).toContain(
+      "round 1: 2 good examples, 6 not a fit of 10 shown; round 2: 1 good examples, 5 not a fit of 10 shown; all people on this role: 3 good examples, 11 not a fit.",
+    );
+    expect(loaded!.text).toContain("tell the recruiter in one line what you changed");
+  });
 
   it("adopts bounded durable human feedback with the role context after restart", async () => {
     const { deps } = fixture();

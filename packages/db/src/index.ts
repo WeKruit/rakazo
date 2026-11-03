@@ -32,6 +32,7 @@ export * from "./polls.js";
 export * from "./queued-messages.js";
 export * from "./recruiting.js";
 export * from "./recruiting-analytics.js";
+export * from "./recruiting-search-quality.js";
 export * from "./recruiting-bootstrap.js";
 export * from "./recruiting-candidate-notes.js";
 export * from "./recruiting-contacts.js";

@@ -262,6 +262,7 @@ import {
   readRecruitingAnalytics,
   readRecruitingAnalyticsPeople,
   readRecruitingOverviewSnapshot,
+  readRecruitingSearchQuality,
   recordClosedAskAnswer,
   recordDesktopActivity,
   recruitingContactFacets,
@@ -4489,6 +4490,9 @@ export function createRouter(deps: RouterDeps) {
       ),
       listFeedback: authed.recruiting.listFeedback.handler(({ context, input }) =>
         listRecruitingFeedback(deps.prisma, context.actor, input),
+      ),
+      searchQuality: authed.recruiting.searchQuality.handler(({ context, input }) =>
+        readRecruitingSearchQuality(deps.prisma, context.actor, input),
       ),
       getAssessment: authed.recruiting.getAssessment.handler(({ context, input }) =>
         getRecruitingAssessment(deps.prisma, context.actor, input),

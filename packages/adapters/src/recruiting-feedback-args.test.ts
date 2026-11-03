@@ -60,6 +60,38 @@ describe("recruiting_feedback arguments", () => {
     expect(args.candidateKeys).toEqual(people.map((person) => person.candidateKey));
   });
 
+  it("saves which way the recruiter went on people, however the call words it", async () => {
+    for (const [given, fit] of [
+      [{ operation: "review", fit: "Not a fit" }, "not_fit"],
+      [{ operation: "rejected" }, "not_fit"],
+      [{ operation: "review", fit: "good" }, "good_example"],
+    ] as const) {
+      const { args, error } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
+        target: "candidate",
+        candidateKeys: ["Jane Doe"],
+        intent,
+        ...given,
+      });
+      expect(error).toBeUndefined();
+      expect(args).toMatchObject({ operation: "review", fit });
+      expect(RecruitingFeedbackInputSchema.safeParse(args).success).toBe(true);
+    }
+    expect(
+      RecruitingFeedbackInputSchema.safeParse({
+        target: "candidate",
+        operation: "pass",
+        fit: "not_fit",
+        roleId: "role-1",
+        expectedRoleRevision: 4,
+        candidateKeys: [people[0]!.candidateKey],
+        candidateRevisions: [{ candidateKey: people[0]!.candidateKey, expectedRevision: 0 }],
+        summary: "x",
+        intent,
+        sourceRefs: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("lists the round's people when a name matches no one or none is given", async () => {
     for (const candidateKeys of [["Pat Kim"], undefined]) {
       const { error } = await filledRecruitingFeedbackArgs(prisma(), "role-1", {
