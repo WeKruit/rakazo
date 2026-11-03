@@ -108,3 +108,45 @@ test("renders tappable choice buttons and submits the offered action id", async 
 
   await captureScreenshot(page, testInfo, "choice-card-answered");
 });
+
+test("a message typed right after a card click goes after the click's answer", async ({ page }) => {
+  const stamp = Date.now();
+  await signup(page, `choice-card-order-${stamp}@rakazo.test`, "password12", "Choice Order");
+  await completeOnboarding(page);
+
+  const botId = activeBotId(page);
+  const composer = page.getByPlaceholder(/Message/);
+  await composer.fill("pick from these cities with tappable choices");
+  await page.keyboard.press("Enter");
+  const toronto = page.getByRole("button", { name: "Toronto", exact: true });
+  await expect(toronto).toBeVisible({ timeout: 60_000 });
+
+  // A slow answer call, as right after a deploy: the typed message must not overtake it.
+  const order: string[] = [];
+  await page.route("**/rpc/threads/answer", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await route.continue();
+    order.push("answered");
+  });
+  page.on("request", (request) => {
+    if (request.url().includes("/rpc/threads/send")) order.push("sent");
+  });
+  await toronto.click();
+  await composer.fill("and tell me a joke");
+  await page.keyboard.press("Enter");
+
+  await expect.poll(() => order, { timeout: 30_000 }).toEqual(["answered", "sent"]);
+  await expect
+    .poll(
+      async () => {
+        const history = await rpc<{
+          messages: Array<{ blocks: Array<{ kind: string; status?: string; answer?: string }> }>;
+        }>(page, "threads/messages", { botId });
+        return history.messages
+          .flatMap((message) => message.blocks)
+          .find((block) => block.kind === "ask")?.answer;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("choice-3");
+});
