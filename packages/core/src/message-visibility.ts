@@ -12,6 +12,11 @@ export type UserVisibleMessagesOptions = {
    * (web CollaborationMarker; mobile AgentEventLabel). Peer bodies stay hidden.
    */
   includePeerReceipts?: boolean;
+  /**
+   * Keep work handed over from another conversation (Kruit to a role, a role back to Kruit)
+   * as a chip that opens where it was asked, even when other peer receipts stay hidden.
+   */
+  includeConversationHandoffs?: boolean;
   /** Peer-run ids from `run.trigger === "bot_message"` when receipts may be out of window. */
   knownPeerRunIds?: Iterable<string>;
   /**
@@ -63,7 +68,14 @@ export function userVisibleMessages<T extends PresentableMessage>(
       return message.blocks.some(isBackgroundInputBlock);
     }
     if (isPeerReceiptBlocks(message.blocks)) {
-      return includePeerReceipts || message.blocks.some(isBackgroundInputBlock);
+      return (
+        includePeerReceipts ||
+        message.blocks.some(isBackgroundInputBlock) ||
+        (options.includeConversationHandoffs === true &&
+          message.blocks.some(
+            (block) => block.kind === "bot_message_received" && Boolean(block.returnThreadId),
+          ))
+      );
     }
     if (!message.runId || !peerRunIds.has(message.runId)) return true;
     // Keep peer-run ask cards, and (unless the caller opts out) the bot's own text reply.

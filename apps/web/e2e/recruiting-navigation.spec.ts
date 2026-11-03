@@ -141,3 +141,22 @@ test("a role whose team is working shows it in the role list", async ({ page }, 
   });
   expect(fixture.unknown).toEqual([]);
 });
+
+test("work Kruit handed to a role links back to where it was asked", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const fixture = await mockRecruitingApp(page, { kruitHandoff: true });
+  await page.goto(`/app/g/${appGroupId}?view=conversation`);
+  const handoff = page.getByRole("link", { name: "Message from Kruit", exact: true });
+  await expect(handoff).toBeVisible();
+  await expect(handoff).toHaveAttribute(
+    "href",
+    "/app/g/recruiting-global-fixture?m=fixture-kruit-echo",
+  );
+  // The brief itself and the team's member names stay out of the recruiter's view.
+  await expect(page.getByText("Goal: find five more platform engineers.")).toHaveCount(0);
+  await test.info().attach("kruit-handoff-1440", {
+    body: await page.screenshot({ path: info.outputPath("kruit-handoff-1440.png") }),
+    contentType: "image/png",
+  });
+  expect(fixture.unknown).toEqual([]);
+});

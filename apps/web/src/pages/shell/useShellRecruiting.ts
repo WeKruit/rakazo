@@ -844,6 +844,7 @@ export function useShellRecruiting({
     () =>
       userVisibleMessages(activeSnapshot?.messages ?? [], {
         includePeerReceipts: showToolActivity,
+        includeConversationHandoffs: true,
       }),
     [activeSnapshot?.messages, showToolActivity],
   );
