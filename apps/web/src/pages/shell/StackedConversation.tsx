@@ -88,13 +88,6 @@ export function StackedConversation({
   }, [groupId, focused]);
 
   useEffect(() => {
-    if (!around || !focused) return;
-    scroller.current
-      ?.querySelector(`[data-message-id="${CSS.escape(focused)}"]`)
-      ?.scrollIntoView({ block: "center" });
-  }, [around, focused]);
-
-  useEffect(() => {
     setSnapshot(null);
     setLoadError(null);
     setActionError(null);
@@ -119,6 +112,15 @@ export function StackedConversation({
   // Same filter as the full conversation: internal continuations and peer chatter stay hidden.
   const source = focused ? around : (snapshot?.messages ?? null);
   const shown = source && userVisibleMessages(source);
+  // A link can target a hidden message, such as a handoff to a role; land on the nearest shown one.
+  const anchor = focused ? nearestShownMessageId(around, shown, focused) : undefined;
+
+  useEffect(() => {
+    if (!anchor) return;
+    scroller.current
+      ?.querySelector(`[data-message-id="${CSS.escape(anchor)}"]`)
+      ?.scrollIntoView({ block: "center" });
+  }, [anchor]);
 
   useEffect(() => {
     if (docked) return;
@@ -206,7 +208,7 @@ export function StackedConversation({
           <div
             key={message.id}
             data-message-id={message.id}
-            className={message.id === focused ? "rounded-xl ring-2 ring-ring" : undefined}
+            className={message.id === anchor ? "rounded-xl ring-2 ring-ring" : undefined}
           >
             <MessageView
               artifactTarget={{ groupId }}
@@ -285,4 +287,16 @@ export function StackedConversation({
       </form>
     </section>
   );
+}
+
+function nearestShownMessageId(
+  around: readonly { id: string; seq: number }[] | null,
+  shown: readonly { id: string; seq: number }[] | null,
+  messageId: string,
+): string | undefined {
+  if (!shown?.length) return undefined;
+  if (shown.some((message) => message.id === messageId)) return messageId;
+  const seq = around?.find((message) => message.id === messageId)?.seq;
+  if (seq === undefined) return undefined;
+  return (shown.findLast((message) => message.seq <= seq) ?? shown[0])?.id;
 }

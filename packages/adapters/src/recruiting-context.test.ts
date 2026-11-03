@@ -20,6 +20,7 @@ const db = vi.hoisted(() => ({
   adopt: vi.fn(),
   feedback: vi.fn(),
   quality: vi.fn(),
+  patterns: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
@@ -33,6 +34,7 @@ vi.mock("@rakazo/db", async (original) => ({
   recordRecruitingContextAdoption: db.adopt,
   listRecruitingFeedback: db.feedback,
   readRecruitingSearchQuality: db.quality,
+  readRecruitingVerdictPatterns: db.patterns,
 }));
 
 const run = { id: "run", spaceId: "space", userId: "owner", botId: "bot", threadId: "thread" };
@@ -123,6 +125,7 @@ describe("recruiting run context", () => {
     db.crmSource.mockReset().mockResolvedValue(null);
     db.feedback.mockResolvedValue({ feedback: [], nextCursor: null });
     db.quality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
+    db.patterns.mockResolvedValue({ role: [], allRoles: [] });
   });
 
   it("includes exact CRM job material only as escaped external reference data", async () => {
@@ -364,6 +367,43 @@ describe("recruiting run context", () => {
       "round 1: 2 good examples, 6 not a fit of 10 shown; round 2: 1 good examples, 5 not a fit of 10 shown; all people on this role: 3 good examples, 11 not a fit.",
     );
     expect(loaded!.text).toContain("tell the recruiter in one line what you changed");
+  });
+
+  it("tells the agent what the praised and turned-down people share, on this role and across roles", async () => {
+    const { deps } = fixture();
+    const facet = (facet: string, fit: string, value: string, people: number) => ({
+      facet,
+      fit,
+      value,
+      people,
+    });
+    const role = [
+      facet("company", "good_example", "Example Logistics", 3),
+      facet("company", "good_example", "One-off Co", 1),
+      facet("school", "good_example", "Example State University", 2),
+      facet("title", "not_fit", "Staffing Recruiter", 4),
+    ];
+    db.patterns.mockResolvedValueOnce({
+      role,
+      allRoles: [...role, facet("company", "not_fit", "Example Agency", 5)],
+    });
+    const loaded = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
+      reason: "turn",
+    });
+    expect(db.patterns).toHaveBeenCalledWith(
+      deps.prisma,
+      expect.objectContaining({ userId: run.userId }),
+      { roleId: workspace.role.id },
+    );
+    expect(loaded!.text).toContain(
+      "This role: praised: company Example Logistics (3); school Example State University (2). turned down: title Staffing Recruiter (4).",
+    );
+    expect(loaded!.text).toContain("All of this recruiter's roles: ");
+    expect(loaded!.text).toContain(
+      "turned down: company Example Agency (5); title Staffing Recruiter (4).",
+    );
+    expect(loaded!.text).not.toContain("One-off Co");
+    expect(loaded!.text).toContain("never a requirement");
   });
 
   it("adopts bounded durable human feedback with the role context after restart", async () => {

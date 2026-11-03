@@ -1,5 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { recruitingHomeGroupId } from "@rakazo/db";
 
 /** Roles shown to the global agent, most recently active first. */
 const DIGEST_ROLES = 8;
@@ -29,6 +30,17 @@ function ago(date: Date, now: number): string {
 }
 
 /**
+ * The account's own team before it holds a role. It is not a role team, so Kruit neither lists
+ * it with the roles nor hands it work; account setup such as the sending email stays with Kruit.
+ */
+export function isRolelessHomeTeam(
+  scope: { spaceId: string; userId: string },
+  group: { id: string; thread?: { activeRecruitingRoleId: string | null } | null },
+): boolean {
+  return group.id === recruitingHomeGroupId(scope) && !group.thread?.activeRecruitingRoleId;
+}
+
+/**
  * A bounded, read-only picture of what each role team did and discussed lately, for the
  * account-wide agent. Built from this user's own role conversations only; details stay in
  * the role's records and conversation.
@@ -39,7 +51,7 @@ export async function loadCrossRoleDigest(
   redact: (text: string) => string,
   now = Date.now(),
 ): Promise<string | undefined> {
-  const groups = await prisma.chatGroup.findMany({
+  const listed = await prisma.chatGroup.findMany({
     where: {
       spaceId: scope.spaceId,
       userId: scope.userId,
@@ -56,6 +68,11 @@ export async function loadCrossRoleDigest(
       thread: { select: { id: true, activeRecruitingRoleId: true } },
     },
   });
+  // The account's own team with no role yet is not a role team: nothing to hand it.
+  const home = recruitingHomeGroupId(scope);
+  const groups = listed.filter(
+    (group) => group.id !== home || group.thread?.activeRecruitingRoleId,
+  );
   if (!groups.length) return undefined;
   const roleIds = groups.flatMap((group) =>
     group.thread?.activeRecruitingRoleId ? [group.thread.activeRecruitingRoleId] : [],
