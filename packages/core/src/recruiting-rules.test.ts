@@ -788,6 +788,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Outreach ended its turn saying the lookup was pending.",
   },
   {
+    rule: "role mail is read in the role's mailbox, not Gmail",
+    in: "Review recruiting draft skill",
+    phrase: "never stop or ask the recruiter to forward mail because a Gmail search found nothing",
+    why: "A delegated reply searched only Gmail, found no thread and asked the recruiter to forward the mail.",
+  },
+  {
     rule: "lookups never stop on low credits",
     in: "Review recruiting draft skill",
     phrase: "never check credits first or stop over a low balance",
