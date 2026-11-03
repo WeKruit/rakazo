@@ -60,6 +60,12 @@ function responseForGlobalRealm(input: object): Response {
   response.headers.forEach((value, key) => {
     if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) headers.append(key, value);
   });
+  // A global Response only holds 200-599. A site outside that range (LinkedIn answers 999) is a
+  // failed request, reported the way a refused fetch is, not a RangeError from this copy.
+  if (response.status < 200 || response.status > 599) {
+    void response.body?.cancel().catch(() => undefined);
+    throw new Error(`Request failed: HTTP ${response.status}`);
+  }
   const init = { status: response.status, statusText: response.statusText, headers };
   if (response.body == null || NULL_BODY_STATUSES.has(response.status)) {
     return new Response(null, init);
