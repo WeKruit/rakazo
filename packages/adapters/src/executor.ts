@@ -475,7 +475,12 @@ import {
   readInstantlyEmail,
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
-import { senderApprovalDisplay } from "./instantly-senders.js";
+import {
+  asksSenderCompanyName,
+  isSenderRead,
+  SENDER_READ_FIRST,
+  senderApprovalDisplay,
+} from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
 import {
   assertConnectorToolArgs,
@@ -6015,6 +6020,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
         // The model saved the recruiter's described role in this turn, so its first question plans searches.
         let roleCreatedInTurn = false;
+        // Sender setup asks nothing until this turn read the account's sending email.
+        let senderRead = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
         const noRoleYet = () =>
@@ -13136,6 +13143,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
               }
               const failure = toolResultError(result);
+              if (failure === undefined && isSenderRead(name, rawArgs)) senderRead = true;
               turnReport.settle(executionId, {
                 ok: failure === undefined,
                 result,
@@ -14479,6 +14487,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
+                    if (!senderRead && asksSenderCompanyName(question))
+                      return { instead: SENDER_READ_FIRST };
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
