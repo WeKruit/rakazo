@@ -1165,6 +1165,40 @@ export function unresolvedContactEmailError(runId: string, email: string, name?:
     : null;
 }
 
+const TYPED_ADDRESS =
+  /[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+@[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+\.[a-z]{2,}/giu;
+
+/**
+ * An address a person wrote in this run's conversation is theirs, not a guess: their own recent
+ * message, or a teammate's brief that hands their words over. Its mail can be read without a
+ * saved contact.
+ */
+export async function addressTypedInConversation(
+  prisma: Pick<PrismaClient, "message">,
+  runId: string,
+  email: string,
+) {
+  const rows = await prisma.message.findMany({
+    where: { role: "user", thread: { runs: { some: { id: runId } } } },
+    orderBy: { seq: "desc" },
+    take: 20,
+    select: { blocks: true },
+  });
+  const wanted = fold(email);
+  return rows.some(
+    (row) =>
+      Array.isArray(row.blocks) &&
+      row.blocks.some(
+        (block) =>
+          block &&
+          typeof block === "object" &&
+          "text" in block &&
+          typeof block.text === "string" &&
+          (block.text.match(TYPED_ADDRESS) ?? []).some((address) => fold(address) === wanted),
+      ),
+  );
+}
+
 /** candidate_key -> lead email recorded when people were added to the role's outreach campaign. */
 async function roleCampaignLeadEmails(prisma: PrismaClient, actor: Actor, roleId: string) {
   const emails = new Map<string, string>();

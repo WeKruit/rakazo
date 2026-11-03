@@ -90,7 +90,7 @@ import {
   SchedulingApprovalEvidenceSchema,
   schedulingPlanHash,
 } from "./recruiting-scheduling.js";
-import { unresolvedContactEmailError } from "./recruiting-tools.js";
+import { addressTypedInConversation, unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
@@ -1977,7 +1977,10 @@ export class McpConnector implements ConnectorProvider {
       const refused =
         parsed.success &&
         unresolvedContactEmailError(context.runId, parsed.data.email, parsed.data.name);
-      if (refused) {
+      if (
+        refused &&
+        !(await addressTypedInConversation(this.prisma, context.runId, parsed.data.email))
+      ) {
         yield { type: "error", message: refused };
         return;
       }
