@@ -22,6 +22,7 @@ import {
   SUMMARIZE_TIMEOUT_BASE_CHARS,
   SUMMARIZE_TIMEOUT_MAX_MS,
   SUMMARIZE_TIMEOUT_MIN_MS,
+  SUMMARY_TARGET_CHARS,
   selectCompactedHistory,
   shouldEnqueueCompaction,
   summarizeTimeoutMs,
@@ -1205,6 +1206,28 @@ describe("compactHistory", () => {
     expect(request.prompt).toContain("marker-0");
     expect(request.prompt).not.toContain("marker-49 ");
     expect(harness.thread.historyCompactedUpToSeq).toBeLessThan(49);
+  });
+
+  it("condenses a summary that outgrew the cap instead of stopping compaction", async () => {
+    // A long conversation's summary sat at the cap, so every run paid for a new summary that was
+    // thrown away and the cursor never moved again.
+    const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
+    harness.runtime.run
+      .mockImplementationOnce(async function* () {
+        yield { type: "done", text: "x".repeat(MAX_COMPACTED_SUMMARY_CHARS + 1) };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "done", text: "Condensed summary." };
+      });
+
+    await compactHistory(harness.deps, "thread-1");
+
+    expect(harness.runtime.run).toHaveBeenCalledTimes(2);
+    const [condense] = harness.runtime.run.mock.calls[1]!;
+    expect(condense.prompt).toContain("<summary>");
+    expect(condense.instructions).toContain(`under ${SUMMARY_TARGET_CHARS} characters`);
+    expect(harness.thread.historyCompactionSummary).toBe("Condensed summary.");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
   });
 
   it("keeps the cursor unchanged when the summary exceeds the safe context budget", async () => {
