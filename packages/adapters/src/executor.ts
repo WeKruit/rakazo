@@ -439,7 +439,7 @@ import {
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
-import { loadCrossRoleDigest } from "./cross-role-digest.js";
+import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -899,6 +899,8 @@ export function lateNote(pending: Promise<string | undefined>) {
 const NEW_ROLE_TITLE = "New role";
 /** Role conversations Kruit opens with start_role. */
 const KRUIT_ROLE_GROUP_PREFIX = "role-";
+const ACCOUNT_SETUP_STAYS_HERE =
+  "That team has no role. Work that belongs to no role, such as getting the sending email ready, you do yourself here: call ensure_sender read and do what it returns. For a new role use start_role.";
 /** People listed back from one search saved as it returned; the rest are in Results. */
 const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -12441,9 +12443,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       userId: run.userId,
                       archivedAt: null,
                     },
-                    select: { id: true, name: true, thread: { select: { id: true } } },
+                    select: {
+                      id: true,
+                      name: true,
+                      thread: { select: { id: true, activeRecruitingRoleId: true } },
+                    },
                   })
                 : null;
+            if (group && isRolelessHomeTeam(run, group))
+              return finish({ error: ACCOUNT_SETUP_STAYS_HERE });
             const target = role?.sourceThread.groupId
               ? {
                   groupId: role.sourceThread.groupId,

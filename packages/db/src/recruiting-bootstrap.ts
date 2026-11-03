@@ -163,6 +163,10 @@ const catalogDigest = (firstPartyMcpUrl?: string) =>
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
 }
+/** The account's own recruiting team, provisioned before any role exists. */
+export function recruitingHomeGroupId(actor: Pick<Actor, "spaceId" | "userId">): string {
+  return `recruiting-${digest([actor.spaceId, actor.userId])}`;
+}
 /** Stable native group identity; clients locate it in their scoped group list. */
 export function recruitingGlobalGroupId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-global-${digest([actor.spaceId, actor.userId])}`;
@@ -548,7 +552,7 @@ async function upgradeInTransaction(
   if (installed.version !== "1")
     throw new IsolationError("Unsupported recruiting defaults version");
   const baseline = readPreset(installed.config);
-  if (baseline.groupId !== `recruiting-${digest([actor.spaceId, actor.userId])}`)
+  if (baseline.groupId !== recruitingHomeGroupId(actor))
     throw new IsolationError("Recruiting defaults belong to another workspace");
   const originalServices = new Set(Object.keys(baseline.services));
   const newBotIds = new Set<string>();
@@ -844,7 +848,7 @@ export async function upgradeRecruitingWorkspace(
       });
       if (!personal) return;
       if (!current || current.version === LEGACY_PRESET_VERSION) {
-        const home = `recruiting-${digest([actor.spaceId, actor.userId])}`;
+        const home = recruitingHomeGroupId(actor);
         const managed = await tx.chatGroup.count({ where: { id: home } });
         if (!managed) await adoptLegacyCrew(tx, actor, current, options);
       } else await upgradeInTransaction(tx, actor, current, options);
@@ -1251,7 +1255,7 @@ export async function backfillRecruitingCrews(
       if (installed && installed.version !== LEGACY_PRESET_VERSION) {
         const home = await prisma.chatGroup.findFirst({
           where: {
-            id: `recruiting-${digest([actor.spaceId, actor.userId])}`,
+            id: recruitingHomeGroupId(actor),
             userId: actor.userId,
             spaceId: actor.spaceId,
           },
@@ -1275,7 +1279,7 @@ export async function backfillRecruitingCrews(
         }
         const group = await tx.chatGroup.findFirst({
           where: {
-            id: `recruiting-${digest([actor.spaceId, actor.userId])}`,
+            id: recruitingHomeGroupId(actor),
             spaceId: actor.spaceId,
             userId: actor.userId,
             archivedAt: null,
