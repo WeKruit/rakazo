@@ -287,7 +287,12 @@ try {
     // Whether the click reached the server, and how it answered.
     const answerCalls = [];
     page.on("response", (response) => {
-      if (response.url().includes("/rpc/threads/answer")) answerCalls.push(response.status());
+      if (!response.url().includes("/rpc/threads/answer")) return;
+      answerCalls.push(response.status());
+      if (response.status() !== 200)
+        void response.text().then((body) =>
+          console.log(`  answer ${response.status()}: ${response.request().postData()} -> ${body}`),
+        );
     });
     await dallas.click();
     // Once the answer is in; a message sent before it would answer the card instead.
