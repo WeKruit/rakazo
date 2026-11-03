@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DISCOVERY_PREWARM_CONCURRENCY,
   DISCOVERY_PREWARM_WINDOW_MS,
   prewarmToolDiscovery,
   warmBotDiscovery,
@@ -36,6 +37,34 @@ describe("prewarmToolDiscovery", () => {
       expect.objectContaining({ botId: "bot-2", spaceId: "space-2", userId: "user-2" }),
     ]);
     expect(discoverTools.mock.calls[0]?.[0]).not.toHaveProperty("runId");
+  });
+});
+
+describe("prewarmToolDiscovery concurrency", () => {
+  it("warms a few bots at a time instead of every bot at once", async () => {
+    const bots = Array.from({ length: 20 }, (_, index) => ({
+      botId: `bot-${index}`,
+      spaceId: "space-1",
+      userId: "user-1",
+    }));
+    let inFlight = 0;
+    let peak = 0;
+    const discoverTools = vi.fn(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return [];
+    });
+
+    await prewarmToolDiscovery(
+      { run: { groupBy: vi.fn(async () => bots) } } as unknown as PrismaClient,
+      { discoverTools },
+      new AbortController().signal,
+    );
+
+    expect(discoverTools).toHaveBeenCalledTimes(20);
+    expect(peak).toBe(DISCOVERY_PREWARM_CONCURRENCY);
   });
 });
 

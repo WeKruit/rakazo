@@ -22,6 +22,7 @@ import {
   SUMMARIZE_TIMEOUT_BASE_CHARS,
   SUMMARIZE_TIMEOUT_MAX_MS,
   SUMMARIZE_TIMEOUT_MIN_MS,
+  SUMMARY_TARGET_CHARS,
   selectCompactedHistory,
   shouldEnqueueCompaction,
   summarizeTimeoutMs,
@@ -227,6 +228,7 @@ describe("formatRecalledMemory", () => {
 type HarnessMessage = {
   id?: string;
   botId?: string | null;
+  runId?: string;
   seq: number;
   role: string;
   blocks: MessageBlock[];
@@ -251,6 +253,8 @@ function compactionHarness(
       spaceId: string;
       botId?: string;
     }) => Promise<AgentRunRequest["model"]>;
+    /** Status of each run that posted a message, by run id. */
+    runStatuses?: Record<string, string>;
     withMemoryProvider?: boolean;
     memoryConfig?: {
       defaultMemoryScope: string;
@@ -290,6 +294,11 @@ function compactionHarness(
         options.validOrigin === false
           ? null
           : { id: "origin-run", botId: "bot-1", sourceMessageId: "current-source" },
+      ),
+      findMany: vi.fn(async (args: { where: { id: { in: string[] }; status: { in: string[] } } }) =>
+        args.where.id.in
+          .filter((id) => args.where.status.in.includes(options.runStatuses?.[id] ?? ""))
+          .map((id) => ({ id })),
       ),
     },
     chatGroup: {
@@ -583,6 +592,31 @@ describe("compactHistory", () => {
       status: "pending",
       text: "Keep this exact approval",
     });
+  });
+
+  it("keeps a card out of the summary while its run still waits for the answer", async () => {
+    const harness = compactionHarness({
+      group: true,
+      runStatuses: { "waiting-run": "waiting_input" },
+    });
+    harness.messages[2]!.runId = "waiting-run";
+    harness.messages[2]!.blocks = [{ kind: "ask", text: "Still waiting", status: "pending" }];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(1);
+  });
+
+  it("summarizes past an unanswered card whose run already ended", async () => {
+    // A card left pending by a stopped or expired run stopped compaction at that card for good,
+    // so every later turn fell back to the 200-message window.
+    const harness = compactionHarness({
+      group: true,
+      runStatuses: { "stopped-run": "cancelled" },
+    });
+    harness.messages[2]!.runId = "stopped-run";
+    harness.messages[2]!.blocks = [{ kind: "ask", text: "Old question", status: "pending" }];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.runtime.run.mock.calls[0]![0].prompt).toContain("Old question");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
   });
 
   it("keeps original Artifact and speaker references in the group summary input", async () => {
@@ -1172,6 +1206,28 @@ describe("compactHistory", () => {
     expect(request.prompt).toContain("marker-0");
     expect(request.prompt).not.toContain("marker-49 ");
     expect(harness.thread.historyCompactedUpToSeq).toBeLessThan(49);
+  });
+
+  it("condenses a summary that outgrew the cap instead of stopping compaction", async () => {
+    // A long conversation's summary sat at the cap, so every run paid for a new summary that was
+    // thrown away and the cursor never moved again.
+    const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
+    harness.runtime.run
+      .mockImplementationOnce(async function* () {
+        yield { type: "done", text: "x".repeat(MAX_COMPACTED_SUMMARY_CHARS + 1) };
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "done", text: "Condensed summary." };
+      });
+
+    await compactHistory(harness.deps, "thread-1");
+
+    expect(harness.runtime.run).toHaveBeenCalledTimes(2);
+    const [condense] = harness.runtime.run.mock.calls[1]!;
+    expect(condense.prompt).toContain("<summary>");
+    expect(condense.instructions).toContain(`under ${SUMMARY_TARGET_CHARS} characters`);
+    expect(harness.thread.historyCompactionSummary).toBe("Condensed summary.");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
   });
 
   it("keeps the cursor unchanged when the summary exceeds the safe context budget", async () => {
