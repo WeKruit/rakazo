@@ -91,7 +91,7 @@ export function ShortlistDirectory({
         shortlist: {
           shortlisted: candidate.shortlisted,
           disabled: !candidateFresh || shortlistPending !== null,
-          set: (value) => void model.setShortlist(candidate, value),
+          set: (value) => model.setShortlist(candidate, value),
         },
       },
       walk: (step) => target(index + step),

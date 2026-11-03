@@ -2128,6 +2128,10 @@ msgstr "无法更新"
 msgid "Could not update agent access"
 msgstr "无法更新 Agent 权限"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not update shortlist. Try again."
+msgstr "无法更新候选名单。请重试。"
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not update the default memory scope"
 msgstr "无法更新默认记忆范围"
@@ -5672,6 +5676,10 @@ msgstr "已保存"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr "保存于岗位最近一次更新之前"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Saved calendar checks"
+msgstr "已保存的日历检查"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."

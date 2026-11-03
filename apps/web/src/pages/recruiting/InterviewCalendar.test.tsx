@@ -291,3 +291,16 @@ it("combines actual status selections without turning availability into a confir
   expect(element.querySelectorAll("[data-event-id]")).toHaveLength(2);
   expect(element.querySelector('[data-event-id="available"]')).toBeNull();
 });
+
+it("returns to today after selecting a later day in the current window", async () => {
+  await mount([source()]);
+  const days = [
+    ...element.querySelectorAll<HTMLButtonElement>('fieldset[aria-label="Choose day"] button'),
+  ];
+  expect(button("Today").disabled).toBe(true);
+  await act(async () => days[1]!.click());
+  expect(button("Today").disabled).toBe(false);
+  await act(async () => button("Today").click());
+  expect(days[0]!.getAttribute("aria-pressed")).toBe("true");
+  expect(button("Today").disabled).toBe(true);
+});

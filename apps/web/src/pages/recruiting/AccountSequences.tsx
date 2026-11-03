@@ -625,11 +625,14 @@ export function AccountSequences({
             >{t`Next`}</Button>
           </div>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {contactSearch
-            ? t`Saved contact membership only; coverage may be incomplete.`
-            : t`≥ Saved minimum · — Not reported`}
-        </p>
+        <details className="mt-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">{t`Historical totals · — Not reported`}</summary>
+          <p className="mt-2">
+            {contactSearch
+              ? t`Saved contact membership only; coverage may be incomplete.`
+              : t`≥ Saved minimum · — Not reported`}
+          </p>
+        </details>
       </section>
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent>

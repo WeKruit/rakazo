@@ -888,7 +888,17 @@ it("lists every role's people in one server-paged table", async () => {
       await act(async () => {});
       expect(container.textContent).toContain("Ada Lovelace");
     });
+    expect(container.textContent).not.toContain("UCLA");
+    const displayColumns = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Display columns",
+    )!;
+    await act(async () => displayColumns.click());
+    const education = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(
+      (item) => item.textContent === "Education",
+    )!;
+    await act(async () => education.click());
     expect(container.textContent).toContain("UCLA");
+    await act(async () => displayColumns.click());
     expect(container.textContent).toContain("1–2 of 120");
     await act(async () =>
       container.querySelector<HTMLButtonElement>('button[aria-label="Next page"]')!.click(),

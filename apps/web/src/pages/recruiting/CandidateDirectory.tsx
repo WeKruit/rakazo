@@ -502,15 +502,15 @@ export function CandidateDirectory({
         <CandidateWindow
           key="table"
           mode="table"
-          tableClassName="w-full min-w-[1280px] table-fixed border-collapse text-left text-sm"
+          tableClassName="w-full min-w-[1120px] table-fixed border-collapse text-left text-sm"
           itemKeys={itemKeys}
           offsets={offsets}
           label={t`Candidate table`}
           header={
-            <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
+            <thead className="sticky top-0 z-20 bg-muted text-xs text-muted-foreground">
               <tr>
                 {selection ? (
-                  <th scope="col" className="w-10 px-3 py-2">
+                  <th scope="col" className="sticky left-0 z-20 w-10 bg-muted px-3 py-2">
                     <Checkbox
                       aria-label={t`Select all on this page`}
                       checked={rows.every((row) => selection.keys.has(row.key))}
@@ -524,7 +524,10 @@ export function CandidateDirectory({
                     />
                   </th>
                 ) : null}
-                <th scope="col" className="w-56 px-3 py-2 font-medium">
+                <th
+                  scope="col"
+                  className={`sticky ${selection ? "left-10" : "left-0"} z-20 w-56 bg-muted px-3 py-2 font-medium`}
+                >
                   <Trans>Name</Trans>
                 </th>
                 <th scope="col" className="w-[18%] px-3 py-2 font-medium">
@@ -579,7 +582,7 @@ export function CandidateDirectory({
                 className="border-t border-border align-middle hover:bg-muted/40 data-selected:bg-muted"
               >
                 {selection ? (
-                  <td className="px-3 py-2">
+                  <td className="sticky left-0 z-10 bg-background px-3 py-2 in-data-selected:bg-muted">
                     <Checkbox
                       aria-label={t`Select ${name}`}
                       checked={selection.keys.has(row.key)}
@@ -592,7 +595,10 @@ export function CandidateDirectory({
                     />
                   </td>
                 ) : null}
-                <th scope="row" className="px-3 py-2 font-normal">
+                <th
+                  scope="row"
+                  className={`sticky ${selection ? "left-10" : "left-0"} z-10 bg-background px-3 py-2 font-normal in-data-selected:bg-muted`}
+                >
                   <div className="flex min-w-0 items-center gap-2">
                     <PersonAvatar name={name} src={profile.assets.photo} size="sm" />
                     <div className="flex min-w-0 flex-1 items-center gap-2">

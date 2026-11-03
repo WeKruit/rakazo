@@ -27,7 +27,7 @@ import {
   Input,
   Textarea,
 } from "@rakazo/ui-web";
-import { ChevronDown, ListFilter, RefreshCw, Search, X } from "lucide-react";
+import { ChevronDown, Columns3, ListFilter, RefreshCw, Search, X } from "lucide-react";
 import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ListPager } from "../../components/ListPager";
@@ -84,6 +84,7 @@ export function AllContacts({
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
+  const [extraColumns, setExtraColumns] = useState<ReadonlySet<string>>(new Set(["profiles"]));
   const cache = useContext(RecruitingReadCacheContext);
   const [enroll, setEnroll] = useState(false);
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());
@@ -240,6 +241,14 @@ export function AllContacts({
     replied: t`Replied`,
     shortlisted: t`Shortlisted`,
   };
+  const optionalColumns = [
+    { key: "profiles", label: t`Profiles`, width: 184 },
+    { key: "tags", label: t`Tags`, width: 160 },
+    { key: "education", label: t`Education`, width: 184 },
+    { key: "location", label: t`Location`, width: 176 },
+    { key: "added", label: t`Date added`, width: 128 },
+    { key: "replied", label: t`Last replied`, width: 128 },
+  ];
   const roleTitle = (id: string) => facets?.roles.find((role) => role.id === id)?.title ?? id;
 
   const people = [...selected.values()];
@@ -426,7 +435,7 @@ export function AllContacts({
   return (
     <section aria-label={t`All contacts`} className="min-w-0 space-y-3">
       <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 bg-background py-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-sm">
+        <div className="relative w-full min-w-0 flex-none sm:w-auto sm:flex-1 sm:max-w-md">
           <Search
             size={15}
             aria-hidden
@@ -558,6 +567,41 @@ export function AllContacts({
                   </DropdownMenuRadioGroup>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="icon-sm"
+                className="sm:w-auto sm:px-3"
+                aria-label={t`Display columns`}
+              />
+            }
+          >
+            <Columns3 size={15} aria-hidden />
+            <span className="hidden sm:inline">
+              <Trans>Display columns</Trans>
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            {optionalColumns.map(({ key, label }) => (
+              <DropdownMenuCheckboxItem
+                key={key}
+                checked={extraColumns.has(key)}
+                onCheckedChange={(checked) =>
+                  setExtraColumns((current) => {
+                    const next = new Set(current);
+                    if (checked) next.add(key);
+                    else next.delete(key);
+                    return next;
+                  })
+                }
+              >
+                {label}
+              </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
@@ -727,10 +771,36 @@ export function AllContacts({
           </p>
           {rows.length ? (
             <div className="hire-contact-table-scroll max-h-[65vh] max-w-full overflow-auto rounded-xl border border-border">
-              <table className="w-full min-w-[1100px] text-left text-sm" aria-busy={loading}>
-                <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
+              <table
+                className="w-full table-fixed text-left text-sm"
+                style={{
+                  minWidth:
+                    1064 +
+                    optionalColumns.reduce(
+                      (width, column) => width + (extraColumns.has(column.key) ? column.width : 0),
+                      0,
+                    ),
+                }}
+                aria-busy={loading}
+              >
+                <colgroup>
+                  <col className="w-10" />
+                  <col className="w-56" />
+                  {extraColumns.has("profiles") ? <col className="w-46" /> : null}
+                  <col className="w-44" />
+                  {extraColumns.has("tags") ? <col className="w-40" /> : null}
+                  <col className="w-56" />
+                  <col className="w-40" />
+                  {extraColumns.has("education") ? <col className="w-46" /> : null}
+                  {extraColumns.has("location") ? <col className="w-44" /> : null}
+                  <col className="w-28" />
+                  <col className="w-32" />
+                  {extraColumns.has("added") ? <col className="w-32" /> : null}
+                  {extraColumns.has("replied") ? <col className="w-32" /> : null}
+                </colgroup>
+                <thead className="sticky top-0 z-20 bg-muted text-xs text-muted-foreground">
                   <tr>
-                    <th className="w-10 px-3 py-2">
+                    <th className="sticky left-0 z-20 w-10 bg-muted px-3 py-2">
                       <Checkbox
                         aria-label={t`Select all on this page`}
                         checked={allOnPage}
@@ -749,42 +819,54 @@ export function AllContacts({
                         }
                       />
                     </th>
-                    <th className="px-3 py-2 font-medium">
+                    <th className="sticky left-10 z-20 bg-muted px-3 py-2 font-medium">
                       <Trans>Name</Trans>
                     </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Profiles</Trans>
-                    </th>
+                    {extraColumns.has("profiles") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Profiles</Trans>
+                      </th>
+                    ) : null}
                     <th className="px-3 py-2 font-medium">
                       <Trans>Roles</Trans>
                     </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Tags</Trans>
-                    </th>
+                    {extraColumns.has("tags") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Tags</Trans>
+                      </th>
+                    ) : null}
                     <th className="px-3 py-2 font-medium">
                       <Trans>Current role</Trans>
                     </th>
                     <th className="px-3 py-2 font-medium">
                       <Trans>Company</Trans>
                     </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Education</Trans>
-                    </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Location</Trans>
-                    </th>
+                    {extraColumns.has("education") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Education</Trans>
+                      </th>
+                    ) : null}
+                    {extraColumns.has("location") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Location</Trans>
+                      </th>
+                    ) : null}
                     <th className="px-3 py-2 font-medium">
                       <Trans>Status</Trans>
                     </th>
                     <th className="px-3 py-2 font-medium">
                       <Trans>Last contacted</Trans>
                     </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Date added</Trans>
-                    </th>
-                    <th className="px-3 py-2 font-medium">
-                      <Trans>Last replied</Trans>
-                    </th>
+                    {extraColumns.has("added") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Date added</Trans>
+                      </th>
+                    ) : null}
+                    {extraColumns.has("replied") ? (
+                      <th className="px-3 py-2 font-medium">
+                        <Trans>Last replied</Trans>
+                      </th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -803,8 +885,8 @@ export function AllContacts({
                     }
                     const target = profileTarget(index);
                     return (
-                      <tr key={person.personKey} className="border-t border-border align-top">
-                        <td className="px-3 py-2">
+                      <tr key={person.personKey} className="border-t border-border align-middle">
+                        <td className="sticky left-0 z-10 bg-background px-3 py-2">
                           <Checkbox
                             aria-label={t`Select ${name}`}
                             checked={selected.has(person.personKey)}
@@ -818,8 +900,8 @@ export function AllContacts({
                             }
                           />
                         </td>
-                        <td className="px-3 py-2 font-medium">
-                          <div className="flex w-56 min-w-0 items-center gap-2">
+                        <td className="sticky left-10 z-10 bg-background px-3 py-2 font-medium">
+                          <div className="flex min-w-0 items-center gap-2">
                             <PersonAvatar name={name} src={person.profileImageUrl} size="sm" />
                             {target && detail ? (
                               <button
@@ -838,85 +920,89 @@ export function AllContacts({
                             )}
                           </div>
                         </td>
+                        {extraColumns.has("profiles") ? (
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              {person.email ? (
+                                <a
+                                  className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                  href={`mailto:${encodeURIComponent(person.email)}`}
+                                  aria-label={t`Email ${name}`}
+                                >
+                                  <ProfileMailIcon className="size-4" />
+                                </a>
+                              ) : null}
+                              {linkedinUrl ? (
+                                <a
+                                  className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                  href={linkedinUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label={t`Open ${name} on LinkedIn`}
+                                >
+                                  <LinkedInIcon className="size-4" />
+                                </a>
+                              ) : null}
+                              {[...socialLinks].map(([href, label]) => (
+                                <a
+                                  key={href}
+                                  className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label={`${name} · ${label}`}
+                                >
+                                  <ProfileSourceIcon href={href} className="size-4" />
+                                </a>
+                              ))}
+                              {!person.email && !linkedinUrl && socialLinks.size === 0 ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : null}
+                            </div>
+                          </td>
+                        ) : null}
                         <td className="px-3 py-2">
-                          <div className="flex items-center gap-1">
-                            {person.email ? (
-                              <a
-                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                                href={`mailto:${encodeURIComponent(person.email)}`}
-                                aria-label={t`Email ${name}`}
-                              >
-                                <ProfileMailIcon className="size-4" />
-                              </a>
-                            ) : null}
-                            {linkedinUrl ? (
-                              <a
-                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                                href={linkedinUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={t`Open ${name} on LinkedIn`}
-                              >
-                                <LinkedInIcon className="size-4" />
-                              </a>
-                            ) : null}
-                            {[...socialLinks].map(([href, label]) => (
-                              <a
-                                key={href}
-                                className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                aria-label={`${name} · ${label}`}
-                              >
-                                <ProfileSourceIcon href={href} className="size-4" />
-                              </a>
-                            ))}
-                            {!person.email && !linkedinUrl && socialLinks.size === 0 ? (
-                              <span className="text-muted-foreground">—</span>
-                            ) : null}
-                          </div>
+                          <p
+                            className="line-clamp-2 break-words text-xs"
+                            title={person.roles.map((role) => role.title).join(" · ")}
+                          >
+                            {person.roles.map((role) => role.title).join(" · ") || "—"}
+                          </p>
                         </td>
+                        {extraColumns.has("tags") ? (
+                          <td className="px-3 py-2">
+                            <div className="flex max-w-40 flex-wrap gap-1">
+                              {!person.tags.length ? (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setSelected(new Map([[person.personKey, person]]));
+                                    setDialog("tag");
+                                  }}
+                                >
+                                  <Trans>Add tags</Trans>
+                                </Button>
+                              ) : null}
+                              {person.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="rounded-md border border-border px-2 py-0.5 text-xs"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        ) : null}
                         <td className="px-3 py-2">
-                          <div className="flex max-w-56 flex-wrap gap-1">
-                            {person.roles.map((role) => (
-                              <span
-                                key={role.id}
-                                className="rounded-md bg-muted px-2 py-0.5 text-xs"
-                              >
-                                {role.title}
-                              </span>
-                            ))}
-                          </div>
+                          <p className="line-clamp-2 break-words" title={person.title ?? undefined}>
+                            {person.title ?? "—"}
+                          </p>
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="flex max-w-40 flex-wrap gap-1">
-                            {!person.tags.length ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setSelected(new Map([[person.personKey, person]]));
-                                  setDialog("tag");
-                                }}
-                              >
-                                <Trans>Add tags</Trans>
-                              </Button>
-                            ) : null}
-                            {person.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded-md border border-border px-2 py-0.5 text-xs"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="max-w-56 px-3 py-2">{person.title ?? "—"}</td>
                         <td className="px-3 py-2">
                           {person.company ? (
-                            <div className="flex w-40 min-w-0 items-center gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
                               <CompanyLogo
                                 name={person.company}
                                 src={person.companyLogoUrl}
@@ -931,38 +1017,55 @@ export function AllContacts({
                             "—"
                           )}
                         </td>
+                        {extraColumns.has("education") ? (
+                          <td className="px-3 py-2">
+                            {person.school ? (
+                              <div className="flex min-w-0 items-center gap-2">
+                                <CompanyLogo
+                                  name={person.school}
+                                  src={person.schoolLogoUrl}
+                                  host={websiteHost(person.schoolWebsiteUrl)}
+                                  small
+                                />
+                                <span className="truncate" title={person.school}>
+                                  {person.school}
+                                </span>
+                              </div>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                        {extraColumns.has("location") ? (
+                          <td className="px-3 py-2">
+                            <p
+                              className="line-clamp-2 break-words"
+                              title={person.location ?? undefined}
+                            >
+                              {person.location ?? "—"}
+                            </p>
+                          </td>
+                        ) : null}
                         <td className="px-3 py-2">
-                          {person.school ? (
-                            <div className="flex w-40 min-w-0 items-center gap-2">
-                              <CompanyLogo
-                                name={person.school}
-                                src={person.schoolLogoUrl}
-                                host={websiteHost(person.schoolWebsiteUrl)}
-                                small
-                              />
-                              <span className="truncate" title={person.school}>
-                                {person.school}
-                              </span>
-                            </div>
-                          ) : (
-                            "—"
-                          )}
+                          <p className="line-clamp-2 break-words">{statusLabel(person.status)}</p>
                         </td>
-                        <td className="px-3 py-2">{person.location ?? "—"}</td>
-                        <td className="px-3 py-2">{statusLabel(person.status)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {person.lastContactedAt
                             ? new Date(person.lastContactedAt).toLocaleDateString()
                             : "—"}
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {person.addedAt ? new Date(person.addedAt).toLocaleDateString() : "—"}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {person.lastRepliedAt
-                            ? new Date(person.lastRepliedAt).toLocaleDateString()
-                            : "—"}
-                        </td>
+                        {extraColumns.has("added") ? (
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {person.addedAt ? new Date(person.addedAt).toLocaleDateString() : "—"}
+                          </td>
+                        ) : null}
+                        {extraColumns.has("replied") ? (
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {person.lastRepliedAt
+                              ? new Date(person.lastRepliedAt).toLocaleDateString()
+                              : "—"}
+                          </td>
+                        ) : null}
                       </tr>
                     );
                   })}

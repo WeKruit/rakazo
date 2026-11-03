@@ -6,7 +6,9 @@ async function openRoute(page: Page, view: string) {
   await page.goto(`/app/g/${appGroupId}?view=${view}`);
   await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
   const collapse = page.getByRole("button", { name: "Collapse role chat", exact: true });
-  if (["contacts", "shortlist"].includes(view)) await expect(collapse).toBeVisible();
+  // Reading views keep their space: the role chat starts closed and opens on request.
+  if (["contacts", "shortlist"].includes(view))
+    await expect(page.getByRole("button", { name: "Open role chat", exact: true })).toBeVisible();
   if (view !== "home" && (await collapse.isVisible())) await collapse.click();
   await expect(page.locator('[data-rakazo-app-state="failed"]')).toHaveCount(0);
 }
@@ -431,6 +433,9 @@ test("candidate detail takes the chat pane and keeps the unsent draft", async ({
   const chat = page.getByRole("region", { name: "Role conversation", exact: true });
   const composer = chat.locator('textarea[name="chat-message"]');
   const draft = "Keep this unsent note.";
+  await expect(chat).toBeHidden();
+  await page.getByRole("button", { name: "Open role chat", exact: true }).click();
+  await expect(composer).toBeFocused();
   await composer.fill(draft);
   await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
   await capture(page, testInfo, "three-pane-chat");

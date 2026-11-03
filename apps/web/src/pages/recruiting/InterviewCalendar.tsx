@@ -211,7 +211,7 @@ export function InterviewCalendar({
           <Button
             size="sm"
             variant="outline"
-            disabled={anchor === today}
+            disabled={selectedDay === today}
             onClick={() => {
               setAnchor(today);
               setDayIndex(0);
