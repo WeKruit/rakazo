@@ -112,6 +112,18 @@ describe("dispatcherFetch OAuth responses", () => {
   });
 });
 
+describe("dispatcherFetch statuses outside the Response range", () => {
+  it("reports a site's 999 as a failed request instead of a RangeError", async () => {
+    // LinkedIn answers 999; copying that into a global Response threw a RangeError the agent
+    // could not act on, so it fetched the same profile again and again.
+    await expect(
+      withPackageResponse("blocked", 999, { "content-type": "text/plain" }, async (response) =>
+        response.text(),
+      ),
+    ).rejects.toThrow("Request failed: HTTP 999");
+  });
+});
+
 async function withPackageResponse<T>(
   body: string,
   status: number,

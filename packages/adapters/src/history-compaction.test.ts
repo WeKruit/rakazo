@@ -1230,6 +1230,22 @@ describe("compactHistory", () => {
     expect(harness.thread.historyCompactedUpToSeq).toBe(49);
   });
 
+  it("stores the summary unescaped so a human's & does not grow on every pass", async () => {
+    // The previous summary is shown to the summarizer escaped and copied verbatim, so a "Q&A"
+    // the human wrote came back as "Q&amp;A", then "Q&amp;amp;A" on the next pass, and so on.
+    const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
+    harness.runtime.run.mockImplementationOnce(async function* () {
+      yield { type: "done", text: "Q&amp;amp;amp;A round, &lt;30 min&gt;." };
+    });
+
+    await compactHistory(harness.deps, "thread-1");
+
+    expect(harness.thread.historyCompactionSummary).toBe("Q&A round, <30 min>.");
+    expect(formatCompactedSummary(harness.thread.historyCompactionSummary!, 49)).toContain(
+      "Q&amp;A round, &lt;30 min&gt;.",
+    );
+  });
+
   it("keeps the cursor unchanged when the summary exceeds the safe context budget", async () => {
     const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
     harness.runtime.run.mockImplementation(async function* () {

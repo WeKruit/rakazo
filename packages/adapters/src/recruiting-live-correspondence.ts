@@ -36,10 +36,20 @@ const allows = (permission: Source["assignments"][number], tool: string) =>
   (Array.isArray(permission.allowedTools) && permission.allowedTools.includes(tool));
 const bindingKey = (serverId: string, roleId: string) =>
   `instantly-role-campaign:${serverId}:${roleId}`;
-// ponytail: a 30-second in-process cache bounds provider reads; permissions are checked before and after every use.
+// ponytail: an in-process cache bounds provider reads; permissions are checked before and after every use.
 // The calendar is the account's, so every role of the account shares one read (and one failure)
-// instead of reading the same calendar again for each role.
-const calendarCache = new Map<string, { expires: number; value: Promise<unknown> }>();
+// instead of reading the same calendar again for each role. A read older than CALENDAR_FRESH_MS is
+// still served at once while a fresh one replaces it in the background, so a page never waits on
+// the provider for a calendar it read in the last CALENDAR_KEEP_MS. A failure is kept only briefly.
+export const CALENDAR_FRESH_MS = 30_000;
+export const CALENDAR_KEEP_MS = 10 * 60_000;
+type CalendarEntry = {
+  fetchedAt: number;
+  expires: number;
+  value: Promise<unknown>;
+  refreshing?: boolean;
+};
+const calendarCache = new Map<string, CalendarEntry>();
 
 export async function refreshRecruitingCorrespondence(
   deps: {
@@ -151,20 +161,14 @@ export async function refreshRecruitingCorrespondence(
       tool,
       args,
     ]);
-    const cached = scope.view === "interview" ? calendarCache.get(cacheKey) : undefined;
-    if (cached && cached.expires > Date.now()) {
-      const value = await cached.value;
-      await fence();
-      return value;
-    }
-    const read = async () => {
+    const read = async (signal: AbortSignal) => {
       const context: AdapterContext = {
         operationId: randomUUID(),
         traceId: randomUUID(),
         userId: actor.userId,
         spaceId: actor.spaceId,
         botId: permission.botId,
-        signal: deps.signal ?? AbortSignal.timeout(30_000),
+        signal,
       };
       let result: unknown;
       onStart?.(new Date().toISOString(), permission.botId, context.operationId);
@@ -193,19 +197,42 @@ export async function refreshRecruitingCorrespondence(
       if (result === undefined) throw new Error("Provider returned no records");
       return result;
     };
-    const value = read();
-    if (scope.view === "interview") {
+    const remember = (value: Promise<unknown>, signal: AbortSignal | undefined) => {
       for (const [key, entry] of calendarCache)
         if (entry.expires <= Date.now()) calendarCache.delete(key);
       if (calendarCache.size >= 500) calendarCache.delete(calendarCache.keys().next().value!);
-      const entry = { expires: Date.now() + 30_000, value };
-      // A request that was closed must not hand its cancelled read to other requests.
+      const fetchedAt = Date.now();
+      const entry: CalendarEntry = { fetchedAt, expires: fetchedAt + CALENDAR_KEEP_MS, value };
       value.catch(() => {
-        if (deps.signal?.aborted && calendarCache.get(cacheKey) === entry)
-          calendarCache.delete(cacheKey);
+        if (calendarCache.get(cacheKey) !== entry) return;
+        // A request that was closed must not hand its cancelled read to other requests.
+        if (signal?.aborted) calendarCache.delete(cacheKey);
+        else entry.expires = Math.min(entry.expires, fetchedAt + CALENDAR_FRESH_MS);
       });
       calendarCache.set(cacheKey, entry);
+      return entry;
+    };
+    const cached = scope.view === "interview" ? calendarCache.get(cacheKey) : undefined;
+    if (cached && cached.expires > Date.now()) {
+      if (!cached.refreshing && Date.now() - cached.fetchedAt >= CALENDAR_FRESH_MS) {
+        cached.refreshing = true;
+        // The refresh outlives this request, so it gets its own deadline, not the page's signal.
+        const next = read(AbortSignal.timeout(30_000));
+        next.then(
+          () => {
+            if (calendarCache.get(cacheKey) === cached) remember(next, undefined);
+          },
+          () => {
+            cached.refreshing = false;
+          },
+        );
+      }
+      const value = await cached.value;
+      await fence();
+      return value;
     }
+    const value = read(deps.signal ?? AbortSignal.timeout(30_000));
+    if (scope.view === "interview") remember(value, deps.signal);
     const result = await value;
     await fence();
     return result;
