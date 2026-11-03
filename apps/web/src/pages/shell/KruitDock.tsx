@@ -5,6 +5,7 @@ import { Badge, Button, Toaster, toast } from "@rakazo/ui-web";
 import { Minus } from "lucide-react";
 import type { MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   clampOffset,
   controlRects,
@@ -261,11 +262,10 @@ function useFloatingDock(hidden: boolean, layout: string) {
         dragging.current = false;
         if (moved.current) {
           saveDockOffset(last);
-          setStored(last);
-          // The next paint uses the new right/bottom, so the transform goes in the same frame.
-          requestAnimationFrame(() => {
-            el.style.transform = "";
-          });
+          // Commit the new right/bottom and drop the transform together, so no frame shows the
+          // drag offset twice (new spot plus transform) or the old spot.
+          flushSync(() => setStored(last));
+          el.style.transform = "";
           // A drag ends in a click on the same element; swallow that one, then forget it.
           setTimeout(() => {
             moved.current = false;
