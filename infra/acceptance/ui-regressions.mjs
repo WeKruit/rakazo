@@ -5,10 +5,15 @@
 //   ids        Home and Contacts show no raw internal IDs ("YaUqUV" chips), supplier names or
 //              internal tool names.
 //   multi      A multi-select question card from Kruit takes several picks before it is sent.
-//   people     Kruit lists people in the LinkedIn format the role teams use.
+//   people     Kruit lists people in the LinkedIn format the role teams use, itself rather than
+//              through the role team.
+//   aftercard  A request typed right after answering a card is answered too, not skipped or
+//              called "already listed".
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
+//   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
+//              is discarded at the end; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   dock       The corner logo follows a mouse drag at once, can be dragged again straight
 //              away, and keeps its place after a reload.
@@ -230,10 +235,172 @@ try {
       `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`,
       (items) => linked(items) >= 3,
     );
+    // Kruit reads saved people itself; handing the read to the role team is slow and often silent.
+    if (
+      replies.some((message) => message.blocks?.some((block) => block.kind === "bot_message_sent"))
+    )
+      failures.push("Kruit handed the people read to a role team instead of listing them");
     if (linked(replies) < 3)
       failures.push(
         `Kruit's answer lists ${linked(replies)} LinkedIn profiles, not 3: "${replies.map(textOf).join(" ").slice(0, 160)}"`,
       );
+  });
+
+  await check("aftercard", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    if (!fixtureRole) return failures.push(`no ${FIXTURE_MARK}role on this account`);
+    // An earlier card still waiting would take this check's messages as its answer.
+    await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+    const cardTag = `${tag}c`;
+    const replies = await ask(
+      kruit.id,
+      `测试 ${cardTag}：请只发一张单选问题卡片问我测试岗位 ${cardTag} 在哪个城市，问题里写上 ${cardTag}，选项 Atlanta、Dallas。不要做别的事。`,
+      (items) => items.some((message) => message.blocks?.some((block) => block.kind === "ask")),
+      2 * 60_000,
+    );
+    if (!replies.some((message) => message.blocks?.some((block) => block.kind === "ask")))
+      return failures.push("Kruit sent no question card within 2 min");
+    await page.goto(`${ORIGIN}/app/g/${kruit.id}`);
+    const dallas = page
+      .locator("div")
+      .filter({ has: page.getByRole("button", { name: "Dallas", exact: true }) })
+      .filter({ hasText: cardTag })
+      .last()
+      .getByRole("button", { name: "Dallas", exact: true });
+    if (
+      !(await dallas.waitFor({ timeout: 30_000 }).then(
+        () => true,
+        () => false,
+      ))
+    ) {
+      await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+      return failures.push("the question card did not show on the page within 30 s");
+    }
+    const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
+    await composer.waitFor({ timeout: 20_000 });
+    // The request goes in while the card answer's reply is still being written.
+    const request = `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`;
+    // The thread finishes painting first; a click on a card that is re-rendering is lost.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(2_000);
+    const lastSeq = Math.max(0, ...(await messages(kruit.id)).map((message) => message.seq));
+    // Whether the click reached the server, and how it answered.
+    const answerCalls = [];
+    page.on("response", (response) => {
+      if (!response.url().includes("/rpc/threads/answer")) return;
+      answerCalls.push(response.status());
+      if (response.status() !== 200)
+        void response.text().then((body) =>
+          console.log(`  answer ${response.status()}: ${response.request().postData()} -> ${body}`),
+        );
+    });
+    await dallas.click();
+    // Once the answer is in; a message sent before it would answer the card instead.
+    if (
+      !(await dallas.waitFor({ state: "detached", timeout: 10_000 }).then(
+        () => true,
+        () => false,
+      ))
+    ) {
+      await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
+      return failures.push("clicking the card's answer did not send it within 10 s");
+    }
+    await composer.fill(request);
+    await composer.press("Enter");
+    let after = [];
+    for (let end = Date.now() + 3 * 60_000; Date.now() < end; await sleep(3_000)) {
+      const all = await messages(kruit.id).catch(() => []);
+      // This run's request, not the same words from an earlier run.
+      const sent = all.find(
+        (message) =>
+          message.seq > lastSeq && message.role === "user" && textOf(message) === request,
+      );
+      after = sent
+        ? all.filter((message) => message.role !== "user" && message.seq > sent.seq)
+        : [];
+      const links = after.reduce(
+        (n, message) => n + (textOf(message).match(/linkedin\.com\/in\//g)?.length ?? 0),
+        0,
+      );
+      if (links >= 3) break;
+    }
+    const answered = (await messages(kruit.id)).some(
+      (message) => message.seq > lastSeq && message.role === "user" && textOf(message) === "Dallas",
+    );
+    if (!answered)
+      failures.push(
+        `the card answer was not recorded before the request (answer calls: ${answerCalls.join(",") || "none"})`,
+      );
+    const text = after.map(textOf).join(" ");
+    if ((text.match(/linkedin\.com\/in\//g)?.length ?? 0) < 3)
+      failures.push(
+        `the request sent right after the card was not answered: "${text.slice(0, 160)}"`,
+      );
+    await page.screenshot({ path: path.join(OUT, "aftercard.png") }).catch(() => {});
+  });
+
+  await check("onemail", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    const roleName = `${FIXTURE_MARK}Agent 工程师 5`;
+    const role = all.find((group) => group.name === roleName);
+    if (!role) return failures.push(`no ${roleName} chat on this account`);
+    // The only address real test email may go to.
+    const to = "noah-scheduling@mail.grokbot.com";
+    const mailTag = `${tag}m`;
+    const cards = async () =>
+      (await messages(role.id).catch(() => [])).flatMap((message) =>
+        (message.blocks ?? []).filter(
+          (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
+        ),
+      );
+    await rpc("threads/send", {
+      groupId: kruit.id,
+      addressing: "coordinator",
+      text: `在「${roleName}」里，回复 ${to} 那封邮件（同一个线程），正文只写：\nRegression check ${mailTag}. Test note, no action needed.\n只发给这个测试邮箱。`,
+    });
+    let found = [];
+    for (let end = Date.now() + 5 * 60_000; Date.now() < end && !found.length; await sleep(5_000))
+      found = await cards();
+    if (!found.length) return failures.push("no Send card for the reply within 5 min");
+    // The duplicate came from a second run about 1.5 min after the first card.
+    await sleep(150_000);
+    found = await cards();
+    if (found.length !== 1) failures.push(`${found.length} Send cards for one email, not 1`);
+    await page.goto(`${ORIGIN}/app/g/${role.id}`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(3_000);
+    // The screenshot shows this run's card, not older ones above it.
+    await page.evaluate((mark) => {
+      const area = [...document.querySelectorAll("textarea")].find((item) =>
+        item.value.includes(mark),
+      );
+      area?.scrollIntoView({ block: "center" });
+    }, mailTag);
+    await sleep(1_000);
+    await page.screenshot({ path: path.join(OUT, "onemail.png") }).catch(() => {});
+    // Clean up without sending: discard every card this check made.
+    for (let left = found.length; left > 0; left -= 1) {
+      const marked = await page.evaluate((mark) => {
+        for (const old of document.querySelectorAll("[data-onemail-discard]"))
+          old.removeAttribute("data-onemail-discard");
+        for (const area of document.querySelectorAll("textarea")) {
+          if (!area.value.includes(mark)) continue;
+          for (let box = area.parentElement; box; box = box.parentElement) {
+            const discard = [...box.querySelectorAll("button")].find(
+              (button) => button.textContent.trim() === "Discard" && !button.disabled,
+            );
+            if (discard) {
+              discard.setAttribute("data-onemail-discard", "1");
+              return true;
+            }
+          }
+        }
+        return false;
+      }, mailTag);
+      if (!marked) break;
+      await page.locator('[data-onemail-discard="1"]').first().click();
+      await sleep(3_000);
+    }
   });
 
   await check("title", async (page, failures) => {

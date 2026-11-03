@@ -25,6 +25,7 @@ model User {
   recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
   recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
+  recruitingOverviewSnapshots RecruitingOverviewSnapshot[]
   recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
@@ -229,6 +230,7 @@ model Space {
   recruitingInboxIndexProgress RecruitingInboxIndexProgress[]
   recruitingInboxMessages RecruitingInboxMessage[]
   recruitingInboxInitializations RecruitingInboxInitialization[]
+  recruitingOverviewSnapshots RecruitingOverviewSnapshot[]
   recruitingInboxCursors RecruitingInboxCursor[]
   modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
@@ -2273,6 +2275,18 @@ model RecruitingInboxInitialization {
   space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   @@id([userId, spaceId])
   @@map("recruiting_inbox_initializations")
+}
+
+/// The last finished Home overview, shown first on the next visit and replaced by live reads.
+model RecruitingOverviewSnapshot {
+  userId String @map("user_id")
+  spaceId String @map("space_id")
+  roles Json
+  savedAt DateTime @default(now()) @map("saved_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  @@id([userId, spaceId])
+  @@map("recruiting_overview_snapshots")
 }
 
 model RecruitingInboxCursor {

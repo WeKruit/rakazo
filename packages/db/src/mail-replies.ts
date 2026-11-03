@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import type { Actor, MailReply, MailReplySendAnswer, ThreadMessage } from "@rakazo/contracts";
 import {
   MailReplyErrorCodeSchema,
+  MailReplySchema,
   MailReplySendAnswerSchema,
   MessageBlock as MessageBlockSchema,
 } from "@rakazo/contracts";
@@ -10,6 +12,7 @@ import {
   catalogApprovalDetails,
   catalogApprovalRequest,
 } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { htmlToPlainText } from "@rakazo/core/node/html-text";
 import type { Prisma, PrismaClient } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
@@ -191,6 +194,107 @@ export function mailReplyState(draft: MailReply, effect: Effect): MailReply {
         : effect.updatedAt.toISOString()
       : null,
   };
+}
+
+const addresses = (items: readonly string[]) =>
+  items
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+
+/** One email: the same mailbox, original email, recipients, subject and text. */
+export function mailReplyFingerprint(draft: MailReply): string {
+  return createHash("sha256")
+    .update(
+      stableJsonValue({
+        from: draft.from,
+        sourceId: draft.inReplyTo.sourceId,
+        emailId: draft.inReplyTo.emailId,
+        to: addresses(draft.to),
+        cc: addresses(draft.cc),
+        bcc: addresses(draft.bcc),
+        subject: draft.subject.trim(),
+        body: draft.body.trim(),
+      }),
+    )
+    .digest("hex");
+}
+
+const LIVE_RUN_STATUSES = ["queued", "leased", "running", "waiting_input", "waiting_takeover"];
+
+/**
+ * Another reply card in this conversation for the same email that is still waiting for the
+ * recruiter, being sent or already sent. Holds a per-email lock until the caller's transaction
+ * ends, so two runs drafting the same email at once see each other.
+ */
+export async function findSameMailReply(
+  tx: Prisma.TransactionClient,
+  input: {
+    spaceId: string;
+    threadId: string;
+    effectId: string;
+    draft: MailReply;
+    /** Only a reply already being sent or sent counts (a send-time check). */
+    sentOnly?: boolean;
+  },
+): Promise<{ effectId: string; status: MailReply["status"] } | undefined> {
+  const fingerprint = mailReplyFingerprint(input.draft);
+  const lock = `mail-reply:${input.threadId}:${fingerprint}`;
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
+  // A card's draft lives on its message; a draft not shown yet lives on its effect.
+  const drafts = new Map<string, MailReply>();
+  const messages = await tx.message.findMany({
+    where: {
+      threadId: input.threadId,
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask" }] },
+    },
+    orderBy: { seq: "desc" },
+    take: 100,
+    select: { blocks: true },
+  });
+  for (const message of messages) {
+    const blocks = MessageBlockSchema.array().safeParse(message.blocks);
+    for (const block of blocks.data ?? [])
+      if (block.kind === "ask" && block.mailReply && block.approvalEffectId)
+        drafts.set(block.approvalEffectId, block.mailReply);
+  }
+  const effects = await tx.externalEffect.findMany({
+    where: {
+      spaceId: input.spaceId,
+      id: { not: input.effectId },
+      run: { threadId: input.threadId },
+      status: { in: ["intended", "approved", "executing", "completed", "uncertain"] },
+    },
+    select: {
+      id: true,
+      status: true,
+      request: true,
+      result: true,
+      updatedAt: true,
+      run: { select: { status: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  for (const effect of effects) {
+    const draft =
+      drafts.get(effect.id) ??
+      MailReplySchema.safeParse(object(effect.result)?.mailReplyApproval).data;
+    if (!draft) continue;
+    const state = mailReplyState(draft, effect);
+    if (mailReplyFingerprint(state) !== fingerprint) continue;
+    if (["sending", "sent", "unknown"].includes(state.status))
+      return { effectId: effect.id, status: state.status };
+    if (
+      !input.sentOnly &&
+      state.status === "needs_approval" &&
+      effect.status === "intended" &&
+      LIVE_RUN_STATUSES.includes(effect.run.status)
+    )
+      return { effectId: effect.id, status: state.status };
+  }
+  return undefined;
 }
 
 export type MailReplyEffect = Effect & { id: string; runId: string; run: { status: string } };

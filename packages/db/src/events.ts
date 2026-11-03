@@ -39,7 +39,7 @@ import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import { loadConnectServer } from "./connect-asks.js";
-import { editMailReplyRequest } from "./mail-replies.js";
+import { editMailReplyRequest, findSameMailReply } from "./mail-replies.js";
 import {
   assertRunCanWriteHistory,
   assertRunIsCancelled,
@@ -1082,6 +1082,22 @@ async function commitAnswerRunInput(
         return null;
       }
       approvalEffect.request = editedApprovalRequest as Prisma.JsonValue;
+      // Sending is once per email: a second card for the same reply in this conversation
+      // cannot send it again while the first is sending or after it was sent.
+      if (
+        await findSameMailReply(tx, {
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          effectId: approvalEffect.id,
+          draft: {
+            ...pendingAsk.mailReply,
+            body: replyAnswer.data.body,
+            cc: replyAnswer.data.cc,
+          },
+          sentOnly: true,
+        })
+      )
+        return null;
       editedApprovalResult = {
         ...(approvalEffect.result &&
         typeof approvalEffect.result === "object" &&

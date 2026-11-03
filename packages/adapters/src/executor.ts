@@ -242,6 +242,7 @@ import {
   fillRecruitingRoleArgs,
   findDefaultModelCredential,
   findModelCredential,
+  findSameMailReply,
   getRecruitingCrmTarget,
   humanMessageInclude,
   InvalidSpaceNameError,
@@ -1229,6 +1230,9 @@ const YEARS_OPEN_NOTE =
   "The JD states no years of experience: one of your clarifying questions before the search is the years range, offering two or three ranges that fit the pay.";
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
+const ASK_WITHOUT_ROLE =
+  "Not asked: no role is saved in this chat yet, so there is no question card to show. Answer the recruiter in plain text in one or two lines. If their message describes a role they are hiring for, save it with recruiting_role create first, then ask.";
+
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
@@ -5804,6 +5808,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        // The request went to a role team this turn: that team owns it now.
+        let delegatedToRole = false;
         let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
@@ -5967,6 +5973,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
         // The model saved the recruiter's described role in this turn, so its first question plans searches.
         let roleCreatedInTurn = false;
+        // A role team with no role yet has no question to ask: a greeting or an unrelated question
+        // gets a plain answer, never a card, until the recruiter's role is saved.
+        const noRoleYet = () =>
+          Boolean(thread.groupId) &&
+          !thread.groupId?.startsWith("recruiting-global-") &&
+          !thread.activeRecruitingRoleId &&
+          Boolean(recruitingBotKey(bot)) &&
+          !linkRole &&
+          !attachedJob &&
+          !roleCreatedInTurn;
         // After the ten are shown the server saves the recruiter's intake answers as the brief, so
         // the role always has one; the model's own brief save then replaces it. The next-step card
         // waits for that save, so the pause never cuts it off.
@@ -9834,10 +9850,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   !Array.isArray(applied!.effect.result)
                     ? applied!.effect.result
                     : {};
-                await deps.prisma.externalEffect.updateMany({
-                  where: { id: applied!.effect.id, status: "intended" },
-                  data: { result: { ...previous, mailReplyApproval: approvalBlock.mailReply } },
+                const draft = approvalBlock.mailReply;
+                // One email gets one card: a second run drafting the same reply in this
+                // conversation reuses the card already shown instead of adding another.
+                const same = await deps.prisma.$transaction(async (tx) => {
+                  const found = await findSameMailReply(tx, {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    effectId: applied!.effect.id,
+                    draft,
+                  });
+                  if (found) return found;
+                  await tx.externalEffect.updateMany({
+                    where: { id: applied!.effect.id, status: "intended" },
+                    data: { result: { ...previous, mailReplyApproval: draft } },
+                  });
+                  return undefined;
                 });
+                if (same) {
+                  const result = {
+                    status: same.status === "needs_approval" ? "already_drafted" : "already_sent",
+                    dispatched: false,
+                    message:
+                      same.status === "needs_approval"
+                        ? "This exact reply is already waiting on its Send card in this conversation, so no second card was made. Tell the recruiter in one line that it is ready to send there; do not draft it again."
+                        : "This exact reply was already sent from this conversation, so nothing was drafted or sent again. Tell the recruiter in one line; do not draft it again.",
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
               } catch (error) {
                 const result = {
                   error: sanitizeConnectorError(error, runSecrets),
@@ -12414,6 +12456,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            delegatedToRole = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: target.groupId, title: target.title },
             ]);
@@ -14337,6 +14380,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                    if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
@@ -15155,6 +15199,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const declineRetried =
             turnReport.enabled &&
             !handedOff &&
+            !delegatedToRole &&
             !messagingChannelRun &&
             (run.trigger === "user" || run.trigger === "follow_up")
               ? await planDeclineRetry(deps, {
@@ -15176,6 +15221,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
+                  noQuestionCard: noRoleYet(),
                   ...(handedIn
                     ? {
                         personRequest: turnRequestText(

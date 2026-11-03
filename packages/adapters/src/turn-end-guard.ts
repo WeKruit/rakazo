@@ -739,6 +739,8 @@ export async function planDeclineRetry(
     memorySaveFailed?: boolean;
     /** An optional judge that can overrule the wording check when a reply only reads as a refusal. */
     judge?: () => Promise<TextJudge | undefined>;
+    /** A question in the reply stays in text: there is nothing to ask on a card (no role yet). */
+    noQuestionCard?: boolean;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -770,9 +772,10 @@ export async function planDeclineRetry(
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
   const variables = draftVariables(input.reply);
-  const declined = input.request.trim()
+  const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
     : undefined;
+  const declined = input.noQuestionCard && reason?.kind !== "decline" ? undefined : reason;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
   // After the asked work, a closing question or offer stands, on a card rather than in text.

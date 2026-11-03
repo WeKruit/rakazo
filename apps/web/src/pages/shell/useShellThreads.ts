@@ -725,13 +725,12 @@ export function useShellThreads({
         observeRunSignal(event);
         applyRunStatus(event);
         invalidateRecruiting(event);
-        const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
         notifyBrowserForEvent(
           event,
           initial.threadId,
           initial.cursor,
           true,
-          eventBot?.name ?? activeGroup.name,
+          activeGroup.name,
           true,
           true,
         );

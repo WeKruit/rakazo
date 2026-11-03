@@ -15,6 +15,7 @@ import type { NavigateFunction } from "react-router-dom";
 import { takeInitialBootstrap } from "../../lib/bootstrap";
 import {
   applyBotStatus,
+  applyGroupRunStatus,
   botStatusFromRunEvent,
   openBotStatusChannel,
 } from "../../lib/bot-run-status";
@@ -375,6 +376,7 @@ export function useShellRoster({
     const status = botStatusFromRunEvent(event);
     if (!status) return;
     setBots((current) => applyBotStatus(current, event.botId, status));
+    setGroups((current) => applyGroupRunStatus(current, event.threadId, status));
     botStatusChannel.current?.post({ botId: event.botId, status });
   }, []);
 

@@ -1,6 +1,12 @@
 import type { ProductEvent } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { applyBotStatus, botStatusFromRunEvent, openBotStatusChannel } from "./bot-run-status";
+import {
+  applyBotStatus,
+  applyGroupRunStatus,
+  botStatusFromRunEvent,
+  groupIsWorking,
+  openBotStatusChannel,
+} from "./bot-run-status";
 
 const event = (type: string, payload: Record<string, unknown> = {}) =>
   ({ type, payload }) as Pick<ProductEvent, "type" | "payload">;
@@ -20,6 +26,25 @@ describe("bot status from run events", () => {
     expect(applyBotStatus(bots, "a", "idle")).toBe(bots);
     expect(applyBotStatus(bots, "missing", "running")).toBe(bots);
     expect(applyBotStatus(bots, "a", "running")).toEqual([{ id: "a", status: "running" }]);
+  });
+});
+
+describe("role status", () => {
+  it("is working only from its own conversation's runs", () => {
+    expect(groupIsWorking({ working: true })).toBe(true);
+    expect(groupIsWorking({ working: false })).toBe(false);
+    expect(groupIsWorking({})).toBe(false);
+  });
+
+  it("follows run events of that conversation and keeps the list otherwise", () => {
+    const groups = [{ threadId: "t1", working: false }, { threadId: "t2" }];
+    expect(applyGroupRunStatus(groups, "t1", "idle")).toBe(groups);
+    expect(applyGroupRunStatus(groups, "other", "running")).toBe(groups);
+    expect(applyGroupRunStatus(groups, "t1", "running")).toEqual([
+      { threadId: "t1", working: true },
+      { threadId: "t2" },
+    ]);
+    expect(applyGroupRunStatus(groups, "t2", "waiting_input")).toBe(groups);
   });
 });
 

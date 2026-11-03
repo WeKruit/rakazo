@@ -21,7 +21,7 @@ vi.mock("@lingui/react/macro", () => ({
     (value === 1 ? one : other).replace("#", String(value)),
 }));
 
-import { BackgroundWork, LiveWork } from "./LiveWork";
+import { BackgroundWork, LiveWork, workHighlights } from "./LiveWork";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -115,7 +115,10 @@ it("folds into a 'Worked for' line that expands to the steps", () => {
   render(ended, false);
   const details = container.querySelector("details");
   expect(details?.open).toBe(false);
-  expect(container.querySelector("summary")?.textContent).toBe("Worked for 1m 12s");
+  // The folded line says what the turn delivered, never how it looked things up.
+  expect(container.querySelector("summary")?.textContent).toBe(
+    "Worked for 1m 12s · Searching candidates",
+  );
   act(() => container.querySelector("summary")?.click());
   expect(details?.open).toBe(true);
   expect(details?.textContent).toContain("Reviewing the role");
@@ -255,4 +258,20 @@ it("counts a small background search up without a note", () => {
   expect(clock?.textContent).toBe("0:42");
   expect(container.textContent).toContain("Finding people");
   expect(container.querySelector('[data-testid="work-countdown-note"]')).toBeNull();
+});
+
+it("names at most two delivered kinds of work and people found with email", () => {
+  expect(
+    workHighlights([
+      { activity: "role", count: 1 },
+      { activity: "research", count: 2, peopleWithEmail: 3 },
+      { activity: "drafting", count: 1 },
+      { activity: "interview", count: 1 },
+      { activity: "profiles_save", count: 1, status: "failed" },
+    ]),
+  ).toEqual({ activities: ["research", "drafting"], withEmail: 3 });
+  expect(workHighlights([{ activity: "thinking", count: 1 }])).toEqual({
+    activities: [],
+    withEmail: 0,
+  });
 });
