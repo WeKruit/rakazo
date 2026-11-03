@@ -192,6 +192,8 @@ describe("local native Instantly thread history", () => {
       afterRest: () => {},
     };
     const prisma = {
+      // The conversation's recent human messages and handed-over briefs.
+      message: { findMany: vi.fn(async () => [] as { blocks: unknown }[]) },
       botMcpServer: {
         findMany: vi.fn(async () => (state.available ? [assignment] : [])),
         findFirst: vi.fn(async ({ where }) =>
@@ -574,6 +576,24 @@ describe("local native Instantly thread history", () => {
       expect(
         await f.collect({ email: "sumeetparekh1@gmail.com", name: "sumeet" }, contactRoute, run),
       ).toMatchObject([{ type: "result" }]);
+      // An address the recruiter typed (here in a teammate's brief quoting them) is not a guess,
+      // even with no saved contact behind it.
+      f.prisma.message.findMany.mockResolvedValue([
+        {
+          blocks: [
+            {
+              kind: "bot_message_received",
+              text: "在「测试固定 · Agent 工程师 5」里，回复 Noah-Test@Example.test 那封邮件",
+            },
+          ],
+        },
+      ]);
+      expect(
+        await f.collect({ email: "noah-test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "result" }]);
+      expect(
+        await f.collect({ email: "noah.test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "error", message: expect.stringMatching(/No stored email/) }]);
     } finally {
       await f.connector.close();
     }
