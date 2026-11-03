@@ -31,6 +31,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   9: "b574260f2cac866fe0f8f8d3cb8363b20c74feeea9772c4d60a66e0263ef00c3",
   // 10: optional editable mail reply on the existing Ask block and structured Send answers.
   10: "b4ce00c4e4734c0d4d4cc573a955abaa826b86e0525a570391ab03ef7e8f108b",
+  // 11: optional question flag on progress blocks (a question shown while it is written).
+  11: "35e16c8b9433b4281e05b4bc11349c3453f5057fe109fa0281e63a1dcdcd21b0",
 };
 
 const OLD_ROWS: unknown[] = [

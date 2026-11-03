@@ -14,7 +14,8 @@ import sys
 import modal
 
 # Keys that only the test environment has (its own DB secret, release markers).
-TEST_ONLY = {"RAKAZO_TEST_ENVIRONMENT"}
+# Google sign-in stays test-only until the production redirect URIs are registered.
+TEST_ONLY = {"RAKAZO_TEST_ENVIRONMENT", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"}
 # Substrings that must never appear in a production value.
 TEST_MARKERS = ("headhunter-stage.", "wekruit-recruiting-test", "-test--")
 # Runtime keys every Modal container has; they are not configuration.

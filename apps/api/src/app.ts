@@ -550,6 +550,7 @@ export async function createApp(
     runtime,
     codexCatalog,
     replySuggestions: true,
+    quickReplies: true,
     sandbox,
     memory,
     memoryProviders,
@@ -829,12 +830,13 @@ export async function createApp(
         signal: c.req.raw.signal,
         // Same user in the same space, so leaving the space also ends a stream.
         // A database failure rejects this check; only a missing membership is unauthorized.
-        stillAuthorized: async () => {
+        // A long read checks this before each step; checks within a second share one lookup.
+        stillAuthorized: recentlyChecked(async () => {
           const current = await sessionActor(c.req.raw);
           return Boolean(
             actor && current?.userId === actor.userId && current.spaceId === actor.spaceId,
           );
-        },
+        }),
       },
     });
     if (matched) return c.newResponse(response.body, response);
@@ -1284,6 +1286,25 @@ function sessionHeaders(request: Request) {
 }
 
 /** A missing or not-owned record is "not found" for the caller, never a server error. */
+/** Calls `check` at most once per `ms`; callers inside that window share its answer. */
+export function recentlyChecked(
+  check: () => Promise<boolean>,
+  ms = 1_000,
+  now: () => number = Date.now,
+): () => Promise<boolean> {
+  let last: { at: number; result: Promise<boolean> } | undefined;
+  return () => {
+    if (last && now() - last.at < ms) return last.result;
+    const result = check();
+    last = { at: now(), result };
+    // A failed check is never reused: the next caller asks again.
+    result.catch(() => {
+      if (last?.result === result) last = undefined;
+    });
+    return result;
+  };
+}
+
 export function notFoundForIsolation(error: unknown): unknown {
   if (!(error instanceof IsolationError)) return error;
   getLogger().warn("rpc.not_found", { at: error.stack?.split("\n")[1]?.trim() });

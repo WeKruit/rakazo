@@ -17,6 +17,7 @@ import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
 import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
+import { warmBotDiscovery } from "./discovery-prewarm.js";
 import type { createRunExecutor } from "./executor.js";
 import { sendRunNotification } from "./executor.js";
 import { reportStalledGroupStage } from "./group-handoff.js";
@@ -196,6 +197,9 @@ export function createBackgroundJobHandlers(deps: {
       if (!run || run.threadId !== payload.message.threadId) return;
       // Throwing hands the retry back to the queue's backoff.
       await sendRunNotification(deps.notifications, run, payload.message);
+    },
+    "discovery.warm": async (payload) => {
+      if (deps.connector) await warmBotDiscovery(deps.prisma, deps.connector, payload.botId);
     },
     "poll.close": async (payload) => {
       await closePollAndWake(

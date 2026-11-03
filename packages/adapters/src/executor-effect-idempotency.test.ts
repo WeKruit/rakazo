@@ -5595,8 +5595,8 @@ describe("native recruiting assessment effect delivery", () => {
     );
   });
 
-  it("saves a role team's role from a short first message before the model's first step", async () => {
-    const f = fixture("short-request-role");
+  async function roleTeamFirstTurn(id: string, text: string, calls: unknown[] = []) {
+    const f = fixture(id);
     vi.mocked(executeRecruitingRoleTool).mockClear();
     const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
@@ -5608,31 +5608,60 @@ describe("native recruiting assessment effect delivery", () => {
       chatGroup: { findUnique: vi.fn(async () => null) },
       chatGroupMember: { findMany: vi.fn(async () => []) },
     });
-    const text = "New grads from USC, CS";
     vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
       {
         id: "human-1",
         seq: 1,
         role: "user",
         botId: null,
-        runId: "short-request-role",
+        runId: id,
         blocks: [{ kind: "text", text }],
         createdAt: new Date(),
       },
     ]) as never);
-    f.setCalls([
+    f.setCalls(calls as never);
+    await f.run();
+    return f;
+  }
+
+  it("never saves a role from a greeting in a role team with no role", async () => {
+    const f = await roleTeamFirstTurn("greeting-no-role", "你好，你能帮我做什么？");
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("no role, no intake question and no people search");
+    expect(prompt).not.toContain("Do not create a role in this turn");
+  });
+
+  it("never shows a question card in a role team with no role", async () => {
+    const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    expect(await request.beforeAsk?.("你想先处理哪项？", undefined)).toEqual({
+      instead: expect.stringContaining("Not asked: no role is saved in this chat yet"),
+    });
+  });
+
+  it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
+    const f = await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
+    expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
+      "Only when the recruiter's message describes a role they are hiring for",
+    );
+  });
+
+  it("saves a role team's role from a titled first message before the model's first step", async () => {
+    const text = "Agent engineer\nNew grads from USC, CS";
+    const f = await roleTeamFirstTurn("titled-request-role", text, [
       {
         name: "handoff_to_bot",
         args: { confirm_name: "Sourcer", message: text },
         executionId: "handoff-1",
       },
     ]);
-    await f.run();
     // The first question comes from the coordinator itself, not after a teammate starts up.
     expect(f.results[0]).toEqual({ error: INTAKE_ASK_FIRST });
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       operation: "create",
-      title: "New role",
+      title: "Agent engineer",
       brief: null,
       intent: { basis: "direct", quote: text },
     });

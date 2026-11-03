@@ -243,6 +243,7 @@ import {
   fillRecruitingRoleArgs,
   findDefaultModelCredential,
   findModelCredential,
+  findSameMailReply,
   getRecruitingCrmTarget,
   humanMessageInclude,
   InvalidSpaceNameError,
@@ -540,6 +541,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
+import { quickReply } from "./quick-reply.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -1230,6 +1232,12 @@ const YEARS_OPEN_NOTE =
   "The JD states no years of experience: one of your clarifying questions before the search is the years range, offering two or three ranges that fit the pay.";
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
+const ASK_WITHOUT_ROLE =
+  "Not asked: no role is saved in this chat yet, so there is no question card to show. Answer the recruiter in plain text in one or two lines. If their message describes a role they are hiring for, save it with recruiting_role create first, then ask.";
+
+const ROLE_NOT_SAVED_NOTE =
+  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
+
 const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
@@ -3660,6 +3668,8 @@ export interface ExecutorDeps {
   autoReview?: AutoReviewProvider;
   /** Suggest the user's next message after each reply (one extra small model call). */
   replySuggestions?: boolean;
+  /** Post a short first reply on each person's turn while the full answer is worked out. */
+  quickReplies?: boolean;
   /**
    * Live Codex model catalog; when present, a statically excluded Codex model
    * can still run for the OAuth account whose backend lists it.
@@ -5305,6 +5315,76 @@ export function createRunExecutor(deps: ExecutorDeps) {
             setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
           }),
         );
+        // A short first reply while the full answer is worked out. It starts beside the rest of
+        // setup and is posted only if the run has not replied yet; the run is told what it said.
+        const quickReplyText = turnBlocks ? blocksText(turnBlocks) : "";
+        let quickReplySaid: string | undefined;
+        if (
+          deps.quickReplies &&
+          run.trigger === "user" &&
+          !messagingChannelRun &&
+          !deps.runtime.describe().capabilities.scripted &&
+          quickReplyText.trim()
+        )
+          void resolvedPending()
+            .then((resolved) =>
+              quickReply({
+                runtime: deps.runtime,
+                model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
+                earlier: historyMessages
+                  .filter(
+                    (message) =>
+                      message.id !== currentTurnMessage?.id &&
+                      ((message.role === "user" && !message.internal) || message.role === "bot"),
+                  )
+                  .map((message) => ({
+                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                    text: blocksText(message.blocks),
+                  })),
+                userText: quickReplyText,
+                runId,
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                threadId: thread.id,
+                onUsage: (event) =>
+                  recordUsage(
+                    deps.prisma,
+                    event,
+                    {
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      botId: bot.id,
+                      parentRunId: runId,
+                      runId,
+                      operationId: `quick-reply:${runId}`,
+                      operationKind: "setup",
+                    },
+                    estimateCatalogTokenCostUsd,
+                  ),
+              }),
+            )
+            .then(async (text) => {
+              if (!text) return;
+              const replied = await deps.prisma.message.count({
+                where: { threadId: thread.id, runId, role: "bot" },
+              });
+              if (replied > 0) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
+                return;
+              }
+              await publishMessage(deps, run, "bot", [
+                { kind: "text", text: redactSecrets(text, runSecrets) },
+              ]);
+              getLogger().info("run.quick_reply", {
+                runId,
+                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
+              });
+              quickReplySaid = text;
+            })
+            .catch((error) => {
+              getLogger().warn("quick reply failed", { runId, reason: String(error) });
+            });
         const initialRecruitingContext = await initialRecruitingContextPending();
         currentRecruitingContext = initialRecruitingContext;
         setupMark("recruitingContext");
@@ -5730,6 +5810,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        // The request went to a role team this turn: that team owns it now.
+        let delegatedToRole = false;
         let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
@@ -5891,6 +5973,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
+        // The model saved the recruiter's described role in this turn, so its first question plans searches.
+        let roleCreatedInTurn = false;
+        // A role team with no role yet has no question to ask: a greeting or an unrelated question
+        // gets a plain answer, never a card, until the recruiter's role is saved.
+        const noRoleYet = () =>
+          Boolean(thread.groupId) &&
+          !thread.groupId?.startsWith("recruiting-global-") &&
+          !thread.activeRecruitingRoleId &&
+          Boolean(recruitingBotKey(bot)) &&
+          !linkRole &&
+          !attachedJob &&
+          !roleCreatedInTurn;
         // After the ten are shown the server saves the recruiter's intake answers as the brief, so
         // the role always has one; the model's own brief save then replaces it. The next-step card
         // waits for that save, so the pause never cuts it off.
@@ -6128,6 +6222,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 payload: {
                   text: visible(redactSecrets(text, runSecrets)),
                   streaming: true,
+                  question: true,
                   ...runTiming,
                 },
               }),
@@ -9757,10 +9852,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   !Array.isArray(applied!.effect.result)
                     ? applied!.effect.result
                     : {};
-                await deps.prisma.externalEffect.updateMany({
-                  where: { id: applied!.effect.id, status: "intended" },
-                  data: { result: { ...previous, mailReplyApproval: approvalBlock.mailReply } },
+                const draft = approvalBlock.mailReply;
+                // One email gets one card: a second run drafting the same reply in this
+                // conversation reuses the card already shown instead of adding another.
+                const same = await deps.prisma.$transaction(async (tx) => {
+                  const found = await findSameMailReply(tx, {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    effectId: applied!.effect.id,
+                    draft,
+                  });
+                  if (found) return found;
+                  await tx.externalEffect.updateMany({
+                    where: { id: applied!.effect.id, status: "intended" },
+                    data: { result: { ...previous, mailReplyApproval: draft } },
+                  });
+                  return undefined;
                 });
+                if (same) {
+                  const result = {
+                    status: same.status === "needs_approval" ? "already_drafted" : "already_sent",
+                    dispatched: false,
+                    message:
+                      same.status === "needs_approval"
+                        ? "This exact reply is already waiting on its Send card in this conversation, so no second card was made. Tell the recruiter in one line that it is ready to send there; do not draft it again."
+                        : "This exact reply was already sent from this conversation, so nothing was drafted or sent again. Tell the recruiter in one line; do not draft it again.",
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
               } catch (error) {
                 const result = {
                   error: sanitizeConnectorError(error, runSecrets),
@@ -12337,6 +12458,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            delegatedToRole = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: target.groupId, title: target.title },
             ]);
@@ -12628,7 +12750,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             // A new role's first question is the coordinator's own: a handoff first costs the
             // recruiter a second agent's start-up before anything appears.
-            if (linkRole && !intakeHandoffRefused && recruitingBotKey(bot) === "main") {
+            if (
+              (linkRole || roleCreatedInTurn) &&
+              !intakeHandoffRefused &&
+              recruitingBotKey(bot) === "main"
+            ) {
               intakeHandoffRefused = true;
               return finish({ error: INTAKE_ASK_FIRST });
             }
@@ -13000,6 +13126,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             },
           );
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
+          if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
           savesInFlight.add(settled);
           void settled.then(() => savesInFlight.delete(settled));
@@ -13182,8 +13309,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : currentTurnMessage.blocks.find(
                 (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
               );
-          // A role team opened without a JD ("new grads from USC, CS") still gets its role saved
-          // now, under a working title, so every later step has a role to save to.
+          // A role team opened without a JD gets its role saved now when the message names it
+          // (a Kruit-opened role, or a title line above the requirements).
           const request =
             !block && !file && thread.groupId && recruitingBotKey(bot)
               ? texts
@@ -13223,9 +13350,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 )?.name.trim()
               : undefined;
             const title =
-              named && named !== NEW_ROLE_TITLE
-                ? named.slice(0, 120)
-                : (requestTitle(request) ?? NEW_ROLE_TITLE);
+              named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : requestTitle(request);
+            // A greeting or a question is not a role: the model saves one only once the recruiter
+            // has described it, so no empty role appears and no search runs for it.
+            if (!title) return undefined;
             return {
               saving: create(title, [], request),
               note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
@@ -13359,6 +13487,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .map((turn) => turn.receiptSeq);
           if (!plan || !planned.success || plan.seq <= Math.max(0, ...answeredBefore))
             return undefined;
+          // A placeholder role was never described, so its plan searches for nobody in particular.
+          const role = await deps.prisma.recruitingRole.findUnique({
+            where: { id: thread.activeRecruitingRoleId ?? "" },
+            select: { title: true },
+          });
+          if (!role || role.title === NEW_ROLE_TITLE) return undefined;
           const startedAt = Date.now();
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
@@ -13647,6 +13781,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
           tools.some((tool) => tool.name === "recruiting_role")
             ? FILE_JOB_NOTE
             : undefined,
+          !linkRole &&
+          !fileNote &&
+          thread.groupId &&
+          !thread.groupId.startsWith("recruiting-global-") &&
+          !thread.activeRecruitingRoleId &&
+          currentTurnMessage?.role === "user" &&
+          !currentTurnMessage.blocks.some((block) => block.kind === "file") &&
+          recruitingBotKey(bot) &&
+          tools.some((tool) => tool.name === "recruiting_role")
+            ? ROLE_NOT_SAVED_NOTE
+            : undefined,
           intakeNote,
           plannedNote,
           handedIn ? HANDOFF_OPENING_NOTE : undefined,
@@ -13887,6 +14032,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const prompt = [
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
+          quickReplySaid
+            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it; go on with the full answer.`
+            : undefined,
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -13929,26 +14077,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )
             .map((candidate) => JSON.stringify([candidate.provider, candidate.modelId])),
         );
-        const configuredRunModel: AgentRunRequest["model"] = {
-          provider: runModelProvider,
-          id: runModelId,
-          apiKey: resolved.oauth ? undefined : resolved.apiKey,
-          ...cloudflareRunFields(resolved),
-          baseUrl: resolved.baseUrl,
-          cacheCapabilities: resolved.cacheCapabilities,
-          contextWindow: resolved.contextWindow,
-          reasoning: resolved.reasoning,
-          maxTokens: resolved.maxTokens,
-          acceptsImages: resolved.acceptsImages,
-          maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-          thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
-          oauth: resolved.oauth
-            ? {
-                credential: resolved.oauth,
-                modify: resolved.modifyOAuth,
-              }
-            : undefined,
-        };
+        const configuredRunModel = runModelFromResolved(
+          runModelProvider,
+          runModelId,
+          resolved,
+          thinkingLevel,
+        );
         const turnUserText = turnBlocks
           ? turnBlocks
               .filter((block) => block.kind === "text")
@@ -14294,6 +14428,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                    if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
@@ -14360,14 +14495,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // planned with it; without four of them the answer turn waits on its own searches.
                     // An explicit [] is the recruiter's own-list-only instruction.
                     if (
-                      (firstRoundPending || linkRole || attachedJob) &&
+                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
                       (plannedSearches === undefined ||
                         (plannedSearches.length > 0 && plannedSearches.length < 4))
                     )
                       return { instead: PLANNED_SEARCHES_MISSING };
                     // An empty plan once skipped the planned searches for a role with no own-list rule.
                     if (
-                      (firstRoundPending || linkRole || attachedJob) &&
+                      (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn) &&
                       plannedSearches?.length === 0 &&
                       !emptySearchesBounced
                     ) {
@@ -14662,7 +14797,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
-              if (event.plannedSearches?.length && (firstRoundPending || linkRole || attachedJob))
+              if (
+                event.plannedSearches?.length &&
+                (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn)
+              )
                 await deps.events
                   .append({
                     spaceId: run.spaceId,
@@ -15109,6 +15247,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const declineRetried =
             turnReport.enabled &&
             !handedOff &&
+            !delegatedToRole &&
             !messagingChannelRun &&
             (run.trigger === "user" || run.trigger === "follow_up")
               ? await planDeclineRetry(deps, {
@@ -15130,6 +15269,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
+                  noQuestionCard: noRoleYet(),
                   ...(handedIn
                     ? {
                         personRequest: turnRequestText(
@@ -17622,6 +17762,34 @@ async function resolveModelKey(
   if (requireStoredSecret) throw new Error("Backup model credential is no longer available");
   cloudflareGatewayProviderEnv({ provider });
   return { apiKey: deploymentKeyFor(deps, provider), redact: [] };
+}
+
+function runModelFromResolved(
+  provider: string,
+  id: string,
+  resolved: Awaited<ReturnType<typeof resolveModelKey>>,
+  thinkingLevel: AgentRunRequest["model"]["thinkingLevel"] | undefined,
+): AgentRunRequest["model"] {
+  return {
+    provider,
+    id,
+    apiKey: resolved.oauth ? undefined : resolved.apiKey,
+    ...cloudflareRunFields(resolved),
+    baseUrl: resolved.baseUrl,
+    cacheCapabilities: resolved.cacheCapabilities,
+    contextWindow: resolved.contextWindow,
+    reasoning: resolved.reasoning,
+    maxTokens: resolved.maxTokens,
+    acceptsImages: resolved.acceptsImages,
+    maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+    thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+    oauth: resolved.oauth
+      ? {
+          credential: resolved.oauth,
+          modify: resolved.modifyOAuth,
+        }
+      : undefined,
+  };
 }
 
 function cloudflareRunFields(resolved: { accountId?: string; gatewayId?: string }): {

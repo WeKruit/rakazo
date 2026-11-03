@@ -948,6 +948,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Outreach declined a plain send to one person as a reply with no original email.",
   },
   {
+    rule: "a typed address finds its correspondence",
+    in: "Outreach",
+    phrase: "only with the stored email it returns or one the recruiter typed;",
+    why: "Asked to reply to a typed test address's email, Outreach found no contact for it and made no Send card.",
+  },
+  {
     rule: "replies go through the confirmation card",
     in: ["Main", "Outreach"],
     phrase:

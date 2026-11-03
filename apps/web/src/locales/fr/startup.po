@@ -2104,11 +2104,6 @@ msgstr "Échec de l'envoi du message"
 msgid "Failed to stop"
 msgstr "Échec de l'arrêt"
 
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
-msgid "Failed."
-msgstr "Échoué."
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "Gestion des échecs"
@@ -3754,6 +3749,7 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "Reconnect your model to continue."
 msgstr ""
@@ -5148,6 +5144,7 @@ msgstr "Test en cours…"
 msgid "The API did not come back. Refresh this page."
 msgstr "L'API n'est pas revenue. Actualisez cette page."
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The computer could not start. Reset it to continue."
 msgstr ""
@@ -5172,6 +5169,7 @@ msgstr ""
 msgid "The recruiting team is not ready yet."
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The reply stopped. Try again."
 msgstr ""
@@ -5691,6 +5689,7 @@ msgstr "Travail en arrière-plan…"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Working…"
 msgstr "En cours…"

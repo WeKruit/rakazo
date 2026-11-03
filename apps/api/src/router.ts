@@ -13,6 +13,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import {
   computerControlExpireJobKey,
+  discoveryWarmJob,
   messagingDeliverJob,
   pollCloseJob,
   routineJobKey,
@@ -169,6 +170,7 @@ import type {
   Me,
   ProductEvent,
   RecruitingCrmRoleReference,
+  RecruitingOverviewRole,
   SidebarBotState,
   SpaceNavigation,
 } from "@rakazo/contracts";
@@ -259,6 +261,7 @@ import {
   RECRUITING_PRESET_SOURCE,
   readRecruitingAnalytics,
   readRecruitingAnalyticsPeople,
+  readRecruitingOverviewSnapshot,
   recordClosedAskAnswer,
   recordDesktopActivity,
   recruitingContactFacets,
@@ -275,6 +278,7 @@ import {
   SpaceLimitError,
   SpaceNotEmptyError,
   SpaceNotFoundError,
+  saveRecruitingOverviewSnapshot,
   seesOperatorSpend,
   selectSpaceModelPreference,
   selectSpaceVoicePreference,
@@ -4262,7 +4266,10 @@ export function createRouter(deps: RouterDeps) {
           reauthorize: () => resolveThreadTarget(deps.prisma, actor, { groupId: group.id }),
           target: await targetOf(group),
         });
-        yield* streamRecruitingOverview(
+        const last = await readRecruitingOverviewSnapshot(deps.prisma, actor).catch(() => []);
+        const finished = new Map<string, RecruitingOverviewRole>();
+        let complete = false;
+        const events = streamRecruitingOverview(
           groups,
           {
             roleId: async (group) =>
@@ -4299,7 +4306,21 @@ export function createRouter(deps: RouterDeps) {
             },
           },
           context.signal ?? new AbortController().signal,
+          { last },
         );
+        for await (const event of events) {
+          if (event.kind === "role") finished.set(event.role.groupId, event.role);
+          if (event.kind === "done") complete = true;
+          yield event;
+        }
+        // Saved after the read finishes, off the response path, for the next visit on any device.
+        if (complete)
+          void saveRecruitingOverviewSnapshot(deps.prisma, actor, [...finished.values()]).catch(
+            (error: unknown) =>
+              getLogger().warn("recruiting.overview.snapshot_failed", {
+                error: error instanceof Error ? error.message : String(error),
+              }),
+          );
       }),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(
@@ -5750,12 +5771,17 @@ export function createRouter(deps: RouterDeps) {
       },
     },
     onboarding: {
-      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(({ context }) =>
-        ensureRecruitingWorkspace(deps.prisma, context.actor, {
+      ensureRecruiting: authed.onboarding.ensureRecruiting.handler(async ({ context }) => {
+        const workspace = await ensureRecruitingWorkspace(deps.prisma, context.actor, {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-        }),
-      ),
+        });
+        // The first message usually follows within seconds; have its tools listed by then.
+        void deps.jobs.enqueue(discoveryWarmJob(workspace.botId)).catch((error) => {
+          getLogger().warn("discovery.warm enqueue failed", { error: String(error) });
+        });
+        return workspace;
+      }),
       start: authed.onboarding.start.handler(async ({ context, input }) => {
         await startOnboarding(onboardingDeps, context.actor, input.botId);
         return { ok: true as const };

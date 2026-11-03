@@ -24,7 +24,7 @@ test("a running turn shows its steps in plain words with a clock, then folds", a
 
     await page.goto(`${fixture}?phase=done`);
     const summary = page.getByTestId("work-summary");
-    await expect(summary.locator("summary")).toHaveText("Worked for 1m 12s");
+    await expect(summary.locator("summary")).toHaveText("Worked for 1m 12s · Searching candidates");
     await expect(summary.getByText("Reviewing candidates")).toBeHidden();
     await captureScreenshot(page, testInfo, `live-work-done-${viewport.name}`);
     await summary.locator("summary").click();
