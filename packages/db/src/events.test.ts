@@ -221,6 +221,7 @@ function approvalAnswerFixture(request: unknown = persistedApprovalRequest) {
   const tx = {
     ...f.tx,
     externalEffect: {
+      findMany: vi.fn(async () => []),
       findFirst: vi.fn(async ({ where }: { where: Record<string, string> }) =>
         Object.entries(where).every(([key, value]) => effect[key as keyof typeof effect] === value)
           ? effect

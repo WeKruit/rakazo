@@ -6,7 +6,7 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
-import { projectMailReplyCards, publishMailReplyCard } from "./mail-replies.js";
+import { findSameMailReply, projectMailReplyCards, publishMailReplyCard } from "./mail-replies.js";
 import { createThreadMessage } from "./messages.js";
 import { provisionMessagingIdentity } from "./messaging.js";
 
@@ -41,12 +41,13 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       await close?.();
     }
   });
-  async function fixture() {
+  async function fixture(keepRuns = false) {
     const { userId, spaceId, threadId, botId } = identity;
-    await prisma.run.updateMany({
-      where: { threadId, status: { in: ["waiting_input", "queued"] } },
-      data: { status: "cancelled" },
-    });
+    if (!keepRuns)
+      await prisma.run.updateMany({
+        where: { threadId, status: { in: ["waiting_input", "queued"] } },
+        data: { status: "cancelled" },
+      });
     const task = await prisma.task.create({
       data: {
         userId,
@@ -277,7 +278,7 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
         await prisma.message.update({ where: { id: f.message.id }, data: { blocks } });
         const answer = {
           action: "send" as const,
-          body: "Edited scheduling confirmation",
+          body: `Edited scheduling confirmation (${mode})`,
           cc: ["copy@example.test"],
         };
         if (mode === "valid") {
@@ -337,5 +338,47 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     expect(stored.blocks).toMatchObject([
       { mailReply: { status: "discarded", body: "Original draft" } },
     ]);
+  });
+
+  it("shows one card per email: a second identical draft in the conversation finds the first", async () => {
+    const first = await fixture();
+    const second = await fixture(true);
+    const draft = MessageBlockSchema.array().parse(second.message.blocks)[0];
+    if (draft?.kind !== "ask" || !draft.mailReply) throw new Error("no draft");
+    const same = (body: string) =>
+      prisma.$transaction((tx) =>
+        findSameMailReply(tx, {
+          spaceId: identity.spaceId,
+          threadId: identity.threadId,
+          effectId: second.effect.id,
+          draft: { ...draft.mailReply!, body },
+        }),
+      );
+    expect(await same("Original draft")).toEqual({
+      effectId: first.effect.id,
+      status: "needs_approval",
+    });
+    expect(await same("A different sentence")).toBeUndefined();
+    // A card whose run ended can no longer be answered, so it does not hold the email.
+    await prisma.run.update({ where: { id: first.run.id }, data: { status: "cancelled" } });
+    expect(await same("Original draft")).toBeUndefined();
+  });
+  it("sends one email once: a second card for a sent reply cannot send it again", async () => {
+    const first = await fixture();
+    const second = await fixture(true);
+    const answer = { action: "send" as const, body: "Sent once", cc: [] };
+    expect(await answerRunInput(prisma, { ...first.input, answer })).toBeTruthy();
+    await prisma.externalEffect.update({
+      where: { id: first.effect.id },
+      data: { status: "completed", result: { status: "sent_recorded" } },
+    });
+    expect(await answerRunInput(prisma, { ...second.input, answer })).toBe(false);
+    expect(
+      await prisma.externalEffect.findUniqueOrThrow({ where: { id: second.effect.id } }),
+    ).toMatchObject({ status: "intended" });
+    // A different text is a different email.
+    expect(
+      await answerRunInput(prisma, { ...second.input, answer: { ...answer, body: "Another" } }),
+    ).toBeTruthy();
   });
 });
