@@ -1255,7 +1255,7 @@ export const REPORT_IN_FINAL_REPLY =
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
 export const STEERING_ACK =
-  "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it.";
+  "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as \"do nothing else\") does not cover this newer message.";
 
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
