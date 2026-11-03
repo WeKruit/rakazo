@@ -1427,6 +1427,64 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
+  it("reads the role's own mailbox for the address a Gmail search looked for", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockResolvedValue(null);
+    const byServer = f.prisma.botMcpServer.findFirst.getMockImplementation()!;
+    f.prisma.botMcpServer.findFirst.mockImplementation((async (args: {
+      where: Record<string, unknown> & { server?: { endpoint?: string } };
+    }) =>
+      args.where.server?.endpoint === f.server.endpoint &&
+      args.where.botId === f.context.botId &&
+      args.where.userId === f.context.userId
+        ? f.assignment
+        : byServer(args as never)) as never);
+    f.prisma.message.findMany.mockResolvedValue([
+      {
+        threadId: "role-thread",
+        thread: { spaceId: f.context.spaceId },
+        blocks: [{ kind: "text", text: "回复 noah-test@example.test 那封邮件" }],
+      },
+    ] as never);
+    f.state.page = {
+      items: [
+        { ...anchor, lead: "noah-test@example.test", from_address_email: "noah-test@example.test" },
+      ],
+    };
+    const run = { ...f.context, runId: "run-gmail-fallback" };
+    const roleMailboxFor = (args: Record<string, unknown>) =>
+      (
+        f.connector as unknown as {
+          roleMailboxFor: (
+            call: unknown,
+            context: unknown,
+          ) => Promise<{ text: string } | undefined>;
+        }
+      ).roleMailboxFor(
+        {
+          tool: "mcp__gmail__search_threads",
+          route: { ...route, toolName: "search_threads" },
+          args,
+        },
+        run,
+      );
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const typed = await roleMailboxFor({ query: "from:noah-test@example.test" });
+      expect(typed?.text).toContain("The role's own mailbox");
+      expect(typed?.text).toContain(anchor.id);
+      expect(typed?.text).not.toContain("could not be read");
+      // A guessed address keeps the contact-email guard.
+      const guessed = await roleMailboxFor({ query: "noah.test@example.test" });
+      expect(guessed?.text).toMatch(/could not be read: No stored email/);
+      expect(await roleMailboxFor({ query: "Noah" })).toBeUndefined();
+    } finally {
+      await f.connector.close();
+    }
+  });
 });
 
 function logicalHref(input: string | URL | Request, init?: RequestInit): string {
@@ -5507,6 +5565,59 @@ describe("MCP discovery tool-list cache", () => {
       await f.connector.close();
       installLogger(previousLogger);
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("Gmail search in a role", () => {
+  it("adds the role's own mailbox to a Gmail thread search result", async () => {
+    const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
+    const assignment = { ...ASSIGNMENT, server: gmail };
+    const state = {
+      failNext: false,
+      initializations: 0,
+      tools: [{ name: "search_threads", inputSchema: { type: "object" } }],
+      callResult: { content: [{ type: "text", text: "{}" }] },
+    };
+    vi.stubGlobal("fetch", mcpFetch(state, gmail.endpoint));
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([assignment]),
+        findFirst: vi.fn().mockResolvedValue(assignment),
+      },
+    };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    const roleMail = vi
+      .spyOn(connector as unknown as { roleMailboxFor: () => Promise<unknown> }, "roleMailboxFor")
+      .mockResolvedValue({ type: "text", text: "role mailbox" });
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    } as never;
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server-1",
+      resourceRevision: SERVER.revision,
+      toolName: "search_threads",
+    };
+    try {
+      await connector.discoverTools(context);
+      const events: { type: string; data?: { content?: unknown[] } }[] = [];
+      for await (const event of connector.execute(
+        { tool: "mcp__gmail__search_threads", args: { query: "a@example.test" }, route } as never,
+        context,
+      ))
+        events.push(event as never);
+      expect(events).toMatchObject([{ type: "result" }]);
+      expect(events[0]?.data?.content).toEqual([
+        { type: "text", text: "{}" },
+        { type: "text", text: "role mailbox" },
+      ]);
+      expect(roleMail).toHaveBeenCalledTimes(1);
+    } finally {
+      await connector.close();
     }
   });
 });
