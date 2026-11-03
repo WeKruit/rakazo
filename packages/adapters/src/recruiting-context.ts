@@ -17,7 +17,12 @@ import {
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   recruitingBriefClarifications,
 } from "@rakazo/core";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import type {
+  PrismaClient,
+  RecruitingVerdictFacet,
+  RecruitingVerdictPatterns,
+  ThreadEvents,
+} from "@rakazo/db";
 import {
   getRecruitingRoleSnapshot,
   type getRecruitingWorkspace,
@@ -25,6 +30,7 @@ import {
   IsolationError,
   listRecruitingFeedback,
   readRecruitingSearchQuality,
+  readRecruitingVerdictPatterns,
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
@@ -104,7 +110,7 @@ export async function loadRecruitingRunContext(
   if (!workspace) return undefined;
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
-  const [crmSourceMaterial, recent, quality] = await Promise.all([
+  const [crmSourceMaterial, recent, quality, patterns] = await Promise.all([
     // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
     // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
@@ -116,6 +122,7 @@ export async function loadRecruitingRunContext(
     }),
     listRecruitingFeedback(deps.prisma, actor, { roleId: workspace.role.id, limit: 20 }),
     readRecruitingSearchQuality(deps.prisma, actor, { roleId: workspace.role.id }),
+    readRecruitingVerdictPatterns(deps.prisma, actor, { roleId: workspace.role.id }),
   ]);
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [
@@ -161,6 +168,7 @@ export async function loadRecruitingRunContext(
     feedbackSize += size;
   }
   const qualityText = searchQualityText(quality);
+  const patternText = verdictPatternText(patterns, redact);
   const text = [
     roleText,
     ...(crmSourceMaterial
@@ -176,6 +184,7 @@ export async function loadRecruitingRunContext(
         ]
       : []),
     ...(qualityText ? [qualityText] : []),
+    ...(patternText ? [patternText] : []),
     ...(recent.feedback.length > feedback.length || recent.nextCursor
       ? [
           "This bounded context omits further saved feedback. Recover the original human messages from native history before assuming there are no later corrections.",
@@ -274,6 +283,62 @@ export function searchQualityText(quality: RecruitingSearchQualityOutput): strin
       ? "The latest round has more people the recruiter turned down than praised: before the next search, find what their not-a-fit reasons in the feedback share and what the good examples show, word the search around that, and tell the recruiter in one line what you changed."
       : "Use it with the feedback reasons to keep what works in the next search.",
   ].join(" ");
+}
+
+const FACET_LABEL: Record<RecruitingVerdictFacet["facet"], string> = {
+  company: "company",
+  title: "title",
+  school: "school",
+  major: "major",
+};
+
+/** A value shared by one person is not a pattern. */
+const PATTERN_MIN_PEOPLE = 2;
+
+function facetLine(facets: RecruitingVerdictFacet[], fit: RecruitingVerdictFacet["fit"]) {
+  const shown = facets.filter((item) => item.fit === fit && item.people >= PATTERN_MIN_PEOPLE);
+  return (["company", "title", "school", "major"] as const)
+    .flatMap((facet) => {
+      const values = shown.filter((item) => item.facet === facet);
+      return values.length
+        ? [
+            `${FACET_LABEL[facet]} ${values.map((item) => `${item.value} (${item.people})`).join(", ")}`,
+          ]
+        : [];
+    })
+    .join("; ");
+}
+
+function scopeLine(label: string, facets: RecruitingVerdictFacet[]) {
+  const praised = facetLine(facets, "good_example");
+  const turnedDown = facetLine(facets, "not_fit");
+  if (!praised && !turnedDown) return undefined;
+  return `${label}: ${[praised && `praised: ${praised}`, turnedDown && `turned down: ${turnedDown}`].filter(Boolean).join(". ")}.`;
+}
+
+/**
+ * What the people the recruiter praised and turned down share (current company and title,
+ * schools, majors), on this role and across all of their roles. Background for wording the next
+ * search, never a requirement or a verdict on anyone.
+ */
+export function verdictPatternText(
+  patterns: RecruitingVerdictPatterns,
+  redact: (value: string) => string = (value) => value,
+): string | undefined {
+  const role = scopeLine("This role", patterns.role);
+  const all =
+    JSON.stringify(patterns.allRoles) === JSON.stringify(patterns.role)
+      ? undefined
+      : scopeLine("All of this recruiter's roles", patterns.allRoles);
+  if (!role && !all) return undefined;
+  return redact(
+    [
+      "What the people the recruiter judged have in common, as counts of people from their saved profiles:",
+      ...(role ? [role] : []),
+      ...(all ? [all] : []),
+      "Word the next search toward what the praised people share and away from what the turned-down people share, within the confirmed brief. A pattern is a preference, never a requirement: ask the recruiter before making one a rule, and never reject anyone for it.",
+    ].join("\n"),
+  );
 }
 
 function contextFingerprint(manifest: RecruitingContextManifest): string {
