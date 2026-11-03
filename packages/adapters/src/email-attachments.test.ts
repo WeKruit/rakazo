@@ -36,7 +36,7 @@ function harness(body: Uint8Array = pdf) {
     put: vi.fn(async () => ({ id: "stored", hash: "hash" })),
     remove: vi.fn(async () => undefined),
   } as unknown as ArtifactStore;
-  const fetch = vi.fn(async () => new Response(body, { status: 200 }));
+  const fetch = vi.fn(async () => new Response(body as BodyInit, { status: 200 }));
   const deps = {
     prisma: prisma as never,
     artifacts,
