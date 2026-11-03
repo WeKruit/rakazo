@@ -43,6 +43,21 @@ type Sender = {
   attached?: boolean;
   default?: boolean;
 };
+/** A call that reads this account's sending email, by tool name or catalog id. */
+export function isSenderRead(name: string, args: Record<string, unknown>): boolean {
+  const target = name === "connectors_execute_tool" ? String(args.id ?? "") : name;
+  return /ensure_sender$/.test(target) && args.operation === "read";
+}
+
+/** A question asking which company name candidates should see, which only sender setup asks. */
+export function asksSenderCompanyName(question: string): boolean {
+  return /公司名|company name/i.test(question);
+}
+
+/** Model-facing: the sending email is read before any setup question. */
+export const SENDER_READ_FIRST =
+  "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
+
 const NO_SELF_SETUP =
   "No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and that we can turn it on if they contact us. Never ask for a company name or propose an address; drafts and contact lookups still work.";
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
