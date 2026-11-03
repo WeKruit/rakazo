@@ -130,6 +130,9 @@ export function startRecruitingCrmAutoSync(
   },
 ): void {
   let running = false;
+  // An owner whose CRM is empty never gets a newer contact, so the query above keeps returning
+  // them. A finished pass counts as fresh for a day in this process instead.
+  const finished = new Map<string, number>();
   const check = async () => {
     if (running || deps.signal.aborted) return;
     running = true;
@@ -139,8 +142,11 @@ export function startRecruitingCrmAutoSync(
         : [];
       for (const owner of owners) {
         if (deps.signal.aborted) break;
-        await syncRecruitingCrmOwner(deps, owner).catch((error) =>
-          getLogger().warn("crm.autosync.failed", { reason: String(error) }),
+        const key = JSON.stringify([owner.userId, owner.spaceId]);
+        if (Date.now() - (finished.get(key) ?? 0) < STALE_AFTER_MS) continue;
+        await syncRecruitingCrmOwner(deps, owner).then(
+          () => finished.set(key, Date.now()),
+          (error) => getLogger().warn("crm.autosync.failed", { reason: String(error) }),
         );
       }
     } catch (error) {

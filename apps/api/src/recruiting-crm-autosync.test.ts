@@ -74,6 +74,37 @@ describe("CRM auto-sync", () => {
     await expect(syncRecruitingCrmOwner(deps(null), owner)).rejects.toThrow("CRM unavailable");
     expect(syncRecruitingCrm).toHaveBeenCalledTimes(1);
   });
+  it("syncs an owner whose CRM stays empty once a day, not at every hourly check", async () => {
+    vi.useFakeTimers();
+    vi.mocked(syncRecruitingCrm).mockResolvedValue(report(null));
+    vi.mocked(indexRecruitingInboxBatch).mockResolvedValue({
+      importsComplete: true,
+      crmComplete: true,
+    });
+    const base = deps(null).prisma as unknown as Record<string, unknown>;
+    const prisma = {
+      ...base,
+      $queryRaw: vi.fn(async () => [owner]),
+    } as unknown as PrismaClient;
+    const abort = new AbortController();
+    try {
+      startRecruitingCrmAutoSync({
+        prisma,
+        connectors: { execute: vi.fn() },
+        firstPartyMcpUrl: "https://crm.example.test/mcp",
+        signal: abort.signal,
+      });
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5 * 60 * 60 * 1000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(20 * 60 * 60 * 1000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(2);
+    } finally {
+      abort.abort();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("saved-mail background indexing", () => {
