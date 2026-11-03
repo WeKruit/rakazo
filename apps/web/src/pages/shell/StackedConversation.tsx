@@ -47,6 +47,7 @@ export function StackedConversation({
 }) {
   const { t } = useLingui();
   const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
+  const acceptedSnapshot = useRef<ThreadSnapshot | null>(null);
   const [focused, setFocused] = useState(messageId);
   const [around, setAround] = useState<ThreadSnapshot["messages"] | null>(null);
   // A failed refresh clears on the next good one; a failed send or answer stays until retried.
@@ -69,6 +70,10 @@ export function StackedConversation({
   const load = useCallback(async () => {
     const next = await rpc.threads.get({ groupId });
     if (current.current !== groupId) return;
+    // Polls and action refreshes can arrive out of order; the cursor is a durable event sequence.
+    const accepted = acceptedSnapshot.current;
+    if (accepted?.threadId === next.threadId && next.cursor < accepted.cursor) return;
+    acceptedSnapshot.current = next;
     setSnapshot(next);
     const latest = new Map(next.messages.map((message) => [message.id, message]));
     setAround((previous) => previous?.map((message) => latest.get(message.id) ?? message) ?? null);

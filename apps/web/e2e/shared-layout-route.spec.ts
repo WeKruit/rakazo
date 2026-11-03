@@ -42,7 +42,7 @@ for (const width of [1440, 390]) {
     await expect(detail).toBeVisible();
     await expect
       .poll(async () => Math.round((await detail.boundingBox())!.width))
-      .toBe(width === 1440 ? 600 : 390);
+      .toBe(width === 1440 ? 720 : 390);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

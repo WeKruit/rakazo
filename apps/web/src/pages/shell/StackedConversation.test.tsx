@@ -348,3 +348,42 @@ it("clears an unchanged draft only after a successful send", async () => {
   await act(async () => submit());
   expect(host!.querySelector("textarea")!.value).toBe("");
 });
+
+it("does not let an older poll restore an answered card or hide its live reply", async () => {
+  vi.useFakeTimers();
+  Element.prototype.scrollIntoView = vi.fn();
+  api.messages.mockResolvedValue({ messages: snapshot.messages });
+  api.answer.mockResolvedValue({ ok: true });
+  let releaseOldPoll!: (value: unknown) => void;
+  api.get.mockResolvedValueOnce(snapshot).mockReturnValueOnce(
+    new Promise((resolve) => {
+      releaseOldPoll = resolve;
+    }),
+  );
+  await mountFocused("card");
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  const accepted = {
+    ...snapshot,
+    cursor: snapshot.cursor + 1,
+    run: { id: "run", status: "running" },
+    activeRuns: [{ id: "run", status: "running" }],
+    messages: [
+      { ...snapshot.messages[2], blocks: [{ kind: "ask", status: "answered" }] },
+      { id: "new-reply", blocks: [{ kind: "text" }] },
+    ],
+  };
+  api.get.mockResolvedValueOnce(accepted).mockReturnValue(new Promise(() => {}));
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-message="card"]')!.click());
+  expect(host!.querySelector('[data-message="new-reply"]')).not.toBeNull();
+  // A later poll may already be in flight; it must not suppress this accepted answer snapshot.
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  await act(async () => releaseOldPoll(snapshot));
+  expect(host!.querySelector('[data-message="new-reply"]')).not.toBeNull();
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-status")).toBe(
+    "answered",
+  );
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-can-answer")).toBe(
+    "false",
+  );
+  expect(host!.textContent).toContain("Thinking");
+});

@@ -172,6 +172,8 @@ test("narrow role chat resizes without losing drafts or scroll position", async 
   const fixture = await recruitingChatFixture(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/app/g/group-fixture?view=results");
+  await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Candidates", exact: true, level: 1 })).toBeVisible();
   const chat = page.getByRole("region", { name: "Role conversation", exact: true });
   if (!(await chat.isVisible()))
     await page.getByRole("button", { name: "Open role chat", exact: true }).click();
