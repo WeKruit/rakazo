@@ -113,7 +113,8 @@ export function turnWork(
       ? (args.id.split(":").at(-1) ?? name)
       : name;
   const action = (target.split("__").at(-1) ?? target).toLowerCase();
-  if (READ_ACTION.test(action)) return undefined;
+  // A writable tool's read operation ("ensure_sender" with operation "read") changed nothing.
+  if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
   return "connected";
