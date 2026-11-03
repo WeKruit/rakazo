@@ -144,6 +144,29 @@ describe("live role correspondence", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(output).toMatchObject({ status: "empty", events: [], partial: false });
   });
+  it("looks up the role's mail campaigns by their exact keys", async () => {
+    const { prisma } = fixture();
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { events: [] } } } as const;
+    });
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "exact-campaign-keys" },
+      { roleId: "role", threadId: "thread", view: "interview" },
+      [source("calendar"), source("instantly")],
+      empty(),
+    );
+    expect(prisma.externalEffect.findMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        status: "completed",
+        idempotencyKey: {
+          in: ["instantly-role-campaign:calendar:role", "instantly-role-campaign:instantly:role"],
+        },
+      },
+      select: { idempotencyKey: true, result: true },
+    });
+  });
   it("reads the account calendar once for all roles opened together", async () => {
     const { prisma, assignment } = fixture();
     const execute = vi.fn(async function* () {
