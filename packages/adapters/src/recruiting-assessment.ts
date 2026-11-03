@@ -281,6 +281,12 @@ export async function executeRecruitingCandidatesTool(
           })),
         );
       succeeded = true;
+      // The query only filters people; a role name passed as one matches no one.
+      if (!result.items.length && query.query?.trim())
+        return {
+          ...result,
+          next: "No saved person matched this query. To list the role's people, call again without query.",
+        };
       if (!enriched.length) return result;
       const emails = new Map(enriched.map(({ item, email }) => [item, email]));
       return {
