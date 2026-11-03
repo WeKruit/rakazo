@@ -84,7 +84,7 @@ export function AllContacts({
   const [days, setDays] = useState<Partial<Record<DateKey, number>>>({});
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
-  const [extraColumns, setExtraColumns] = useState<ReadonlySet<string>>(new Set());
+  const [extraColumns, setExtraColumns] = useState<ReadonlySet<string>>(new Set(["profiles"]));
   const cache = useContext(RecruitingReadCacheContext);
   const [enroll, setEnroll] = useState(false);
   const [selected, setSelected] = useState<Map<string, RecruitingContact>>(new Map());

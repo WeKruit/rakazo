@@ -70,6 +70,7 @@ it("reveals secondary fields without refetching contacts and retains them when p
     expect(headers()).toEqual([
       "",
       "Name",
+      "Profiles",
       "Roles",
       "Current role",
       "Company",
