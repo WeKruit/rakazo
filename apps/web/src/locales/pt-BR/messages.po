@@ -3153,7 +3153,7 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Historical totals · — Not reported"
-msgstr ""
+msgstr "Totais históricos · — Não informado"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
