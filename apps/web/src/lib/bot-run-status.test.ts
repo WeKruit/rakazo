@@ -2,7 +2,7 @@ import type { ProductEvent } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   applyBotStatus,
-  applyGroupMemberStatus,
+  applyGroupRunStatus,
   botStatusFromRunEvent,
   groupIsWorking,
   openBotStatusChannel,
@@ -29,22 +29,22 @@ describe("bot status from run events", () => {
   });
 });
 
-describe("role team status", () => {
-  const role = (status: string) => ({ members: [{ botId: "a", name: "A", color: "ink", status }] });
-
-  it("is working only while a member runs and does not wait on the user", () => {
-    expect(groupIsWorking(role("running"))).toBe(true);
-    expect(groupIsWorking(role("queued"))).toBe(true);
-    expect(groupIsWorking(role("waiting_input"))).toBe(false);
-    expect(groupIsWorking(role("idle"))).toBe(false);
-    expect(groupIsWorking({ members: [] })).toBe(false);
+describe("role status", () => {
+  it("is working only from its own conversation's runs", () => {
+    expect(groupIsWorking({ working: true })).toBe(true);
+    expect(groupIsWorking({ working: false })).toBe(false);
+    expect(groupIsWorking({})).toBe(false);
   });
 
-  it("follows run events for that member and keeps the list otherwise", () => {
-    const groups = [role("idle")];
-    expect(applyGroupMemberStatus(groups, "a", "idle")).toBe(groups);
-    expect(applyGroupMemberStatus(groups, "missing", "running")).toBe(groups);
-    expect(groupIsWorking(applyGroupMemberStatus(groups, "a", "running")[0]!)).toBe(true);
+  it("follows run events of that conversation and keeps the list otherwise", () => {
+    const groups = [{ threadId: "t1", working: false }, { threadId: "t2" }];
+    expect(applyGroupRunStatus(groups, "t1", "idle")).toBe(groups);
+    expect(applyGroupRunStatus(groups, "other", "running")).toBe(groups);
+    expect(applyGroupRunStatus(groups, "t1", "running")).toEqual([
+      { threadId: "t1", working: true },
+      { threadId: "t2" },
+    ]);
+    expect(applyGroupRunStatus(groups, "t2", "waiting_input")).toBe(groups);
   });
 });
 

@@ -130,7 +130,7 @@ test("Work and Role details preserve the original actions on a compact screen", 
 
 test("a role whose team is working shows it in the role list", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const fixture = await mockRecruitingApp(page, { memberStatus: "running" });
+  const fixture = await mockRecruitingApp(page, { workingRole: true });
   await page.goto(`/app/g/${appGroupId}?view=contacts`);
   const roles = page.getByRole("navigation", { name: "Role conversations", exact: true });
   await expect(roles.getByTestId("role-working")).toHaveCount(1);

@@ -28,31 +28,21 @@ export function applyBotStatus<T extends Pick<Bot, "id" | "status">>(
   return bots.map((candidate) => (candidate.id === botId ? { ...candidate, status } : candidate));
 }
 
-const WORKING_STATUSES = new Set(["queued", "leased", "running"]);
-
-/** A role team member is on a foreground run that is not waiting on the user. */
-export function groupIsWorking(group: Pick<Group, "members">) {
-  return group.members.some((member) => WORKING_STATUSES.has(member.status ?? "idle"));
+/** A reply in this role's own conversation is running and not waiting on the user. */
+export function groupIsWorking(group: Pick<Group, "working">) {
+  return group.working === true;
 }
 
-export function applyGroupMemberStatus<T extends Pick<Group, "members">>(
+/** Run events of a role's conversation mark it working at once; the list read reconciles. */
+export function applyGroupRunStatus<T extends Pick<Group, "threadId" | "working">>(
   groups: T[],
-  botId: string,
+  threadId: string,
   status: string,
 ): T[] {
-  let changed = false;
-  const next = groups.map((group) => {
-    if (!group.members.some((member) => member.botId === botId && member.status !== status))
-      return group;
-    changed = true;
-    return {
-      ...group,
-      members: group.members.map((member) =>
-        member.botId === botId ? { ...member, status } : member,
-      ),
-    };
-  });
-  return changed ? next : groups;
+  const working = ["queued", "leased", "running"].includes(status);
+  const group = groups.find((candidate) => candidate.threadId === threadId);
+  if (!group || Boolean(group.working) === working) return groups;
+  return groups.map((candidate) => (candidate === group ? { ...candidate, working } : candidate));
 }
 
 export type BotStatusMessage = { botId: string; status: string };

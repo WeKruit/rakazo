@@ -15,7 +15,7 @@ import type { NavigateFunction } from "react-router-dom";
 import { takeInitialBootstrap } from "../../lib/bootstrap";
 import {
   applyBotStatus,
-  applyGroupMemberStatus,
+  applyGroupRunStatus,
   botStatusFromRunEvent,
   openBotStatusChannel,
 } from "../../lib/bot-run-status";
@@ -363,7 +363,6 @@ export function useShellRoster({
     if (!userId || !spaceId) return;
     const channel = openBotStatusChannel({ userId, spaceId }, ({ botId, status }) => {
       setBots((current) => applyBotStatus(current, botId, status));
-      setGroups((current) => applyGroupMemberStatus(current, botId, status));
       // The finished run's preview and error badge come from the navigation read.
       if (status === "idle") void refreshBots().catch(() => undefined);
     });
@@ -377,7 +376,7 @@ export function useShellRoster({
     const status = botStatusFromRunEvent(event);
     if (!status) return;
     setBots((current) => applyBotStatus(current, event.botId, status));
-    setGroups((current) => applyGroupMemberStatus(current, event.botId, status));
+    setGroups((current) => applyGroupRunStatus(current, event.threadId, status));
     botStatusChannel.current?.post({ botId: event.botId, status });
   }, []);
 

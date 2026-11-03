@@ -681,7 +681,12 @@ describe("group pending attention", () => {
       archivedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-      thread: { id: "thread", unread: false, messages: [], runs: [{ id: "run" }] },
+      thread: {
+        id: "thread",
+        unread: false,
+        messages: [],
+        runs: [{ id: "run", status: "waiting_input" }],
+      },
       members: ["a", "b"].map((id) => ({ bot: { id, name: id, color: "ink", runs: [] } })),
     };
     const findMany = vi.fn(async () => [
@@ -706,6 +711,7 @@ describe("group pending attention", () => {
     const result = await createGroupRepos(prisma as unknown as PrismaClient).listGroups(actor);
     expect(result[0]).toMatchObject({
       needsInput: true,
+      working: false,
       attention: approval ? "approval" : "question",
     });
     expect(findMany).toHaveBeenCalledWith(

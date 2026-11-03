@@ -18,6 +18,7 @@ import { lockSpaceForContentCreation } from "./spaces.js";
 import {
   activeRunSelection,
   activeRunStatuses,
+  backgroundRunTriggers,
   latestThreadMessages,
   previewFromBlocks,
 } from "./thread-listing.js";
@@ -36,7 +37,7 @@ type GroupRecord = {
   thread: {
     id: string;
     unread: boolean;
-    runs?: Array<{ id: string }>;
+    runs?: Array<{ id: string; status: string }>;
   } | null;
   members: Array<{
     bot: {
@@ -81,7 +82,12 @@ function mapGroup(group: GroupRecord, previews: LatestPreviews): Group {
     threadId: group.thread.id,
     preview,
     unread: group.thread.unread,
-    ...(group.thread.runs ? { needsInput: group.thread.runs.length > 0 } : {}),
+    ...(group.thread.runs
+      ? {
+          needsInput: group.thread.runs.some((run) => run.status === "waiting_input"),
+          working: group.thread.runs.some((run) => run.status !== "waiting_input"),
+        }
+      : {}),
     updatedAt: group.updatedAt.toISOString(),
     createdAt: group.createdAt.toISOString(),
   };
@@ -165,11 +171,21 @@ function groupPreviews(
   );
 }
 
+const workingRunStatuses = ["queued", "leased", "running"];
+
 const groupInclude = {
   thread: {
     include: {
-      // A run paused on the user's answer or approval in this conversation.
-      runs: { where: { status: "waiting_input" }, select: { id: true } },
+      // Runs paused on the user's answer or approval, and replies running, in this conversation.
+      runs: {
+        where: {
+          OR: [
+            { status: "waiting_input" },
+            { status: { in: workingRunStatuses }, trigger: { notIn: backgroundRunTriggers } },
+          ] as Prisma.RunWhereInput[],
+        },
+        select: { id: true, status: true },
+      },
     },
   },
   members: {
