@@ -58,6 +58,24 @@ describe("user-visible messages", () => {
     ).toEqual(["user", "sent", "received", "reply", "answer"]);
   });
 
+  it("keeps only work handed over from another conversation when receipts are hidden", () => {
+    const handoff = message("handoff", "", [
+      {
+        kind: "bot_message_received",
+        fromBotId: "kruit",
+        fromBotName: "Kruit",
+        text: "Goal: find five more people.",
+        returnThreadId: "kruit-thread",
+        returnToMessageId: "echo",
+      },
+    ]);
+    expect(
+      userVisibleMessages([...peerExchange, handoff], { includeConversationHandoffs: true }).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["user", "reply", "answer", "handoff"]);
+  });
+
   it("uses authoritative peer run ids when the receipt is outside the loaded page", () => {
     const messages = [
       message("activity", "run-peer", [

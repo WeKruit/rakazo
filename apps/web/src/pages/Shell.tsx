@@ -72,6 +72,7 @@ import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingReadCacheContext } from "./recruiting/shared";
+import { HandoffSourceContext, handoffSourceFor } from "./shell/handoff-source";
 import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 import { StackedConversation } from "./shell/StackedConversation";
@@ -238,6 +239,10 @@ export function ShellPage() {
     !model.groupId.startsWith("recruiting-global-")
       ? groups.find((group) => group.id.startsWith("recruiting-global-"))
       : undefined;
+  const handoffSource = useCallback(
+    (threadId: string) => handoffSourceFor(groups, threadId),
+    [groups],
+  );
   // A link to a moment in another conversation, as Kruit cites it, opens stacked from the right.
   useEffect(() => {
     function openLinkedConversation(event: MouseEvent) {
@@ -841,7 +846,9 @@ export function ShellPage() {
       <RecruitingChatContextProvider value={chatContextApi}>
         <RecruitingDetailProvider value={recruitingDetail}>
           <RecruitingReadCacheContext.Provider value={recruitingReadCache.current}>
-            {shell}
+            <HandoffSourceContext.Provider value={handoffSource}>
+              {shell}
+            </HandoffSourceContext.Provider>
           </RecruitingReadCacheContext.Provider>
         </RecruitingDetailProvider>
       </RecruitingChatContextProvider>
