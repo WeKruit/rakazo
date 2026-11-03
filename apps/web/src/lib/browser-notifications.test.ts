@@ -104,10 +104,20 @@ describe("browser notifications", () => {
         "Chief",
       ),
     ).toEqual({ title: "Chief", body: "" });
+    // A failure says what to do next, the same words the conversation shows.
     expect(browserNotificationMessage(event({ type: "run.failed" }), "Chief")).toEqual({
       title: "Chief failed",
-      body: "Failed.",
+      body: "The reply stopped. Try again.",
     });
+    expect(
+      browserNotificationMessage(
+        event({
+          type: "run.failed",
+          payload: { error: "The computer could not start. Reset it to continue." },
+        }),
+        "Chief",
+      ).body,
+    ).toBe("The computer could not start. Reset it to continue.");
     expect(browserNotificationMessage(event({ type: "run.cancelled" }), "Chief")).toEqual({
       title: "Chief stopped",
       body: "Stopped.",

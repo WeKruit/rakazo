@@ -6187,7 +6187,9 @@ it("shows ordinary users the turn's work in plain words and folds it once the re
   ]);
   expect(container!.querySelector('[data-testid="live-work"]')).toBeNull();
   const summary = container!.querySelector<HTMLDetailsElement>('[data-testid="work-summary"]');
-  expect(summary?.querySelector("summary")?.textContent).toMatch(/^Worked for \d+s$/);
+  expect(summary?.querySelector("summary")?.textContent).toMatch(
+    /^Worked for \d+s · Searching candidates$/,
+  );
   expect(summary?.open).toBe(false);
   expect(summary?.textContent).toContain("Searching candidates");
   expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
@@ -6341,7 +6343,9 @@ it("opens account Sequence and Interview from an account page, not the bot conve
       ["Sequence", "sequence"],
       ["Interview", "interview"],
     ]) {
-      const link = [...nav.querySelectorAll("a")].find((item) => item.textContent?.trim() === label)!;
+      const link = [...nav.querySelectorAll("a")].find(
+        (item) => item.textContent?.trim() === label,
+      )!;
       expect(link.getAttribute("href")).toBe(`/app?view=${view}&role=all`);
     }
   });

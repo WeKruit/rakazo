@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 import { ListPager } from "../../components/ListPager";
 import type { ArtifactTarget } from "../../lib/artifact-open";
+import { groupIsWorking } from "../../lib/bot-run-status";
 import { memoWithLatestHandlers } from "../../lib/memo-latest";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
@@ -573,6 +574,14 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                           ? t`Needs confirmation`
                           : t`Needs input`}
                     </span>
+                  </span>
+                ) : groupIsWorking(group) ? (
+                  <span
+                    data-testid="role-working"
+                    className="size-1.5 shrink-0 animate-pulse rounded-full bg-muted-foreground"
+                    title={t`Working…`}
+                  >
+                    <span className="sr-only">{t`Working…`}</span>
                   </span>
                 ) : null}
                 <span

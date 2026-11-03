@@ -92,7 +92,8 @@ export function useShellNotifications({
         if (!allowed) return true;
         const result = deliverNativeBrowserNotification(
           pending.event,
-          currentBot.name || pending.botName,
+          // A role notification is named for the role, never for a member of its team.
+          pending.groupNotification ? pending.botName : currentBot.name || pending.botName,
           {
             enabled: pending.groupNotification || currentBot.notifyOnFinish,
             pageVisible: document.visibilityState === "visible",

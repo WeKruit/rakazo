@@ -2104,11 +2104,6 @@ msgstr "메시지를 보내지 못했습니다."
 msgid "Failed to stop"
 msgstr "작업을 중지하지 못했습니다."
 
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
-msgid "Failed."
-msgstr "실패했습니다."
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Failure handling"
 msgstr "실패했을 때 처리"
@@ -3754,6 +3749,7 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "Reconnect your model to continue."
 msgstr ""
@@ -5148,6 +5144,7 @@ msgstr "테스트 중…"
 msgid "The API did not come back. Refresh this page."
 msgstr "API가 다시 작동하지 않습니다. 이 페이지를 새로 고침하세요."
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The computer could not start. Reset it to continue."
 msgstr ""
@@ -5172,6 +5169,7 @@ msgstr ""
 msgid "The recruiting team is not ready yet."
 msgstr ""
 
+#: src/lib/browser-notifications.ts
 #: src/pages/shell/useShellController.tsx
 msgid "The reply stopped. Try again."
 msgstr ""
@@ -5691,6 +5689,7 @@ msgstr "백그라운드에서 작업 중…"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Working…"
 msgstr "처리 중…"
