@@ -10,10 +10,9 @@ for (const width of [1440, 390]) {
     await page.goto(`/app/g/${appGroupId}?view=contacts`);
     await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
     const collapse = page.getByRole("button", { name: "Collapse role chat", exact: true });
-    await expect(collapse).toBeVisible();
-    await collapse.click();
+    await expect(page.getByRole("region", { name: "Role conversation", exact: true })).toBeHidden();
     await expect(
-      page.getByRole("heading", { name: "Contacts", exact: true, level: 1 }),
+      page.getByRole("heading", { name: "Candidates", exact: true, level: 1 }),
     ).toHaveCount(1);
     const wrapper = page.locator(".hire-standard-view-native");
     await expect(wrapper).toBeVisible();

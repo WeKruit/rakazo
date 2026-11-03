@@ -276,7 +276,7 @@ function WeeklyShortlist({
     Array.from({ length: 4 }, (_, index) => Math.round((index * (period - 1)) / 3)),
   );
   return (
-    <section aria-label={t`Shortlisted profiles`} className="min-w-0 rounded-xl bg-muted/40 p-4">
+    <section aria-label={t`Shortlisted profiles`} className="min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium">
@@ -408,28 +408,25 @@ function OutreachFunnel({
       <h3 className="text-sm font-medium">
         <Trans>Outreach funnel</Trans>
       </h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        <Trans>Current totals · all dates</Trans>
-      </p>
-      <ol className="mt-4 grid grid-cols-2 gap-2">
+      <ol className="mt-3 divide-y divide-border">
         {stages.map((stage) => {
           const partial = stage.count !== null && (stage.partial || incomplete);
           return (
-            <li key={stage.key} className="flex min-w-0 flex-col gap-1">
+            <li key={stage.key} className="min-w-0">
               <Button
                 variant="ghost"
-                className="h-auto w-full flex-col items-stretch gap-1 rounded-lg bg-card/80 p-3 text-start whitespace-normal font-normal hover:bg-card"
+                className="h-auto w-full justify-between gap-3 rounded-none px-0 py-2 text-start whitespace-normal font-normal"
                 aria-label={t`Inspect ${labels[stage.key]}`}
                 aria-pressed={selected === stage.key}
                 onClick={() => setSelected(selected === stage.key ? undefined : stage.key)}
               >
-                <span className="break-words text-xs text-muted-foreground">
+                <span className="break-words text-sm text-muted-foreground">
                   {labels[stage.key]}
                 </span>
                 <span className="text-lg font-semibold tabular-nums">
                   {stage.count === null ? "—" : `${partial ? "≥" : ""}${stage.count}`}
                 </span>
-                <span className="text-xs tabular-nums text-muted-foreground">
+                <span className="sr-only">
                   {stage.count === null ? (
                     <Trans>Unknown</Trans>
                   ) : partial ? (
@@ -463,9 +460,14 @@ function OutreachFunnel({
           </Trans>
         </p>
       ) : null}
-      <p className="mt-3 text-xs text-muted-foreground">
-        <Trans>Send totals are not available from these records.</Trans>
-      </p>
+      <details className="mt-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer">
+          <Trans>Current totals · all dates</Trans>
+        </summary>
+        <p className="mt-2">
+          <Trans>Send totals are not available from these records.</Trans>
+        </p>
+      </details>
     </section>
   );
 }
@@ -511,7 +513,7 @@ function YourTasks({
     }
   }
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
         <CardTitle>
           <h2>
@@ -597,7 +599,7 @@ function YourTasks({
 function OverviewSkeleton() {
   const { t } = useLingui();
   return (
-    <div role="status" aria-label={t`Loading…`} className="grid gap-6 md:grid-cols-2">
+    <div role="status" aria-label={t`Loading…`} className="grid items-start gap-6 md:grid-cols-2">
       {[0, 1].map((item) => (
         <div key={item} className="space-y-3">
           <Skeleton className="h-4 w-32" />
@@ -724,6 +726,52 @@ export function HomeDashboard({
             </NativeSelect>
           </div>
         </div>
+        <div className="grid items-start gap-6 md:grid-cols-2">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>
+                <h2>
+                  <Trans>Recents</Trans>
+                </h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-2">
+              {recents.length ? (
+                <ul aria-label={t`Recents`}>
+                  {recents.map((group) => (
+                    <li key={group.id}>
+                      <Button
+                        variant="ghost"
+                        className="h-auto w-full justify-start gap-3 px-2 py-2 text-start font-normal"
+                        onClick={() => onOpenRole(group.id)}
+                      >
+                        <span className="min-w-0 flex-1 truncate" dir="auto">
+                          {group.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {new Date(group.updatedAt).toLocaleDateString()}
+                        </span>
+                        <ChevronRight size={15} aria-hidden="true" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-2 text-sm text-muted-foreground">
+                  <Trans>No roles yet.</Trans>
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <YourTasks
+            key={readCacheScope}
+            scope={readCacheScope}
+            refreshSignal={refreshSignal}
+            roleGroups={roleGroups}
+            onOpenRole={onOpenRole}
+            project={project}
+          />
+        </div>
         <Card>
           <CardHeader>
             <CardTitle>
@@ -776,7 +824,7 @@ export function HomeDashboard({
           </CardContent>
         </Card>
         {overview.data ? (
-          <Card>
+          <Card size="sm">
             <CardHeader>
               <CardTitle>
                 <h2>
@@ -785,12 +833,6 @@ export function HomeDashboard({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="mb-3 text-xs text-muted-foreground">
-                <Trans>
-                  Future confirmed events from saved calendar checks, shown in your local time. This
-                  is a recorded subset, not all bookings or availability.
-                </Trans>
-              </p>
               <ul className="space-y-2" aria-label={t`Upcoming recorded bookings`}>
                 {overview.data.bookings
                   .filter((booking) => !project || booking.groupId === project)
@@ -835,55 +877,20 @@ export function HomeDashboard({
                   <Trans>Some role calendar records are unavailable or partial.</Trans>
                 </p>
               ) : null}
+              <details className="mt-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer">
+                  <Trans>Saved calendar checks</Trans>
+                </summary>
+                <p className="mt-2">
+                  <Trans>
+                    Future confirmed events from saved calendar checks, shown in your local time.
+                    This is a recorded subset, not all bookings or availability.
+                  </Trans>
+                </p>
+              </details>
             </CardContent>
           </Card>
         ) : null}
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <h2>
-                  <Trans>Recents</Trans>
-                </h2>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-2">
-              {recents.length ? (
-                <ul aria-label={t`Recents`}>
-                  {recents.map((group) => (
-                    <li key={group.id}>
-                      <Button
-                        variant="ghost"
-                        className="h-auto w-full justify-start gap-3 px-2 py-2 text-start font-normal"
-                        onClick={() => onOpenRole(group.id)}
-                      >
-                        <span className="min-w-0 flex-1 truncate" dir="auto">
-                          {group.name}
-                        </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {new Date(group.updatedAt).toLocaleDateString()}
-                        </span>
-                        <ChevronRight size={15} aria-hidden="true" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="px-2 text-sm text-muted-foreground">
-                  <Trans>No roles yet.</Trans>
-                </p>
-              )}
-            </CardContent>
-          </Card>
-          <YourTasks
-            key={readCacheScope}
-            scope={readCacheScope}
-            refreshSignal={refreshSignal}
-            roleGroups={roleGroups}
-            onOpenRole={onOpenRole}
-            project={project}
-          />
-        </div>
       </div>
     </div>
   );

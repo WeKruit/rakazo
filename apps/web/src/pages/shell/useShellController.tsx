@@ -165,8 +165,8 @@ export function useShellController() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
-  // The role chat starts open: answers and confirmation cards must be visible without a click.
-  const [roleChatOpen, setRoleChatOpen] = useState(true);
+  // Reading a workspace keeps its space; a new waiting card still opens the chat below.
+  const [roleChatOpen, setRoleChatOpen] = useState(false);
   const [requeuedRunIds, setRequeuedRunIds] = useState<string[]>([]);
   const observeRunSignal = useCallback(
     (event: { type: string; runId?: string | null; threadId?: string | null }) => {

@@ -247,11 +247,13 @@ export function AccountInbox({
   }>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailFailed, setDetailFailed] = useState(false);
+  const [historyFailed, setHistoryFailed] = useState(false);
   useEffect(() => {
     let active = true;
     if (serverThread && spaceId) {
       setDetailLoading(true);
       setDetailFailed(false);
+      setHistoryFailed(false);
       void rpc.recruiting
         .globalInbox({
           spaceId,
@@ -717,6 +719,11 @@ export function AccountInbox({
                   }}
                 />
               ) : null}
+              {historyFailed ? (
+                <p role="alert" className="mt-3 text-sm text-destructive">
+                  <Trans>Could not load earlier messages. Try again.</Trans>
+                </p>
+              ) : null}
               {serverThread && detail?.key === detailKey && detail.nextCursor ? (
                 <Button
                   className="mt-3"
@@ -725,6 +732,7 @@ export function AccountInbox({
                   disabled={detailLoading}
                   onClick={() => {
                     if (!spaceId) return;
+                    setHistoryFailed(false);
                     setDetailLoading(true);
                     void rpc.recruiting
                       .globalInbox({
@@ -756,7 +764,7 @@ export function AccountInbox({
                           );
                       })
                       .catch(() => {
-                        if (activeDetail.current === detailKey) setDetailFailed(true);
+                        if (activeDetail.current === detailKey) setHistoryFailed(true);
                       })
                       .finally(() => {
                         if (activeDetail.current === detailKey) setDetailLoading(false);

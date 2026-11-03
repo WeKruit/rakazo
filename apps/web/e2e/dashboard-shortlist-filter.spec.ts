@@ -17,7 +17,8 @@ for (const width of [1440, 390]) {
       .first()
       .click();
     await expect(page).toHaveURL(/view=contacts.*shortlistFrom=/);
-    await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
+    if (await page.getByRole("button", { name: "Collapse role chat", exact: true }).isVisible())
+      await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
     const contacts = page.getByRole("region", { name: "Contacts", exact: true });
     const clear = page.getByRole("button", { name: "Clear date filter", exact: true });
     await expect(clear).toBeVisible();
@@ -35,7 +36,8 @@ for (const width of [1440, 390]) {
     await expect(clear).toBeVisible();
     await expect(contacts.getByText("Avery Example", { exact: true })).toBeVisible();
     await expect(contacts.getByText("Blake Sample", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
+    if (await page.getByRole("button", { name: "Collapse role chat", exact: true }).isVisible())
+      await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
     const path = info.outputPath(`weekly-shortlist-${width}.png`);
     await page.screenshot({ path, fullPage: true });
     await info.attach(`weekly-shortlist-${width}`, { path, contentType: "image/png" });

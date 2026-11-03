@@ -431,6 +431,9 @@ test("candidate detail takes the chat pane and keeps the unsent draft", async ({
   const chat = page.getByRole("region", { name: "Role conversation", exact: true });
   const composer = chat.locator('textarea[name="chat-message"]');
   const draft = "Keep this unsent note.";
+  await expect(chat).toBeHidden();
+  await page.getByRole("button", { name: "Open role chat", exact: true }).click();
+  await expect(composer).toBeFocused();
   await composer.fill(draft);
   await expect(page.getByRole("region", { name: "Contacts" })).toBeVisible();
   await capture(page, testInfo, "three-pane-chat");

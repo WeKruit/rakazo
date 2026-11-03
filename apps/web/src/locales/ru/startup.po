@@ -17,10 +17,6 @@ msgstr ""
 msgid " (unread)"
 msgstr " (непрочитано)"
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "— Not reported"
-msgstr ""
-
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -900,14 +896,6 @@ msgstr "Карточки"
 msgid "Cc"
 msgstr ""
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period is not reported"
-msgstr ""
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period: not reported"
-msgstr ""
-
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Change status"
 msgstr ""
@@ -1381,6 +1369,10 @@ msgstr ""
 msgid "Could not load contacts."
 msgstr ""
 
+#: src/pages/recruiting/AccountInbox.tsx
+msgid "Could not load earlier messages. Try again."
+msgstr "Не удалось загрузить предыдущие сообщения. Повторите попытку."
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "Не удалось загрузить интеграции"
@@ -1815,6 +1807,7 @@ msgstr "Закрыть"
 msgid "Dismiss error"
 msgstr "Закрыть ошибку"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Display columns"
 msgstr ""
@@ -2330,6 +2323,11 @@ msgstr "Высокий"
 msgid "High"
 msgstr "Высокий"
 
+#: src/pages/recruiting/AccountSequences.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Historical totals · — Not reported"
+msgstr "Итоги за всё время · — Нет данных"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "How to check"
 msgstr "Как проверить"
@@ -2491,6 +2489,7 @@ msgstr ""
 msgid "Job title"
 msgstr ""
 
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Jump to latest"
 msgstr "Перейти к последнему"
@@ -2920,6 +2919,7 @@ msgid "Name: {0}"
 msgstr ""
 
 #: src/lib/roster-status.ts
+#: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
 msgstr ""
 

@@ -233,7 +233,12 @@ export function RecruitingDetailPanel({
   });
   const depth = controller.stack.length;
   const [sequencePerson, setSequencePerson] = useState<string>();
-  const [shortlisted, setShortlisted] = useState<{ key: string; value: boolean }>();
+  const [shortlisted, setShortlisted] = useState<{
+    key: string;
+    value: boolean;
+  }>();
+  const [shortlistPending, setShortlistPending] = useState<string>();
+  const [shortlistFailed, setShortlistFailed] = useState<string>();
 
   useEffect(() => {
     if (!person) return;
@@ -319,8 +324,13 @@ export function RecruitingDetailPanel({
   const next = current.walk?.(1);
   const actions = current.actions;
   const shortlist = actions?.shortlist;
+  const shortlistKey = JSON.stringify([
+    current.role?.spaceId,
+    current.role?.roleId,
+    person.candidateId,
+  ]);
   const isShortlisted =
-    shortlisted?.key === person.candidateId ? shortlisted.value : shortlist?.shortlisted;
+    shortlisted?.key === shortlistKey ? shortlisted.value : shortlist?.shortlisted;
   const emailDraft =
     actions?.emailDraft ?? (crm ? () => controller.replace({ ...current, view: "thread" }) : null);
   const stage = [
@@ -570,6 +580,11 @@ export function RecruitingDetailPanel({
               <dd className="break-all">{phone || "—"}</dd>
             </dl>
           </details>
+          {shortlistFailed === shortlistKey ? (
+            <p role="alert" className="text-sm text-destructive">
+              <Trans>Could not update shortlist. Try again.</Trans>
+            </p>
+          ) : null}
           {emailDraft || shortlist || resumeUrl || actions?.openEvidence ? (
             <div className="flex flex-wrap gap-2">
               {emailDraft ? (
@@ -583,10 +598,22 @@ export function RecruitingDetailPanel({
                   size="sm"
                   variant="outline"
                   aria-pressed={Boolean(isShortlisted)}
-                  disabled={shortlist.disabled}
-                  onClick={() => {
-                    setShortlisted({ key: person.candidateId, value: !isShortlisted });
-                    shortlist.set(!isShortlisted);
+                  disabled={shortlist.disabled || shortlistPending === shortlistKey}
+                  onClick={async () => {
+                    setShortlistPending(shortlistKey);
+                    setShortlistFailed(undefined);
+                    try {
+                      if (await shortlist.set(!isShortlisted))
+                        setShortlisted({
+                          key: shortlistKey,
+                          value: !isShortlisted,
+                        });
+                      else setShortlistFailed(shortlistKey);
+                    } catch {
+                      setShortlistFailed(shortlistKey);
+                    } finally {
+                      setShortlistPending(undefined);
+                    }
                   }}
                 >
                   <Bookmark size={15} aria-hidden fill={isShortlisted ? "currentColor" : "none"} />

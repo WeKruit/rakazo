@@ -63,7 +63,11 @@ export type RecruitingDetailTarget = {
   actions?: {
     emailDraft?: () => void;
     findEmail?: () => void;
-    shortlist?: { shortlisted: boolean; disabled: boolean; set: (shortlisted: boolean) => void };
+    shortlist?: {
+      shortlisted: boolean;
+      disabled: boolean;
+      set: (shortlisted: boolean) => Promise<boolean>;
+    };
     openEvidence?: (trigger: HTMLElement) => void;
   };
   /** The neighbouring person in the opening list, to walk it without closing the panel. */

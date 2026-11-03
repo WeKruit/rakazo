@@ -2128,6 +2128,10 @@ msgstr "업데이트하지 못했습니다."
 msgid "Could not update agent access"
 msgstr "Bot의 서버 사용 권한을 변경하지 못했습니다."
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not update shortlist. Try again."
+msgstr "후보 명단을 업데이트하지 못했습니다. 다시 시도하세요."
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not update the default memory scope"
 msgstr "기본 기억 범위를 변경하지 못했습니다."
@@ -5669,6 +5673,10 @@ msgstr "저장됨"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Saved calendar checks"
+msgstr "저장된 캘린더 확인 기록"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."

@@ -2,12 +2,13 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
 import { answerableAskMessageIds, threadTailPhase, userVisibleMessages } from "@rakazo/core";
 import { Button, cn, Textarea } from "@rakazo/ui-web";
-import { ArrowLeft, Maximize2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, Maximize2 } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LoadingState, Shimmer } from "../../components/ai/primitives";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { isRunPhase, threadTailLabel } from "../../lib/roster-status";
 import { rpc } from "../../lib/rpc";
+import { transcriptIsNearEnd } from "../../lib/transcript-scroll";
 import { errorText } from "../../lib/user-error";
 
 const MessageView = lazyPanel(() => import("../ShellMessage").then((module) => module.MessageView));
@@ -34,7 +35,7 @@ export function StackedConversation({
   onOpenFull,
 }: {
   groupId: string;
-  /** Opens at this message instead of the latest ones, until the recruiter sends. */
+  /** Opens at this message instead of the latest ones, until the recruiter sends or answers. */
   messageId?: string;
   title: string;
   /** Says what this conversation is, under the title. */
@@ -56,6 +57,9 @@ export function StackedConversation({
   const [pendingSince, setPendingSince] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const editRevision = useRef(0);
+  const following = useRef(!messageId);
+  const [atEnd, setAtEnd] = useState(!messageId);
   const scroller = useRef<HTMLDivElement>(null);
   // A message typed right after a card click goes after the click's answer.
   const answering = useRef<Promise<unknown>>(Promise.resolve());
@@ -66,6 +70,8 @@ export function StackedConversation({
     const next = await rpc.threads.get({ groupId });
     if (current.current !== groupId) return;
     setSnapshot(next);
+    const latest = new Map(next.messages.map((message) => [message.id, message]));
+    setAround((previous) => previous?.map((message) => latest.get(message.id) ?? message) ?? null);
     setLoadError(null);
     const phase = threadTailPhase(next);
     if (isRunPhase(phase)) setPendingSince(null);
@@ -104,11 +110,6 @@ export function StackedConversation({
     };
   }, [load]);
 
-  const lastId = snapshot?.messages.at(-1)?.id;
-  useEffect(() => {
-    const box = scroller.current;
-    if (box && !focused) box.scrollTop = box.scrollHeight;
-  }, [lastId, focused]);
   // Same filter as the full conversation: internal continuations and peer chatter stay hidden.
   const source = focused ? around : (snapshot?.messages ?? null);
   const shown = source && userVisibleMessages(source);
@@ -140,16 +141,30 @@ export function StackedConversation({
       : null;
   const botName = (botId: string | undefined) => bots.find((bot) => bot.id === botId)?.name;
 
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    if (box && !focused && following.current) box.scrollTop = box.scrollHeight;
+  }, [shown, focused, workingLabel]);
+
+  function jumpToLatest() {
+    following.current = true;
+    setAtEnd(true);
+    setFocused(undefined);
+    const box = scroller.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
   async function send() {
     const text = draft.trim();
     if (!text || sending) return;
+    const revision = editRevision.current;
     setSending(true);
     setActionError(null);
     try {
       await answering.current;
       await rpc.threads.send({ groupId, text });
-      setDraft("");
-      setFocused(undefined);
+      if (editRevision.current === revision) setDraft("");
+      jumpToLatest();
       setPendingSince(Date.now());
       await load().catch(noop);
     } catch (err) {
@@ -198,63 +213,87 @@ export function StackedConversation({
           <Maximize2 />
         </Button>
       </header>
-      <div ref={scroller} className="rk-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {shown === null && !error ? (
-          <p className="text-sm text-muted-foreground">
-            <Trans>Loading…</Trans>
-          </p>
-        ) : null}
-        {shown?.map((message) => (
-          <div
-            key={message.id}
-            data-message-id={message.id}
-            className={message.id === anchor ? "rounded-xl ring-2 ring-ring" : undefined}
-          >
-            <MessageView
-              artifactTarget={{ groupId }}
-              message={message}
-              canAnswer={answerable.includes(message.id)}
-              onAnswer={async (target, answer: AskAnswer, username?: string) => {
-                const answered = rpc.threads.answer({
-                  groupId,
-                  runId: target.runId ?? "",
-                  messageId: target.id,
-                  answer,
-                  ...(username ? { username } : {}),
-                });
-                answering.current = answered.catch(noop);
-                await answered;
-                setPendingSince(Date.now());
-                await load().catch(noop);
-              }}
-              onOpenBot={noop}
-              onOpenPeerMessages={noop}
-              memberName={botName}
-              peerBot={(botId) => {
-                const bot = bots.find((item) => item.id === botId);
-                return bot ? { name: bot.name, color: bot.color } : undefined;
-              }}
-              onRefresh={load}
-              onBotChanged={asyncNoop}
-              onAddRoutine={noop}
-              voiceReady={false}
-              speaking={false}
-              onSpeak={noop}
-              onOpenComputer={noop}
-              showToolActivity={false}
+      <div className="relative flex min-h-0 flex-1">
+        <div
+          ref={scroller}
+          onScroll={(event) => {
+            const nearEnd = transcriptIsNearEnd(event.currentTarget);
+            following.current = nearEnd;
+            setAtEnd(nearEnd);
+          }}
+          className="rk-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4"
+        >
+          {shown === null && !error ? (
+            <p className="text-sm text-muted-foreground">
+              <Trans>Loading…</Trans>
+            </p>
+          ) : null}
+          {shown?.map((message) => (
+            <div
+              key={message.id}
+              data-message-id={message.id}
+              className={message.id === anchor ? "rounded-xl ring-2 ring-ring" : undefined}
+            >
+              <MessageView
+                artifactTarget={{ groupId }}
+                message={message}
+                canAnswer={answerable.includes(message.id)}
+                onAnswer={async (target, answer: AskAnswer, username?: string) => {
+                  const answered = rpc.threads.answer({
+                    groupId,
+                    runId: target.runId ?? "",
+                    messageId: target.id,
+                    answer,
+                    ...(username ? { username } : {}),
+                  });
+                  answering.current = answered.catch(noop);
+                  await answered;
+                  jumpToLatest();
+                  setPendingSince(Date.now());
+                  await load().catch(noop);
+                }}
+                onOpenBot={noop}
+                onOpenPeerMessages={noop}
+                memberName={botName}
+                peerBot={(botId) => {
+                  const bot = bots.find((item) => item.id === botId);
+                  return bot ? { name: bot.name, color: bot.color } : undefined;
+                }}
+                onRefresh={load}
+                onBotChanged={asyncNoop}
+                onAddRoutine={noop}
+                voiceReady={false}
+                speaking={false}
+                onSpeak={noop}
+                onOpenComputer={noop}
+                showToolActivity={false}
+              />
+            </div>
+          ))}
+          {workingLabel && !focused ? (
+            <LoadingState
+              label={workingLabel}
+              indicator={
+                <span aria-hidden>
+                  <Shimmer>{workingLabel}</Shimmer>
+                </span>
+              }
             />
-          </div>
-        ))}
-        {workingLabel && !focused ? (
-          <LoadingState
-            label={workingLabel}
-            indicator={
-              <span aria-hidden>
-                <Shimmer>{workingLabel}</Shimmer>
-              </span>
-            }
-          />
-        ) : null}
+          ) : null}
+        </div>
+        <button
+          type="button"
+          aria-label={t`Jump to latest`}
+          aria-hidden={atEnd}
+          tabIndex={atEnd ? -1 : 0}
+          onClick={jumpToLatest}
+          className={cn(
+            "absolute bottom-4 left-1/2 z-20 grid size-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-muted/95 text-foreground/75 shadow-md",
+            atEnd && "pointer-events-none opacity-0",
+          )}
+        >
+          <ArrowDown size={17} aria-hidden="true" />
+        </button>
       </div>
       {error ? (
         <p role="alert" className="px-4 pb-2 text-sm text-destructive">
@@ -270,7 +309,10 @@ export function StackedConversation({
       >
         <Textarea
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            editRevision.current += 1;
+            setDraft(event.target.value);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
