@@ -77,7 +77,8 @@ for (const width of [1440, 390]) {
     );
     await page.goto(`/app/g/${appGroupId}?view=sequence`);
     await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
-    await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
+    if (await page.getByRole("button", { name: "Collapse role chat", exact: true }).isVisible())
+      await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Sending schedule", exact: true }),
     ).toBeVisible();

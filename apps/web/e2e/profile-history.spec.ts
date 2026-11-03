@@ -36,7 +36,8 @@ for (const width of [1440, 390]) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`/app/g/${appGroupId}?view=contacts`);
     await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
-    await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
+    if (await page.getByRole("button", { name: "Collapse role chat", exact: true }).isVisible())
+      await page.getByRole("button", { name: "Collapse role chat", exact: true }).click();
     const candidate = page
       .getByRole("row")
       .filter({ has: page.getByRole("button", { name: "Avery Example", exact: true }) });

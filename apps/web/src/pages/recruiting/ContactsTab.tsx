@@ -34,7 +34,7 @@ export type AutumnCandidateActions = {
   /** Writes are allowed only while the shown results are the validated current read. */
   ready: boolean;
   shortlistFailedKey: string | null;
-  setShortlist: (candidate: RecruitingCandidate, shortlisted: boolean) => void;
+  setShortlist: (candidate: RecruitingCandidate, shortlisted: boolean) => Promise<boolean>;
   /** Asks the role chat for a draft to approve; never sends. */
   sendEmail?: (candidate: RecruitingCandidate) => void;
   findEmail?: (candidate: RecruitingCandidate) => void;

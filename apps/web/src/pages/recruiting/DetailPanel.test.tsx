@@ -33,6 +33,7 @@ vi.mock("@lingui/react/macro", () => ({
 }));
 
 import { RecruitingChatContextProvider } from "../shell/recruiting-chat-context";
+import type { RecruitingDetailController } from "./detail";
 import {
   ContactsTab,
   RecruitingDetailPanel,
@@ -391,4 +392,50 @@ it("shows an owned contact-only profile without fabricating a role or reading ro
   expect(button(view, "Notes")).toBeUndefined();
   expect(crmData).not.toHaveBeenCalled();
   expect(recordView).not.toHaveBeenCalled();
+});
+
+it("shows shortlist success only after persistence and lets a failed change retry", async () => {
+  let finish!: (saved: boolean) => void;
+  const set = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const target = {
+    view: "contact" as const,
+    role: null,
+    crm: false,
+    person: ada,
+    actions: { shortlist: { shortlisted: false, disabled: false, set } },
+  };
+  const controller: RecruitingDetailController = {
+    stack: [target],
+    current: target,
+    open: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    close: vi.fn(),
+    pending: null,
+    restore: vi.fn(),
+  };
+  const view = await mount(
+    <RecruitingChatContextProvider value={{ setSelectedContact, setSelectedEmail: vi.fn() }}>
+      <RecruitingDetailPanel controller={controller} />
+    </RecruitingChatContextProvider>,
+  );
+  await act(async () => button(view, "Shortlist")!.click());
+  expect(button(view, "Shortlist")!.disabled).toBe(true);
+  expect(button(view, "Shortlisted")).toBeUndefined();
+  await act(async () => finish(false));
+  expect(button(view, "Shortlist")!.getAttribute("aria-pressed")).toBe("false");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not update shortlist");
+  set.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => button(view, "Shortlist")!.click());
+  expect(button(view, "Shortlist")!.getAttribute("aria-pressed")).toBe("false");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not update shortlist");
+  await act(async () => button(view, "Shortlist")!.click());
+  await act(async () => finish(true));
+  expect(button(view, "Shortlisted")!.getAttribute("aria-pressed")).toBe("true");
+  expect(view.querySelector('[role="alert"]')).toBeNull();
 });

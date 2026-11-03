@@ -2128,6 +2128,10 @@ msgstr "Güncellenemedi"
 msgid "Could not update agent access"
 msgstr "Agent erişimi güncellenemedi"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not update shortlist. Try again."
+msgstr "Kısa liste güncellenemedi. Tekrar deneyin."
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not update the default memory scope"
 msgstr "Varsayılan hafıza kapsamı güncellenemedi"
@@ -3149,7 +3153,7 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Historical totals · — Not reported"
-msgstr ""
+msgstr "Geçmiş toplamlar · — Bildirilmedi"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
@@ -5669,6 +5673,10 @@ msgstr "Kaydedildi"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Saved calendar checks"
+msgstr "Kaydedilmiş takvim kontrolleri"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."

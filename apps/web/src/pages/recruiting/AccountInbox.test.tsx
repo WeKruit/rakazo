@@ -12,7 +12,12 @@ vi.mock("@lingui/react/macro", () => ({
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
   }),
 }));
-vi.mock("../../lib/auth", () => ({ authClient: { useSession: () => ({ data: null }) } }));
+const globalInbox = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/rpc", () => ({ rpc: { recruiting: { globalInbox } } }));
+vi.mock("./MailReplyCards", () => ({ MailReplyCards: () => null }));
+vi.mock("../../lib/auth", () => ({
+  authClient: { useSession: () => ({ data: null }) },
+}));
 
 import { AccountInbox, accountInboxThreads } from "./AccountInbox";
 
@@ -326,5 +331,65 @@ it("keeps the exact requested sent original without exposing other sent-only thr
   } finally {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
+  }
+});
+
+it("keeps loaded mail readable after history paging fails and retries the same cursor", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const first = email("first", "source-one");
+  const earlier = email("earlier", "source-one");
+  globalInbox
+    .mockResolvedValueOnce({ items: [{ email: first }], nextCursor: "older" })
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce({ items: [{ email: earlier }], nextCursor: null });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <AccountInbox
+          spaceId="space"
+          roles={roles}
+          items={[item("one", [first])]}
+          pending={[]}
+          serverThreads={[
+            {
+              key: "thread",
+              roleId: "one",
+              emailId: first.id,
+              sourceId: first.sourceId,
+              organizationId: null,
+              mailbox: first.eaccount,
+              latestIncomingAt: null,
+            },
+          ]}
+          onLoadMore={vi.fn()}
+          onRetry={vi.fn()}
+          onOpenRole={vi.fn()}
+        />,
+      ),
+    );
+    const load = () =>
+      [...container.querySelectorAll("button")].find(
+        (node) => node.textContent === "Load earlier messages",
+      )!;
+    await act(async () => load().click());
+    expect(container.querySelector('[data-testid="email-conversation"]')?.textContent).toContain(
+      first.body,
+    );
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "Could not load earlier messages",
+    );
+    expect(load().disabled).toBe(false);
+    await act(async () => load().click());
+    expect(globalInbox).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "older" }));
+    expect(container.querySelector('[data-testid="email-conversation"]')?.textContent).toContain(
+      earlier.body,
+    );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+    globalInbox.mockReset();
   }
 });

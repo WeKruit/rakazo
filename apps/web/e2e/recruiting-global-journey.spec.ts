@@ -17,6 +17,10 @@ async function overview(page: Page, view = "roles") {
 }
 async function send(page: Page, text: string, mode: "enter" | "button" = "enter") {
   const composer = page.getByRole("combobox", { name: /Message/ });
+  // A role opens on its workspace with the chat closed; the recruiter opens it to type.
+  const openChat = page.getByRole("button", { name: "Open role chat", exact: true });
+  await expect(composer.or(openChat).first()).toBeVisible();
+  if (await openChat.isVisible()) await openChat.click();
   await expect(composer).toBeVisible();
   await composer.fill(text);
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();

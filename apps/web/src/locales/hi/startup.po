@@ -17,10 +17,6 @@ msgstr ""
 msgid " (unread)"
 msgstr " (अपठित)"
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "— Not reported"
-msgstr ""
-
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -900,14 +896,6 @@ msgstr "कार्ड"
 msgid "Cc"
 msgstr ""
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period is not reported"
-msgstr ""
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period: not reported"
-msgstr ""
-
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Change status"
 msgstr ""
@@ -1381,6 +1369,10 @@ msgstr ""
 msgid "Could not load contacts."
 msgstr ""
 
+#: src/pages/recruiting/AccountInbox.tsx
+msgid "Could not load earlier messages. Try again."
+msgstr "पुराने संदेश लोड नहीं हो सके। फिर से कोशिश करें।"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "इंटीग्रेशन लोड नहीं हो सके"
@@ -1815,6 +1807,7 @@ msgstr ""
 msgid "Dismiss error"
 msgstr ""
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Display columns"
 msgstr ""
@@ -2330,6 +2323,11 @@ msgstr "उच्च"
 msgid "High"
 msgstr "उच्च"
 
+#: src/pages/recruiting/AccountSequences.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Historical totals · — Not reported"
+msgstr "ऐतिहासिक कुल · — जानकारी उपलब्ध नहीं"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "How to check"
 msgstr "जांच कैसे करें"
@@ -2491,6 +2489,7 @@ msgstr ""
 msgid "Job title"
 msgstr ""
 
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Jump to latest"
 msgstr "नवीनतम संदेश पर जाएँ"
@@ -2920,6 +2919,7 @@ msgid "Name: {0}"
 msgstr ""
 
 #: src/lib/roster-status.ts
+#: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
 msgstr ""
 

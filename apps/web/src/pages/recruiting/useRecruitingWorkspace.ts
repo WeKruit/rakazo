@@ -823,7 +823,7 @@ export function useRecruitingWorkspace({
       !candidateFresh ||
       (readCache && candidateValidation.current !== readCache.epoch)
     )
-      return;
+      return false;
     const mutation = {};
     shortlistMutation.current = mutation;
     const roleGeneration = editScope.current.generation;
@@ -844,7 +844,7 @@ export function useRecruitingWorkspace({
         expectedRevision: candidate.revision,
         shortlisted,
       });
-      if (!isCurrent()) return;
+      if (!isCurrent()) return false;
       if (
         saved.roleId !== candidate.roleId ||
         saved.candidateKey !== candidate.candidateKey ||
@@ -867,11 +867,13 @@ export function useRecruitingWorkspace({
       );
       // Reuse the role-verified loader for authoritative counts after this saved change.
       setRefresh((value) => value + 1);
+      return true;
     } catch (error) {
       if (isCurrent()) {
         denyAccess(error);
         setShortlistFailed(candidate.candidateKey);
       }
+      return false;
     } finally {
       if (isCurrent()) {
         shortlistMutation.current = null;

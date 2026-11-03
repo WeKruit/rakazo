@@ -388,7 +388,7 @@ export function RecruitingEvidenceTab({
                 selectedKey: selection?.candidateKey,
                 ready: candidateFresh && shortlistPending === null,
                 shortlistFailedKey: shortlistFailed,
-                setShortlist: (candidate, shortlisted) => void setShortlist(candidate, shortlisted),
+                setShortlist: (candidate, shortlisted) => setShortlist(candidate, shortlisted),
                 sendEmail: onDiscussCandidate
                   ? (candidate) => discussCandidate(candidate, "email_draft")
                   : undefined,

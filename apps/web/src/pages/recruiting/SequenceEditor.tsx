@@ -20,12 +20,18 @@ import {
 } from "@rakazo/ui-web";
 import { ChevronDown, ChevronRight, Clock3, Mail, Plus, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { authClient } from "../../lib/auth";
 import { CampaignObservedDetails } from "./CampaignObservedDetails";
-import { clearSequenceDraftNonce, sequenceDraftNonce } from "./sequenceDraftNonce";
+import {
+  clearSequenceDraftNonce,
+  sequenceDraftEdits,
+  sequenceDraftNonce,
+} from "./sequenceDraftNonce";
 
 export type SequenceEditorProps = {
   roleId: string;
   serverId: string;
+  spaceId?: string;
   expectedCampaignId?: string;
   mode?: "new" | "edit";
   observedDetails?: RecruitingCampaignDetails;
@@ -40,6 +46,7 @@ const tokens = ["first_name", "last_name", "company_name", "personalization"];
 export function SequenceEditor({
   roleId,
   serverId,
+  spaceId,
   expectedCampaignId,
   mode = "edit",
   observedDetails,
@@ -49,6 +56,12 @@ export function SequenceEditor({
 }: SequenceEditorProps) {
   const { t } = useLingui();
   const formId = useId();
+  const userId = authClient.useSession().data?.user.id;
+  const editScope =
+    userId && spaceId
+      ? JSON.stringify([userId, spaceId, roleId, serverId, expectedCampaignId, mode])
+      : undefined;
+  const draftRevision = useRef<string | undefined>(undefined);
   const [data, setData] = useState<RecruitingSequenceOutput>();
   const [draft, setDraft] = useState<RecruitingSequenceDraft>();
   const [busy, setBusy] = useState(false);
@@ -62,7 +75,7 @@ export function SequenceEditor({
   const [composerWidth, setComposerWidth] = useState(300);
   const [confirmExit, setConfirmExit] = useState(false);
   const epoch = useRef(0);
-  const nonceScope = JSON.stringify([roleId, serverId, "create"]);
+  const nonceScope = JSON.stringify([userId, spaceId, roleId, serverId, "create"]);
   const clientNonce = useMemo(() => sequenceDraftNonce(nonceScope), [nonceScope]);
   const accept = (result: RecruitingSequenceOutput, reading = false) => {
     const campaign = reading && mode === "new" ? null : result.campaign;
@@ -74,7 +87,13 @@ export function SequenceEditor({
       timezone: campaign?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
       send_hours: campaign?.send_hours ?? "weekdays_9_to_5",
     });
-    setDirty(false);
+    draftRevision.current = campaign?.revision;
+    const edits = reading && editScope ? sequenceDraftEdits.get(editScope) : undefined;
+    if (edits) {
+      setDraft(edits.draft);
+      draftRevision.current = edits.revision;
+    }
+    setDirty(Boolean(edits));
   };
   useEffect(() => {
     const current = ++epoch.current;
@@ -108,7 +127,7 @@ export function SequenceEditor({
     return () => {
       epoch.current++;
     };
-  }, [roleId, serverId, expectedCampaignId, mode, execute]);
+  }, [roleId, serverId, expectedCampaignId, mode, execute, editScope]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -122,7 +141,14 @@ export function SequenceEditor({
   const editable =
     !mismatch && (!data?.campaign || (data.campaign.editable && Boolean(data.campaign.revision)));
   const change = (patch: Partial<RecruitingSequenceDraft>) => {
-    setDraft((value) => (value ? { ...value, ...patch } : value));
+    if (!draft) return;
+    const next = { ...draft, ...patch };
+    if (editScope)
+      sequenceDraftEdits.set(editScope, {
+        draft: next,
+        revision: draftRevision.current,
+      });
+    setDraft(next);
     setSaved(false);
     setDirty(true);
   };
@@ -143,10 +169,12 @@ export function SequenceEditor({
                 serverId,
                 campaignId: data!.campaign!.id,
                 draft,
-                expectedRevision: data!.campaign!.revision!,
+                expectedRevision: draftRevision.current!,
               }
             : { operation, roleId, serverId, campaignId: data!.campaign!.id };
       const result = await execute(input);
+      if (editScope && sequenceDraftEdits.get(editScope)?.draft === draft)
+        sequenceDraftEdits.delete(editScope);
       if (current === epoch.current) {
         accept(result);
         if (operation === "create") clearSequenceDraftNonce(nonceScope, clientNonce);
@@ -716,6 +744,7 @@ export function SequenceEditor({
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
+                if (editScope) sequenceDraftEdits.delete(editScope);
                 setConfirmExit(false);
                 onDone?.();
               }}

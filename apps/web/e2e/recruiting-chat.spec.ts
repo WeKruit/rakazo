@@ -85,7 +85,7 @@ test("run errors stay visible with a dark appearance preference", async ({ page 
   await page.goto("/app/g/group-fixture?view=feedback");
   // Recruiting has its own light token palette, independent of this preference.
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByTestId("composer-error")).toContainText("Something went wrong.");
+  await expect(page.getByTestId("composer-error")).toContainText("The reply stopped. Try again.");
   await expect(page.getByTestId("composer-error-retry")).toHaveText("Try again");
   await expect(page.getByTestId("composer-error")).toBeInViewport();
   await captureScreenshot(page, testInfo, "feedback-run-error");
@@ -172,7 +172,13 @@ test("narrow role chat resizes without losing drafts or scroll position", async 
   const fixture = await recruitingChatFixture(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/app/g/group-fixture?view=results");
+  await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Candidates", exact: true, level: 1 }),
+  ).toBeVisible();
   const chat = page.getByRole("region", { name: "Role conversation", exact: true });
+  if (!(await chat.isVisible()))
+    await page.getByRole("button", { name: "Open role chat", exact: true }).click();
   await expect(chat).toBeVisible();
   const resize = page.getByRole("separator", { name: "Resize chat", exact: true });
   await resize.focus();
