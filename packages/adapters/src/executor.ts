@@ -242,6 +242,7 @@ import {
   fillRecruitingRoleArgs,
   findDefaultModelCredential,
   findModelCredential,
+  findSameMailReply,
   getRecruitingCrmTarget,
   humanMessageInclude,
   InvalidSpaceNameError,
@@ -5807,6 +5808,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        // The request went to a role team this turn: that team owns it now.
+        let delegatedToRole = false;
         let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
@@ -9847,10 +9850,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   !Array.isArray(applied!.effect.result)
                     ? applied!.effect.result
                     : {};
-                await deps.prisma.externalEffect.updateMany({
-                  where: { id: applied!.effect.id, status: "intended" },
-                  data: { result: { ...previous, mailReplyApproval: approvalBlock.mailReply } },
+                const draft = approvalBlock.mailReply;
+                // One email gets one card: a second run drafting the same reply in this
+                // conversation reuses the card already shown instead of adding another.
+                const same = await deps.prisma.$transaction(async (tx) => {
+                  const found = await findSameMailReply(tx, {
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    effectId: applied!.effect.id,
+                    draft,
+                  });
+                  if (found) return found;
+                  await tx.externalEffect.updateMany({
+                    where: { id: applied!.effect.id, status: "intended" },
+                    data: { result: { ...previous, mailReplyApproval: draft } },
+                  });
+                  return undefined;
                 });
+                if (same) {
+                  const result = {
+                    status: same.status === "needs_approval" ? "already_drafted" : "already_sent",
+                    dispatched: false,
+                    message:
+                      same.status === "needs_approval"
+                        ? "This exact reply is already waiting on its Send card in this conversation, so no second card was made. Tell the recruiter in one line that it is ready to send there; do not draft it again."
+                        : "This exact reply was already sent from this conversation, so nothing was drafted or sent again. Tell the recruiter in one line; do not draft it again.",
+                  };
+                  return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                    ? result
+                    : uncertainEffectResult(name);
+                }
               } catch (error) {
                 const result = {
                   error: sanitizeConnectorError(error, runSecrets),
@@ -12427,6 +12456,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             );
             if (!sent.ok) return finish({ error: sent.error });
+            delegatedToRole = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: target.groupId, title: target.title },
             ]);
@@ -15169,6 +15199,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const declineRetried =
             turnReport.enabled &&
             !handedOff &&
+            !delegatedToRole &&
             !messagingChannelRun &&
             (run.trigger === "user" || run.trigger === "follow_up")
               ? await planDeclineRetry(deps, {

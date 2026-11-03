@@ -11,6 +11,8 @@
 //   title      A new role's title replaces "New role" once the JD names the role.
 //   greeting   A greeting in a role team with no role saves no role, asks no role question,
 //              and the next unrelated message starts no people search.
+//   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
+//              is discarded at the end; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
 //   dock       The corner logo follows a mouse drag at once, can be dragged again straight
 //              away, and keeps its place after a reload.
@@ -316,6 +318,62 @@ try {
         `the request sent right after the card was not answered: "${text.slice(0, 160)}"`,
       );
     await page.screenshot({ path: path.join(OUT, "aftercard.png") }).catch(() => {});
+  });
+
+  await check("onemail", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    const roleName = `${FIXTURE_MARK}Agent 工程师 5`;
+    const role = all.find((group) => group.name === roleName);
+    if (!role) return failures.push(`no ${roleName} chat on this account`);
+    // The only address real test email may go to.
+    const to = "noah-scheduling@mail.grokbot.com";
+    const mailTag = `${tag}m`;
+    const cards = async () =>
+      (await messages(role.id).catch(() => [])).flatMap((message) =>
+        (message.blocks ?? []).filter(
+          (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
+        ),
+      );
+    await rpc("threads/send", {
+      groupId: kruit.id,
+      addressing: "coordinator",
+      text: `在「${roleName}」里，回复 ${to} 那封邮件（同一个线程），正文只写：\nRegression check ${mailTag}. Test note, no action needed.\n只发给这个测试邮箱。`,
+    });
+    let found = [];
+    for (let end = Date.now() + 5 * 60_000; Date.now() < end && !found.length; await sleep(5_000))
+      found = await cards();
+    if (!found.length) return failures.push("no Send card for the reply within 5 min");
+    // The duplicate came from a second run about 1.5 min after the first card.
+    await sleep(150_000);
+    found = await cards();
+    if (found.length !== 1) failures.push(`${found.length} Send cards for one email, not 1`);
+    await page.goto(`${ORIGIN}/app/g/${role.id}`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(3_000);
+    await page.screenshot({ path: path.join(OUT, "onemail.png") }).catch(() => {});
+    // Clean up without sending: discard every card this check made.
+    for (let left = found.length; left > 0; left -= 1) {
+      const marked = await page.evaluate((mark) => {
+        for (const old of document.querySelectorAll("[data-onemail-discard]"))
+          old.removeAttribute("data-onemail-discard");
+        for (const area of document.querySelectorAll("textarea")) {
+          if (!area.value.includes(mark)) continue;
+          for (let box = area.parentElement; box; box = box.parentElement) {
+            const discard = [...box.querySelectorAll("button")].find(
+              (button) => button.textContent.trim() === "Discard" && !button.disabled,
+            );
+            if (discard) {
+              discard.setAttribute("data-onemail-discard", "1");
+              return true;
+            }
+          }
+        }
+        return false;
+      }, mailTag);
+      if (!marked) break;
+      await page.locator('[data-onemail-discard="1"]').first().click();
+      await sleep(3_000);
+    }
   });
 
   await check("title", async (page, failures) => {
