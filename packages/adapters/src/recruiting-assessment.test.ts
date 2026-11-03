@@ -853,9 +853,14 @@ describe("native saved candidate reads", () => {
   );
 
   it.each(["list", "sources"])(
-    "reports no current role for %s without inventing a page",
+    "reports no current role for %s with the open roles to name, without inventing a page",
     async (operation) => {
       const f = fixture();
+      const roles = [{ id: "role-1", title: "Data engineer" }];
+      const findRoles = vi.fn(async () => roles);
+      (f.deps.prisma as unknown as { recruitingRole: unknown }).recruitingRole = {
+        findMany: findRoles,
+      };
       db.workspace.mockResolvedValue(null);
       expect(
         await executeRecruitingCandidatesTool(
@@ -864,7 +869,21 @@ describe("native saved candidate reads", () => {
           operation === "list" ? { operation } : { operation, candidateKey: "candidate-one" },
           context,
         ),
-      ).toEqual({ status: "no_current_role" });
+      ).toEqual({
+        status: "no_current_role",
+        roles,
+        next: "Call again with the roleId of the role the recruiter named.",
+      });
+      // Only the caller's own open roles.
+      expect(findRoles).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            archivedAt: null,
+          }),
+        }),
+      );
       expect(db.candidates).not.toHaveBeenCalled();
       expect(db.sources).not.toHaveBeenCalled();
     },

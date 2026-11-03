@@ -5,7 +5,8 @@
 //   ids        Home and Contacts show no raw internal IDs ("YaUqUV" chips), supplier names or
 //              internal tool names.
 //   multi      A multi-select question card from Kruit takes several picks before it is sent.
-//   people     Kruit lists people in the LinkedIn format the role teams use.
+//   people     Kruit lists people in the LinkedIn format the role teams use, itself rather than
+//              through the role team.
 //   aftercard  A request typed right after answering a card is answered too, not skipped or
 //              called "already listed".
 //   title      A new role's title replaces "New role" once the JD names the role.
@@ -234,6 +235,11 @@ try {
       `列出「${fixtureRole.name}」这个岗位里保存的任意 3 个候选人。`,
       (items) => linked(items) >= 3,
     );
+    // Kruit reads saved people itself; handing the read to the role team is slow and often silent.
+    if (
+      replies.some((message) => message.blocks?.some((block) => block.kind === "bot_message_sent"))
+    )
+      failures.push("Kruit handed the people read to a role team instead of listing them");
     if (linked(replies) < 3)
       failures.push(
         `Kruit's answer lists ${linked(replies)} LinkedIn profiles, not 3: "${replies.map(textOf).join(" ").slice(0, 160)}"`,

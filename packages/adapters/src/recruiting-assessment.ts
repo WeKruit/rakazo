@@ -111,6 +111,23 @@ export async function executeRecruitingCandidatesTool(
     });
     authorizeMs = Math.round(performance.now() - started);
     const queryStarted = performance.now();
+    // A chat with no role of its own (Kruit) names the role by roleId. Hand back the open
+    // roles so the next call reads the right one, instead of a dead end the model routes around.
+    const noCurrentRole = async () => ({
+      status: "no_current_role" as const,
+      roles: await deps.prisma.recruitingRole.findMany({
+        where: {
+          userId: trusted.actor.userId,
+          spaceId: trusted.actor.spaceId,
+          archivedAt: null,
+          sourceThread: { OR: [{ group: { archivedAt: null } }, { bot: { archivedAt: null } }] },
+        },
+        orderBy: { id: "desc" },
+        take: 30,
+        select: { id: true, title: true },
+      }),
+      next: "Call again with the roleId of the role the recruiter named.",
+    });
     if (input.operation === "resolve") {
       const result = roleId
         ? await resolveRecruitingContact(
@@ -231,7 +248,7 @@ export async function executeRecruitingCandidatesTool(
       }
       if (!listRoleId) {
         succeeded = true;
-        return { status: "no_current_role" as const };
+        return noCurrentRole();
       }
       const result = await listRecruitingCandidates(deps.prisma, trusted.actor, {
         roleId: listRoleId,
@@ -292,7 +309,7 @@ export async function executeRecruitingCandidatesTool(
     const sourceRoleId = roleId ?? namedSourceRoleId;
     if (!sourceRoleId) {
       succeeded = true;
-      return { status: "no_current_role" as const };
+      return noCurrentRole();
     }
     if (!deps.artifacts) throw new IsolationError();
     const result = await listRecruitingCandidateSources(deps.prisma, trusted.actor, {
