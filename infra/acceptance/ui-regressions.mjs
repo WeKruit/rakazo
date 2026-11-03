@@ -350,6 +350,14 @@ try {
     await page.goto(`${ORIGIN}/app/g/${role.id}`);
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(3_000);
+    // The screenshot shows this run's card, not older ones above it.
+    await page.evaluate((mark) => {
+      const area = [...document.querySelectorAll("textarea")].find((item) =>
+        item.value.includes(mark),
+      );
+      area?.scrollIntoView({ block: "center" });
+    }, mailTag);
+    await sleep(1_000);
     await page.screenshot({ path: path.join(OUT, "onemail.png") }).catch(() => {});
     // Clean up without sending: discard every card this check made.
     for (let left = found.length; left > 0; left -= 1) {
