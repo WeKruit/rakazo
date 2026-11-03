@@ -168,6 +168,7 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
+  recruiterLanguageText,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
@@ -13711,32 +13712,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // sits next to their message, where it holds.
         // History is newest first, so the first user row is the recruiter's latest message (a
         // teammate's message also arrives as a user row, and is skipped).
-        const lastRecruiterBlocks = messages.find(
-          (message) =>
-            message.role === "user" &&
-            !(
-              Array.isArray(message.blocks) &&
-              message.blocks.some(
-                (block) =>
-                  block &&
-                  typeof block === "object" &&
-                  "kind" in block &&
-                  block.kind === "bot_message_received",
-              )
-            ),
-        )?.blocks;
-        const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
-          ? lastRecruiterBlocks
-              .map((block) =>
-                block &&
-                typeof block === "object" &&
-                "text" in block &&
-                typeof block.text === "string"
-                  ? block.text
-                  : "",
-              )
-              .join(" ")
-          : "";
+        const recruiterTexts = messages
+          .filter(
+            (message) =>
+              message.role === "user" &&
+              !(
+                Array.isArray(message.blocks) &&
+                message.blocks.some(
+                  (block) =>
+                    block &&
+                    typeof block === "object" &&
+                    "kind" in block &&
+                    block.kind === "bot_message_received",
+                )
+              ),
+          )
+          .map((message) =>
+            Array.isArray(message.blocks)
+              ? message.blocks
+                  .map((block) =>
+                    block &&
+                    typeof block === "object" &&
+                    "text" in block &&
+                    typeof block.text === "string"
+                      ? block.text
+                      : "",
+                  )
+                  .join(" ")
+              : "",
+          );
+        const lastRecruiterText = recruiterLanguageText(recruiterTexts);
         const languageNote = !hideVendors
           ? undefined
           : isChineseText(lastRecruiterText)

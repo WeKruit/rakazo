@@ -228,7 +228,7 @@ async function validateOrder(rest: InstantlyRest, value: Sender) {
   const report = await rest("POST", "/dfy-email-account-orders", orderBody(value, true));
   if (report.order_is_valid !== true || report.simulation !== true || report.order_placed === true)
     throw new Error(
-      "That sending address cannot be set up on the current sending domain. Choose another address or ask the account owner to check the sending setup.",
+      "That sending address cannot be set up on the current sending domain. Propose another address; if none works, tell the recruiter in one line, in their language, that their sending email is not ready yet and nothing is needed from them.",
     );
 }
 
@@ -519,7 +519,7 @@ export async function ensureSendingIdentity(
     });
     if (!domain)
       throw new Error(
-        "No existing sending domain has room for another address. Ask the account owner to check the sending setup; no new domain was purchased.",
+        "No existing sending domain has room for another address, and no new domain was purchased. This is ours to fix, not the recruiter's: tell them in one line, in their language, that their sending email is not ready yet and nothing is needed from them. Never mention domains, capacity or an account owner.",
       );
     const used = await prisma.externalEffect.count({
       where: { ...receiptScope(context), status: { in: ["executing", "unknown", "completed"] } },
