@@ -16,6 +16,7 @@ import type {
   ComputerRef,
   ConnectorCall,
   ConnectorProvider,
+  ConnectorRoute,
   ConnectorTool,
   JobPublisher,
   ManagedConnectorProvider,
@@ -441,6 +442,7 @@ import { loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
+import { EMAIL_ATTACHMENTS_NOTE, saveEmailAttachments } from "./email-attachments.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -12991,7 +12993,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 durationMs: Math.round(performance.now() - saveStartedAt),
                 people: Array.isArray(saved.people) ? saved.people.length : 0,
               });
-            const returned = saved ?? finished;
+            const returned = await withEmailAttachments(
+              saved ?? finished,
+              result,
+              connectorCall.route,
+            );
             const note =
               countdown ??
               workNote ??
@@ -13001,6 +13007,48 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return note ? withWorkNote(returned, note) : returned;
           }
           return finish({ error: `unknown tool ${name}` });
+        };
+        // A candidate's email read by the agent keeps its attachments as saved files it can read.
+        const withEmailAttachments = async (
+          returned: unknown,
+          raw: unknown,
+          route: ConnectorRoute | undefined,
+        ) => {
+          if (
+            !deps.artifacts ||
+            route?.connectorId !== "mcp" ||
+            !route.resourceId ||
+            (route.toolName !== "get_email" && route.toolName !== "native_instantly_get_email") ||
+            !returned ||
+            typeof returned !== "object" ||
+            Array.isArray(returned)
+          )
+            return returned;
+          const email = readInstantlyEmail(mcpObject(raw) ?? raw);
+          if (!email?.attachment_json?.files.length) return returned;
+          const attachments = await saveEmailAttachments(
+            { prisma: deps.prisma, artifacts: deps.artifacts },
+            {
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              groupId: thread.groupId,
+              runId: run.id,
+              sourceId: route.resourceId,
+            },
+            email,
+            { download: true, signal: context.signal },
+          ).catch(() => []);
+          return attachments.length
+            ? {
+                ...(returned as Record<string, unknown>),
+                savedAttachments: attachments.map(({ id, ...file }) => ({
+                  artifactId: id,
+                  ...file,
+                })),
+                savedAttachmentsNote: EMAIL_ATTACHMENTS_NOTE,
+              }
+            : returned;
         };
         // A role save still running when a question card pauses the turn would lose its lease and be
         // refused; the card waits for it instead.

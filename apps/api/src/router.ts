@@ -4177,6 +4177,7 @@ export function createRouter(deps: RouterDeps) {
             connectors: deps.connectors,
             jobs: deps.jobs,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            artifacts: deps.artifacts,
             signal: context.signal,
             stillAuthorized: context.stillAuthorized,
             reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
