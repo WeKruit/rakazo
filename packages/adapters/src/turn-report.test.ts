@@ -38,6 +38,13 @@ describe("turnWork", () => {
     expect(
       turnWork("connectors_execute_tool", { id: "srv:native_instantly_list_emails" }, wrote),
     ).toBeUndefined();
+    // Checking the sending email reads it; only propose or confirm can change anything.
+    expect(
+      turnWork("instantly__mail__ensure_sender", { operation: "read" }, wrote),
+    ).toBeUndefined();
+    expect(turnWork("instantly__mail__ensure_sender", { operation: "confirm" }, wrote)).toBe(
+      "connected",
+    );
     expect(turnWork("connectors_execute_tool", { id: "srv:create_booking" }, wrote)).toBe(
       "scheduling",
     );
