@@ -15,6 +15,8 @@
 //   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
 //              is discarded at the end; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
+//   twochats   Kruit with no role open shows one chat; a role's chat shows Kruit beside it, and
+//              each pane says which conversation it is. Read-only.
 //   dock       The corner logo follows a mouse drag at once, can be dragged again straight
 //              away, and keeps its place after a reload.
 //
@@ -298,9 +300,13 @@ try {
       if (!response.url().includes("/rpc/threads/answer")) return;
       answerCalls.push(response.status());
       if (response.status() !== 200)
-        void response.text().then((body) =>
-          console.log(`  answer ${response.status()}: ${response.request().postData()} -> ${body}`),
-        );
+        void response
+          .text()
+          .then((body) =>
+            console.log(
+              `  answer ${response.status()}: ${response.request().postData()} -> ${body}`,
+            ),
+          );
     });
     await dallas.click();
     // Once the answer is in; a message sent before it would answer the card instead.
@@ -355,12 +361,23 @@ try {
     // The only address real test email may go to.
     const to = "noah-scheduling@mail.grokbot.com";
     const mailTag = `${tag}m`;
-    const cards = async () =>
-      (await messages(role.id).catch(() => [])).flatMap((message) =>
+    const tagged = (items) =>
+      items.flatMap((message) =>
         (message.blocks ?? []).filter(
           (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
         ),
       );
+    const cards = async () => tagged(await messages(role.id).catch(() => []));
+    // A read that fails while staging restarts is not zero cards: wait for the chat to answer.
+    const recount = async () => {
+      for (let end = Date.now() + 3 * 60_000; ; await sleep(10_000)) {
+        try {
+          return tagged(await messages(role.id));
+        } catch (error) {
+          if (Date.now() > end) throw new Error(`could not read the role chat: ${error.message}`);
+        }
+      }
+    };
     await rpc("threads/send", {
       groupId: kruit.id,
       addressing: "coordinator",
@@ -372,9 +389,20 @@ try {
     if (!found.length) return failures.push("no Send card for the reply within 5 min");
     // The duplicate came from a second run about 1.5 min after the first card.
     await sleep(150_000);
-    found = await cards();
+    found = await recount();
     if (found.length !== 1) failures.push(`${found.length} Send cards for one email, not 1`);
-    await page.goto(`${ORIGIN}/app/g/${role.id}`);
+    for (let attempt = 0; attempt < 12; attempt += 1, await sleep(10_000)) {
+      await page.goto(`${ORIGIN}/app/g/${role.id}`).catch(() => {});
+      if (
+        !/no upstreams available/.test(
+          await page
+            .locator("body")
+            .innerText()
+            .catch(() => ""),
+        )
+      )
+        break;
+    }
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(3_000);
     // The screenshot shows this run's card, not older ones above it.
@@ -409,6 +437,36 @@ try {
       await page.locator('[data-onemail-discard="1"]').first().click();
       await sleep(3_000);
     }
+  });
+
+  await check("twochats", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    if (!fixtureRole) return failures.push("no 测试固定 role chat on this account");
+    const docked = page.locator("section[data-docked-conversation]");
+    await page.goto(`${ORIGIN}/app/g/${kruit.id}?view=conversation`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(2_000);
+    if (await docked.count()) failures.push("Kruit with no role open shows a second chat");
+    await page.screenshot({ path: path.join(OUT, "twochats-kruit.png") }).catch(() => {});
+    await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}?view=conversation`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(3_000);
+    if (!(await docked.isVisible())) failures.push("a role's chat shows no Kruit chat beside it");
+    else {
+      const label = (await docked.locator("header").innerText()).replace(/\s+/g, " ");
+      if (!/Kruit/.test(label) || !/(All roles|全部岗位)/.test(label))
+        failures.push(`the Kruit pane is not labelled Kruit · All roles: "${label}"`);
+    }
+    const roleHeader = (await page.locator("main .hire-pane-header").first().innerText()).replace(
+      /\s+/g,
+      " ",
+    );
+    if (
+      !/(Role conversation|岗位对话)/.test(roleHeader) ||
+      !roleHeader.includes(fixtureRole.name.slice(0, 8))
+    )
+      failures.push(`the role chat is not labelled with its role: "${roleHeader.slice(0, 120)}"`);
+    await page.screenshot({ path: path.join(OUT, "twochats-role.png") }).catch(() => {});
   });
 
   await check("title", async (page, failures) => {

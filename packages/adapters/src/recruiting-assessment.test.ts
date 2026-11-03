@@ -730,6 +730,21 @@ describe("native saved candidate reads", () => {
     },
   );
 
+  it("tells the agent to list without the query when a filtered list matches no one", async () => {
+    const f = fixture();
+    db.candidates.mockResolvedValue({ roleId: "role", items: [], total: 0, nextCursor: null });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list", query: "Data Engineer 6", limit: 3 },
+      context,
+    );
+    expect(result).toMatchObject({
+      items: [],
+      next: "No saved person matched this query. To list the role's people, call again without query.",
+    });
+  });
+
   it("shows each listed person's email saved by an earlier contact lookup", async () => {
     const f = fixture();
     const linkedinUrl = "https://www.linkedin.com/in/example-person";
