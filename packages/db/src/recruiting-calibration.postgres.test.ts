@@ -317,4 +317,67 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("counts the recruiter's latest verdict per person for each round", async () => {
+    let n = 0;
+    const verdict = (candidateKeys: string[], fit: string, at: Date, status = "recorded") =>
+      prisma.externalEffect.create({
+        data: {
+          spaceId,
+          runId,
+          kind: "recruiting_feedback",
+          idempotencyKey: `verdict:${suffix}:${n++}`,
+          status: "completed",
+          createdAt: at,
+          request: { target: "candidate", operation: "review", roleId, candidateKeys, fit },
+          result: { status },
+        },
+      });
+    const minute = (offset: number) => new Date(Date.UTC(2026, 10, 3, 12, offset));
+    await verdict(["first-0", "first-1", "first-2"], "not_fit", minute(0));
+    await verdict(["first-3"], "good_example", minute(1));
+    // A later word on the same person replaces the earlier one.
+    await verdict(["first-2"], "good_example", minute(2));
+    // Nothing saved is never counted.
+    await verdict(["first-4"], "good_example", minute(3), "needs_clarification");
+    // The feedback form on a person outside any round.
+    const role = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } });
+    await prisma.message.create({
+      data: {
+        threadId,
+        seq: ++messageSeq,
+        role: "user",
+        createdAt: minute(4),
+        blocks: [
+          {
+            kind: "text",
+            text: "Candidate feedback: Not a fit",
+            recruitingFeedback: {
+              roleId,
+              roleRevisionId: role.currentRevisionId,
+              expectedRoleRevision: 1,
+              candidateKeys: ["spare-0", "second-0"],
+              choice: "not_fit",
+            },
+          },
+        ],
+      },
+    });
+    const quality = await recruiting.readRecruitingSearchQuality(prisma, actor, { roleId });
+    expect(quality.rounds[0]).toEqual({
+      round: 1,
+      shown: 10,
+      goodExample: 2,
+      notFit: 2,
+      accepted: true,
+    });
+    expect(quality).toMatchObject({ goodExample: 2, notFit: 4 });
+    await expect(
+      recruiting.readRecruitingSearchQuality(
+        prisma,
+        { ...actor, userId: `someone-else-${suffix}` },
+        { roleId },
+      ),
+    ).rejects.toThrow(recruiting.IsolationError);
+  });
 });

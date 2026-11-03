@@ -42,6 +42,7 @@ const api = vi.hoisted(() => ({
   listAssessments: vi.fn(),
   listCandidates: vi.fn(),
   listFeedback: vi.fn(),
+  searchQuality: vi.fn(),
   listCandidateSources: vi.fn(),
   setCandidateShortlist: vi.fn(),
   getAssessment: vi.fn(),
@@ -1530,6 +1531,7 @@ beforeEach(() => {
     partial: false,
   });
   api.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
+  api.searchQuality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
   api.readSource.mockRejectedValue(new Error("Source unavailable"));
   api.listAssessments.mockResolvedValue([assessment]);
   api.listCandidates.mockImplementation(async ({ roleId }: { roleId: string }) => {
@@ -2216,6 +2218,50 @@ it("keeps feedback summaries scoped to the current role and ignores a late previ
   expect(view.container.textContent).not.toContain("Small teams");
   expect(api.answer).not.toHaveBeenCalled();
   expect(api.editCriteria).not.toHaveBeenCalled();
+});
+
+it("shows how the recruiter judged each round and labels feedback saved from chat", async () => {
+  api.searchQuality.mockResolvedValue({
+    rounds: [
+      { round: 1, shown: 10, goodExample: 2, notFit: 6, accepted: false },
+      { round: 2, shown: 10, goodExample: 0, notFit: 0, accepted: false },
+    ],
+    goodExample: 2,
+    notFit: 6,
+  });
+  api.listFeedback.mockResolvedValue({
+    feedback: [
+      {
+        id: "chat-feedback",
+        createdAt: "2026-11-03T12:00:00Z",
+        roleRevisionId: "revision",
+        feedback: {
+          target: "candidate",
+          operation: "review",
+          fit: "not_fit",
+          roleId: role.id,
+          expectedRoleRevision: 1,
+          candidateKeys: ["candidate"],
+          summary: "Too senior",
+          intent: { basis: "direct", quote: "Too senior" },
+          sourceRefs: [],
+        },
+        source: { quote: "Too senior" },
+      },
+    ],
+    nextCursor: null,
+  });
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    summary: "feedback",
+  });
+  await act(async () => undefined);
+  expect(api.searchQuality).toHaveBeenCalledWith({ roleId: role.id });
+  const rounds = view.container.querySelectorAll(".hire-candidate-feedback-history li");
+  expect([...rounds].map((item) => item.textContent)).toEqual([
+    "Round 1 · 2 good examples · 6 not a fit",
+  ]);
+  expect(view.container.textContent).toContain("Not a fit · ");
 });
 
 async function changeStatement(container: HTMLElement, statement: string, index = 0) {
