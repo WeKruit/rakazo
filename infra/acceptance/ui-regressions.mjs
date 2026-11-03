@@ -276,6 +276,9 @@ try {
       await rpc("threads/stop", { groupId: kruit.id, scope: "all" }).catch(() => {});
       return failures.push("the question card did not show on the page within 30 s");
     }
+    // Kruit has no role: opening it shows the conversation, not an empty role page.
+    if (await page.getByText("No role linked", { exact: true }).isVisible())
+      failures.push('opening Kruit shows "No role linked"');
     const composer = page.locator('fieldset[aria-label="Message composer"] textarea').first();
     await composer.waitFor({ timeout: 20_000 });
     // The request goes in while the card answer's reply is still being written.
@@ -284,6 +287,11 @@ try {
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(2_000);
     const lastSeq = Math.max(0, ...(await messages(kruit.id)).map((message) => message.seq));
+    // A slow answer call, as right after a deploy: the typed request must still go after it.
+    await page.route("**/rpc/threads/answer", async (route) => {
+      await sleep(3_000);
+      await route.continue();
+    });
     // Whether the click reached the server, and how it answered.
     const answerCalls = [];
     page.on("response", (response) => {
