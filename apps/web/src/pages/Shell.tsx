@@ -142,7 +142,10 @@ export function ShellPage() {
     accountParams.get("view") === "inbox";
   const { t } = useLingui();
   // A waiting conversation opened from the corner, stacked over the current page.
-  const [stacked, setStacked] = useState<{ groupId: string; messageId?: string } | null>(null);
+  const [stacked, setStacked] = useState<{
+    groupId: string;
+    messageId?: string;
+  } | null>(null);
   const openStacked = useCallback(
     (groupId: string, messageId?: string) =>
       setStacked(messageId ? { groupId, messageId } : { groupId }),
@@ -227,6 +230,14 @@ export function ShellPage() {
     roleCreationError,
   } = model;
   const stackedGroup = stacked ? groups.find((group) => group.id === stacked.groupId) : undefined;
+  // A role's chat shows Kruit beside it, so both conversations stay in reach and labelled.
+  const kruitBesideRole =
+    !showToolActivity &&
+    model.recruitingWorkspaceView === "conversation" &&
+    model.groupId &&
+    !model.groupId.startsWith("recruiting-global-")
+      ? groups.find((group) => group.id.startsWith("recruiting-global-"))
+      : undefined;
   // A link to a moment in another conversation, as Kruit cites it, opens stacked from the right.
   useEffect(() => {
     function openLinkedConversation(event: MouseEvent) {
@@ -301,8 +312,11 @@ export function ShellPage() {
   };
 
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
-  const renderCorrespondence = (page?:RecruitingAccountViewOutput["items"][number]) =>
-    knownThreadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
+  const renderCorrespondence = (
+    page?: RecruitingAccountViewOutput["items"][number],
+  ) =>
+    knownThreadId &&
+    ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
       <RecruitingCorrespondence
         view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
         page={page}
@@ -311,7 +325,9 @@ export function ShellPage() {
         threadId={knownThreadId}
         onEmailSelection={selectCorrespondence}
         onReviewSchedulingPlan={reviewSchedulingPlan}
-        outreachBotIds={(activeSnapshot?.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+        outreachBotIds={(activeSnapshot?.members ?? [])
+          .filter((member) => member.name === "Outreach")
+          .map((member) => member.botId)}
         onConversation={(text) => {
           openRoleChat(text);
         }}
@@ -566,13 +582,29 @@ export function ShellPage() {
       ) : accountView ? (
         accountPage
       ) : (
-        <ShellConversation
-          reviewSchedulingPlan={reviewSchedulingPlan}
-          model={model}
-          roleCreationForm={roleCreationForm}
-          nativeCorrespondence={renderCorrespondence()}
-          primaryPage={roleCorrespondencePage ? accountPage : undefined}
-        />
+        <>
+          {kruitBesideRole ? (
+            <StackedConversation
+              key={kruitBesideRole.id}
+              docked
+              groupId={kruitBesideRole.id}
+              title={RECRUITING_GLOBAL_AGENT_NAME}
+              subtitle={t`All roles`}
+              bots={bots}
+              onBack={() => undefined}
+              onOpenFull={() =>
+                navigate(`/app/g/${encodeURIComponent(kruitBesideRole.id)}?view=conversation`)
+              }
+            />
+          ) : null}
+          <ShellConversation
+            reviewSchedulingPlan={reviewSchedulingPlan}
+            model={model}
+            roleCreationForm={roleCreationForm}
+            nativeCorrespondence={renderCorrespondence()}
+            primaryPage={roleCorrespondencePage ? accountPage : undefined}
+          />
+        </>
       )}
 
       {model.call ? (

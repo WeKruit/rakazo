@@ -125,3 +125,34 @@ it("shows the answer being worked on and clears a failed refresh on the next goo
   expect(host.textContent).toContain("Thinking");
   vi.useRealTimers();
 });
+
+it("docks as a labelled pane with no Back, and Escape leaves it open", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  api.get.mockResolvedValue(snapshot);
+  host = document.createElement("div");
+  document.body.append(host);
+  const onBack = vi.fn();
+  await act(async () =>
+    createRoot(host!).render(
+      <StackedConversation
+        docked
+        groupId="global"
+        title="Kruit"
+        subtitle="All roles"
+        bots={[]}
+        onBack={onBack}
+        onOpenFull={vi.fn()}
+      />,
+    ),
+  );
+  const pane = host.querySelector<HTMLElement>("section[data-docked-conversation]")!;
+  expect(pane.getAttribute("aria-label")).toBe("Kruit");
+  expect(pane.className).not.toContain("fixed");
+  expect(pane.querySelector("h2")!.textContent).toBe("Kruit");
+  expect(pane.textContent).toContain("All roles");
+  expect([...pane.querySelectorAll("button")].some((b) => b.textContent === "Back")).toBe(false);
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  });
+  expect(onBack).not.toHaveBeenCalled();
+});
