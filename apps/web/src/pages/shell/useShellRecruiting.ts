@@ -185,7 +185,7 @@ export function useShellRecruiting({
   const recruitingWorkspaceView: RecruitingWorkspaceView =
     requestedWorkspaceView && workspaceViews.includes(requestedWorkspaceView)
       ? requestedWorkspaceView
-      : inGroup
+      : inGroup && !groupId?.startsWith("recruiting-global-")
         ? "results"
         : "conversation";
   const workspaceNewRole = !showToolActivity && panel === "create-group";
