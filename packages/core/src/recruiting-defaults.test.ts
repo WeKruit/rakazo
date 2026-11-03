@@ -11,6 +11,7 @@ import {
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
 } from "./recruiting-defaults.js";
 
@@ -105,5 +106,23 @@ describe("isEnglishText", () => {
     expect(isEnglishText("Book Adam Test for Nov 3 at 2pm Central")).toBe(true);
     expect(isEnglishText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(false);
     expect(isEnglishText("Adam Test")).toBe(false);
+  });
+});
+
+describe("recruiterLanguageText", () => {
+  it("keeps the conversation's language for a short answer such as a company name", () => {
+    expect(recruiterLanguageText(["Acme Test Co", "我想开始给候选人发邮件"])).toBe(
+      "我想开始给候选人发邮件",
+    );
+  });
+
+  it("follows a recruiter who switches to an English sentence", () => {
+    const english = "Please write the rest of this in English for me";
+    expect(recruiterLanguageText([english, "我想开始给候选人发邮件"])).toBe(english);
+  });
+
+  it("falls back to the latest message when none has a clear language", () => {
+    expect(recruiterLanguageText(["OK"])).toBe("OK");
+    expect(recruiterLanguageText([])).toBe("");
   });
 });

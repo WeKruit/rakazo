@@ -48,7 +48,7 @@ type Row = {
   run: { userId: string; spaceId: string };
   spaceId: string;
 };
-function fixture(limit = 2) {
+function fixture(limit = 2, senderSelfSetup = true) {
   const rows: Row[] = [];
   const observed = [
     {
@@ -123,7 +123,9 @@ function fixture(limit = 2) {
   };
   const fake = {
     externalEffect: effect,
-    deploymentSettings: { findUnique: vi.fn(async () => ({ sendingMailboxLimit: limit })) },
+    deploymentSettings: {
+      findUnique: vi.fn(async () => ({ sendingMailboxLimit: limit, senderSelfSetup })),
+    },
     run: {
       findFirst: vi.fn(async ({ where }: any) => ({
         id: where.id,
@@ -618,4 +620,28 @@ it("refuses a legacy sender shared with another owner before altering its displa
   ).rejects.toThrow("not exclusively owned");
   expect(f.rest).not.toHaveBeenCalled();
   expect(f.orders()).toBe(0);
+});
+
+it("never lets a recruiter set up or buy a sender unless the deployment allows self setup", async () => {
+  const f = fixture(2, false);
+  expect(
+    await ensureSendingIdentity(f.prisma, f.rest, context, "source", { operation: "read" }),
+  ).toMatchObject({ senders: [], selfSetup: false });
+  await expect(
+    ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+      operation: "propose",
+      display_name: "Acme",
+    }),
+  ).rejects.toThrow("cannot email candidates yet");
+  approve("chosen@product.test");
+  await expect(
+    ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+      operation: "confirm",
+      email: "chosen@product.test",
+      display_name: "Acme",
+    }),
+  ).rejects.toThrow("cannot email candidates yet");
+  expect(f.rest).not.toHaveBeenCalled();
+  expect(f.orders()).toBe(0);
+  expect(f.rows).toHaveLength(0);
 });

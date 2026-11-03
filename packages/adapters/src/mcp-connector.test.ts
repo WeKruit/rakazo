@@ -192,6 +192,8 @@ describe("local native Instantly thread history", () => {
       afterRest: () => {},
     };
     const prisma = {
+      // The conversation's recent human messages and handed-over briefs.
+      message: { findMany: vi.fn(async (_args?: unknown) => [] as unknown[]) },
       botMcpServer: {
         findMany: vi.fn(async () => (state.available ? [assignment] : [])),
         findFirst: vi.fn(async ({ where }) =>
@@ -574,6 +576,53 @@ describe("local native Instantly thread history", () => {
       expect(
         await f.collect({ email: "sumeetparekh1@gmail.com", name: "sumeet" }, contactRoute, run),
       ).toMatchObject([{ type: "result" }]);
+      // An address the recruiter typed (here in a teammate's brief quoting them) is not a guess,
+      // even with no saved contact behind it.
+      const row = (threadId: string, block: Record<string, unknown>) => ({
+        threadId,
+        thread: { spaceId: "space-1" },
+        blocks: [block],
+      });
+      f.prisma.message.findMany.mockResolvedValue([
+        row("role-thread", {
+          kind: "bot_message_received",
+          text: "在「测试固定 · Agent 工程师 5」里，回复 Noah-Test@Example.test 那封邮件",
+        }),
+      ] as never);
+      expect(
+        await f.collect({ email: "noah-test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "result" }]);
+      expect(
+        await f.collect({ email: "noah.test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "error", message: expect.stringMatching(/No stored email/) }]);
+      // A brief that paraphrased the address away: the recruiter typed it in the conversation
+      // that delegated the work, in the same account.
+      f.prisma.message.findMany.mockImplementation((async (args: {
+        where: { threadId?: { in: string[] }; thread?: { spaceId?: string } };
+      }) =>
+        !args.where.threadId
+          ? [
+              row("role-thread", {
+                kind: "bot_message_received",
+                text: "Goal: 核对指定测试邮箱的原始邮件",
+                returnThreadId: "kruit-thread",
+              }),
+            ]
+          : args.where.threadId.in.includes("kruit-thread") &&
+              args.where.thread?.spaceId === "space-1"
+            ? [
+                row("kruit-thread", {
+                  kind: "text",
+                  text: "回复 noah-test@example.test 那封邮件（同一个线程）",
+                }),
+              ]
+            : []) as never);
+      expect(
+        await f.collect({ email: "noah-test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "result" }]);
+      expect(
+        await f.collect({ email: "noah.test@example.test", name: "Noah" }, contactRoute, run),
+      ).toMatchObject([{ type: "error", message: expect.stringMatching(/No stored email/) }]);
     } finally {
       await f.connector.close();
     }
