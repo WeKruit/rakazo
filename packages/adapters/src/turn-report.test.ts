@@ -42,6 +42,14 @@ describe("turnWork", () => {
     expect(
       turnWork("instantly__mail__ensure_sender", { operation: "read" }, wrote),
     ).toBeUndefined();
+    // Through the catalog the operation is nested in the call's arguments.
+    expect(
+      turnWork(
+        "connectors_execute_tool",
+        { id: "srv:native_instantly_ensure_sender", arguments: { operation: "read" } },
+        wrote,
+      ),
+    ).toBeUndefined();
     expect(turnWork("instantly__mail__ensure_sender", { operation: "confirm" }, wrote)).toBe(
       "connected",
     );
