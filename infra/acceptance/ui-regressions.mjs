@@ -361,12 +361,23 @@ try {
     // The only address real test email may go to.
     const to = "noah-scheduling@mail.grokbot.com";
     const mailTag = `${tag}m`;
-    const cards = async () =>
-      (await messages(role.id).catch(() => [])).flatMap((message) =>
+    const tagged = (items) =>
+      items.flatMap((message) =>
         (message.blocks ?? []).filter(
           (block) => block.kind === "ask" && block.mailReply?.body?.includes(mailTag),
         ),
       );
+    const cards = async () => tagged(await messages(role.id).catch(() => []));
+    // A read that fails while staging restarts is not zero cards: wait for the chat to answer.
+    const recount = async () => {
+      for (let end = Date.now() + 3 * 60_000; ; await sleep(10_000)) {
+        try {
+          return tagged(await messages(role.id));
+        } catch (error) {
+          if (Date.now() > end) throw new Error(`could not read the role chat: ${error.message}`);
+        }
+      }
+    };
     await rpc("threads/send", {
       groupId: kruit.id,
       addressing: "coordinator",
@@ -378,9 +389,20 @@ try {
     if (!found.length) return failures.push("no Send card for the reply within 5 min");
     // The duplicate came from a second run about 1.5 min after the first card.
     await sleep(150_000);
-    found = await cards();
+    found = await recount();
     if (found.length !== 1) failures.push(`${found.length} Send cards for one email, not 1`);
-    await page.goto(`${ORIGIN}/app/g/${role.id}`);
+    for (let attempt = 0; attempt < 12; attempt += 1, await sleep(10_000)) {
+      await page.goto(`${ORIGIN}/app/g/${role.id}`).catch(() => {});
+      if (
+        !/no upstreams available/.test(
+          await page
+            .locator("body")
+            .innerText()
+            .catch(() => ""),
+        )
+      )
+        break;
+    }
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(3_000);
     // The screenshot shows this run's card, not older ones above it.
