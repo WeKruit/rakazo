@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
@@ -79,7 +79,12 @@ export async function createPublicWebServer(options: {
     ).catch(() => null);
     if (resolved && resolved !== root && !resolved.startsWith(`${root}${path.sep}`))
       return c.notFound();
-    c.header("cache-control", "no-cache");
+    // Build assets carry a content hash in their name, so a cached copy never goes stale; the
+    // CDN and browser can serve them without asking this container again.
+    c.header(
+      "cache-control",
+      pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+    );
     if (pathname === HTML_PREVIEW_PATH)
       c.header("content-security-policy", "frame-ancestors 'self'; sandbox allow-scripts");
     await next();
@@ -94,6 +99,17 @@ export async function createPublicWebServer(options: {
       return c.notFound();
     return sendPage(c);
   });
+  // A new container reads its image files lazily, so the first read of each bundle chunk is slow
+  // and Home loads chunk after chunk. Read the build once in the background right away.
+  const warmStarted = performance.now();
+  void warmFiles(root).then(
+    (files) =>
+      options.logger.info("public web warmed", {
+        files,
+        ms: Math.round(performance.now() - warmStarted),
+      }),
+    () => undefined,
+  );
   const listener = getRequestListener(app.fetch);
   const server = createServer();
   if (options.screen) {
@@ -129,6 +145,21 @@ export async function createPublicWebServer(options: {
     server.on("upgrade", (_req, socket) => socket.destroy());
   }
   return server;
+}
+
+/** Read every regular file under root, a few at a time; returns how many were read. */
+export async function warmFiles(root: string): Promise<number> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath, entry.name));
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: 8 }, async () => {
+      while (next < files.length) await readFile(files[next++]!).catch(() => undefined);
+    }),
+  );
+  return files.length;
 }
 
 /**
