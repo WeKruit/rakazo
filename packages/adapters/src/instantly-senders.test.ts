@@ -668,6 +668,12 @@ it("asks no company name until the turn read the sending email", () => {
       operation: "read",
     }),
   ).toBe(true);
+  expect(
+    isSenderRead("connectors_execute_tool", {
+      id: "srv:native_instantly_ensure_sender",
+      arguments: { operation: "read" },
+    }),
+  ).toBe(true);
   expect(isSenderRead("instantly__mail__ensure_sender", { operation: "propose" })).toBe(false);
   const description = nativeInstantlyWrites.find(
     (tool) => tool.name === "ensure_sender",

@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError, Prisma as Sql } from "@rakazo/db";
 import { z } from "zod";
 import type { InstantlyRest } from "./instantly-native-writes.js";
+import { toolOperation } from "./turn-report.js";
 
 const DisplayName = z
   .string()
@@ -45,8 +46,9 @@ type Sender = {
 };
 /** A call that reads this account's sending email, by tool name or catalog id. */
 export function isSenderRead(name: string, args: Record<string, unknown>): boolean {
-  const target = name === "connectors_execute_tool" ? String(args.id ?? "") : name;
-  return /ensure_sender$/.test(target) && args.operation === "read";
+  const catalog = name === "connectors_execute_tool" || name === "mcp_execute_tool";
+  const target = catalog ? String(args.id ?? "") : name;
+  return /ensure_sender$/.test(target) && toolOperation(args) === "read";
 }
 
 /** A question asking which company name candidates should see, which only sender setup asks. */
