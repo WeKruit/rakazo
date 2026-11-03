@@ -15,6 +15,8 @@
 //   onemail    One request to Kruit for an email reply shows one Send card, not two. The card
 //              is discarded at the end; nothing is sent.
 //   reminder   The corner reminder never covers the composer in a role chat.
+//   twochats   Kruit with no role open shows one chat; a role's chat shows Kruit beside it, and
+//              each pane says which conversation it is. Read-only.
 //   dock       The corner logo follows a mouse drag at once, can be dragged again straight
 //              away, and keeps its place after a reload.
 //
@@ -298,9 +300,13 @@ try {
       if (!response.url().includes("/rpc/threads/answer")) return;
       answerCalls.push(response.status());
       if (response.status() !== 200)
-        void response.text().then((body) =>
-          console.log(`  answer ${response.status()}: ${response.request().postData()} -> ${body}`),
-        );
+        void response
+          .text()
+          .then((body) =>
+            console.log(
+              `  answer ${response.status()}: ${response.request().postData()} -> ${body}`,
+            ),
+          );
     });
     await dallas.click();
     // Once the answer is in; a message sent before it would answer the card instead.
@@ -409,6 +415,36 @@ try {
       await page.locator('[data-onemail-discard="1"]').first().click();
       await sleep(3_000);
     }
+  });
+
+  await check("twochats", async (page, failures) => {
+    if (!kruit) return failures.push("no Kruit chat on this account");
+    if (!fixtureRole) return failures.push("no 测试固定 role chat on this account");
+    const docked = page.locator("section[data-docked-conversation]");
+    await page.goto(`${ORIGIN}/app/g/${kruit.id}?view=conversation`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(2_000);
+    if (await docked.count()) failures.push("Kruit with no role open shows a second chat");
+    await page.screenshot({ path: path.join(OUT, "twochats-kruit.png") }).catch(() => {});
+    await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}?view=conversation`);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await sleep(3_000);
+    if (!(await docked.isVisible())) failures.push("a role's chat shows no Kruit chat beside it");
+    else {
+      const label = (await docked.locator("header").innerText()).replace(/\s+/g, " ");
+      if (!/Kruit/.test(label) || !/(All roles|全部岗位)/.test(label))
+        failures.push(`the Kruit pane is not labelled Kruit · All roles: "${label}"`);
+    }
+    const roleHeader = (await page.locator("main .hire-pane-header").first().innerText()).replace(
+      /\s+/g,
+      " ",
+    );
+    if (
+      !/(Role conversation|岗位对话)/.test(roleHeader) ||
+      !roleHeader.includes(fixtureRole.name.slice(0, 8))
+    )
+      failures.push(`the role chat is not labelled with its role: "${roleHeader.slice(0, 120)}"`);
+    await page.screenshot({ path: path.join(OUT, "twochats-role.png") }).catch(() => {});
   });
 
   await check("title", async (page, failures) => {
