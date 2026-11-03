@@ -216,6 +216,10 @@ export async function recruitingChatFixture(
   const sendReady = new Promise<void>((resolve) => {
     releaseSend = resolve;
   });
+  let releaseAnswer: (() => void) | undefined;
+  const answerReady = new Promise<void>((resolve) => {
+    releaseAnswer = resolve;
+  });
   let releaseFeedback: (() => void) | undefined;
   const feedbackReady = new Promise<void>((resolve) => {
     releaseFeedback = resolve;
@@ -290,6 +294,9 @@ export async function recruitingChatFixture(
       case "threads/send":
         await sendReady;
         return reply({ runId: "sent-fixture" });
+      case "threads/answer":
+        await answerReady;
+        return reply({ ok: true });
       case "threads/stop":
         return reply({ ok: true });
       case "recruiting/roleCandidates":
@@ -393,6 +400,7 @@ export async function recruitingChatFixture(
     calls,
     unexpected,
     releaseSend: () => releaseSend?.(),
+    releaseAnswer: () => releaseAnswer?.(),
     recoverFeedback: () => {
       feedbackState = "empty";
       releaseFeedback?.();
