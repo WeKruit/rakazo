@@ -1,5 +1,6 @@
+import { recruitingHomeGroupId } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { loadCrossRoleDigest } from "./cross-role-digest.js";
+import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js";
 
 const now = Date.parse("2026-11-01T04:00:00Z");
 
@@ -72,12 +73,60 @@ describe("loadCrossRoleDigest", () => {
     expect(digest).toContain(
       'Recent: Recruiter: "new grads, USC preferred" / Sourcer: "Is USC required?"',
     );
-    expect(digest).toContain("- Data Scientist · groupId g2, no saved role yet · last activity 5 min ago");
+    expect(digest).toContain(
+      "- Data Scientist · groupId g2, no saved role yet · last activity 5 min ago",
+    );
     expect(prisma.chatGroup.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ spaceId: "s", userId: "u", archivedAt: null }),
       }),
     );
+  });
+
+  it("never offers the account's own team as a role team before it holds a role", async () => {
+    const scope = { spaceId: "s", userId: "u" };
+    const home = recruitingHomeGroupId(scope);
+    const roleless = { id: home, thread: { activeRecruitingRoleId: null } };
+    expect(isRolelessHomeTeam(scope, roleless)).toBe(true);
+    expect(
+      isRolelessHomeTeam(scope, { id: home, thread: { activeRecruitingRoleId: "role-1" } }),
+    ).toBe(false);
+    expect(
+      isRolelessHomeTeam(scope, { id: "role-abc", thread: { activeRecruitingRoleId: null } }),
+    ).toBe(false);
+    expect(isRolelessHomeTeam({ spaceId: "s", userId: "other" }, roleless)).toBe(false);
+    const digest = await loadCrossRoleDigest(
+      fakePrisma(
+        [
+          {
+            ...roleless,
+            name: "Recruiting",
+            updatedAt: new Date(now),
+            thread: { id: "t0", activeRecruitingRoleId: null },
+          },
+          {
+            id: "role-abc",
+            name: "Data Scientist",
+            updatedAt: new Date(now),
+            thread: { id: "t2", activeRecruitingRoleId: null },
+          },
+        ],
+        {},
+      ) as never,
+      scope,
+      (t) => t,
+      now,
+    );
+    expect(digest).not.toContain(home);
+    expect(digest).toContain("groupId role-abc, no saved role yet");
+    expect(
+      await loadCrossRoleDigest(
+        fakePrisma([{ ...roleless, name: "Recruiting", updatedAt: new Date(now) }], {}) as never,
+        scope,
+        (t) => t,
+        now,
+      ),
+    ).toBeUndefined();
   });
 
   it("returns nothing when the recruiter has no role teams", async () => {
