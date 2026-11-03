@@ -1170,33 +1170,55 @@ const TYPED_ADDRESS =
 
 /**
  * An address a person wrote in this run's conversation is theirs, not a guess: their own recent
- * message, or a teammate's brief that hands their words over. Its mail can be read without a
- * saved contact.
+ * message, or a teammate's brief that hands their words over. Delegated work also looks at the
+ * conversation it came from, where the recruiter typed it, since a brief may paraphrase the
+ * address away. Its mail can be read without a saved contact.
  */
 export async function addressTypedInConversation(
   prisma: Pick<PrismaClient, "message">,
   runId: string,
   email: string,
 ) {
-  const rows = await prisma.message.findMany({
-    where: { role: "user", thread: { runs: { some: { id: runId } } } },
-    orderBy: { seq: "desc" },
-    take: 20,
-    select: { blocks: true },
-  });
   const wanted = fold(email);
-  return rows.some(
-    (row) =>
-      Array.isArray(row.blocks) &&
-      row.blocks.some(
-        (block) =>
-          block &&
-          typeof block === "object" &&
-          "text" in block &&
-          typeof block.text === "string" &&
-          (block.text.match(TYPED_ADDRESS) ?? []).some((address) => fold(address) === wanted),
-      ),
-  );
+  const texts = (blocks: unknown) =>
+    Array.isArray(blocks)
+      ? blocks.filter(
+          (block): block is { text: string; kind?: unknown; returnThreadId?: unknown } =>
+            block && typeof block === "object" && "text" in block && typeof block.text === "string",
+        )
+      : [];
+  let where: Parameters<typeof prisma.message.findMany>[0] = {
+    where: { role: "user", thread: { runs: { some: { id: runId } } } },
+  };
+  let spaceId: string | undefined;
+  const seen = new Set<string>();
+  // The run's own conversation, then up to two conversations that delegated to it.
+  for (let hop = 0; hop < 3; hop += 1) {
+    const rows = await prisma.message.findMany({
+      ...where,
+      orderBy: { seq: "desc" },
+      take: 20,
+      select: { blocks: true, threadId: true, thread: { select: { spaceId: true } } },
+    });
+    const from = new Set<string>();
+    for (const row of rows) {
+      seen.add(row.threadId);
+      spaceId ??= row.thread.spaceId;
+      for (const block of texts(row.blocks)) {
+        if ((block.text.match(TYPED_ADDRESS) ?? []).some((address) => fold(address) === wanted))
+          return true;
+        if (
+          block.kind === "bot_message_received" &&
+          typeof block.returnThreadId === "string" &&
+          !seen.has(block.returnThreadId)
+        )
+          from.add(block.returnThreadId);
+      }
+    }
+    if (!from.size || !spaceId) return false;
+    where = { where: { role: "user", threadId: { in: [...from] }, thread: { spaceId } } };
+  }
+  return false;
 }
 
 /** candidate_key -> lead email recorded when people were added to the role's outreach campaign. */
