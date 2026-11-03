@@ -34,6 +34,8 @@ type Source = {
 const allows = (permission: Source["assignments"][number], tool: string) =>
   permission.allowAllTools ||
   (Array.isArray(permission.allowedTools) && permission.allowedTools.includes(tool));
+const bindingKey = (serverId: string, roleId: string) =>
+  `instantly-role-campaign:${serverId}:${roleId}`;
 // ponytail: a 30-second in-process cache bounds provider reads; permissions are checked before and after every use.
 // The calendar is the account's, so every role of the account shares one read (and one failure)
 // instead of reading the same calendar again for each role.
@@ -218,14 +220,17 @@ export async function refreshRecruitingCorrespondence(
       ),
     ].map((email) => email.toLowerCase()),
   );
-  const campaignBindings = await deps.prisma.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      status: "completed",
-      idempotencyKey: { endsWith: `:${scope.roleId}`, startsWith: "instantly-role-campaign:" },
-    },
-    select: { idempotencyKey: true, result: true },
-  });
+  // Exact keys use the unique index; a prefix or suffix match reads every effect in the table.
+  const campaignBindings = sources.length
+    ? await deps.prisma.externalEffect.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          status: "completed",
+          idempotencyKey: { in: sources.map((source) => bindingKey(source.id, scope.roleId)) },
+        },
+        select: { idempotencyKey: true, result: true },
+      })
+    : [];
   for (const binding of campaignBindings)
     for (const value of Object.values(record(record(binding.result)?.leads) ?? {})) {
       const email = record(value)?.email;
@@ -310,8 +315,7 @@ export async function refreshRecruitingCorrespondence(
     try {
       if (scope.view === "inbox") {
         for (const binding of campaignBindings) {
-          if (binding.idempotencyKey !== `instantly-role-campaign:${source.id}:${scope.roleId}`)
-            continue;
+          if (binding.idempotencyKey !== bindingKey(source.id, scope.roleId)) continue;
           const campaignId = record(binding.result)?.campaignId;
           if (
             typeof campaignId !== "string" ||
