@@ -379,11 +379,20 @@ export async function mockRecruitingApp(
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
     workingRole?: boolean;
+    kruitHandoff?: boolean;
   } = {},
 ) {
-  const groups = options.workingRole
+  const roleGroups = options.workingRole
     ? bootstrap.groups.map((item) => ({ ...item, working: true }))
     : bootstrap.groups;
+  // Kruit's own conversation, which hands work to the role.
+  const kruitGroup = {
+    ...group,
+    id: "recruiting-global-fixture",
+    name: "Kruit",
+    threadId: "fixture-kruit-thread",
+  };
+  const groups = options.kruitHandoff ? [...roleGroups, kruitGroup] : roleGroups;
   const spaces = bootstrap.spaces.map((space) => ({ ...space, groups }));
   const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
     ? {
@@ -408,7 +417,32 @@ export async function mockRecruitingApp(
           },
         ],
       }
-    : snapshot;
+    : options.kruitHandoff
+      ? {
+          ...snapshot,
+          cursor: 1,
+          messages: [
+            {
+              id: "fixture-kruit-brief",
+              threadId: snapshot.threadId,
+              seq: 1,
+              role: "user",
+              createdAt: checkedAt,
+              blocks: [
+                {
+                  kind: "bot_message_received",
+                  fromBotId: "fixture-kruit-bot",
+                  fromBotName: "Kruit",
+                  text: "Goal: find five more platform engineers.",
+                  intent: "request",
+                  returnThreadId: kruitGroup.threadId,
+                  returnToMessageId: "fixture-kruit-echo",
+                },
+              ],
+            },
+          ],
+        }
+      : snapshot;
   const plans: RecruitingSchedulingPlan[] = [];
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];

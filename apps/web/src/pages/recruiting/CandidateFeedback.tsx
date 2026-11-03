@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { RecruitingFeedbackRecord } from "@rakazo/contracts";
+import type { RecruitingFeedbackRecord, RecruitingSearchQualityOutput } from "@rakazo/contracts";
 import { Button, NativeSelect, NativeSelectOption, Textarea } from "@rakazo/ui-web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
@@ -296,6 +296,7 @@ export function FeedbackHistory({
       <Heading className={collapsed ? "cursor-pointer font-medium" : "font-medium"}>
         <Trans>Feedback history</Trans>
       </Heading>
+      {candidateKey ? null : <SearchQuality roleId={roleId} refreshSignal={refreshSignal} />}
       {showEmpty && !records.length && !failed ? (
         <p role={pending ? "status" : undefined} className="text-sm text-muted-foreground">
           {pending ? <Trans>Loading…</Trans> : <Trans>No saved feedback yet.</Trans>}
@@ -304,9 +305,9 @@ export function FeedbackHistory({
       {records.map((record) => (
         <div key={record.id} className="space-y-1 border-l pl-3">
           <p className="text-sm text-muted-foreground">
-            {record.choice === "good_example" ? (
+            {(record.choice ?? recordFit(record)) === "good_example" ? (
               <Trans>Good example</Trans>
-            ) : record.choice === "not_fit" ? (
+            ) : (record.choice ?? recordFit(record)) === "not_fit" ? (
               <Trans>Not a fit</Trans>
             ) : record.choice === "skip" ? (
               <Trans>Skip for now</Trans>
@@ -317,7 +318,7 @@ export function FeedbackHistory({
             ) : record.choice === "resume" ? (
               <Trans>Resume consideration</Trans>
             ) : null}
-            {record.choice ? " · " : null}
+            {record.choice || recordFit(record) ? " · " : null}
             <time dateTime={record.createdAt}>{new Date(record.createdAt).toLocaleString()}</time>
             {record.feedback.target !== "preference" ? (
               <>
@@ -345,5 +346,40 @@ export function FeedbackHistory({
         </Button>
       ) : null}
     </Container>
+  );
+}
+
+/** A good example or not a fit the agent saved from the recruiter's words in chat. */
+function recordFit(record: RecruitingFeedbackRecord) {
+  return record.feedback.target === "candidate" ? record.feedback.fit : undefined;
+}
+
+/** How the recruiter judged each calibration round, so they can see the search getting closer. */
+function SearchQuality({ roleId, refreshSignal }: { roleId: string; refreshSignal?: number }) {
+  const [quality, setQuality] = useState<RecruitingSearchQualityOutput | null>(null);
+  useEffect(() => {
+    let current = true;
+    rpc.recruiting
+      .searchQuality({ roleId })
+      .then((result) => {
+        if (current) setQuality(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [roleId, refreshSignal]);
+  const rounds = quality?.rounds.filter((round) => round.goodExample || round.notFit) ?? [];
+  if (!rounds.length) return null;
+  return (
+    <ul className="space-y-1 text-sm">
+      {rounds.map((round) => (
+        <li key={round.round}>
+          <Trans>
+            Round {round.round} · {round.goodExample} good examples · {round.notFit} not a fit
+          </Trans>
+        </li>
+      ))}
+    </ul>
   );
 }

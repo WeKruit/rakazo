@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
-import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@rakazo/contracts";
+import type {
+  Actor,
+  RecruitingArtifactRef,
+  RecruitingFeedbackRecord,
+  RecruitingSearchQualityOutput,
+} from "@rakazo/contracts";
 import {
   RECRUITING_BRIEF_CHECKLIST,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
@@ -19,6 +24,7 @@ import {
   getRecruitingWorkspaceCrmSourceMaterial,
   IsolationError,
   listRecruitingFeedback,
+  readRecruitingSearchQuality,
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
 import type { LoadedAgentMemoryContext } from "./memory-context.js";
@@ -98,7 +104,7 @@ export async function loadRecruitingRunContext(
   if (!workspace) return undefined;
   // Always reauthorize saved source material, including the trusted-workspace fast path.
   // It and the feedback below are independent reads, so they share one wait.
-  const [crmSourceMaterial, recent] = await Promise.all([
+  const [crmSourceMaterial, recent, quality] = await Promise.all([
     // A CRM link that no longer checks out (a reconnected or disabled CRM) leaves its material
     // out instead of failing the turn; CRM tools verify the link again when they run.
     getRecruitingWorkspaceCrmSourceMaterial(deps.prisma, actor, {
@@ -109,6 +115,7 @@ export async function loadRecruitingRunContext(
       throw error;
     }),
     listRecruitingFeedback(deps.prisma, actor, { roleId: workspace.role.id, limit: 20 }),
+    readRecruitingSearchQuality(deps.prisma, actor, { roleId: workspace.role.id }),
   ]);
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [
@@ -153,6 +160,7 @@ export async function loadRecruitingRunContext(
     feedback.push(JSON.parse(redact(JSON.stringify(record))) as RecruitingFeedbackRecord);
     feedbackSize += size;
   }
+  const qualityText = searchQualityText(quality);
   const text = [
     roleText,
     ...(crmSourceMaterial
@@ -167,6 +175,7 @@ export async function loadRecruitingRunContext(
           `<recruiting_feedback>${redact(JSON.stringify(feedback)).replace(/</g, "\\u003c")}</recruiting_feedback>`,
         ]
       : []),
+    ...(qualityText ? [qualityText] : []),
     ...(recent.feedback.length > feedback.length || recent.nextCursor
       ? [
           "This bounded context omits further saved feedback. Recover the original human messages from native history before assuming there are no later corrections.",
@@ -240,6 +249,31 @@ export async function loadRecruitingRunContext(
     manifest,
     contextArtifact: { artifactId: persisted.artifact.id, sha256: persisted.artifact.hash },
   };
+}
+
+/**
+ * The recruiter's verdicts so far as one line, so the agent can tell whether its searches are
+ * getting closer to what the recruiter wants. Nothing when there is no verdict yet.
+ */
+export function searchQualityText(quality: RecruitingSearchQualityOutput): string | undefined {
+  if (!quality.goodExample && !quality.notFit) return undefined;
+  const rounds = quality.rounds
+    .filter((round) => round.goodExample || round.notFit)
+    .map(
+      (round) =>
+        `round ${round.round}: ${round.goodExample} good examples, ${round.notFit} not a fit of ${round.shown} shown`,
+    );
+  const latest = quality.rounds.at(-1);
+  const worse = latest && !latest.accepted && latest.notFit > latest.goodExample;
+  return [
+    `Search quality from the recruiter's latest verdict per person: ${[
+      ...rounds,
+      `all people on this role: ${quality.goodExample} good examples, ${quality.notFit} not a fit`,
+    ].join("; ")}.`,
+    worse
+      ? "The latest round has more people the recruiter turned down than praised: before the next search, find what their not-a-fit reasons in the feedback share and what the good examples show, word the search around that, and tell the recruiter in one line what you changed."
+      : "Use it with the feedback reasons to keep what works in the next search.",
+  ].join(" ");
 }
 
 function contextFingerprint(manifest: RecruitingContextManifest): string {

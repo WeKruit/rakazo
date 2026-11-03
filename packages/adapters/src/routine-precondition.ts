@@ -26,7 +26,10 @@ export function parseRoutinePrecondition(prompt: string): RoutinePrecondition | 
   return DIRECTIVE.exec(prompt)?.[1]?.toLowerCase() as RoutinePrecondition | undefined;
 }
 
-type RoutineScope = Pick<Routine, "spaceId" | "userId" | "botId" | "threadId" | "lastRunAt">;
+type RoutineScope = Pick<
+  Routine,
+  "spaceId" | "userId" | "botId" | "threadId" | "lastRunAt" | "createdAt"
+>;
 
 /** Cheap existence checks over existing tables; never a shell probe or a model call. */
 export async function routinePreconditionMet(
@@ -49,7 +52,10 @@ export async function routinePreconditionMet(
       select: { updatedAt: true },
     });
     if (!latest) return false;
-    return !since || latest.updatedAt > since || Date.now() - since.getTime() >= MEMORY_REVIEW_MS;
+    // A routine that never ran compares with its creation: a new bot's first night has nothing
+    // to tidy unless memory changed since it was set up.
+    const base = since ?? routine.createdAt;
+    return latest.updatedAt > base || Date.now() - base.getTime() >= MEMORY_REVIEW_MS;
   }
   if (!since) return true;
   const [messages, inbound, recruiting] = await Promise.all([

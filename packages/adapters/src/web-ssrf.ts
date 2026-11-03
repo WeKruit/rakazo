@@ -193,7 +193,14 @@ async function followRedirects(
       dispatcher: state.dispatcher,
     } as RequestInit & { dispatcher: Agent }),
     state.signal,
-  );
+  ).catch((error: unknown) => {
+    // A status no Response can hold (LinkedIn's 999) arrives as this error; the hop still happened.
+    const status = /^Request failed: HTTP (\d+)$/.exec(
+      error instanceof Error ? error.message : "",
+    )?.[1];
+    if (status) auditEgress(validated, "GET", Object.keys(headers), Number(status));
+    throw error;
+  });
   auditEgress(validated, "GET", Object.keys(headers), response.status);
 
   if (response.status >= 300 && response.status < 400) {

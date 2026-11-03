@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPublicWebServer, hostAccepted } from "./public-web.js";
+import { createPublicWebServer, hostAccepted, warmFiles } from "./public-web.js";
 
 let directory: string;
 let server: Server;
@@ -73,6 +73,23 @@ describe("production public listener", () => {
     expect(asset.headers.get("content-encoding")).toBe("gzip");
     expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await asset.text()).toContain('console.log("test")');
+  });
+  it("lets the CDN and browser keep hashed build assets, never the page", async () => {
+    const asset = await fetch(`${origin}/assets/app.js`);
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const page = await fetch(`${origin}/`, { headers: { accept: "text/html" } });
+    expect(page.headers.get("cache-control")).toBe("no-cache");
+    const preview = await fetch(`${origin}/html-preview.html`);
+    expect(preview.headers.get("cache-control")).toBe("no-cache");
+  });
+  it("reads the whole build once at startup so a new container serves it warm", async () => {
+    expect(await warmFiles(path.join(directory, "dist"))).toBeGreaterThanOrEqual(3);
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        "public web warmed",
+        expect.objectContaining({ files: expect.any(Number) }),
+      ),
+    );
   });
   it("sends a fresh nonce in the page and an enforced strict policy", async () => {
     const nonces = [];

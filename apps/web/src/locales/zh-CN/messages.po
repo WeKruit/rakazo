@@ -5544,6 +5544,13 @@ msgstr "轮换密钥"
 msgid "Round {0}"
 msgstr "第 {0} 轮"
 
+#. placeholder {0}: round.round
+#. placeholder {1}: round.goodExample
+#. placeholder {2}: round.notFit
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Round {0} · {1} good examples · {2} not a fit"
+msgstr "第 {0} 轮 · {1} 位好的例子 · {2} 位不合适"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Rounds"
 msgstr "轮次"

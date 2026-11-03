@@ -8,6 +8,7 @@ export function CollaborationMarker({
   color,
   identity,
   label,
+  href,
   onClick,
   status,
 }: {
@@ -15,14 +16,18 @@ export function CollaborationMarker({
   color: string;
   identity: string;
   label: string;
+  /** Another conversation's moment, opened beside this chat. */
+  href?: string;
   onClick?: () => void;
   status?: "running" | "completed" | "failed";
 }) {
-  const Tag = onClick ? "button" : "div";
+  const Tag = href ? "a" : onClick ? "button" : "div";
   return (
     <div className="flex justify-start">
       <Tag
-        type={onClick ? "button" : undefined}
+        type={onClick && !href ? "button" : undefined}
+        href={href}
+        data-stacked-conversation={href ? "" : undefined}
         data-testid={status ? "specialist-work" : "peer-receipt-chip"}
         role={status === "running" ? "status" : undefined}
         aria-label={ariaLabel}

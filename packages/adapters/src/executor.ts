@@ -916,6 +916,38 @@ const ROUND_DIRECTION_OPERATIONS = new Set([
   "note",
 ]);
 
+/** Words a model uses for a recruiter's verdict on people, read as the saved fit. */
+const FEEDBACK_FITS: Record<string, "good_example" | "not_fit"> = {
+  good_example: "good_example",
+  good: "good_example",
+  fit: "good_example",
+  good_fit: "good_example",
+  like: "good_example",
+  liked: "good_example",
+  approve: "good_example",
+  approved: "good_example",
+  positive: "good_example",
+  not_fit: "not_fit",
+  not_a_fit: "not_fit",
+  bad: "not_fit",
+  bad_fit: "not_fit",
+  reject: "not_fit",
+  rejected: "not_fit",
+  dislike: "not_fit",
+  negative: "not_fit",
+  no_fit: "not_fit",
+};
+
+function feedbackFit(value: unknown): "good_example" | "not_fit" | undefined {
+  if (typeof value !== "string") return undefined;
+  return FEEDBACK_FITS[
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_")
+  ];
+}
+
 /**
  * Fills the recruiting_feedback fields the server knows for the conversation's role (role,
  * revision, an empty source list, a summary from the quote), reads a round's "review" as its
@@ -953,6 +985,11 @@ export async function filledRecruitingFeedbackArgs(
   )
     filled.operation = "scope";
   if (filled.target !== "candidate") return { args: filled };
+  const fit = feedbackFit(filled.fit) ?? feedbackFit(filled.operation);
+  if (fit) {
+    filled.fit = fit;
+    if (feedbackFit(filled.operation)) filled.operation = "review";
+  }
   const given = Array.isArray(filled.candidateKeys) ? filled.candidateKeys : [];
   const keys = given.length
     ? await savedRoleCandidateKeys(prisma as PrismaClient, roleId, given)
@@ -1041,7 +1078,7 @@ export async function unsavedRoundFeedback(
     select: { id: true },
   });
   if (saved) return undefined;
-  return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they turned down or praised, and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
+  return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they praised and fit "good_example", another call with the people they turned down and fit "not_fit", and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
 }
 
 /** The topic a step may show beside its label, as a payload field. */
@@ -1256,7 +1293,7 @@ export const REPORT_IN_FINAL_REPLY =
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
 export const STEERING_ACK =
-  "The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as \"do nothing else\") does not cover this newer message.";
+  'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";

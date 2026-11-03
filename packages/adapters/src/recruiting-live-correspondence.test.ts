@@ -3,7 +3,11 @@ import type { Actor, RecruitingCorrespondence } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { refreshRecruitingCorrespondence } from "./recruiting-live-correspondence.js";
+import {
+  CALENDAR_FRESH_MS,
+  CALENDAR_KEEP_MS,
+  refreshRecruitingCorrespondence,
+} from "./recruiting-live-correspondence.js";
 
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof import("@rakazo/db")>()),
@@ -143,6 +147,87 @@ describe("live role correspondence", () => {
     );
     expect(execute).not.toHaveBeenCalled();
     expect(output).toMatchObject({ status: "empty", events: [], partial: false });
+  });
+  it("serves an older calendar read at once and refreshes it in the background", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    const { prisma } = fixture();
+    const page = (id: string) => ({
+      type: "result",
+      data: {
+        structuredContent: {
+          events: [
+            {
+              id,
+              summary: "Candidate interview",
+              start: { dateTime: "2026-10-31T12:00:00Z" },
+              end: { dateTime: "2026-10-31T13:00:00Z" },
+              attendees: [{ email: "candidate@example.test" }],
+            },
+          ],
+        },
+      },
+    });
+    let release: (() => void) | undefined;
+    const execute = vi
+      .fn()
+      .mockImplementationOnce(async function* () {
+        yield page("first");
+      })
+      .mockImplementationOnce(async function* () {
+        // The provider is slow: the page must not wait for this read.
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        yield page("second");
+      });
+    const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
+    const open = async () => {
+      const output = empty();
+      await refreshRecruitingCorrespondence(
+        deps,
+        { ...actor, userId: "stale-while-refresh" },
+        { roleId: "role", threadId: "thread", view: "interview" },
+        [source("calendar")],
+        output,
+      );
+      return output.events.map((event) => event.id);
+    };
+    expect(await open()).toEqual(["calendar:first"]);
+    vi.advanceTimersByTime(CALENDAR_FRESH_MS + 1);
+    expect(await open()).toEqual(["calendar:first"]);
+    expect(execute).toHaveBeenCalledTimes(2);
+    release?.();
+    await vi.waitFor(async () => expect(await open()).toEqual(["calendar:second"]));
+    expect(execute).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(CALENDAR_KEEP_MS + 1);
+    execute.mockImplementationOnce(async function* () {
+      yield page("third");
+    });
+    expect(await open()).toEqual(["calendar:third"]);
+  });
+  it("looks up the role's mail campaigns by their exact keys", async () => {
+    const { prisma } = fixture();
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { events: [] } } } as const;
+    });
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "exact-campaign-keys" },
+      { roleId: "role", threadId: "thread", view: "interview" },
+      [source("calendar"), source("instantly")],
+      empty(),
+    );
+    expect(prisma.externalEffect.findMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        status: "completed",
+        idempotencyKey: {
+          in: ["instantly-role-campaign:calendar:role", "instantly-role-campaign:instantly:role"],
+        },
+      },
+      select: { idempotencyKey: true, result: true },
+    });
   });
   it("reads the account calendar once for all roles opened together", async () => {
     const { prisma, assignment } = fixture();

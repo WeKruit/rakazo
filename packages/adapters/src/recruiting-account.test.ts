@@ -11,6 +11,7 @@ vi.mock("@rakazo/db", async (original) => ({
   createGroupRepos: vi.fn(),
   getRecruitingWorkspace: vi.fn(),
   listRecruitingFeedback: vi.fn(),
+  readRecruitingSearchQuality: vi.fn(),
   listRecruitingReminders: vi.fn(),
   listRecruitingSchedulingPlans: vi.fn(),
 }));
@@ -172,6 +173,11 @@ beforeEach(() => {
       }) as never,
   );
   vi.mocked(db.listRecruitingFeedback).mockResolvedValue({ feedback: [], nextCursor: null });
+  vi.mocked(db.readRecruitingSearchQuality).mockResolvedValue({
+    rounds: [],
+    goodExample: 0,
+    notFit: 0,
+  });
   vi.mocked(db.listRecruitingReminders).mockResolvedValue({ items: [], overdueCount: 0 });
   vi.mocked(db.listRecruitingSchedulingPlans).mockResolvedValue({
     plans: [],

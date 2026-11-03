@@ -76,6 +76,18 @@ describe("tool card render decisions", () => {
     expect(renderableMessageBlocks(blocks, false)).toEqual([textBlock, narration]);
   });
 
+  it("keeps work handed over from another conversation when diagnostics are hidden", () => {
+    const peer: MessageBlock = {
+      kind: "bot_message_received",
+      fromBotId: "kruit",
+      fromBotName: "Kruit",
+      text: "Find five more.",
+      intent: "request",
+    };
+    const handoff: MessageBlock = { ...peer, returnThreadId: "kruit-thread" };
+    expect(renderableMessageBlocks([peer, handoff], false)).toEqual([handoff]);
+  });
+
   it("keeps native approval cards visible when diagnostics are hidden", () => {
     const approval: MessageBlock = {
       kind: "ask",

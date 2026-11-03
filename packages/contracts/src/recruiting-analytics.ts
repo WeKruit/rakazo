@@ -73,3 +73,22 @@ export const RecruitingAnalyticsPeopleOutputSchema = z.strictObject({
 });
 export type RecruitingAnalyticsPeopleInput = z.infer<typeof RecruitingAnalyticsPeopleInputSchema>;
 export type RecruitingAnalyticsPeopleOutput = z.infer<typeof RecruitingAnalyticsPeopleOutputSchema>;
+
+/** The recruiter's own verdicts on the people a role's search returned, per calibration round. */
+export const RecruitingSearchQualityInputSchema = z.strictObject({ roleId: Id });
+const Count = z.number().int().nonnegative();
+export const RecruitingSearchQualityOutputSchema = z.strictObject({
+  rounds: z.array(
+    z.strictObject({
+      round: z.number().int().positive(),
+      shown: Count,
+      goodExample: Count,
+      notFit: Count,
+      accepted: z.boolean(),
+    }),
+  ),
+  /** Every person on the role with a verdict, rounds and scale-out alike. */
+  goodExample: Count,
+  notFit: Count,
+});
+export type RecruitingSearchQualityOutput = z.infer<typeof RecruitingSearchQualityOutputSchema>;

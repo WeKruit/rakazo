@@ -44,7 +44,7 @@ type Sender = {
   default?: boolean;
 };
 const NO_SELF_SETUP =
-  "Not set up: this account has no sending email, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and that we can turn it on if they contact us. Never ask for a company name or propose an address; drafts and contact lookups still work.";
+  "No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and that we can turn it on if they contact us. Never ask for a company name or propose an address; drafts and contact lookups still work.";
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
 const own = (context: AdapterContext) => ({ userId: context.userId, spaceId: context.spaceId });
 const receiptScope = (context: AdapterContext) => ({
@@ -472,6 +472,8 @@ export async function ensureSendingIdentity(
       defaultMailbox: await defaultSendingMailbox(prisma, context),
       mailboxLimit: limit,
       selfSetup,
+      // The read itself says what to do, so an agent that never loaded sender setup still answers right.
+      ...(!selfSetup && !current.length && !pending.length ? { next: NO_SELF_SETUP } : {}),
     };
   }
   if (input.operation === "select") {

@@ -936,13 +936,23 @@ export const RecruitingFeedbackInputSchema = z.discriminatedUnion("target", [
       ...ScopedFeedback,
       target: z.literal("candidate"),
       operation: z.enum(["review", "hold", "pass", "resume"]),
+      fit: z
+        .enum(["good_example", "not_fit"])
+        .optional()
+        .describe(
+          'For review: which way the recruiter\'s own words went on these people. "good_example" when they praised them or want more like them, "not_fit" when they turned them down. Leave it out when their words are neither. Record praised and turned-down people in separate calls.',
+        ),
       candidateRevisions: CandidateRevisions.optional(),
       candidateKeys: z
         .array(RecruitingId)
         .min(1)
         .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
     })
-    .superRefine(validateCandidateDecision),
+    .superRefine(validateCandidateDecision)
+    .superRefine((input, ctx) => {
+      if (input.fit && input.operation !== "review")
+        ctx.addIssue({ code: "custom", path: ["fit"], message: "fit belongs to review feedback" });
+    }),
   RecruitingPreferenceFeedbackSchema,
 ]);
 export type RecruitingFeedbackInput = z.infer<typeof RecruitingFeedbackInputSchema>;

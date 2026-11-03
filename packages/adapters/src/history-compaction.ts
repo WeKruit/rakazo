@@ -110,6 +110,18 @@ function escapePromptData(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+/**
+ * The summarizer reads the previous summary escaped and copies wording verbatim, so its output
+ * carries the escapes. Summaries are stored raw (they are escaped again when read); without this
+ * every pass added another "amp;" to each & the human wrote.
+ */
+export function unescapeSummary(value: string): string {
+  let text = value;
+  for (let pass = 0; pass < 20 && /&(?:amp|lt|gt);/.test(text); pass++)
+    text = text.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  return text;
+}
+
 /** Last words of every summary, where the model reads them right before the newer messages. */
 export const COMPACTED_SUMMARY_TAIL =
   "This summary loses detail. When unsure about an exact earlier name, number, wording or decision, read it with search_history or read_history before relying on it.";
@@ -553,7 +565,7 @@ export async function compactHistory(
     if (!text) {
       throw new Error(`history.compact summarizer returned no summary for thread ${threadId}`);
     }
-    return text;
+    return unescapeSummary(text);
   };
 
   let summary = await summarize(

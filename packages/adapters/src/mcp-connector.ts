@@ -95,6 +95,8 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
+const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
+const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const THREAD_HISTORY = "native_instantly_get_thread_history";
 const CONTACT_EMAILS = "native_instantly_search_contact_emails";
 const MAILBOX_EMAILS = "native_instantly_list_mailbox_emails";
@@ -1451,7 +1453,19 @@ export class McpConnector implements ConnectorProvider {
         setupMs: calledAt - startedAt,
         callMs: Date.now() - calledAt,
       });
-      yield { type: "result", data: redactConnectorPayload(result, secrets) };
+      const roleMail =
+        assignment.server.endpoint?.replace(/\/$/, "") === GMAIL_MCP &&
+        call.route.toolName === "search_threads" &&
+        !result.isError
+          ? await this.roleMailboxFor(call, context)
+          : undefined;
+      yield {
+        type: "result",
+        data: redactConnectorPayload(
+          roleMail ? { ...result, content: [...(result.content ?? []), roleMail] } : result,
+          secrets,
+        ),
+      };
     } catch (error) {
       // A known rate limit leaves the session healthy. Other thrown calls keep the existing
       // reconnect and uncertain-outcome handling for transport or authentication failures.
@@ -1962,6 +1976,54 @@ export class McpConnector implements ConnectorProvider {
     const current = await this.instantlyCampaignScope(context, serverId);
     if (JSON.stringify(current) !== JSON.stringify(expected))
       throw new IsolationError("The current role or campaign mapping changed during the operation");
+  }
+
+  /**
+   * A Gmail search for a person's address also reads the role's own mailbox, where outreach and
+   * replies live: the recruiter's Gmail alone often has no such thread, and a team that stopped
+   * there asked the recruiter to forward mail the role already holds. The read keeps every guard
+   * of the native contact-email read (assignment, stored or typed address, campaign scope).
+   */
+  private async roleMailboxFor(call: ConnectorCall, context: AdapterContext) {
+    const email = JSON.stringify(call.args ?? {}).match(MAIL_ADDRESS)?.[0];
+    if (!email || !context.botId) return undefined;
+    const assignment = await this.prisma.botMcpServer.findFirst({
+      where: {
+        botId: context.botId,
+        spaceId: context.spaceId,
+        userId: context.userId,
+        server: { enabled: true, endpoint: INSTANTLY_MCP, transport: "streamable_http" },
+      },
+      select: { server: { select: { id: true, revision: true } } },
+    });
+    if (!assignment) return undefined;
+    let text = "";
+    try {
+      for await (const event of this.readInstantlyEmails(
+        {
+          ...call,
+          tool: CONTACT_EMAILS,
+          route: {
+            ...call.route!,
+            resourceId: assignment.server.id,
+            resourceRevision: assignment.server.revision,
+            toolName: CONTACT_EMAILS,
+          },
+          args: { email },
+        },
+        context,
+      )) {
+        if (event.type === "error") text = `could not be read: ${event.message}`;
+        if (event.type === "result") text = JSON.stringify(event.data).slice(0, 12_000);
+      }
+    } catch (error) {
+      context.signal.throwIfAborted();
+      text = `could not be read: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    return {
+      type: "text" as const,
+      text: `The role's own mailbox, where its outreach and replies live, for ${email} (answer a thread here with reply_to_email on its email id): ${text}`,
+    };
   }
 
   private async *readInstantlyEmails(
