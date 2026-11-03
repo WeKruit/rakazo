@@ -378,15 +378,11 @@ export async function mockRecruitingApp(
     sequenceDraft?: boolean;
     calendarStatus?: "accepted" | "confirmed";
     candidateReport?: RecruitingCandidateReport;
-    memberStatus?: string;
+    workingRole?: boolean;
   } = {},
 ) {
-  const status = options.memberStatus;
-  const groups = status
-    ? bootstrap.groups.map((item) => ({
-        ...item,
-        members: item.members.map((member) => ({ ...member, status })),
-      }))
+  const groups = options.workingRole
+    ? bootstrap.groups.map((item) => ({ ...item, working: true }))
     : bootstrap.groups;
   const spaces = bootstrap.spaces.map((space) => ({ ...space, groups }));
   const initialSnapshot: NonNullable<AppBootstrap["thread"]> = options.sequenceDraft
