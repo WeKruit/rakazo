@@ -156,6 +156,9 @@ export function useShellMessages({
   const { t } = useLingui();
   const mounted = useRef(false);
   const echoTimers = useRef(new Set<number>());
+  // A card answer still on its way. A message typed right after the click goes after it, so the
+  // card is answered by the click and the message stays a new request.
+  const answering = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -197,13 +200,15 @@ export function useShellMessages({
         !current.messages.some((item) => item.id === message.id && item.runId === message.runId)
       )
         return;
-      await rpc.threads.answer({
+      const answered = rpc.threads.answer({
         ...(groupId ? { groupId } : { botId: botId! }),
         runId: message.runId ?? "",
         messageId: message.id,
         answer: text,
         ...(username ? { username } : {}),
       });
+      answering.current = answered.catch(() => undefined);
+      await answered;
       if (groupId && activeGroupId.current === groupId) {
         await refreshGroupThreadRef.current(groupId);
       } else if (botId && activeBotId.current === botId) {
@@ -428,6 +433,7 @@ export function useShellMessages({
           botsRefreshUser.current === submittedUser &&
           discussionScope.current.composerRef === submittedComposer &&
           (!correspondenceReference || currentCorrespondenceScope.current === selectedEmail?.scope);
+        await answering.current;
         if (!stillSubmitted()) {
           withdrawEcho();
           return false;

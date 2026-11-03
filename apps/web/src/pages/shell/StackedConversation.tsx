@@ -51,6 +51,8 @@ export function StackedConversation({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  // A message typed right after a card click goes after the click's answer.
+  const answering = useRef<Promise<unknown>>(Promise.resolve());
   const current = useRef(groupId);
   current.current = groupId;
 
@@ -135,6 +137,7 @@ export function StackedConversation({
     setSending(true);
     setActionError(null);
     try {
+      await answering.current;
       await rpc.threads.send({ groupId, text });
       setDraft("");
       setFocused(undefined);
@@ -186,13 +189,15 @@ export function StackedConversation({
               message={message}
               canAnswer={answerable.includes(message.id)}
               onAnswer={async (target, answer: AskAnswer, username?: string) => {
-                await rpc.threads.answer({
+                const answered = rpc.threads.answer({
                   groupId,
                   runId: target.runId ?? "",
                   messageId: target.id,
                   answer,
                   ...(username ? { username } : {}),
                 });
+                answering.current = answered.catch(noop);
+                await answered;
                 setPendingSince(Date.now());
                 await load().catch(noop);
               }}
