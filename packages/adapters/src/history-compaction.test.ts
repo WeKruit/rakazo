@@ -227,6 +227,7 @@ describe("formatRecalledMemory", () => {
 type HarnessMessage = {
   id?: string;
   botId?: string | null;
+  runId?: string;
   seq: number;
   role: string;
   blocks: MessageBlock[];
@@ -251,6 +252,8 @@ function compactionHarness(
       spaceId: string;
       botId?: string;
     }) => Promise<AgentRunRequest["model"]>;
+    /** Status of each run that posted a message, by run id. */
+    runStatuses?: Record<string, string>;
     withMemoryProvider?: boolean;
     memoryConfig?: {
       defaultMemoryScope: string;
@@ -290,6 +293,11 @@ function compactionHarness(
         options.validOrigin === false
           ? null
           : { id: "origin-run", botId: "bot-1", sourceMessageId: "current-source" },
+      ),
+      findMany: vi.fn(async (args: { where: { id: { in: string[] }; status: { in: string[] } } }) =>
+        args.where.id.in
+          .filter((id) => args.where.status.in.includes(options.runStatuses?.[id] ?? ""))
+          .map((id) => ({ id })),
       ),
     },
     chatGroup: {
@@ -583,6 +591,31 @@ describe("compactHistory", () => {
       status: "pending",
       text: "Keep this exact approval",
     });
+  });
+
+  it("keeps a card out of the summary while its run still waits for the answer", async () => {
+    const harness = compactionHarness({
+      group: true,
+      runStatuses: { "waiting-run": "waiting_input" },
+    });
+    harness.messages[2]!.runId = "waiting-run";
+    harness.messages[2]!.blocks = [{ kind: "ask", text: "Still waiting", status: "pending" }];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(1);
+  });
+
+  it("summarizes past an unanswered card whose run already ended", async () => {
+    // A card left pending by a stopped or expired run stopped compaction at that card for good,
+    // so every later turn fell back to the 200-message window.
+    const harness = compactionHarness({
+      group: true,
+      runStatuses: { "stopped-run": "cancelled" },
+    });
+    harness.messages[2]!.runId = "stopped-run";
+    harness.messages[2]!.blocks = [{ kind: "ask", text: "Old question", status: "pending" }];
+    await compactHistory(harness.deps, "thread-1", "origin-run");
+    expect(harness.runtime.run.mock.calls[0]![0].prompt).toContain("Old question");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
   });
 
   it("keeps original Artifact and speaker references in the group summary input", async () => {

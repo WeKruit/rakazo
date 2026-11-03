@@ -1,7 +1,7 @@
 import type { AgentRunRequest, AgentRuntime, JobPublisher } from "@rakazo/adapter-kit";
 import { historyCompactJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { blocksToAgentHistoryText, isOpenAskBlock } from "@rakazo/core";
+import { ACTIVE_RUN_STATUSES, blocksToAgentHistoryText, isOpenAskBlock } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recordUsage } from "@rakazo/db";
 import { getLogger, unwrapJobPayload } from "@rakazo/logging";
@@ -243,6 +243,32 @@ export interface CompactHistoryDeps {
   }) => Promise<AgentRunRequest["model"]>;
 }
 
+/**
+ * Runs behind the batch's unanswered cards that can still take the answer. A card whose run
+ * already ended (stopped, expired, failed) is history like any other message; keeping it out of
+ * the summary would stop compaction at that card for the rest of the conversation.
+ */
+async function runsStillWaiting(
+  prisma: PrismaClient,
+  batch: Array<{ runId?: string | null; blocks: unknown }>,
+): Promise<Set<string>> {
+  const runIds = [
+    ...new Set(
+      batch.flatMap((message) =>
+        message.runId && (message.blocks as MessageBlock[]).some(isOpenAskBlock)
+          ? [message.runId]
+          : [],
+      ),
+    ),
+  ];
+  if (runIds.length === 0) return new Set();
+  const waiting = await prisma.run.findMany({
+    where: { id: { in: runIds }, status: { in: [...ACTIVE_RUN_STATUSES] } },
+    select: { id: true },
+  });
+  return new Set(waiting.map((run) => run.id));
+}
+
 export async function compactHistory(
   deps: CompactHistoryDeps,
   threadId: string,
@@ -316,6 +342,7 @@ export async function compactHistory(
     seq: number;
     role: string;
     botId?: string | null;
+    runId?: string | null;
     blocks: unknown;
   }> = [];
   let bootstrappingLocalSummary = false;
@@ -328,7 +355,7 @@ export async function compactHistory(
       where: { threadId, seq: { lte: previousCursor } },
       orderBy: { seq: "desc" },
       take: LEGACY_HISTORY_WINDOW_SIZE + 1,
-      select: { id: true, seq: true, role: true, botId: true, blocks: true },
+      select: { id: true, seq: true, role: true, botId: true, runId: true, blocks: true },
     });
     batch = bootstrapCandidates.reverse();
     if (batch.length > 0) {
@@ -359,15 +386,17 @@ export async function compactHistory(
       where: { threadId, seq: { gt: range.fromSeqExclusive, lt: thread.nextMessageSeq } },
       orderBy: { seq: "asc" },
       take: range.take,
-      select: { id: true, seq: true, role: true, botId: true, blocks: true },
+      select: { id: true, seq: true, role: true, botId: true, runId: true, blocks: true },
     });
   }
   if (sourceRunId) {
     batch = batch.filter((message) => message.seq < thread.nextMessageSeq - HISTORY_WINDOW_SIZE);
+    const waitingRunIds = await runsStillWaiting(deps.prisma, batch);
     const protectedIndex = batch.findIndex(
       (message) =>
         message.id === origin?.sourceMessageId ||
-        (message.blocks as MessageBlock[]).some(isOpenAskBlock),
+        ((message.blocks as MessageBlock[]).some(isOpenAskBlock) &&
+          (!message.runId || waitingRunIds.has(message.runId))),
     );
     if (protectedIndex >= 0) batch = batch.slice(0, protectedIndex);
   }
