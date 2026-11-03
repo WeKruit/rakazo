@@ -278,6 +278,11 @@ try {
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(2_000);
     const lastSeq = Math.max(0, ...(await messages(kruit.id)).map((message) => message.seq));
+    // Whether the click reached the server, and how it answered.
+    const answerCalls = [];
+    page.on("response", (response) => {
+      if (response.url().includes("/rpc/threads/answer")) answerCalls.push(response.status());
+    });
     await dallas.click();
     // Once the answer is in; a message sent before it would answer the card instead.
     if (
@@ -311,7 +316,10 @@ try {
     const answered = (await messages(kruit.id)).some(
       (message) => message.seq > lastSeq && message.role === "user" && textOf(message) === "Dallas",
     );
-    if (!answered) failures.push("the card answer was not recorded before the request");
+    if (!answered)
+      failures.push(
+        `the card answer was not recorded before the request (answer calls: ${answerCalls.join(",") || "none"})`,
+      );
     const text = after.map(textOf).join(" ");
     if ((text.match(/linkedin\.com\/in\//g)?.length ?? 0) < 3)
       failures.push(
