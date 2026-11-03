@@ -96,6 +96,7 @@ describe("routinePreconditionMet", () => {
     botId: "bot-1",
     threadId: null,
     lastRunAt,
+    createdAt: new Date(Date.now() - 86_400_000),
   };
 
   it("is met on the first trigger and whenever any source changed since the last run", async () => {
@@ -141,6 +142,7 @@ describe("memory tidy preconditions", () => {
     botId: "bot-1",
     threadId: null,
     lastRunAt: new Date(Date.now() - day),
+    createdAt: new Date(Date.now() - 3 * day),
   };
   const withLatest = (updatedAt: Date | null) => {
     const findFirst = vi.fn(async () => (updatedAt ? { updatedAt } : null));
@@ -161,10 +163,17 @@ describe("memory tidy preconditions", () => {
     );
     const weekOld = { ...routine, lastRunAt: new Date(Date.now() - 7 * day) };
     expect(await routinePreconditionMet(unchanged.prisma, weekOld, "memory", undefined)).toBe(true);
-    const first = { ...routine, lastRunAt: null };
+    // A routine that never ran compares with its creation, so a new bot's first night is
+    // skipped unless memory changed after it was set up.
+    const first = { ...routine, lastRunAt: null, createdAt: new Date(Date.now() - day) };
     expect(await routinePreconditionMet(unchanged.prisma, first, "bot_memory", undefined)).toBe(
-      true,
+      false,
     );
+    expect(await routinePreconditionMet(changed.prisma, first, "bot_memory", undefined)).toBe(true);
+    const firstWeekOld = { ...first, createdAt: new Date(Date.now() - 7 * day) };
+    expect(
+      await routinePreconditionMet(unchanged.prisma, firstWeekOld, "bot_memory", undefined),
+    ).toBe(true);
     const empty = withLatest(null);
     expect(await routinePreconditionMet(empty.prisma, first, "memory", undefined)).toBe(false);
   });
