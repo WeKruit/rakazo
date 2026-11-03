@@ -1194,6 +1194,17 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("leaves a question in the reply as text when there is nothing to ask on a card", async () => {
+    const greeting = {
+      ...input,
+      reply: "你好！我可以帮你找人、写邮件和安排面试。你想先处理哪件事？",
+      request: "你好，你能帮我做什么？",
+    };
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    expect(await planDeclineRetry(human, greeting)).toBeDefined();
+    expect(await planDeclineRetry(human, { ...greeting, noQuestionCard: true })).toBeUndefined();
+  });
+
   it("redrafts a draft shown with template variables once", async () => {
     const reply =
       "Here is the sequence.\n\n### Email 1\n**Subject:** Role\n\nHi {{firstName}},\n\nA role.";
