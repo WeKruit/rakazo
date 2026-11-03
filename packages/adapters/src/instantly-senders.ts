@@ -43,6 +43,8 @@ type Sender = {
   attached?: boolean;
   default?: boolean;
 };
+const NO_SELF_SETUP =
+  "Not set up: this account has no sending email, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and that we can turn it on if they contact us. Never ask for a company name or propose an address; drafts and contact lookups still work.";
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
 const own = (context: AdapterContext) => ({ userId: context.userId, spaceId: context.spaceId });
 const receiptScope = (context: AdapterContext) => ({
@@ -419,9 +421,11 @@ export async function ensureSendingIdentity(
   await context.reauthorize?.();
   const settings = await prisma.deploymentSettings.findUnique({
     where: { id: "default" },
-    select: { sendingMailboxLimit: true },
+    select: { sendingMailboxLimit: true, senderSelfSetup: true },
   });
   const limit = settings?.sendingMailboxLimit ?? 2;
+  // Mailboxes are added for an account by us; a recruiter sets one up only where the deployment allows it.
+  const selfSetup = settings?.senderSelfSetup === true;
   const mine = await confirmedSendingMailboxes(prisma, context);
   if (input.operation === "read") {
     const pending = await prisma.externalEffect.findMany({
@@ -467,6 +471,7 @@ export async function ensureSendingIdentity(
       }),
       defaultMailbox: await defaultSendingMailbox(prisma, context),
       mailboxLimit: limit,
+      selfSetup,
     };
   }
   if (input.operation === "select") {
@@ -505,6 +510,8 @@ export async function ensureSendingIdentity(
       mailboxLimit: limit,
     };
   }
+  if (!selfSetup && !(input.operation === "confirm" && input.mode === "attach"))
+    throw new Error(NO_SELF_SETUP);
   const accounts =
     input.operation === "confirm" && input.mode === "attach" ? [] : await orderedAccounts(rest);
   if (input.operation === "propose") {

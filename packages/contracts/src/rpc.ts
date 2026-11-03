@@ -456,6 +456,7 @@ export const appContract = {
       .input(
         z.object({
           sendingMailboxLimit: z.number().int().min(1).max(100).optional(),
+          senderSelfSetup: z.boolean().optional(),
           signupsEnabled: z.boolean().optional(),
           signupAllowlist: z.array(z.string()).optional(),
           computerHost: z.enum(["docker", "this-mac"]).nullable().optional(),

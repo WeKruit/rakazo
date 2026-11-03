@@ -1574,6 +1574,7 @@ export function createRouter(deps: RouterDeps) {
             id: "default",
             ownerUserId: context.actor.userId,
             sendingMailboxLimit: input.sendingMailboxLimit ?? 2,
+            senderSelfSetup: input.senderSelfSetup ?? false,
             signupsEnabled: input.signupsEnabled ?? true,
             signupAllowlist: (input.signupAllowlist ?? []).join(","),
             signupPolicyInitialized: true,
@@ -1583,6 +1584,9 @@ export function createRouter(deps: RouterDeps) {
             ...(input.sendingMailboxLimit === undefined
               ? {}
               : { sendingMailboxLimit: input.sendingMailboxLimit }),
+            ...(input.senderSelfSetup === undefined
+              ? {}
+              : { senderSelfSetup: input.senderSelfSetup }),
             ...(input.signupsEnabled === undefined ? {} : { signupsEnabled: input.signupsEnabled }),
             ...(input.signupAllowlist ? { signupAllowlist: input.signupAllowlist.join(",") } : {}),
             ...(input.signupsEnabled === undefined && input.signupAllowlist === undefined
@@ -8062,6 +8066,7 @@ async function deploymentDto(prisma: PrismaClient, sandboxProvider: string) {
   const settings = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
   return {
     sendingMailboxLimit: settings?.sendingMailboxLimit ?? 2,
+    senderSelfSetup: settings?.senderSelfSetup ?? false,
     ownerUserId: settings?.ownerUserId ?? null,
     signupsEnabled: settings?.signupsEnabled ?? true,
     signupAllowlist: settings?.signupAllowlist
