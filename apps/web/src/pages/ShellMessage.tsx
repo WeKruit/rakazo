@@ -61,6 +61,7 @@ import {
   shouldRenderToolCard,
 } from "../lib/tool-activity-view";
 import { ReplyLine } from "./shell/chat-context";
+import { useHandoffSource } from "./shell/handoff-source";
 
 const AppConnectCard = lazyPanel(() =>
   withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.AppConnectCard),
@@ -243,6 +244,7 @@ export const MessageView = memo(function MessageView({
   onContinue?: () => void;
 }) {
   const { t } = useLingui();
+  const handoffSource = useHandoffSource();
   const isNarration =
     message.role === "bot" &&
     message.blocks.length > 0 &&
@@ -385,6 +387,25 @@ export const MessageView = memo(function MessageView({
               </span>
               {showToolActivity ? <span>{block.text}</span> : null}
             </div>
+          );
+        }
+        if (block.kind === "bot_message_received" && !showToolActivity) {
+          // Work handed over from another conversation links back to where it was asked.
+          const source = block.returnThreadId ? handoffSource(block.returnThreadId) : undefined;
+          if (!source) return null;
+          const peer = source.name;
+          const label = t`Message from ${peer}`;
+          return (
+            <CollaborationMarker
+              key={i}
+              ariaLabel={label}
+              color={peerBot(block.fromBotId)?.color ?? FALLBACK_BOT_COLOR}
+              identity={block.fromBotId}
+              label={label}
+              href={`/app/g/${encodeURIComponent(source.groupId)}${
+                block.returnToMessageId ? `?m=${encodeURIComponent(block.returnToMessageId)}` : ""
+              }`}
+            />
           );
         }
         if (block.kind === "bot_message_sent" || block.kind === "bot_message_received") {

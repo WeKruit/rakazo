@@ -48,6 +48,8 @@ export function renderableMessageBlocks(
   return blocks.filter(
     (block) =>
       (showToolActivity ||
+        // Work handed over from another conversation stays as a link back to it.
+        (block.kind === "bot_message_received" && Boolean(block.returnThreadId)) ||
         !["handoff", "bot_message_sent", "bot_message_received", "child_bot"].includes(
           block.kind,
         )) &&
