@@ -4,9 +4,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn(), answer: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn(), answer: vi.fn(), messages: vi.fn() }));
 vi.mock("../../lib/rpc", () => ({
-  rpc: { threads: { get: api.get, send: api.send, answer: api.answer } },
+  rpc: { threads: { get: api.get, send: api.send, answer: api.answer, messages: api.messages } },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children?: ReactNode }) => children,
@@ -155,4 +155,36 @@ it("docks as a labelled pane with no Back, and Escape leaves it open", async () 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
   });
   expect(onBack).not.toHaveBeenCalled();
+});
+
+it("lands on the request when a link targets a hidden handoff", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Element.prototype.scrollIntoView = vi.fn();
+  api.get.mockResolvedValue(snapshot);
+  api.messages.mockResolvedValue({
+    messages: [
+      { id: "ask", seq: 1, role: "user", blocks: [{ kind: "text" }] },
+      { id: "echo", seq: 2, runId: "r", blocks: [{ kind: "bot_message_sent" }] },
+      { id: "later", seq: 3, role: "user", blocks: [{ kind: "text" }] },
+    ],
+  });
+  host = document.createElement("div");
+  document.body.append(host);
+  await act(async () =>
+    createRoot(host!).render(
+      <StackedConversation
+        groupId="kruit"
+        messageId="echo"
+        title="Kruit"
+        bots={[]}
+        onBack={vi.fn()}
+        onOpenFull={vi.fn()}
+      />,
+    ),
+  );
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(api.messages).toHaveBeenCalledWith({ groupId: "kruit", around: { messageId: "echo" } });
+  expect(host.querySelector('[data-message-id="echo"]')).toBeNull();
+  expect(host.querySelector('[data-message-id="ask"]')!.className).toContain("ring-2");
+  expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
 });

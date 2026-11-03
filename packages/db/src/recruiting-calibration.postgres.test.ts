@@ -372,6 +372,42 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       accepted: true,
     });
     expect(quality).toMatchObject({ goodExample: 2, notFit: 4 });
+
+    // What the praised and turned-down people share, from saved profiles or their search rows.
+    await prisma.recruitingSavedProfile.create({
+      data: {
+        spaceId,
+        ownerUserId: userId,
+        personKey: "first-2",
+        provider: "synthetic",
+        sourceEffectId: "synthetic",
+        fetchedAt: minute(5),
+        profile: {
+          experience: [
+            { title: "Analyst", company_name: "Old Co", is_current: false },
+            { title: "Ops Lead", company_name: " Example Logistics ", is_current: true },
+          ],
+          education: [{ school_name: "Example State University", field_of_study: "Supply Chain" }],
+        },
+      },
+    });
+    const patterns = await recruiting.readRecruitingVerdictPatterns(prisma, actor, { roleId });
+    expect(patterns.role).toEqual(
+      expect.arrayContaining([
+        { facet: "company", fit: "good_example", value: "Example Logistics", people: 1 },
+        { facet: "title", fit: "good_example", value: "Ops Lead", people: 1 },
+        { facet: "title", fit: "good_example", value: "Warehouse operations manager", people: 1 },
+        {
+          facet: "title",
+          fit: "not_fit",
+          value: "Warehouse operations manager",
+          people: expect.any(Number),
+        },
+        { facet: "school", fit: "good_example", value: "Example State University", people: 1 },
+        { facet: "major", fit: "good_example", value: "Supply Chain", people: 1 },
+      ]),
+    );
+    expect(patterns.allRoles).toEqual(patterns.role);
     await expect(
       recruiting.readRecruitingSearchQuality(
         prisma,
