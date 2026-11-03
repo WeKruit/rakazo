@@ -5632,6 +5632,14 @@ describe("native recruiting assessment effect delivery", () => {
     expect(prompt).not.toContain("Do not create a role in this turn");
   });
 
+  it("never shows a question card in a role team with no role", async () => {
+    const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    expect(await request.beforeAsk?.("你想先处理哪项？", undefined)).toEqual({
+      instead: expect.stringContaining("Not asked: no role is saved in this chat yet"),
+    });
+  });
+
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
     const f = await roleTeamFirstTurn("short-request-role", "New grads from USC, CS");
     expect(executeRecruitingRoleTool).not.toHaveBeenCalled();
