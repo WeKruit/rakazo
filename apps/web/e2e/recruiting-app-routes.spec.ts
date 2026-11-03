@@ -6,7 +6,9 @@ async function openRoute(page: Page, view: string) {
   await page.goto(`/app/g/${appGroupId}?view=${view}`);
   await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
   const collapse = page.getByRole("button", { name: "Collapse role chat", exact: true });
-  if (["contacts", "shortlist"].includes(view)) await expect(collapse).toBeVisible();
+  // Reading views keep their space: the role chat starts closed and opens on request.
+  if (["contacts", "shortlist"].includes(view))
+    await expect(page.getByRole("button", { name: "Open role chat", exact: true })).toBeVisible();
   if (view !== "home" && (await collapse.isVisible())) await collapse.click();
   await expect(page.locator('[data-rakazo-app-state="failed"]')).toHaveCount(0);
 }
