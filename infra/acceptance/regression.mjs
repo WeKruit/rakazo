@@ -1482,10 +1482,11 @@ try {
     for (const end = Date.now() + 90_000; !saved && Date.now() < end; await sleep(5_000))
       saved = (await memoryDocs()).find((doc) => doc.content.includes(team));
     if (!saved) failures.push(`the preference "${team}" was not saved to memory within 90 s`);
+    // The role agent may post a quick acknowledgement first; wait for the name, not any reply.
     const recall = await say(fixture, "我让你怎么称呼我的团队？只回答名字。", {
       fixture: true,
       limitMs: 3 * 60_000,
-      until: answered,
+      until: (replies) => replies.some((message) => botText(message).includes(team)),
     });
     if (!recall.replies.some((message) => botText(message).includes(team)))
       failures.push(
