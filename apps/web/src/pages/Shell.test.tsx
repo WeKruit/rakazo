@@ -112,6 +112,7 @@ const shellApi = vi.hoisted(() => ({
     listAssessments: vi.fn(),
     listCandidates: vi.fn(),
     listFeedback: vi.fn(),
+    searchQuality: vi.fn(),
     listCandidateSources: vi.fn(),
     listResearch: vi.fn(),
     listQuestions: vi.fn(),
@@ -620,6 +621,7 @@ async function renderFeedbackShell(
   shellApi.recruiting.profileActivity.recordView.mockResolvedValue({ ok: true });
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
   shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
+  shellApi.recruiting.searchQuality.mockResolvedValue({ rounds: [], goodExample: 0, notFit: 0 });
   shellApi.recruiting.correspondence.mockResolvedValue({
     status: "not_checked",
     checkedAt: null,
