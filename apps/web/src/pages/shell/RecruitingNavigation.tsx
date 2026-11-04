@@ -13,7 +13,7 @@ import {
   Send,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ListPager } from "../../components/ListPager";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { groupIsWorking } from "../../lib/bot-run-status";
@@ -177,16 +177,23 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     failed?: boolean;
     unavailable?: boolean;
   }>();
+  // A saved change elsewhere invalidates the shared reads; read the roles again before failing.
+  const [crmReread, setCrmReread] = useState(0);
+  const crmRereads = useRef(0);
   useEffect(() => {
     if (!crmContext) return;
     let cancelled = false;
     const abort = new AbortController();
     const { cache, scope, target } = crmContext;
     const epoch = cache.epoch;
-    // A sibling read that invalidated this scope in flight leaves a retryable failure, not a spinner.
+    // A sibling read that invalidated this scope in flight is read again a few times, then
+    // leaves a retryable failure rather than a spinner.
     const invalidated = () => {
       if (cache.epoch === epoch) return false;
-      setCrm({ key: crmKey, roles: [], failed: true });
+      if (crmRereads.current < 3) {
+        crmRereads.current++;
+        setCrmReread((value) => value + 1);
+      } else setCrm({ key: crmKey, roles: [], failed: true });
       return true;
     };
     const cacheKey = `${scope}:crm:roles`;
@@ -239,6 +246,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         );
         if (cancelled || invalidated()) return;
         const roles = lists.flat();
+        crmRereads.current = 0;
         rememberRecruitingRead(cache, cacheKey, roles, epoch);
         setCrm({
           key: crmKey,
@@ -247,13 +255,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         });
       })
       .catch(() => {
-        if (!cancelled) setCrm({ key: crmKey, roles: [], failed: true });
+        if (!cancelled && !invalidated()) setCrm({ key: crmKey, roles: [], failed: true });
       });
     return () => {
       cancelled = true;
       abort.abort();
     };
-  }, [crmKey]);
+  }, [crmKey, crmReread]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);

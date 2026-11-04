@@ -1588,23 +1588,36 @@ async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingRea
   return container;
 }
 
-it("ends a CRM role read in a retryable failure when another read invalidates the cache", async () => {
-  let finish!: (value: unknown) => void;
-  shellApi.recruiting.crmData
-    .mockReturnValueOnce(
+it("reads the CRM roles again when another read invalidates the cache, then offers a retry", async () => {
+  const finishes: ((value: unknown) => void)[] = [];
+  shellApi.recruiting.crmData.mockImplementation(
+    () =>
       new Promise((resolve) => {
-        finish = resolve;
+        finishes.push(resolve);
       }),
-    )
-    .mockReturnValue(new Promise(() => {}));
+  );
   const cache = createRecruitingReadCache();
   const view = await renderRoleNavigation(cache);
   expect(view.textContent).toContain("Loading roles…");
-  // A sibling read was denied and dropped this scope; nothing re-renders the navigation.
+  // A sibling's saved change drops this scope while the roles are read; nothing else re-renders.
   clearRecruitingReads(cache, "actor:space:thread");
-  await act(async () => finish({ operation: "memberships", sources: [] }));
+  await act(async () => finishes.at(-1)!({ operation: "memberships", sources: [] }));
+  expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(2);
+  expect(view.textContent).not.toContain("Could not read candidate records.");
+  // A list that keeps being invalidated stops after a few reads and offers a retry.
+  for (let read = 0; read < 3; read++) {
+    clearRecruitingReads(cache, "actor:space:thread");
+    await act(async () => finishes.at(-1)!({ operation: "memberships", sources: [] }));
+  }
+  expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(4);
+  expect(view.textContent).toContain("Could not read candidate records.");
+  const retry = [...view.querySelectorAll("button")].find(
+    (item) => item.textContent === "Try again",
+  )!;
+  await act(async () => retry.click());
+  await act(async () => finishes.at(-1)!({ operation: "memberships", sources: [] }));
   expect(view.textContent).not.toContain("Loading roles…");
-  expect(view.textContent).toContain("Try again");
+  expect(view.textContent).not.toContain("Could not read candidate records.");
 });
 
 it("retries the CRM role list through a deploy's unavailable window but not after a denial", async () => {
