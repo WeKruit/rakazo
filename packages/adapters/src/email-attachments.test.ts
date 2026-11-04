@@ -1,6 +1,6 @@
 import type { ArtifactStore } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
-import { saveEmailAttachments } from "./email-attachments.js";
+import { emailsWithAttachments, saveEmailAttachments } from "./email-attachments.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -124,5 +124,66 @@ describe("saveEmailAttachments", () => {
     );
     expect(saved).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("emailsWithAttachments", () => {
+  // The shape the mail provider returns for a candidate's reply with a file (fake values).
+  const reply = (id: string, ueType: number, files: unknown[] | null) => ({
+    id,
+    timestamp_created: "2026-11-03T04:05:13.000Z",
+    timestamp_email: "2026-11-03T04:05:12.000Z",
+    message_id: `<${id}@mail.example.test>`,
+    subject: "Re: Front Desk Supervisor opportunity",
+    to_address_email_list: "recruiter@example.test",
+    from_address_email: "candidate@example.test",
+    body: { text: "My profile is attached." },
+    organization_id: ORG,
+    eaccount: "recruiter@example.test",
+    campaign_id: "33333333-3333-4333-8333-333333333333",
+    lead: "candidate@example.test",
+    ue_type: ueType,
+    thread_id: "thread-1",
+    ...(files ? { attachment_json: { files } } : {}),
+  });
+  const file = {
+    filename: "Profile.pdf",
+    size: 1047,
+    type: "application/pdf",
+    url: `${base}/Profile.pdf`,
+    error: null,
+  };
+  const page = (items: unknown[]) => ({
+    structuredContent: {
+      source: "local_native_instantly_rest",
+      page: { items },
+      query: {},
+      coverage: {},
+    },
+  });
+
+  it("finds a reply's file in the contact, mailbox and thread page reads", () => {
+    const items = [
+      reply(EMAIL, 2, [file]),
+      reply("44444444-4444-4444-8444-444444444444", 2, null),
+      // Files on mail we sent are ours, not the candidate's.
+      reply("55555555-5555-4555-8555-555555555555", 1, [file]),
+    ];
+    for (const tool of [
+      "native_instantly_search_contact_emails",
+      "native_instantly_list_mailbox_emails",
+      "native_instantly_get_thread_history",
+    ])
+      expect(emailsWithAttachments(tool, page(items)).map((email) => email.id)).toEqual([EMAIL]);
+  });
+
+  it("reads the local get_email result as well as the remote tool's body", () => {
+    const local = {
+      structuredContent: { source: "local_native_instantly_rest", result: reply(EMAIL, 2, [file]) },
+    };
+    const remote = { structuredContent: reply(EMAIL, 2, [file]) };
+    expect(emailsWithAttachments("native_instantly_get_email", local)).toHaveLength(1);
+    expect(emailsWithAttachments("get_email", remote)).toHaveLength(1);
+    expect(emailsWithAttachments("list_campaigns", remote)).toEqual([]);
   });
 });
