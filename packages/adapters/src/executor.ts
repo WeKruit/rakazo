@@ -446,7 +446,11 @@ import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js"
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
-import { EMAIL_ATTACHMENTS_NOTE, saveEmailAttachments } from "./email-attachments.js";
+import {
+  EMAIL_ATTACHMENTS_NOTE,
+  emailsWithAttachments,
+  saveEmailAttachments,
+} from "./email-attachments.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -756,6 +760,8 @@ const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
 
 /** People Kruit lists from a role when the recruiter named no number. */
 const SHOWN_ROLE_PEOPLE = 10;
+// One mail page saves the files of at most this many received emails; a later read saves the rest.
+const MAX_ATTACHMENT_EMAILS = 5;
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -13118,7 +13124,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return finish({ error: `unknown tool ${name}` });
         };
-        // A candidate's email read by the agent keeps its attachments as saved files it can read.
+        // A candidate's email read by the agent keeps its attachments as saved files it can read,
+        // whichever mail read found it.
         const withEmailAttachments = async (
           returned: unknown,
           raw: unknown,
@@ -13128,34 +13135,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !deps.artifacts ||
             route?.connectorId !== "mcp" ||
             !route.resourceId ||
-            (route.toolName !== "get_email" && route.toolName !== "native_instantly_get_email") ||
             !returned ||
             typeof returned !== "object" ||
             Array.isArray(returned)
           )
             return returned;
-          const email = readInstantlyEmail(mcpObject(raw) ?? raw);
-          if (!email?.attachment_json?.files.length) return returned;
-          const attachments = await saveEmailAttachments(
-            { prisma: deps.prisma, artifacts: deps.artifacts },
-            {
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              groupId: thread.groupId,
-              runId: run.id,
-              sourceId: route.resourceId,
-            },
-            email,
-            { download: true, signal: context.signal },
-          ).catch(() => []);
+          const emails = emailsWithAttachments(route.toolName, raw);
+          const attachments = [];
+          for (const email of emails.slice(0, MAX_ATTACHMENT_EMAILS)) {
+            const saved = await saveEmailAttachments(
+              { prisma: deps.prisma, artifacts: deps.artifacts },
+              {
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                groupId: thread.groupId,
+                runId: run.id,
+                sourceId: route.resourceId,
+              },
+              email,
+              { download: true, signal: context.signal },
+            ).catch(() => []);
+            for (const { id, ...file } of saved)
+              attachments.push({ artifactId: id, emailId: email.id, ...file });
+          }
           return attachments.length
             ? {
                 ...(returned as Record<string, unknown>),
-                savedAttachments: attachments.map(({ id, ...file }) => ({
-                  artifactId: id,
-                  ...file,
-                })),
+                savedAttachments: attachments,
                 savedAttachmentsNote: EMAIL_ATTACHMENTS_NOTE,
               }
             : returned;
