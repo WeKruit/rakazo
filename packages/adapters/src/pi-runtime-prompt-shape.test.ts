@@ -27,8 +27,9 @@ describe("promptShape", () => {
     });
     expect(changed.system).toBe(shape.system);
     expect(changed.tools).toBe(shape.tools);
-    expect(changed.messages.split(" ")[0]).toBe(shape.messages.split(" ")[0]);
-    expect(changed.messages.split(" ")[1]).not.toBe(shape.messages.split(" ")[1]);
+    expect(changed.prefix.split(" ")[0]).toBe(shape.prefix.split(" ")[0]);
+    expect(changed.prefix.split(" ")[1]).not.toBe(shape.prefix.split(" ")[1]);
     expect(JSON.stringify(shape)).not.toContain("Kruit");
+    expect(Object.keys(shape)).not.toContain("messages");
   });
 });
