@@ -474,6 +474,12 @@ export function useRecruitingWorkspace({
     (!readCache || candidateValidation.current === readCache.epoch);
   const latestCandidates = useRef({ fresh: candidateFresh, items: candidatePage?.items });
   latestCandidates.current = { fresh: candidateFresh, items: candidatePage?.items };
+  // Actions started while the list re-reads wait for it, then save against the current rows.
+  const candidateWaiters = useRef(new Set<() => void>());
+  useEffect(() => {
+    if (!candidateFresh) return;
+    for (const wake of candidateWaiters.current) wake();
+  });
   const candidatesCacheKey =
     readCacheScope && roleId && roleRevisionId
       ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters, candidateOffset])}`
@@ -837,14 +843,32 @@ export function useRecruitingWorkspace({
       }
     }
   }
+  const candidatesCurrent = () =>
+    latestCandidates.current.fresh &&
+    (!readCache || candidateValidation.current === readCache.epoch);
+  async function waitForCurrentCandidates() {
+    if (candidatesCurrent()) return true;
+    // Another panel's change can leave the list unverified with no read running; start one.
+    setCandidateReread((value) => value + 1);
+    const deadline = Date.now() + 15_000;
+    while (!candidatesCurrent()) {
+      if (!editScope.current.active || Date.now() > deadline) return false;
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer);
+          candidateWaiters.current.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, 1_000);
+        candidateWaiters.current.add(wake);
+      });
+    }
+    return true;
+  }
   async function setShortlist(target: RecruitingCandidate, shortlisted: boolean) {
     // An open profile can hold this action from an earlier render; check the list as it is now.
-    if (
-      shortlistMutation.current ||
-      !latestCandidates.current.fresh ||
-      (readCache && candidateValidation.current !== readCache.epoch)
-    )
-      return false;
+    if (shortlistMutation.current || !(await waitForCurrentCandidates())) return false;
+    if (shortlistMutation.current) return false;
     const candidate =
       latestCandidates.current.items?.find(
         (item) => item.roleId === target.roleId && item.candidateKey === target.candidateKey,
