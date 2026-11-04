@@ -231,6 +231,8 @@ export function useShellRecruiting({
     key: string;
     scope: string;
     workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+    /** The role's last binding, shown while a cleared read is fetched again. */
+    kept?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
     failed?: boolean;
   }>();
   useEffect(() => {
@@ -252,11 +254,16 @@ export function useShellRecruiting({
     const cached = savedRecruitingRead(cache, `${recruitingCacheScope}:workspace`) as
       | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
       | undefined;
-    setBindingRead({
+    // A saved change clears the cached read; keep its binding so the workbench is not remounted.
+    setBindingRead((previous) => ({
       key: bindingReadKey,
       scope: recruitingCacheScope,
       workspace: cached?.workspace,
-    });
+      kept:
+        cached?.workspace === undefined && previous && previous.scope === recruitingCacheScope
+          ? (previous.workspace ?? previous.kept)
+          : undefined,
+    }));
     void fetchRecruitingRead(cache, recruitingCacheScope, "getWorkspace", { threadId }, () =>
       retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal),
     )
@@ -302,11 +309,16 @@ export function useShellRecruiting({
     groupId,
   ]);
   // Until a refresh's effect runs, keep this conversation's binding so the workbench is not remounted.
+  const shownBinding =
+    bindingRead && bindingRead.scope === recruitingCacheScope
+      ? (bindingRead.workspace ?? bindingRead.kept)
+      : undefined;
   const currentBindingRead =
-    bindingRead?.key === bindingReadKey
+    bindingRead?.key === bindingReadKey &&
+    (bindingRead.failed || bindingRead.workspace !== undefined || !shownBinding)
       ? bindingRead
-      : bindingRead?.workspace && bindingRead.scope === recruitingCacheScope
-        ? { key: bindingReadKey, scope: bindingRead.scope, workspace: bindingRead.workspace }
+      : shownBinding
+        ? { key: bindingReadKey, scope: bindingRead!.scope, workspace: shownBinding }
         : undefined;
   const currentWorkspaceRead = useMemo(
     () =>
