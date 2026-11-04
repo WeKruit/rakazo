@@ -59,6 +59,47 @@ describe("attachment helpers", () => {
     expect(deriveMessageQuote(blocks, reference.subject, "plain-text")).toBeUndefined();
     expect(deriveMessageQuote(blocks, "Read this reply", "plain-text")).toBe("Read this reply");
   });
+  it("shows which reply a reply card drafted, and whether it still waits", () => {
+    const mailReply = {
+      from: "recruiter@example.test",
+      to: ["candidate@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Re: Interview",
+      body: `Thanks, Tuesday works. ${"x".repeat(600)}`,
+      inReplyTo: {
+        emailId: "email-1",
+        sourceId: "mailbox-1",
+        threadId: "thread-1",
+        subject: "Interview",
+        sender: "candidate@example.test",
+      },
+      status: "needs_approval" as const,
+      sentAt: null,
+    };
+    const card = {
+      kind: "ask" as const,
+      text: "Confirm reply",
+      approvalEffectId: "effect-1",
+      status: "expired" as const,
+      mailReply,
+    };
+    const history = blocksToAgentHistoryText([card]);
+    expect(history).toContain("Reply draft to candidate@example.test; subject: Re: Interview");
+    expect(history).toContain("Body: Thanks, Tuesday works.");
+    expect(history).toContain("Approval card closed unanswered");
+    expect(history.length).toBeLessThan(700);
+    expect(
+      blocksToAgentHistoryText([
+        {
+          ...card,
+          status: "answered",
+          answer: "send",
+          mailReply: { ...mailReply, status: "sent" },
+        },
+      ]),
+    ).toContain("Mail status: sent");
+  });
   it("accepts zip archives and rejects unsupported mime types and empty payloads", () => {
     expect(() => validateAttachmentMimeType("application/zip")).not.toThrow();
     expect(() => validateAttachmentMimeType("application/octet-stream")).toThrow(

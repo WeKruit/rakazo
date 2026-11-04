@@ -1,5 +1,6 @@
 import type {
   AttachmentMimeType,
+  MailReply,
   MessageBlock,
   RecruitingChatContext,
   RecruitingCorrespondenceReference,
@@ -122,6 +123,21 @@ export function promptTextForAttachments(
   return [caption, ...notes].filter(Boolean).join("\n\n") || "See attached files.";
 }
 
+/** Long enough to tell drafts apart; the full draft stays on the card. */
+const MAIL_REPLY_HISTORY_BODY_CHARS = 500;
+
+function mailReplyHistoryText(reply: MailReply): string {
+  const body =
+    reply.body.length > MAIL_REPLY_HISTORY_BODY_CHARS
+      ? `${reply.body.slice(0, MAIL_REPLY_HISTORY_BODY_CHARS)}…`
+      : reply.body;
+  return [
+    `Reply draft to ${[...reply.to, ...reply.cc].join(", ")}; subject: ${reply.subject}`,
+    `Body: ${body}`,
+    ...(reply.status === "needs_approval" ? [] : [`Mail status: ${reply.status}`]),
+  ].join("\n");
+}
+
 export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
   return blocks
     .map((block) => {
@@ -158,12 +174,16 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
       }
       // Without the answer a later turn sees the question as still open and asks it again.
       if (block.kind === "ask") {
+        // A reply card's title alone ("Confirm reply") cannot tell one draft from another.
+        const text = block.mailReply
+          ? `${block.text}\n${mailReplyHistoryText(block.mailReply)}`
+          : block.text;
         // An approval card that reads like a request must not read like a granted one.
         if (block.approvalEffectId && block.status !== "answered")
-          return `${block.text}\n(${block.status === "expired" ? "Approval card closed unanswered" : "Approval card waiting for the user; not answered"})`;
-        if (block.status !== "answered" || !block.answer) return block.text;
+          return `${text}\n(${block.status === "expired" ? "Approval card closed unanswered" : "Approval card waiting for the user; not answered"})`;
+        if (block.status !== "answered" || !block.answer) return text;
         const choice = block.actions?.find((action) => action.id === block.answer);
-        return `${block.text}\nAnswer: ${choice?.label ?? block.answer}`;
+        return `${text}\nAnswer: ${choice?.label ?? block.answer}`;
       }
       if ("text" in block && typeof block.text === "string") return block.text;
       return "";
