@@ -25,6 +25,7 @@ import {
   SUMMARY_TARGET_CHARS,
   selectCompactedHistory,
   shouldEnqueueCompaction,
+  steppedHistoryWindow,
   summarizeTimeoutMs,
 } from "./history-compaction.js";
 
@@ -52,6 +53,25 @@ describe("nextCompactionBatchRange", () => {
 
   it("continues from the cursor when something has already been compacted", () => {
     expect(nextCompactionBatchRange(50, 50)).toEqual({ fromSeqExclusive: 50, take: 50 });
+  });
+});
+
+describe("steppedHistoryWindow", () => {
+  const thread = (latest: number) => Array.from({ length: latest + 1 }, (_, seq) => ({ seq }));
+  const window = (latest: number) => steppedHistoryWindow(thread(latest), 200, (m) => m.seq);
+
+  it("keeps the window's first message while new messages arrive, then moves it a step", () => {
+    // Messages 250 to 299 all start at 100, so each turn reuses the cached history before it.
+    for (const latest of [250, 260, 299]) expect(window(latest)[0]).toEqual({ seq: 100 });
+    expect(window(300)[0]).toEqual({ seq: 150 });
+    expect(window(299)).toHaveLength(200);
+    expect(window(300)).toHaveLength(151);
+    expect(window(300).at(-1)).toEqual({ seq: 300 });
+  });
+
+  it("keeps a short thread whole and never exceeds the window", () => {
+    expect(window(40)).toHaveLength(41);
+    expect(steppedHistoryWindow(thread(500), 50, (m) => m.seq).length).toBeLessThanOrEqual(50);
   });
 });
 

@@ -140,6 +140,24 @@ export function historyWindowSize(options: {
     : LEGACY_HISTORY_WINDOW_SIZE;
 }
 
+/**
+ * The newest messages, at most `size`, starting at a multiple of `step` (a quarter of the window) in
+ * message order. The start then stays put for `step` new messages instead of moving on every turn: a start that moves
+ * changes the first history message, and the provider's prompt cache misses everything after it.
+ */
+export function steppedHistoryWindow<T>(
+  messages: readonly T[],
+  size: number,
+  seqOf: (message: T) => number | undefined,
+  step = Math.max(1, Math.floor(size / 4)),
+): T[] {
+  const seqs = messages.map(seqOf).filter((seq): seq is number => seq !== undefined);
+  if (seqs.length === 0) return messages.slice(-size);
+  const latest = Math.max(...seqs);
+  const start = Math.ceil((latest - size + 1) / step) * step;
+  return messages.filter((message) => (seqOf(message) ?? latest) >= start).slice(-size);
+}
+
 export function formatRecalledMemory(
   results: Array<{ memory: string; id?: string; provenance?: string; entity?: string }>,
 ): string {

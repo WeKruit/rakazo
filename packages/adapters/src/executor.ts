@@ -460,6 +460,7 @@ import {
   MAX_RECALLED_MEMORIES,
   selectCompactedHistory,
   shouldEnqueueCompaction,
+  steppedHistoryWindow,
 } from "./history-compaction.js";
 import {
   describeCampaignActivation,
@@ -5267,12 +5268,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         }
         if (!compactedHistory.usedLocalSummary) {
-          history = history.slice(
-            -historyWindowSize({
+          const seqById = new Map(compactedHistory.history.map((m) => [m.id, m.seq]));
+          history = steppedHistoryWindow(
+            history,
+            historyWindowSize({
               semanticMemoryEnabled: semanticMemoryEnabled && !thread.historyCompactionSummary,
               compacted: thread.historyCompactedUpToSeq != null,
               recallSucceeded,
             }),
+            (message) => seqById.get(message.id),
           );
         }
         if (canonicalHistory.length)
