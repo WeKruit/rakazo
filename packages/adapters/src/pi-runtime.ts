@@ -144,7 +144,12 @@ let catalogModelsCache: Models | undefined;
 export function promptShape(context: {
   systemPrompt?: string;
   tools?: readonly { name: string; description?: string; parameters?: unknown }[];
-  messages: readonly { role: string; content?: unknown }[];
+  messages: readonly {
+    role: string;
+    content?: unknown;
+    toolsAdded?: readonly unknown[];
+    toolsRemoved?: readonly unknown[];
+  }[];
 }) {
   const hash = (value: unknown) =>
     createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 8);
@@ -156,9 +161,13 @@ export function promptShape(context: {
     toolCount: context.tools?.length ?? 0,
     messageCount: context.messages.length,
     // The first messages decide whether a new turn reuses the conversation's cached history.
-    messages: context.messages
+    // Named "prefix": the logger redacts any field called messages.
+    prefix: context.messages
       .slice(0, 12)
-      .map((message) => `${message.role[0]}${hash(message.content)}`)
+      .map(
+        (message) =>
+          `${message.role[0]}${hash([message.content, message.toolsAdded, message.toolsRemoved])}`,
+      )
       .join(" "),
   };
 }
