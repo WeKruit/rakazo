@@ -96,6 +96,22 @@ describe("bounded context selection", () => {
     expect(selected.messages).toEqual([history[0], history[18], history[19]]);
     expect(selected.droppedMessages).toBe(17);
   });
+  it("keeps the window's first exchange for several turns so the cached prefix survives", () => {
+    const firstKept = (turns: number) => {
+      const history = Array.from({ length: turns }, (_, index) => user(`exchange ${index}`));
+      const selected = selectContext(history, {
+        budget,
+        strategy: "retrieval",
+        recentExchanges: 4,
+      });
+      expect(selected.messages.at(-1)).toEqual(history.at(-1));
+      return selected.messages[0];
+    };
+    // Turns 8 to 11 all start at exchange 4; the start moves only at turn 12.
+    expect([8, 9, 10, 11].map(firstKept)).toEqual(Array(4).fill(user("exchange 4")));
+    expect(firstKept(12)).toEqual(user("exchange 8"));
+    expect(firstKept(3)).toEqual(user("exchange 0"));
+  });
   it("retains a warm useful prefix when budget allows, cold selection performs no summary work", () => {
     const history = Array.from({ length: 20 }, (_, index) => user(`exchange ${index}`));
     expect(

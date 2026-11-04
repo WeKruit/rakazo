@@ -400,7 +400,8 @@ describe("runtime context policy", () => {
       });
       const unrelated = { roleContext: "Untrusted provider claims. ".repeat(1000) };
       append("provider", "mcp__other__research", unrelated);
-      for (let i = 0; i < 12; i++)
+      // More exchanges than the widest recent window (15), so the older adoption falls outside it.
+      for (let i = 0; i < 16; i++)
         context.messages.push({ role: "user", content: `Later steering ${i}`, timestamp: 200 + i });
       const prepared = createRuntimeContextPolicy({
         ...request,
