@@ -6558,9 +6558,12 @@ describe("approval cards on a new user message", () => {
     };
     f.runData.sourceMessageId = human.id;
     f.prisma.message.findMany.mockResolvedValue([card, human]);
+    f.prisma.run.findMany.mockResolvedValue([{ id: "earlier-run" }] as never);
     let prompt = "";
+    let history = "";
     f.runtimeRun.mockImplementation(async function* (request) {
       prompt = request.prompt;
+      history = JSON.stringify(request.history);
       yield { type: "done" as const, text: "Here is what I found." };
     });
     await f.run();
@@ -6568,5 +6571,50 @@ describe("approval cards on a new user message", () => {
       'still waiting for the user, nobody has answered: "Confirm interview booking → Adam Test"',
     );
     expect(prompt).toContain("not an answer to those cards: answer what it actually asks");
+    expect(history).toContain("Approval card waiting for the user");
+  });
+  it("leaves out a card whose run already ended", async () => {
+    const f = fixture("ended-booking-card");
+    const card = {
+      id: "booking-card",
+      seq: 1,
+      role: "bot",
+      botId: f.runData.botId,
+      runId: "earlier-run",
+      blocks: [
+        {
+          kind: "ask" as const,
+          text: "Confirm interview booking → Adam Test",
+          approvalEffectId: "11111111-1111-4111-8111-111111111111",
+          status: "pending" as const,
+          actions: [
+            { id: "allow", label: "Allow once" },
+            { id: "deny", label: "Deny" },
+          ],
+        },
+      ],
+    };
+    const human = {
+      id: "human-read",
+      seq: 2,
+      role: "user",
+      botId: null,
+      runId: f.runData.id,
+      blocks: [{ kind: "text" as const, text: "Can you read my latest Gmail and calendar?" }],
+    };
+    f.runData.sourceMessageId = human.id;
+    f.prisma.message.findMany.mockResolvedValue([card, human]);
+    f.prisma.run.findMany.mockResolvedValue([] as never);
+    let prompt = "";
+    let history = "";
+    f.runtimeRun.mockImplementation(async function* (request) {
+      prompt = request.prompt;
+      history = JSON.stringify(request.history);
+      yield { type: "done" as const, text: "Here is what I found." };
+    });
+    await f.run();
+    expect(prompt).not.toContain("still waiting for the user");
+    expect(history).toContain("Approval card closed unanswered");
+    expect(history).not.toContain("Approval card waiting for the user");
   });
 });

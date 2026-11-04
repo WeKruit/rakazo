@@ -3,10 +3,12 @@ import type { ArtifactStore } from "@rakazo/adapter-kit";
 import type { AttachmentMimeType } from "@rakazo/contracts";
 import { ARTIFACT_NAME_MAX_LENGTH, ATTACHMENT_MAX_BYTES, DOCX_MIME_TYPE } from "@rakazo/contracts";
 import { inferAttachmentMimeType } from "@rakazo/core";
+import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { Prisma } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { InstantlyEmail } from "./instantly-reply.js";
+import { readInstantlyEmail, readInstantlyEmailPage } from "./instantly-reply.js";
 import type { ResolveHostname } from "./web-ssrf.js";
 import { fetchSafeWebBytes } from "./web-ssrf.js";
 
@@ -229,6 +231,30 @@ async function saveOne(
       });
     throw error;
   }
+}
+
+const LOCAL_READ = "local_native_instantly_rest";
+// The local mail reads that return a raw page of full emails, as the agent finds a reply with them.
+const PAGE_READS = new Set([
+  "native_instantly_search_contact_emails",
+  "native_instantly_list_mailbox_emails",
+  "native_instantly_get_thread_history",
+]);
+
+/**
+ * The emails with files in one mail read's raw result: the email itself for get_email (the body,
+ * or its `result` as the local read wraps it), the received emails of a page for the list and
+ * thread reads (files we sent are ours, not the candidate's).
+ */
+export function emailsWithAttachments(toolName: string, raw: unknown): InstantlyEmail[] {
+  const body = mcpObject(raw);
+  const emails =
+    toolName === "get_email" || toolName === "native_instantly_get_email"
+      ? [readInstantlyEmail(body?.result) ?? readInstantlyEmail(body)]
+      : PAGE_READS.has(toolName) && body?.source === LOCAL_READ
+        ? (readInstantlyEmailPage(body.page)?.items ?? []).filter((email) => email.ue_type === 2)
+        : [];
+  return emails.filter((email): email is InstantlyEmail => !!email?.attachment_json?.files.length);
 }
 
 /** What the agent is told about a read email's saved files. */

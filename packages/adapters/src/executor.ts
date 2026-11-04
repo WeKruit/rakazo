@@ -106,6 +106,7 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
+  closeEndedAsks,
   completeToolStep,
   connectorKindFromToolName,
   containsSecret,
@@ -130,6 +131,7 @@ import {
   isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
+  isOpenAskBlock,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -287,6 +289,7 @@ import {
   skipRateLimitedRun,
   unitVector,
   votePoll,
+  waitingCardBlocks,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -443,7 +446,11 @@ import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js"
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
-import { EMAIL_ATTACHMENTS_NOTE, saveEmailAttachments } from "./email-attachments.js";
+import {
+  EMAIL_ATTACHMENTS_NOTE,
+  emailsWithAttachments,
+  saveEmailAttachments,
+} from "./email-attachments.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -753,6 +760,8 @@ const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
 
 /** People Kruit lists from a role when the recruiter named no number. */
 const SHOWN_ROLE_PEOPLE = 10;
+// One mail page saves the files of at most this many received emails; a later read saves the rest.
+const MAX_ATTACHMENT_EMAILS = 5;
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -4861,6 +4870,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ).map((row) => [row.id, row.name])
             : [],
         );
+        // A card left pending by a run that ended is history, not a card still waiting.
+        const cardRunIds = [
+          ...new Set(
+            messages.flatMap((m) =>
+              m.runId && (m.blocks as MessageBlock[]).some(isOpenAskBlock) ? [m.runId] : [],
+            ),
+          ),
+        ];
+        const waitingCardRuns = new Set(
+          cardRunIds.length
+            ? (
+                await deps.prisma.run.findMany({
+                  where: { id: { in: cardRunIds }, status: { in: [...ACTIVE_RUN_STATUSES] } },
+                  select: { id: true },
+                })
+              ).map((row) => row.id)
+            : [],
+        );
         // In a group, mark where this member's unread part starts, so it catches up on what
         // others said since its own last reply instead of rereading the whole thread.
         const firstUnseen = thread.groupId ? firstUnseenMessageId(messages, run.botId) : undefined;
@@ -4889,7 +4916,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : m.role === "bot" && m.botId === run.botId
                   ? "assistant"
                   : "user") as "user" | "assistant" | "system",
-              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(m)}`,
+              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(
+                {
+                  ...m,
+                  blocks: closeEndedAsks(
+                    m.blocks as MessageBlock[],
+                    !m.runId || waitingCardRuns.has(m.runId),
+                  ),
+                },
+              )}`,
             })),
             summary: thread.historyCompactionSummary,
             historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
@@ -13089,7 +13124,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return finish({ error: `unknown tool ${name}` });
         };
-        // A candidate's email read by the agent keeps its attachments as saved files it can read.
+        // A candidate's email read by the agent keeps its attachments as saved files it can read,
+        // whichever mail read found it.
         const withEmailAttachments = async (
           returned: unknown,
           raw: unknown,
@@ -13099,34 +13135,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !deps.artifacts ||
             route?.connectorId !== "mcp" ||
             !route.resourceId ||
-            (route.toolName !== "get_email" && route.toolName !== "native_instantly_get_email") ||
             !returned ||
             typeof returned !== "object" ||
             Array.isArray(returned)
           )
             return returned;
-          const email = readInstantlyEmail(mcpObject(raw) ?? raw);
-          if (!email?.attachment_json?.files.length) return returned;
-          const attachments = await saveEmailAttachments(
-            { prisma: deps.prisma, artifacts: deps.artifacts },
-            {
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              groupId: thread.groupId,
-              runId: run.id,
-              sourceId: route.resourceId,
-            },
-            email,
-            { download: true, signal: context.signal },
-          ).catch(() => []);
+          const emails = emailsWithAttachments(route.toolName, raw);
+          const attachments = [];
+          for (const email of emails.slice(0, MAX_ATTACHMENT_EMAILS)) {
+            const saved = await saveEmailAttachments(
+              { prisma: deps.prisma, artifacts: deps.artifacts },
+              {
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                groupId: thread.groupId,
+                runId: run.id,
+                sourceId: route.resourceId,
+              },
+              email,
+              { download: true, signal: context.signal },
+            ).catch(() => []);
+            for (const { id, ...file } of saved)
+              attachments.push({ artifactId: id, emailId: email.id, ...file });
+          }
           return attachments.length
             ? {
                 ...(returned as Record<string, unknown>),
-                savedAttachments: attachments.map(({ id, ...file }) => ({
-                  artifactId: id,
-                  ...file,
-                })),
+                savedAttachments: attachments,
                 savedAttachmentsNote: EMAIL_ATTACHMENTS_NOTE,
               }
             : returned;
@@ -13719,18 +13755,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return undefined;
               }),
               run.trigger === "user" && currentTurnMessage?.role === "user"
-                ? deps.prisma.message
-                    .findMany({
-                      where: {
-                        threadId: thread.id,
-                        role: "bot",
-                        blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-                      },
-                      orderBy: { seq: "desc" },
-                      take: 20,
-                      select: { blocks: true },
-                    })
-                    .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
+                ? waitingCardBlocks(deps.prisma, thread.id)
+                    .then(waitingApprovalCards)
                     .catch(() => [])
                 : [],
               attachedFileReads().catch((error) => {

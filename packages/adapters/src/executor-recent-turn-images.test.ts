@@ -895,7 +895,9 @@ describe("routine runs carry their previous run", () => {
       first.request.history.some((e) => e.content.includes("Previous runs of this routine")),
     ).toBe(false);
     const user = await runWithModel(TEXT_ONLY_MODEL);
-    expect(user.prisma.run.findMany).not.toHaveBeenCalled();
+    expect(user.prisma.run.findMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ routineId: expect.anything() }) }),
+    );
   });
 });
 

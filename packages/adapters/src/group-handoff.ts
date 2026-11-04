@@ -16,6 +16,7 @@ import {
   type PrismaClient,
   questionClosedByChat,
   touchGroupUpdatedAt,
+  waitingCardBlocks,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -160,18 +161,8 @@ export async function handoffToGroupBot(
       }
 
       // The sender's words about a card are not its state: the next bot reads the cards' own record.
-      const waitingCards = await tx.message.findMany({
-        where: {
-          threadId: run.threadId,
-          role: "bot",
-          blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-        },
-        orderBy: { seq: "desc" },
-        take: 20,
-        select: { blocks: true },
-      });
       const approvalNote = waitingApprovalNote(
-        waitingApprovalCards(waitingCards.map((message) => message.blocks)),
+        waitingApprovalCards(await waitingCardBlocks(tx, run.threadId)),
       );
       const text = approvalNote ? `${input.message}\n\n${approvalNote}` : input.message;
       const handoffBlock: MessageBlock = {
