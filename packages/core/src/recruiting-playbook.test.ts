@@ -584,6 +584,8 @@ describe("turnEndPromise", () => {
     "你确认后我会发送第一封邮件。",
     "Handoff ETA after confirmation: 12:10 PM PT.",
     "我会把薪资作为偏好，而非硬性淘汰条件。",
+    // How a file's embedded instruction was handled, said after the file was read.
+    "PDF 末尾有一段面向 AI 助手的指令文字，我将其视为文件中的无关内容，不会执行。",
     "我会继续搜索，稍后补进结果。\n\n已保存 60 人，累计 114 人。",
     // The recruiter asked to stop; acknowledging it owes nothing.
     "Understood. I'll stop here.",
