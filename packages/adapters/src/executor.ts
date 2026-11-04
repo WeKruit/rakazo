@@ -711,6 +711,7 @@ import {
   recruitingRoundPeople,
   sendDeclineRetry,
   turnRequestText,
+  unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -911,6 +912,19 @@ const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
 const FEEDBACK_NOT_SAVED =
   "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
+
+/**
+ * What the agent is told when a feedback save is refused. A check that says what to change
+ * (the exact quote, a source reference) is passed on, so the next call can fix it.
+ */
+export function feedbackSaveRefused(error: Error): string {
+  const named =
+    error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
+  const fix = named
+    ? error.message
+    : "The quote must be the recruiter's exact words from their message, roleId the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
+  return `${FEEDBACK_NOT_SAVED} ${fix} Never run people searches again because this save failed.`;
+}
 
 /** Round feedback words that mean the round's direction, not its acceptance. */
 const ROUND_DIRECTION_OPERATIONS = new Set([
@@ -5857,6 +5871,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let handedOff = false;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
+        // A reply-card tool ran this turn, so what the turn says about that card came from it.
+        let mailReplyAttempted = false;
         let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
@@ -8285,6 +8301,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             "native_instantly_reply_to_email",
             "GMAIL_REPLY_TO_THREAD",
           ].includes(sendOperation ?? "");
+          if (mailReplyOperation) mailReplyAttempted = true;
           const recruiterSaidSend =
             !mailReplyOperation &&
             !nextApprovedTool &&
@@ -10881,10 +10898,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (!(repeated && typeof repeated === "object" && "error" in repeated))
                   return candidateDecision ? repeated : finish(repeated);
               }
-              if (error instanceof IsolationError)
-                return finish({
-                  error: `${FEEDBACK_NOT_SAVED} The quote must be the recruiter's exact words from their message, roleId the conversation's current role, and candidateKeys saved people on it.`,
+              if (error instanceof IsolationError) {
+                getLogger().warn("recruiting.tool.rejected", {
+                  runId,
+                  tool: name,
+                  operation: args.operation,
+                  error: error.name,
+                  message: error.message,
+                  at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
+                return finish({ error: feedbackSaveRefused(error) });
+              }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (
@@ -15305,7 +15329,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
-            turnReport.enabled &&
+            (!handedOff &&
+            !mailReplyAttempted &&
+            run.trigger !== "follow_up" &&
+            !blocks.some((block) => block.kind === "ask")
+              ? unprovenReplyCardRetry(text, turnRequestText(currentTurnMessage, undefined, bot.id))
+              : undefined) ??
+            (turnReport.enabled &&
             !handedOff &&
             !delegatedToRole &&
             !messagingChannelRun &&
@@ -15359,7 +15389,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   getLogger().error("run.decline guard", error);
                   return undefined;
                 })
-              : undefined;
+              : undefined);
           if (declineRetried?.card !== undefined) {
             // A retry still asked in text: its question goes on a card, answered like any card.
             text = declineRetried.keep ?? "";

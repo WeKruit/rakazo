@@ -231,8 +231,13 @@ export function useShellRecruiting({
     key: string;
     scope: string;
     workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+    /** The role's last binding, shown while a cleared read is fetched again. */
+    kept?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
     failed?: boolean;
   }>();
+  // A saved change invalidates a binding read in flight; read it again rather than fail.
+  const [bindingReread, setBindingReread] = useState(0);
+  const bindingRereads = useRef(0);
   useEffect(() => {
     if (!boundRoleView || !recruitingCacheScope || !knownThreadId) {
       setBindingRead(undefined);
@@ -252,24 +257,45 @@ export function useShellRecruiting({
     const cached = savedRecruitingRead(cache, `${recruitingCacheScope}:workspace`) as
       | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
       | undefined;
-    setBindingRead({
+    // A saved change clears the cached read; keep its binding so the workbench is not remounted.
+    setBindingRead((previous) => ({
       key: bindingReadKey,
       scope: recruitingCacheScope,
       workspace: cached?.workspace,
-    });
+      kept:
+        cached?.workspace === undefined && previous && previous.scope === recruitingCacheScope
+          ? (previous.workspace ?? previous.kept)
+          : undefined,
+    }));
+    // A read invalidated in flight is not trusted; read again a few times, then offer a retry.
+    const invalidated = () => {
+      if (epoch === cache.epoch) return false;
+      if (bindingRereads.current < 3) {
+        bindingRereads.current++;
+        setBindingReread((value) => value + 1);
+      } else
+        setBindingRead((previous) => ({
+          key: bindingReadKey,
+          scope: recruitingCacheScope,
+          failed: true,
+          kept:
+            previous?.scope === recruitingCacheScope
+              ? (previous.workspace ?? previous.kept)
+              : undefined,
+        }));
+      return true;
+    };
     void fetchRecruitingRead(cache, recruitingCacheScope, "getWorkspace", { threadId }, () =>
       retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal),
     )
       .then((workspace) => {
-        if (!isCurrent()) return;
-        // A read invalidated in flight is not trusted, but must not leave the view loading.
-        if (epoch !== cache.epoch)
-          return setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
+        if (!isCurrent() || invalidated()) return;
+        bindingRereads.current = 0;
         rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
         setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, workspace });
       })
       .catch((error: unknown) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || invalidated()) return;
         // An outage keeps sibling reads; only a denial drops this conversation's saved reads.
         if (
           error instanceof ORPCError &&
@@ -296,17 +322,23 @@ export function useShellRecruiting({
     boundRoleView,
     recruitingCacheScope,
     bindingReadKey,
+    bindingReread,
     knownThreadId,
     userId,
     bootstrapMe?.spaceId,
     groupId,
   ]);
   // Until a refresh's effect runs, keep this conversation's binding so the workbench is not remounted.
+  const shownBinding =
+    bindingRead && bindingRead.scope === recruitingCacheScope
+      ? (bindingRead.workspace ?? bindingRead.kept)
+      : undefined;
   const currentBindingRead =
-    bindingRead?.key === bindingReadKey
+    bindingRead?.key === bindingReadKey &&
+    (bindingRead.failed || bindingRead.workspace !== undefined || !shownBinding)
       ? bindingRead
-      : bindingRead?.workspace && bindingRead.scope === recruitingCacheScope
-        ? { key: bindingReadKey, scope: bindingRead.scope, workspace: bindingRead.workspace }
+      : shownBinding
+        ? { key: bindingReadKey, scope: bindingRead!.scope, workspace: shownBinding }
         : undefined;
   const currentWorkspaceRead = useMemo(
     () =>
