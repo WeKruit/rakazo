@@ -310,5 +310,17 @@ describe("waiting approval cards", () => {
     const note = waitingApprovalNote(["Confirm interview booking → Adam Test"]);
     expect(note).toContain('nobody has answered: "Confirm interview booking → Adam Test"');
     expect(note).toContain("Never say or imply the user approved");
+    expect(note).toContain("Every other approval card is closed");
+  });
+
+  it("tells reply cards apart by recipient and body", () => {
+    const reply = (body: string) => ({
+      ...approval("Confirm reply", "pending"),
+      mailReply: { to: ["bo@example.com"], body },
+    });
+    expect(waitingApprovalCards([[reply("Thanks,\n see you Tue")], [reply("Another note")]])).toEqual([
+      'Confirm reply to bo@example.com: "Thanks, see you Tue"',
+      'Confirm reply to bo@example.com: "Another note"',
+    ]);
   });
 });
