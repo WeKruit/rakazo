@@ -2,7 +2,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { Bookmark, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { isInShortlistWeek } from "./dashboard-drilldown";
@@ -128,6 +128,9 @@ export function ContactsTab(
   const loading = !failures.length && Boolean(list.autumn?.loading || list.crmRead.loading);
   const empty = !loading && !failures.length && !rows.length;
   const role = { roleId: props.roleId, spaceId: props.spaceId, conversation: props.conversation };
+  // An open detail keeps the target it opened with; its writes use the latest row and actions.
+  const latest = useRef({ autumn, rows });
+  latest.current = { autumn, rows };
 
   function target(index: number): RecruitingDetailTarget | undefined {
     const row = rows[index];
@@ -165,7 +168,15 @@ export function ContactsTab(
               shortlist: {
                 shortlisted: candidate.shortlisted,
                 disabled: !autumn.ready,
-                set: (value: boolean) => autumn.setShortlist(candidate, value),
+                set: (value: boolean) => {
+                  const now = latest.current;
+                  const fresh = now.rows.find(
+                    (item) => item.autumn?.candidateKey === candidate.candidateKey,
+                  )?.autumn;
+                  return now.autumn
+                    ? now.autumn.setShortlist(fresh ?? candidate, value)
+                    : Promise.resolve(false);
+                },
               },
               openEvidence: (trigger: HTMLElement) => autumn.openEvidence(candidate, trigger),
             },

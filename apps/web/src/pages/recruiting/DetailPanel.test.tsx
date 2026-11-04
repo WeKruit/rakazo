@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import type { RecruitingCandidate } from "@rakazo/contracts";
 import type { ReactNode } from "react";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -392,6 +393,84 @@ it("shows an owned contact-only profile without fabricating a role or reading ro
   expect(button(view, "Notes")).toBeUndefined();
   expect(crmData).not.toHaveBeenCalled();
   expect(recordView).not.toHaveBeenCalled();
+});
+
+it("saves a later profile shortlist change with the latest row and save action", async () => {
+  // The open profile keeps the row it opened with; the next change must not reuse its revision.
+  const grace = {
+    roleId: "role-1",
+    candidateKey: "grace",
+    name: "Grace",
+    title: null,
+    company: null,
+    location: null,
+    linkedinUrl: null,
+    resumeUrl: null,
+    evidenceUrls: null,
+    issues: [],
+    shortlisted: false,
+    decision: null,
+    revision: 0,
+    discoveryCount: 1,
+    firstDiscoveredAt: checkedAt,
+    lastDiscoveredAt: checkedAt,
+    latestAssessment: null,
+    crm: null,
+  } as unknown as RecruitingCandidate;
+  const opened = vi.fn(async () => true);
+  const latest = vi.fn(async () => true);
+  const read = (item: RecruitingCandidate, setShortlist: typeof opened) => ({
+    items: [item],
+    loading: false,
+    failed: false,
+    retry: () => undefined,
+    total: 1,
+    hasMore: false,
+    loadMore: () => undefined,
+    sortByScore: true,
+    includeCrm: false,
+    ready: true,
+    shortlistFailedKey: null,
+    setShortlist,
+    openEvidence: () => undefined,
+  });
+  let update!: (next: ReturnType<typeof read>) => void;
+  function Host() {
+    const [autumn, setAutumn] = useState(read(grace, opened));
+    update = setAutumn;
+    const detail = useRecruitingDetailController("thread-1");
+    return (
+      <RecruitingChatContextProvider
+        value={{ setSelectedContact, setSelectedEmail: () => undefined }}
+      >
+        <RecruitingDetailProvider value={detail}>
+          <ContactsTab
+            roleId="role-1"
+            spaceId="space-1"
+            conversation={{ groupId: "group-1" }}
+            autumn={autumn}
+          />
+          <RecruitingDetailPanel controller={detail} />
+        </RecruitingDetailProvider>
+      </RecruitingChatContextProvider>
+    );
+  }
+  const view = await mount(<Host />);
+  await act(async () => button(view, "Grace")!.click());
+  await settle();
+  const shortlist = () =>
+    [...panel(view)!.querySelectorAll("button")].find((item) =>
+      /^Shortlist(ed)?$/.test(item.textContent ?? ""),
+    )!;
+  await act(async () => shortlist().click());
+  expect(opened).toHaveBeenCalledWith(expect.objectContaining({ revision: 0 }), true);
+  // The list refreshes with the saved revision and a new save action.
+  await act(async () => update(read({ ...grace, shortlisted: true, revision: 1 }, latest)));
+  await act(async () => shortlist().click());
+  expect(latest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ revision: 1 }), false);
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(shortlist().textContent).toBe("Shortlist");
+  expect(panel(view)!.querySelector('[role="alert"]')).toBeNull();
 });
 
 it("shows shortlist success only after persistence and lets a failed change retry", async () => {
