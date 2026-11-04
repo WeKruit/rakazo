@@ -1,6 +1,5 @@
 import { ACTIVE_RUN_STATUSES, AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
 import type { Prisma } from "./client.js";
-import { closeRunAsksInTransaction } from "./closed-asks.js";
 
 /** A cancelled turn may finish registering research that the provider already accepted. */
 export const STOPPED_TURN = "turn_stopped";
@@ -26,12 +25,9 @@ export function threadStopRunWhere(
   };
 }
 
-/**
- * The caller selects authorized runs and owns the surrounding transaction and cleanup.
- * A card the cancelled run was waiting on closes with it, so nothing reads it as waiting later.
- */
+/** The caller selects authorized runs and owns the surrounding transaction and cleanup. */
 export async function cancelRunsInTransaction(
-  tx: Prisma.TransactionClient,
+  tx: Pick<Prisma.TransactionClient, "run" | "attempt" | "task">,
   runs: ReadonlyArray<{ id: string; taskId: string }>,
   cancelledAt: Date,
 ): Promise<void> {
@@ -54,16 +50,4 @@ export async function cancelRunsInTransaction(
     where: { id: { in: runs.map((run) => run.taskId) } },
     data: { status: "cancelled" },
   });
-  const ended = await tx.run.findMany({
-    where: { id: { in: runIds } },
-    select: { id: true, spaceId: true, threadId: true, botId: true },
-  });
-  for (const run of ended) {
-    await closeRunAsksInTransaction(tx, {
-      spaceId: run.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
-      runId: run.id,
-    });
-  }
 }

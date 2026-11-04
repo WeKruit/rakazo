@@ -2676,28 +2676,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       );
     },
   );
-  it("closes the card of a stopped wait, so it never reads as waiting again", async () => {
+  it("does not read the card of a stopped wait as waiting", async () => {
     const f = await questionFixture();
     await recruiting.pauseRunForInput(prisma, f.pause);
-    const question = (await recruiting.getRecruitingQuestion(prisma, actor, f.lookup))!;
     expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toHaveLength(1);
     await prisma.$transaction((tx) =>
       recruiting.cancelRunsInTransaction(tx, [{ id: f.run.id, taskId: f.run.taskId }], new Date()),
     );
-    const card = await prisma.message.findUniqueOrThrow({ where: { id: question.messageId } });
-    expect(card.blocks).toEqual([expect.objectContaining({ kind: "ask", status: "expired" })]);
-    expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toEqual([]);
-    expect(
-      await prisma.event.count({
-        where: { runId: f.run.id, type: "thread.message.updated" },
-      }),
-    ).toBe(1);
-  });
-  it("does not read a card left pending by an ended run as waiting", async () => {
-    const f = await questionFixture();
-    await recruiting.pauseRunForInput(prisma, f.pause);
-    // Cards stopped before stops closed them are still stored as pending.
-    await prisma.run.update({ where: { id: f.run.id }, data: { status: "cancelled" } });
     expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toEqual([]);
   });
   it.each(["lease", "role", "attempt"])(
