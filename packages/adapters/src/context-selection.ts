@@ -486,9 +486,18 @@ export function selectContext<T extends ContextMessage>(
   const keepPrefix =
     options.strategy === "current" ||
     (options.strategy === "cache-aware" && options.cacheWarmth === "likely-warm");
+  const recent = Math.max(1, options.recentExchanges ?? 8);
+  const exchangeCount = groups.filter((group) =>
+    group.indexes.some((i) => messages[i]!.role === "user"),
+  ).length;
+  // Move the window's start once every `recent` exchanges, not on every turn: a start that
+  // shifts each turn changes the first history message, so the provider cache misses everything
+  // after the instructions. Between moves the window holds recent to 2 * recent - 1 exchanges.
   const exchangeLimit = keepPrefix
     ? Number.POSITIVE_INFINITY
-    : Math.max(1, options.recentExchanges ?? 8);
+    : exchangeCount > recent
+      ? recent + ((exchangeCount - recent) % recent)
+      : recent;
   let exchanges = 0;
   // Retain a contiguous recent suffix. Skip no holes inside a retained tool group.
   for (let index = groups.length - 1; index >= 0; index--) {
