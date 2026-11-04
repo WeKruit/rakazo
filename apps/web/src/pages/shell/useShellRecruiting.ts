@@ -404,12 +404,6 @@ export function useShellRecruiting({
   // Hidden and inert together: a closed role chat's composer must not be reachable or typed into.
   const roleChatHidden =
     workspaceFull && (Boolean(recruitingDetail.current) || !(roleChatWorkspace && roleChatOpen));
-  useEffect(() => {
-    if (roleChatWorkspace && roleChatOpen && !roleChatSection.current?.hidden)
-      roleChatSection.current
-        ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
-        ?.focus();
-  }, [roleChatWorkspace, roleChatOpen, activeSnapshot?.threadId]);
   const workspaceBrief =
     !showToolActivity &&
     !crmMode &&
@@ -556,8 +550,14 @@ export function useShellRecruiting({
   function openRoleChat(text?: string) {
     recruitingDetail.close();
     if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
-    if (roleChatWorkspace) setRoleChatOpen(true);
-    else openRecruitingView("conversation");
+    if (roleChatWorkspace) {
+      setRoleChatOpen(true);
+      requestAnimationFrame(() =>
+        roleChatSection.current
+          ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
+          ?.focus(),
+      );
+    } else openRecruitingView("conversation");
   }
   const candidateFeedbackRecipients = inGroup
     ? (activeSnapshot?.members ?? activeGroup?.members ?? [])
@@ -1006,7 +1006,7 @@ export function useShellRecruiting({
       setSelectedCorrespondence(null);
       setPanel(null);
       setMobileSidebarOpen(false);
-      setRoleChatOpen(true);
+      setRoleChatOpen(view === "conversation");
       setOpeningCrmRole(null);
       const search = new URLSearchParams({ view });
       // Preserve an exact person link while converting an older role URL.

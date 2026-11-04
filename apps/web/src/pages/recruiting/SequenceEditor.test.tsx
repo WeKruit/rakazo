@@ -3,9 +3,16 @@ import type { RecruitingSequenceOutput } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { SequenceEditor } from "./SequenceEditor";
 
+const session = vi.hoisted(() => ({ userId: "sequence-user" }));
+vi.mock("../../lib/auth", () => ({
+  authClient: {
+    useSession: () => ({ data: { user: { id: session.userId } } }),
+  },
+}));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
   useLingui: () => ({
@@ -171,4 +178,170 @@ it("navigates saved email steps, previews without sending, and Done only exits",
   expect(done).toHaveBeenCalledOnce();
   expect(execute).toHaveBeenCalledTimes(before);
   await act(async () => root.unmount());
+});
+
+it("preserves dirty edits through SPA navigation and isolates role, user, and Space", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let revision = "a".repeat(64);
+  const execute = vi.fn(async () => ({
+    ...campaign,
+    campaign: { ...campaign.campaign!, revision },
+  }));
+  const navigate: { current?: ReturnType<typeof useNavigate> } = {};
+  let spaceId = "draft-space";
+  function Nav() {
+    navigate.current = useNavigate();
+    return null;
+  }
+  function Editor() {
+    const { roleId } = useParams();
+    return (
+      <SequenceEditor
+        roleId={roleId!}
+        serverId="server"
+        spaceId={spaceId}
+        execute={execute}
+        onDone={() => navigate.current!("/inbox")}
+      />
+    );
+  }
+  const go = (path: string | number) =>
+    act(async () => {
+      if (typeof path === "number") navigate.current!(path);
+      else navigate.current!(path);
+    });
+  const body = () => host.querySelector<HTMLTextAreaElement>('textarea[name="body-0"]')!;
+  const app = () => (
+    <MemoryRouter initialEntries={["/draft-role/sequence"]}>
+      <Nav />
+      <Routes>
+        <Route path="/:roleId/sequence" element={<Editor />} />
+        <Route path="/inbox" element={<p>Inbox</p>} />
+      </Routes>
+    </MemoryRouter>
+  );
+  try {
+    await act(async () => root.render(app()));
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        body(),
+        "Unsaved edit",
+      );
+      body().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await go("/inbox");
+    revision = "b".repeat(64);
+    await go(-1);
+    expect(body().value).toBe("Unsaved edit");
+    expect(host.textContent).toContain("Unsaved changes");
+    await go("/other-role/sequence");
+    expect(body().value).toBe("Hello");
+    await go(-1);
+    expect(body().value).toBe("Unsaved edit");
+    session.userId = "other-user";
+    await go("/inbox");
+    await go(-1);
+    expect(body().value).toBe("Hello");
+    session.userId = "sequence-user";
+    spaceId = "other-space";
+    await go("/inbox");
+    await go(-1);
+    expect(body().value).toBe("Hello");
+    spaceId = "draft-space";
+    await go("/inbox");
+    await go(-1);
+    expect(body().value).toBe("Unsaved edit");
+    execute.mockRejectedValueOnce(new Error("offline"));
+    await act(async () =>
+      host
+        .querySelector('form[id$="-form"]')!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    await go("/inbox");
+    await go(-1);
+    expect(body().value).toBe("Unsaved edit");
+    await act(async () =>
+      host
+        .querySelector('form[id$="-form"]')!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: "save",
+        expectedRevision: "a".repeat(64),
+      }),
+    );
+    await go("/inbox");
+    await go(-1);
+    expect(body().value).toBe("Hello");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        body(),
+        "Discard this",
+      );
+      body().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      [...host.querySelectorAll("button")].find((node) => node.textContent === "Done")!.click(),
+    );
+    await act(async () =>
+      [...document.querySelectorAll("button")]
+        .find((node) => node.textContent === "Discard changes")!
+        .click(),
+    );
+    await go(-1);
+    expect(body().value).toBe("Hello");
+  } finally {
+    session.userId = "sequence-user";
+    await act(async () => root.unmount());
+  }
+});
+
+it("clears a successfully saved draft even when navigation unmounts the editor while saving", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let finish!: (result: RecruitingSequenceOutput) => void;
+  const execute = vi.fn(async () => campaign);
+  const editor = () => (
+    <SequenceEditor
+      roleId="saving-role"
+      serverId="server"
+      spaceId="saving-space"
+      execute={execute}
+    />
+  );
+  try {
+    await act(async () => root.render(editor()));
+    const body = host.querySelector<HTMLTextAreaElement>('textarea[name="body-0"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        body,
+        "Saving edits",
+      );
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () =>
+      host
+        .querySelector('form[id$="-form"]')!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+    );
+    await act(async () => root.render(<p>Inbox</p>));
+    await act(async () => finish(campaign));
+    await act(async () => root.render(editor()));
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[name="body-0"]')!.value).toBe("Hello");
+    expect(host.textContent).not.toContain("Unsaved changes");
+  } finally {
+    await act(async () => root.unmount());
+  }
 });

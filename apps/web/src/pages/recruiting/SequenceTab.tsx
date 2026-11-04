@@ -509,6 +509,7 @@ export function SequenceTab(
       <SequenceEditor
         key={`${props.roleId}:${editing.campaignId ?? "new"}`}
         roleId={props.roleId}
+        spaceId={props.spaceId}
         serverId={editing.serverId}
         expectedCampaignId={editing.campaignId}
         mode={editing.campaignId ? "edit" : "new"}

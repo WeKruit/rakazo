@@ -17,10 +17,6 @@ msgstr ""
 msgid " (unread)"
 msgstr " (읽지 않음)"
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "— Not reported"
-msgstr ""
-
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -900,14 +896,6 @@ msgstr "카드"
 msgid "Cc"
 msgstr ""
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period is not reported"
-msgstr ""
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Change from previous period: not reported"
-msgstr ""
-
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Change status"
 msgstr ""
@@ -1381,6 +1369,10 @@ msgstr ""
 msgid "Could not load contacts."
 msgstr ""
 
+#: src/pages/recruiting/AccountInbox.tsx
+msgid "Could not load earlier messages. Try again."
+msgstr "이전 메시지를 불러오지 못했습니다. 다시 시도하세요."
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "연동 목록을 불러오지 못했습니다."
@@ -1815,6 +1807,7 @@ msgstr "닫기"
 msgid "Dismiss error"
 msgstr "오류 닫기"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Display columns"
 msgstr ""
@@ -2330,6 +2323,11 @@ msgstr "높음"
 msgid "High"
 msgstr "높음"
 
+#: src/pages/recruiting/AccountSequences.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Historical totals · — Not reported"
+msgstr "누적 합계 · — 미제공"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "How to check"
 msgstr "완료 확인 방법"
@@ -2491,6 +2489,7 @@ msgstr ""
 msgid "Job title"
 msgstr ""
 
+#: src/pages/shell/StackedConversation.tsx
 #: src/pages/shell/Transcript.tsx
 msgid "Jump to latest"
 msgstr "최신 메시지로 이동"
@@ -2920,6 +2919,7 @@ msgid "Name: {0}"
 msgstr ""
 
 #: src/lib/roster-status.ts
+#: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
 msgstr ""
 

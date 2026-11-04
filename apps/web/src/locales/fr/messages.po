@@ -2128,6 +2128,10 @@ msgstr "Impossible de mettre à jour"
 msgid "Could not update agent access"
 msgstr "Impossible de mettre à jour l'accès de l'agent"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not update shortlist. Try again."
+msgstr "Impossible de mettre à jour la présélection. Réessayez."
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not update the default memory scope"
 msgstr "Impossible de mettre à jour la portée de mémoire par défaut"
@@ -3149,7 +3153,7 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Historical totals · — Not reported"
-msgstr ""
+msgstr "Totaux historiques · — Non renseigné"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
@@ -5669,6 +5673,10 @@ msgstr "Enregistré"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Saved calendar checks"
+msgstr "Vérifications du calendrier enregistrées"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."

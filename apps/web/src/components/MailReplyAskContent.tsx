@@ -26,7 +26,7 @@ export function MailReplyAskContent({
   const [body, setBody] = useState(reply.body);
   const [cc, setCc] = useState(reply.cc.join(", "));
   const [showCc, setShowCc] = useState(reply.cc.length > 0);
-  const [expanded, setExpanded] = useState(reply.status !== "sent");
+  const [expanded, setExpanded] = useState(reply.status !== "sent" && reply.status !== "discarded");
   const [pending, setPending] = useState<"send" | "discard" | null>(null);
   const [accepted, setAccepted] = useState<"send" | "discard" | null>(null);
   const [error, setError] = useState<string>();
@@ -34,7 +34,7 @@ export function MailReplyAskContent({
     if (reply.status !== "needs_approval") {
       setBody(reply.body);
       setCc(reply.cc.join(", "));
-      if (reply.status === "sent") setExpanded(false);
+      if (reply.status === "sent" || reply.status === "discarded") setExpanded(false);
     }
   }, [reply.status, reply.body, reply.cc.join(", ")]);
   const submitted = pending ?? accepted;
@@ -105,6 +105,7 @@ export function MailReplyAskContent({
     try {
       await onAnswer(answer === "deny" ? answer : answer.data);
       setAccepted(action);
+      if (action === "discard") setExpanded(false);
     } catch {
       inFlight.current = false;
       setError(

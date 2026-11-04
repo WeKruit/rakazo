@@ -232,6 +232,7 @@ for (const width of [1440, 390]) {
     await tableScroll.hover();
     await expect(tableScroll).not.toHaveCSS("scrollbar-color", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)");
     const search = list.getByRole("textbox", { name: "Search contacts", exact: true });
+    if (width === 390) expect((await search.boundingBox())!.width).toBeGreaterThan(300);
     await search.fill("Blake");
     await expect(list.getByText("Avery Example")).toHaveCount(0);
     await expect(list.getByText("Blake Example")).toBeVisible();
@@ -259,6 +260,9 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(list.getByText("Tagged 1 contacts.")).toBeVisible();
     expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"] }]);
+    await list.getByRole("button", { name: "Display columns", exact: true }).click();
+    await page.getByRole("menuitemcheckbox", { name: "Tags", exact: true }).click();
+    await page.keyboard.press("Escape");
     await expect(list.getByText("Hot", { exact: true })).toBeVisible();
     await page.keyboard.press("Control+k");
     const searchDialog = page.getByRole("dialog", { name: "Search", exact: true });

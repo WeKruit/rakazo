@@ -528,6 +528,10 @@ try {
     try {
       await page.goto(`${ORIGIN}/app/g/${id}`);
       const box = page.locator('fieldset[aria-label="Message composer"] textarea').first();
+      // A role page opens with its chat closed.
+      const openChat = page.getByRole("button", { name: "Open role chat", exact: true });
+      await box.or(openChat).first().waitFor({ timeout: 20_000 });
+      if (await openChat.isVisible()) await openChat.click();
       await box.waitFor({ timeout: 20_000 });
       const before = new Set((await messages(id)).map((message) => message.id));
       await box.fill(`${FIXTURE_MARK}你好，你能帮我做什么？`);

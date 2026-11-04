@@ -21,7 +21,7 @@ import {
   writesChinese,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
-import { cn } from "@rakazo/ui-web";
+import { Button, cn } from "@rakazo/ui-web";
 import { ArrowDown, TextQuote } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import {
@@ -439,7 +439,20 @@ export const Transcript = memo(function Transcript({
   );
 
   return (
-    <div className="relative flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {answerableAskMessageIds.length > 0 ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mx-4 mt-2 self-start"
+          onClick={() => onJumpToMessage(answerableAskMessageIds.at(-1)!)}
+        >
+          {t`Needs an answer`}
+          {answerableAskMessageIds.length > 1 ? (
+            <span>{answerableAskMessageIds.length}</span>
+          ) : null}
+        </Button>
+      ) : null}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Observes bubbled scroll keys without changing native keyboard behavior. */}
       <div
         ref={scrollRef}

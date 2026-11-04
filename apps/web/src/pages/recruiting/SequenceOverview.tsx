@@ -165,7 +165,7 @@ export function SequenceOverview({
         className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${detail ? "2xl:grid-cols-7" : "xl:grid-cols-6"}`}
       >
         {metrics.map((metric) => (
-          <div key={metric.label} className="relative min-w-0 rounded-xl border bg-muted/20 p-4">
+          <div key={metric.label} className="relative min-w-0 rounded-lg border bg-muted/20 p-3">
             <dt className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
               {onMetric && metric.filter ? (
                 <button
@@ -179,14 +179,8 @@ export function SequenceOverview({
               ) : (
                 metric.label
               )}
-              <span
-                title={t`Change from previous period is not reported`}
-                role="img"
-                aria-label={t`Change from previous period: not reported`}
-                className="after:content-['—']"
-              />
             </dt>
-            <dd className="mt-3 text-2xl font-semibold tabular-nums">
+            <dd className="mt-1 text-xl font-semibold tabular-nums">
               {metric.value === null ? (
                 <>
                   <span aria-hidden>—</span>
@@ -202,10 +196,10 @@ export function SequenceOverview({
           </div>
         ))}
       </dl>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>
-          <Trans>— Not reported</Trans>
-        </span>
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer">
+          <Trans>Historical totals · — Not reported</Trans>
+        </summary>
         {period !== "all" ? (
           <span role="status">
             <Trans>
@@ -219,21 +213,29 @@ export function SequenceOverview({
             <Trans>≥ Observed in loaded records</Trans>
           </span>
         ) : null}
-      </div>
+      </details>
       <section
         aria-label={t`Recorded send activity`}
-        className="min-w-0 rounded-xl border bg-card p-4 sm:p-5"
+        className="min-w-0 rounded-lg border bg-card p-3"
       >
-        {overviewCounts && sendDates === null ? (
+        {!hasDatedSends ? (
           <>
-            <h3 className="mb-3 text-sm font-semibold">
+            <h3 className="mb-1 text-sm font-semibold">
               <Trans>Schedule</Trans>
             </h3>
             {sendContext ? (
               <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
             ) : null}
             <p className="text-sm text-muted-foreground">
-              <Trans>Send timing is not reported in saved sequence records.</Trans>
+              {sendDates === null ? (
+                overviewCounts ? (
+                  <Trans>Send timing is not reported in saved sequence records.</Trans>
+                ) : (
+                  <Trans>Recruiter messages are unavailable for this role.</Trans>
+                )
+              ) : (
+                <Trans>No dated sends in the available records.</Trans>
+              )}
             </p>
           </>
         ) : (

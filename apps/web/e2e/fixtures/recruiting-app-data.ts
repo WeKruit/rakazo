@@ -853,7 +853,9 @@ export async function mockRecruitingApp(
           : { bindingEffectId: "fixture-binding", target: crmTarget },
       };
     else if (method === "notifications/desktopActivity") value = { ok: true };
-    else if (method === "recruiting/workEstimate") value = { activities: [], updatedAt: checkedAt };
+    else if (method === "recruiting/workEstimate") value = null;
+    else if (method === "recruiting/searchQuality")
+      value = { rounds: [], goodExample: 0, notFit: 0 };
     else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
     else if (method === "recruiting/listCandidates") {
       const items = candidates

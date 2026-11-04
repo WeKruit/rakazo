@@ -280,6 +280,27 @@ export async function recruitingChatFixture(
         return reply(bootstrap);
       case "me":
         return reply(me);
+      case "bots/page":
+        return reply({ items: input.archived ? [] : [bot], nextOffset: null });
+      case "groups/page":
+        return reply({ items: input.archived ? [] : [group], nextOffset: null });
+      case "notifications/desktopActivity":
+        return reply({ ok: true });
+      case "recruiting/workEstimate":
+        return reply(null);
+      case "recruiting/searchQuality":
+        return reply({ rounds: [], goodExample: 0, notFit: 0 });
+      case "recruiting/globalInboxSummary":
+        return reply({
+          unread: { count: 0, unknownThreads: 0, scope: "indexed_stored_mail" },
+          coverage: {
+            importsComplete: true,
+            crmComplete: true,
+            native: "observed",
+            providerComplete: false,
+            checkedAt: createdAt,
+          },
+        });
       case "spaces/list":
         return reply({ spaces, current: { bots: [bot], groups: [group], botSections: [] } });
       case "threads/get":

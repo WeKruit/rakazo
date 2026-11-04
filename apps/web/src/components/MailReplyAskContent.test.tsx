@@ -139,6 +139,9 @@ it("Discard denies the existing approval without submitting a send", async () =>
     expect(
       view.container.querySelector('[data-testid="mail-reply-card"]')?.getAttribute("data-status"),
     ).toBe("discarded");
+    expect(
+      view.container.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded"),
+    ).toBe("false");
   } finally {
     await view.close();
   }
@@ -203,6 +206,19 @@ it.each([
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(message);
     expect(view.container.textContent).not.toContain("private-provider");
     expect(view.button("Send")).toBeUndefined();
+  } finally {
+    await view.close();
+  }
+});
+
+it("keeps discarded history collapsed until opened", async () => {
+  const view = await mount({ ...reply, status: "discarded" });
+  try {
+    expect(view.container.textContent).not.toContain(reply.body);
+    await act(async () =>
+      view.container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!.click(),
+    );
+    expect(view.container.textContent).toContain(reply.body);
   } finally {
     await view.close();
   }

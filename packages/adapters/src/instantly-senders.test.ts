@@ -5,11 +5,17 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { InstantlyRest } from "./instantly-native-writes.js";
-import { InstantlyRestError, runInstantlyWrite } from "./instantly-native-writes.js";
+import {
+  InstantlyRestError,
+  nativeInstantlyWrites,
+  runInstantlyWrite,
+} from "./instantly-native-writes.js";
 import {
   adoptLegacySender,
+  asksSenderCompanyName,
   defaultSendingMailbox,
   ensureSendingIdentity,
+  isSenderRead,
   requireSendingMailboxReady,
   sendingMailboxState,
 } from "./instantly-senders.js";
@@ -648,4 +654,30 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
   expect(f.rest).not.toHaveBeenCalled();
   expect(f.orders()).toBe(0);
   expect(f.rows).toHaveLength(0);
+});
+
+it("asks no company name until the turn read the sending email", () => {
+  // Kruit once asked "which company name" first on an account that cannot set one up.
+  expect(asksSenderCompanyName("请提供用于准备发件地址的公司名称")).toBe(true);
+  expect(asksSenderCompanyName("Which company name should candidates see?")).toBe(true);
+  expect(asksSenderCompanyName("这个岗位的地点是？")).toBe(false);
+  expect(isSenderRead("instantly__mail__ensure_sender", { operation: "read" })).toBe(true);
+  expect(
+    isSenderRead("connectors_execute_tool", {
+      id: "srv:native_instantly_ensure_sender",
+      operation: "read",
+    }),
+  ).toBe(true);
+  expect(
+    isSenderRead("connectors_execute_tool", {
+      id: "srv:native_instantly_ensure_sender",
+      arguments: { operation: "read" },
+    }),
+  ).toBe(true);
+  expect(isSenderRead("instantly__mail__ensure_sender", { operation: "propose" })).toBe(false);
+  const description = nativeInstantlyWrites.find(
+    (tool) => tool.name === "ensure_sender",
+  )?.description;
+  expect(description).toContain("Always call read first");
+  expect(description).not.toContain("First ask the company name");
 });

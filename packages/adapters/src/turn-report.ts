@@ -85,6 +85,17 @@ function isContactLookup(result: unknown): boolean {
 const READ_ACTION =
   /^(?:native_[a-z]+_)?(?:(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)|whoami$|me$)/;
 
+/** A call's operation, read from a catalog call's nested arguments too. */
+export function toolOperation(args: Record<string, unknown>): string | undefined {
+  const nested = args.arguments;
+  const operation =
+    args.operation ??
+    (nested && typeof nested === "object"
+      ? (nested as Record<string, unknown>).operation
+      : undefined);
+  return typeof operation === "string" ? operation : undefined;
+}
+
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
  * when it changed nothing a person needs to hear about. A failed call did nothing.
@@ -96,7 +107,7 @@ export function turnWork(
 ): TurnWork | undefined {
   if (settled && !settled.ok) return undefined;
   if (settled && isContactLookup(settled.result)) return "contacts";
-  const operation = typeof args.operation === "string" ? args.operation : undefined;
+  const operation = toolOperation(args);
   if (name.endsWith("web_search_advanced_exa") || name.endsWith("__agent_run"))
     return "people_search";
   if (name === "recruiting_research") {
@@ -109,7 +120,8 @@ export function turnWork(
   // A catalog call names its tool in `id` ("server:get_bookings"); many servers declare no
   // read-only hint, so a get or list call is read by its name, never reported as a change.
   const target =
-    name === "connectors_execute_tool" && typeof args.id === "string"
+    (name === "connectors_execute_tool" || name === "mcp_execute_tool") &&
+    typeof args.id === "string"
       ? (args.id.split(":").at(-1) ?? name)
       : name;
   const action = (target.split("__").at(-1) ?? target).toLowerCase();

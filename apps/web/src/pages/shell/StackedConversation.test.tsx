@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
 import { act } from "react";
+import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -14,7 +15,7 @@ vi.mock("@lingui/react/macro", () => ({
 }));
 vi.mock("../ShellMessage", () => ({
   MessageView: (props: {
-    message: { id: string; runId: string };
+    message: { id: string; runId: string; blocks?: { status?: string }[] };
     canAnswer: boolean;
     onAnswer: (message: unknown, answer: string) => Promise<void>;
   }) => (
@@ -22,6 +23,7 @@ vi.mock("../ShellMessage", () => ({
       type="button"
       data-message={props.message.id}
       data-can-answer={props.canAnswer}
+      data-status={props.message.blocks?.[0]?.status}
       onClick={() => void props.onAnswer(props.message, "allow")}
     >
       {props.message.id}
@@ -44,8 +46,12 @@ const snapshot = {
   ],
 };
 let host: HTMLDivElement | undefined;
-afterEach(() => {
+let root: Root | undefined;
+afterEach(async () => {
+  await act(async () => root?.unmount());
+  root = undefined;
   host?.remove();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
@@ -56,8 +62,9 @@ it("stacks the waiting conversation, answers its card there and goes back", asyn
   host = document.createElement("div");
   document.body.append(host);
   const onBack = vi.fn();
+  root = createRoot(host!);
   await act(async () =>
-    createRoot(host!).render(
+    root!.render(
       <StackedConversation
         groupId="role"
         title="Designer"
@@ -98,8 +105,9 @@ it("shows the answer being worked on and clears a failed refresh on the next goo
   api.answer.mockResolvedValue({ ok: true });
   host = document.createElement("div");
   document.body.append(host);
+  root = createRoot(host!);
   await act(async () =>
-    createRoot(host!).render(
+    root!.render(
       <StackedConversation
         groupId="role"
         title="Designer"
@@ -132,8 +140,9 @@ it("docks as a labelled pane with no Back, and Escape leaves it open", async () 
   host = document.createElement("div");
   document.body.append(host);
   const onBack = vi.fn();
+  root = createRoot(host!);
   await act(async () =>
-    createRoot(host!).render(
+    root!.render(
       <StackedConversation
         docked
         groupId="global"
@@ -170,8 +179,9 @@ it("lands on the request when a link targets a hidden handoff", async () => {
   });
   host = document.createElement("div");
   document.body.append(host);
+  root = createRoot(host!);
   await act(async () =>
-    createRoot(host!).render(
+    root!.render(
       <StackedConversation
         groupId="kruit"
         messageId="echo"
@@ -187,4 +197,193 @@ it("lands on the request when a link targets a hidden handoff", async () => {
   expect(host.querySelector('[data-message-id="echo"]')).toBeNull();
   expect(host.querySelector('[data-message-id="ask"]')!.className).toContain("ring-2");
   expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+});
+
+async function mountFocused(messageId?: string) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(
+      <StackedConversation
+        groupId="role"
+        messageId={messageId}
+        title="Designer"
+        bots={[]}
+        onBack={vi.fn()}
+        onOpenFull={vi.fn()}
+      />,
+    );
+  });
+  return host;
+}
+async function typeDraft(value: string) {
+  await act(async () => {
+    const input = host!.querySelector("textarea")!;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      value,
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("returns a focused approval to live updates after an answer", async () => {
+  vi.useFakeTimers();
+  Element.prototype.scrollIntoView = vi.fn();
+  api.get.mockResolvedValue(snapshot);
+  api.messages.mockResolvedValue({ messages: snapshot.messages });
+  api.answer.mockResolvedValue({ ok: true });
+  await mountFocused("card");
+  const answered = { ...snapshot.messages[2], blocks: [{ kind: "ask", status: "answered" }] };
+  api.get.mockResolvedValue({
+    ...snapshot,
+    messages: [answered, { id: "live-progress", blocks: [{ kind: "text" }] }],
+    run: { id: "run", status: "running" },
+    activeRuns: [{ id: "run", status: "running" }],
+  });
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-message="card"]')!.click());
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-can-answer")).toBe(
+    "false",
+  );
+  expect(host!.querySelector('[data-message="live-progress"]')).not.toBeNull();
+  expect(host!.textContent).toContain("Thinking");
+  api.get.mockResolvedValue({
+    ...snapshot,
+    run: null,
+    activeRuns: [],
+    messages: [answered, { id: "final-result", blocks: [{ kind: "text" }] }],
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(host!.querySelector('[data-message="final-result"]')).not.toBeNull();
+});
+
+it("keeps a newer draft when the previous send receipt arrives", async () => {
+  api.get.mockResolvedValue(snapshot);
+  let accepted!: () => void;
+  api.send.mockReturnValue(
+    new Promise<void>((resolve) => {
+      accepted = resolve;
+    }),
+  );
+  await mountFocused();
+  await typeDraft("First message");
+  await act(async () =>
+    host!
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  await typeDraft("New draft while waiting");
+  await act(async () => accepted());
+  expect(api.send).toHaveBeenCalledWith({ groupId: "role", text: "First message" });
+  expect(host!.querySelector("textarea")!.value).toBe("New draft while waiting");
+});
+
+it("preserves history reading on refresh and follows again after Jump to latest", async () => {
+  vi.useFakeTimers();
+  api.get.mockResolvedValue(snapshot);
+  await mountFocused();
+  const box = host!.querySelector<HTMLDivElement>(".rk-scroll")!;
+  let height = 1_000;
+  Object.defineProperties(box, {
+    scrollHeight: { get: () => height },
+    clientHeight: { value: 300 },
+  });
+  box.scrollTop = 200;
+  await act(async () => box.dispatchEvent(new Event("scroll", { bubbles: true })));
+  height = 1_200;
+  api.get.mockResolvedValue({
+    ...snapshot,
+    messages: [...snapshot.messages, { id: "new-reply", blocks: [{ kind: "text" }] }],
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(box.scrollTop).toBe(200);
+  const jump = host!.querySelector<HTMLButtonElement>('button[aria-label="Jump to latest"]')!;
+  expect(jump).not.toBeNull();
+  expect(jump.getAttribute("aria-hidden")).not.toBe("true");
+  await act(async () => jump.click());
+  expect(box.scrollTop).toBe(height);
+  height = 1_400;
+  api.get.mockResolvedValue({
+    ...snapshot,
+    messages: [...snapshot.messages, { id: "next-reply", blocks: [{ kind: "text" }] }],
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(box.scrollTop).toBe(height);
+});
+
+it("refreshes an anchored card without moving away from its history", async () => {
+  vi.useFakeTimers();
+  Element.prototype.scrollIntoView = vi.fn();
+  api.get.mockResolvedValue(snapshot);
+  api.messages.mockResolvedValue({ messages: snapshot.messages });
+  await mountFocused("card");
+  api.get.mockResolvedValue({
+    ...snapshot,
+    messages: snapshot.messages.map((message) =>
+      message.id === "card"
+        ? { ...message, blocks: [{ kind: "ask", status: "answered" }] }
+        : message,
+    ),
+  });
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-status")).toBe(
+    "answered",
+  );
+  expect(host!.querySelector('[data-message-id="card"]')!.className).toContain("ring-2");
+});
+
+it("clears an unchanged draft only after a successful send", async () => {
+  api.get.mockResolvedValue(snapshot);
+  api.send.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce({ ok: true });
+  await mountFocused();
+  await typeDraft("Keep until accepted");
+  const submit = () =>
+    host!
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await act(async () => submit());
+  expect(host!.querySelector("textarea")!.value).toBe("Keep until accepted");
+  await act(async () => submit());
+  expect(host!.querySelector("textarea")!.value).toBe("");
+});
+
+it("does not let an older poll restore an answered card or hide its live reply", async () => {
+  vi.useFakeTimers();
+  Element.prototype.scrollIntoView = vi.fn();
+  api.messages.mockResolvedValue({ messages: snapshot.messages });
+  api.answer.mockResolvedValue({ ok: true });
+  let releaseOldPoll!: (value: unknown) => void;
+  api.get.mockResolvedValueOnce(snapshot).mockReturnValueOnce(
+    new Promise((resolve) => {
+      releaseOldPoll = resolve;
+    }),
+  );
+  await mountFocused("card");
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  const accepted = {
+    ...snapshot,
+    cursor: snapshot.cursor + 1,
+    run: { id: "run", status: "running" },
+    activeRuns: [{ id: "run", status: "running" }],
+    messages: [
+      { ...snapshot.messages[2], blocks: [{ kind: "ask", status: "answered" }] },
+      { id: "new-reply", blocks: [{ kind: "text" }] },
+    ],
+  };
+  api.get.mockResolvedValueOnce(accepted).mockReturnValue(new Promise(() => {}));
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-message="card"]')!.click());
+  expect(host!.querySelector('[data-message="new-reply"]')).not.toBeNull();
+  // A later poll may already be in flight; it must not suppress this accepted answer snapshot.
+  await act(async () => vi.advanceTimersByTimeAsync(3_000));
+  await act(async () => releaseOldPoll(snapshot));
+  expect(host!.querySelector('[data-message="new-reply"]')).not.toBeNull();
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-status")).toBe(
+    "answered",
+  );
+  expect(host!.querySelector('[data-message="card"]')!.getAttribute("data-can-answer")).toBe(
+    "false",
+  );
+  expect(host!.textContent).toContain("Thinking");
 });

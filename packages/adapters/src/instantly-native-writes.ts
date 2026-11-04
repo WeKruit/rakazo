@@ -204,7 +204,7 @@ export const nativeInstantlyWrites = [
     "ensure_sender",
     EnsureSenderInput,
     false,
-    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. First ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
+    "Read this account's confirmed sending identity, propose an available address on an existing product sending domain without purchasing, or confirm the proposal. Always call read first and do what it returns. Only when read returns selfSetup true with no sender, ask the company name on one native question card, then call propose. Call confirm with that exact email and display_name: the tool's native Create address / Change the address approval is the second card; do not ask another question first. Only the real exact native allow receipt authorizes a paid order. select changes the default owned sender on its own native approval. The account limit is a product default. Never buys a domain, guesses a warmup completion date, activates campaigns, or approves sending.",
   ),
   tool(
     "get_role_draft",
