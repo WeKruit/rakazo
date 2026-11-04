@@ -148,6 +148,8 @@ export function useRecruitingWorkspace({
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
   const candidateValidation = useRef<number | undefined>(undefined);
+  const [candidateReread, setCandidateReread] = useState(0);
+  const candidateRereads = useRef(0);
   const candidateValidatedRead = useRef<string | undefined>(undefined);
   const displayedCandidateQuery = useRef<string | undefined>(undefined);
   const denyAccess = useCallback(
@@ -540,6 +542,20 @@ export function useRecruitingWorkspace({
       generation === candidateGeneration.current &&
       epoch === readEpoch.current &&
       (!readCache || cacheEpoch === readCache.epoch);
+    // Another read invalidated the cache while this page loaded; read it again so actions stay usable.
+    const rereadIfInvalidated = () => {
+      if (
+        cancelled ||
+        generation !== candidateGeneration.current ||
+        epoch !== readEpoch.current ||
+        !readCache ||
+        cacheEpoch === readCache.epoch ||
+        candidateRereads.current >= 3
+      )
+        return;
+      candidateRereads.current++;
+      setCandidateReread((value) => value + 1);
+    };
     loadingMore.current = false;
     setCandidateLoading(!!roleId && validatedWorkspaceRead === workspaceReadKey);
     setCandidateFailed(false);
@@ -576,7 +592,7 @@ export function useRecruitingWorkspace({
         },
         { signal: abort.signal },
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) return rereadIfInvalidated();
       if (
         result.kind !== "candidates" ||
         !result.data ||
@@ -597,6 +613,7 @@ export function useRecruitingWorkspace({
         setCandidateList((current) => ({ ...current, page: last + 1 }));
         return;
       }
+      candidateRereads.current = 0;
       candidateValidation.current = cacheEpoch;
       candidateValidatedRead.current = `${workspaceReadKey}:${candidateQueryKey}`;
       setCandidatePage(page);
@@ -690,6 +707,7 @@ export function useRecruitingWorkspace({
     readCache,
     workspaceReadKey,
     validatedWorkspaceRead,
+    candidateReread,
   ]);
   useEffect(() => {
     let cancelled = false;
