@@ -235,6 +235,9 @@ export function useShellRecruiting({
     kept?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
     failed?: boolean;
   }>();
+  // A saved change invalidates a binding read in flight; read it again rather than fail.
+  const [bindingReread, setBindingReread] = useState(0);
+  const bindingRereads = useRef(0);
   useEffect(() => {
     if (!boundRoleView || !recruitingCacheScope || !knownThreadId) {
       setBindingRead(undefined);
@@ -264,19 +267,35 @@ export function useShellRecruiting({
           ? (previous.workspace ?? previous.kept)
           : undefined,
     }));
+    // A read invalidated in flight is not trusted; read again a few times, then offer a retry.
+    const invalidated = () => {
+      if (epoch === cache.epoch) return false;
+      if (bindingRereads.current < 3) {
+        bindingRereads.current++;
+        setBindingReread((value) => value + 1);
+      } else
+        setBindingRead((previous) => ({
+          key: bindingReadKey,
+          scope: recruitingCacheScope,
+          failed: true,
+          kept:
+            previous?.scope === recruitingCacheScope
+              ? (previous.workspace ?? previous.kept)
+              : undefined,
+        }));
+      return true;
+    };
     void fetchRecruitingRead(cache, recruitingCacheScope, "getWorkspace", { threadId }, () =>
       retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal),
     )
       .then((workspace) => {
-        if (!isCurrent()) return;
-        // A read invalidated in flight is not trusted, but must not leave the view loading.
-        if (epoch !== cache.epoch)
-          return setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
+        if (!isCurrent() || invalidated()) return;
+        bindingRereads.current = 0;
         rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
         setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, workspace });
       })
       .catch((error: unknown) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || invalidated()) return;
         // An outage keeps sibling reads; only a denial drops this conversation's saved reads.
         if (
           error instanceof ORPCError &&
@@ -303,6 +322,7 @@ export function useShellRecruiting({
     boundRoleView,
     recruitingCacheScope,
     bindingReadKey,
+    bindingReread,
     knownThreadId,
     userId,
     bootstrapMe?.spaceId,
