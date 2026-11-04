@@ -106,6 +106,7 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
+  closeEndedAsks,
   completeToolStep,
   connectorKindFromToolName,
   containsSecret,
@@ -130,6 +131,7 @@ import {
   isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
+  isOpenAskBlock,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -4862,6 +4864,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ).map((row) => [row.id, row.name])
             : [],
         );
+        // A card left pending by a run that ended is history, not a card still waiting.
+        const cardRunIds = [
+          ...new Set(
+            messages.flatMap((m) =>
+              m.runId && (m.blocks as MessageBlock[]).some(isOpenAskBlock) ? [m.runId] : [],
+            ),
+          ),
+        ];
+        const waitingCardRuns = new Set(
+          cardRunIds.length
+            ? (
+                await deps.prisma.run.findMany({
+                  where: { id: { in: cardRunIds }, status: { in: [...ACTIVE_RUN_STATUSES] } },
+                  select: { id: true },
+                })
+              ).map((row) => row.id)
+            : [],
+        );
         // In a group, mark where this member's unread part starts, so it catches up on what
         // others said since its own last reply instead of rereading the whole thread.
         const firstUnseen = thread.groupId ? firstUnseenMessageId(messages, run.botId) : undefined;
@@ -4890,7 +4910,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : m.role === "bot" && m.botId === run.botId
                   ? "assistant"
                   : "user") as "user" | "assistant" | "system",
-              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(m)}`,
+              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(
+                {
+                  ...m,
+                  blocks: closeEndedAsks(
+                    m.blocks as MessageBlock[],
+                    !m.runId || waitingCardRuns.has(m.runId),
+                  ),
+                },
+              )}`,
             })),
             summary: thread.historyCompactionSummary,
             historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
