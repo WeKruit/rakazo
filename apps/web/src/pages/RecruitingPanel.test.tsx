@@ -6016,6 +6016,60 @@ it("ignores a late candidate page and denial from the old thread", async () => {
   expect(view.container.querySelector('[role="alert"]')).toBeNull();
 });
 
+it("saves a shortlist change from an action held since the list was refreshing", async () => {
+  // An open profile keeps the action from the render it last saw, which can be mid-refresh.
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.setCandidateShortlist
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: true,
+      revision: 1,
+    })
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: false,
+      revision: 2,
+    });
+  let refreshed!: (value: unknown) => void;
+  const view = await mounted("thread-1", undefined, true, undefined, {
+    readCache: createRecruitingReadCache(),
+    readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
+  });
+  await view.click("Evidence");
+  const held = () => {
+    const box = view.container.querySelector('[aria-label="Shortlist candidate-1"]')!;
+    let fiber = (
+      box as unknown as Record<
+        string,
+        { memoizedProps?: Record<string, unknown>; return?: unknown }
+      >
+    )[Object.keys(box).find((key) => key.startsWith("__reactFiber$"))!];
+    while (fiber && !fiber.memoizedProps?.onCheckedChange) fiber = fiber.return as typeof fiber;
+    return fiber!.memoizedProps!.onCheckedChange as (checked: boolean) => void;
+  };
+  api.listCandidates.mockReturnValueOnce(new Promise((resolve) => (refreshed = resolve)));
+  await view.click("Shortlist candidate-1");
+  const stale = held();
+  await act(async () =>
+    refreshed(
+      candidatePage([
+        { ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 },
+      ]),
+    ),
+  );
+  await act(async () => stale(false));
+  expect(api.setCandidateShortlist).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateKey: "candidate-1",
+      expectedRevision: 1,
+      shortlisted: false,
+    }),
+  );
+  expect(view.container.textContent).not.toContain("Could not save shortlist");
+});
+
 it("keeps a confirmed shortlist receipt when refreshing the candidate counts fails", async () => {
   api.listCandidates
     .mockResolvedValueOnce(candidatePage([candidateFixture("candidate-1", false)]))

@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@rakazo/ui-web";
 import { Bookmark } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ListPager } from "../../components/ListPager";
 import { readRecruitingPanelState } from "../../lib/right-panel-state";
 import { AddToSequenceDialog } from "./AddToSequenceDialog";
@@ -53,9 +53,6 @@ export function ShortlistDirectory({
       ),
     [candidatePage?.items],
   );
-  // An open detail keeps the target it opened with; its writes use the latest row and model.
-  const latest = useRef({ model, items: candidatePage?.items });
-  latest.current = { model, items: candidatePage?.items };
   function target(index: number): RecruitingDetailTarget | undefined {
     const row = rows[index];
     if (!row?.autumn || !workspace) return undefined;
@@ -94,11 +91,7 @@ export function ShortlistDirectory({
         shortlist: {
           shortlisted: candidate.shortlisted,
           disabled: !candidateFresh || shortlistPending !== null,
-          set: (value) => {
-            const now = latest.current;
-            const fresh = now.items?.find((item) => item.candidateKey === candidate.candidateKey);
-            return now.model.setShortlist(fresh ?? candidate, value);
-          },
+          set: (value) => model.setShortlist(candidate, value),
         },
       },
       walk: (step) => target(index + step),

@@ -470,6 +470,8 @@ export function useRecruitingWorkspace({
     validatedWorkspaceRead === workspaceReadKey &&
     candidateValidatedRead.current === `${workspaceReadKey}:${candidateQueryKey}` &&
     (!readCache || candidateValidation.current === readCache.epoch);
+  const latestCandidates = useRef({ fresh: candidateFresh, items: candidatePage?.items });
+  latestCandidates.current = { fresh: candidateFresh, items: candidatePage?.items };
   const candidatesCacheKey =
     readCacheScope && roleId && roleRevisionId
       ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters, candidateOffset])}`
@@ -817,13 +819,18 @@ export function useRecruitingWorkspace({
       }
     }
   }
-  async function setShortlist(candidate: RecruitingCandidate, shortlisted: boolean) {
+  async function setShortlist(target: RecruitingCandidate, shortlisted: boolean) {
+    // An open profile can hold this action from an earlier render; check the list as it is now.
     if (
       shortlistMutation.current ||
-      !candidateFresh ||
+      !latestCandidates.current.fresh ||
       (readCache && candidateValidation.current !== readCache.epoch)
     )
       return false;
+    const candidate =
+      latestCandidates.current.items?.find(
+        (item) => item.roleId === target.roleId && item.candidateKey === target.candidateKey,
+      ) ?? target;
     const mutation = {};
     shortlistMutation.current = mutation;
     const roleGeneration = editScope.current.generation;
