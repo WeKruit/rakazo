@@ -21,6 +21,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { recruitingReadViewFixture } from "../lib/query.test-support";
 import {
+  clearRecruitingReads,
   createRecruitingReadCache,
   rememberRecruitingRead,
   savedRecruitingRead,
@@ -6066,6 +6067,95 @@ it("saves a shortlist change from an action held since the list was refreshing",
       expectedRevision: 1,
       shortlisted: false,
     }),
+  );
+  expect(view.container.textContent).not.toContain("Could not save shortlist");
+});
+
+it("saves a shortlist change after another read invalidates the list while it refreshes", async () => {
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.setCandidateShortlist
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: true,
+      revision: 1,
+    })
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: false,
+      revision: 2,
+    });
+  let refreshed!: (value: unknown) => void;
+  const cache = createRecruitingReadCache();
+  const scope = JSON.stringify(["actor-1", role.spaceId, "thread-1"]);
+  const view = await mounted("thread-1", undefined, true, undefined, {
+    readCache: cache,
+    readCacheScope: scope,
+  });
+  await view.click("Evidence");
+  api.listCandidates.mockReturnValueOnce(new Promise((resolve) => (refreshed = resolve)));
+  await view.click("Shortlist candidate-1");
+  // A sibling panel's saved change clears the shared reads before this refresh answers.
+  clearRecruitingReads(cache, scope);
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+  );
+  await act(async () =>
+    refreshed(
+      candidatePage([
+        { ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 },
+      ]),
+    ),
+  );
+  await view.click("Shortlist candidate-1");
+  expect(api.setCandidateShortlist).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      candidateKey: "candidate-1",
+      expectedRevision: 1,
+      shortlisted: false,
+    }),
+  );
+  expect(view.container.textContent).not.toContain("Could not save shortlist");
+});
+
+it("waits for the list to be read again when a shortlist change starts after another panel cleared it", async () => {
+  api.listCandidates.mockResolvedValue(candidatePage([candidateFixture("candidate-1", false)]));
+  api.setCandidateShortlist
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: true,
+      revision: 1,
+    })
+    .mockResolvedValueOnce({
+      roleId: role.id,
+      candidateKey: "candidate-1",
+      shortlisted: false,
+      revision: 2,
+    });
+  const cache = createRecruitingReadCache();
+  const scope = JSON.stringify(["actor-1", role.spaceId, "thread-1"]);
+  const view = await mounted("thread-1", undefined, true, undefined, {
+    readCache: cache,
+    readCacheScope: scope,
+  });
+  await view.click("Evidence");
+  api.listCandidates.mockResolvedValue(
+    candidatePage([{ ...candidateFixture("candidate-1", false), shortlisted: true, revision: 1 }]),
+  );
+  await view.click("Shortlist candidate-1");
+  // Nothing in this panel re-reads after a sibling's change; the next action must not be refused.
+  clearRecruitingReads(cache, scope);
+  await view.click("Shortlist candidate-1");
+  await vi.waitFor(() =>
+    expect(api.setCandidateShortlist).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        candidateKey: "candidate-1",
+        expectedRevision: 1,
+        shortlisted: false,
+      }),
+    ),
   );
   expect(view.container.textContent).not.toContain("Could not save shortlist");
 });

@@ -148,6 +148,8 @@ export function useRecruitingWorkspace({
   const loadingMore = useRef(false);
   const readEpoch = useRef(0);
   const candidateValidation = useRef<number | undefined>(undefined);
+  const [candidateReread, setCandidateReread] = useState(0);
+  const candidateRereads = useRef(0);
   const candidateValidatedRead = useRef<string | undefined>(undefined);
   const displayedCandidateQuery = useRef<string | undefined>(undefined);
   const denyAccess = useCallback(
@@ -472,6 +474,12 @@ export function useRecruitingWorkspace({
     (!readCache || candidateValidation.current === readCache.epoch);
   const latestCandidates = useRef({ fresh: candidateFresh, items: candidatePage?.items });
   latestCandidates.current = { fresh: candidateFresh, items: candidatePage?.items };
+  // Actions started while the list re-reads wait for it, then save against the current rows.
+  const candidateWaiters = useRef(new Set<() => void>());
+  useEffect(() => {
+    if (!candidateFresh) return;
+    for (const wake of candidateWaiters.current) wake();
+  });
   const candidatesCacheKey =
     readCacheScope && roleId && roleRevisionId
       ? `${readCacheScope}:candidates:${JSON.stringify([roleId, roleRevisionId, candidateRequestFilters, candidateOffset])}`
@@ -540,6 +548,20 @@ export function useRecruitingWorkspace({
       generation === candidateGeneration.current &&
       epoch === readEpoch.current &&
       (!readCache || cacheEpoch === readCache.epoch);
+    // Another read invalidated the cache while this page loaded; read it again so actions stay usable.
+    const rereadIfInvalidated = () => {
+      if (
+        cancelled ||
+        generation !== candidateGeneration.current ||
+        epoch !== readEpoch.current ||
+        !readCache ||
+        cacheEpoch === readCache.epoch ||
+        candidateRereads.current >= 3
+      )
+        return;
+      candidateRereads.current++;
+      setCandidateReread((value) => value + 1);
+    };
     loadingMore.current = false;
     setCandidateLoading(!!roleId && validatedWorkspaceRead === workspaceReadKey);
     setCandidateFailed(false);
@@ -576,7 +598,7 @@ export function useRecruitingWorkspace({
         },
         { signal: abort.signal },
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) return rereadIfInvalidated();
       if (
         result.kind !== "candidates" ||
         !result.data ||
@@ -597,6 +619,7 @@ export function useRecruitingWorkspace({
         setCandidateList((current) => ({ ...current, page: last + 1 }));
         return;
       }
+      candidateRereads.current = 0;
       candidateValidation.current = cacheEpoch;
       candidateValidatedRead.current = `${workspaceReadKey}:${candidateQueryKey}`;
       setCandidatePage(page);
@@ -690,6 +713,7 @@ export function useRecruitingWorkspace({
     readCache,
     workspaceReadKey,
     validatedWorkspaceRead,
+    candidateReread,
   ]);
   useEffect(() => {
     let cancelled = false;
@@ -819,14 +843,32 @@ export function useRecruitingWorkspace({
       }
     }
   }
+  const candidatesCurrent = () =>
+    latestCandidates.current.fresh &&
+    (!readCache || candidateValidation.current === readCache.epoch);
+  async function waitForCurrentCandidates() {
+    if (candidatesCurrent()) return true;
+    // Another panel's change can leave the list unverified with no read running; start one.
+    setCandidateReread((value) => value + 1);
+    const deadline = Date.now() + 15_000;
+    while (!candidatesCurrent()) {
+      if (!editScope.current.active || Date.now() > deadline) return false;
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer);
+          candidateWaiters.current.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, 1_000);
+        candidateWaiters.current.add(wake);
+      });
+    }
+    return true;
+  }
   async function setShortlist(target: RecruitingCandidate, shortlisted: boolean) {
     // An open profile can hold this action from an earlier render; check the list as it is now.
-    if (
-      shortlistMutation.current ||
-      !latestCandidates.current.fresh ||
-      (readCache && candidateValidation.current !== readCache.epoch)
-    )
-      return false;
+    if (shortlistMutation.current || !(await waitForCurrentCandidates())) return false;
+    if (shortlistMutation.current) return false;
     const candidate =
       latestCandidates.current.items?.find(
         (item) => item.roleId === target.roleId && item.candidateKey === target.candidateKey,
