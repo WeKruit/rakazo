@@ -136,6 +136,33 @@ const toolCallBudgetsByRun = new Map<string, ToolCallBudget>();
 // their imports, and ESM hoists those imports, so module-level env reads here
 // would run before .env is loaded and miss the local provider entirely.
 let catalogModelsCache: Models | undefined;
+/**
+ * Short hashes of each part of a model request, in the order the provider caches them. Two
+ * calls share a cached prefix up to the first hash that differs, so comparing consecutive calls
+ * in the logs shows which part breaks the prompt cache. Only hashes are logged, never content.
+ */
+export function promptShape(context: {
+  systemPrompt?: string;
+  tools?: readonly { name: string; description?: string; parameters?: unknown }[];
+  messages: readonly { role: string; content?: unknown }[];
+}) {
+  const hash = (value: unknown) =>
+    createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 8);
+  return {
+    system: hash(context.systemPrompt ?? ""),
+    tools: hash(
+      (context.tools ?? []).map((tool) => [tool.name, tool.description, tool.parameters]),
+    ),
+    toolCount: context.tools?.length ?? 0,
+    messageCount: context.messages.length,
+    // The first messages decide whether a new turn reuses the conversation's cached history.
+    messages: context.messages
+      .slice(0, 12)
+      .map((message) => `${message.role[0]}${hash(message.content)}`)
+      .join(" "),
+  };
+}
+
 function catalogModels(): Models {
   catalogModelsCache ??= registerOpenAiCompatibleCatalog(
     registerLocalProvider(supplementPiModels(builtinModels())),
@@ -498,7 +525,10 @@ export class PiAgentRuntime implements AgentRuntime {
             () => agent,
             () => contextPolicy,
           ),
-          streamFn: (_m, ctx, options) => fallbackAwareModelStream(fallbackState, ctx, options),
+          streamFn: (_m, ctx, options) => {
+            getLogger().info("model.prompt_shape", { runId: request.runId, ...promptShape(ctx) });
+            return fallbackAwareModelStream(fallbackState, ctx, options);
+          },
           getApiKey: hasBackups
             ? async () => activeStreamTarget.credentials?.accessToken ?? activeStreamTarget.apiKey
             : async () => apiKey,
