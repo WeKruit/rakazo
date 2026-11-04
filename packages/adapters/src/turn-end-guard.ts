@@ -865,6 +865,28 @@ export function declinedRunId(clientNonce: string | null | undefined): string | 
   return clientNonce.slice(AUTOCONTINUE_NONCE_PREFIX.length, -":decline".length) || undefined;
 }
 
+/** A request to reply to someone's email, naming the address. */
+const REPLY_REQUEST =
+  /(回复|reply)[^\n]{0,80}[\w.+-]+@[\w-]+\.[\w.-]+|[\w.+-]+@[\w-]+\.[\w.-]+[^\n]{0,80}(回复|reply)/i;
+
+/** A reply naming a reply card's outcome ("已被丢弃", "already sent"). */
+const REPLY_CARD_OUTCOME =
+  /(回复卡|审批卡|卡片|reply card|approval card|\bcard\b)[^。.!?\n]{0,40}(已被?丢弃|已发送|已处理|discarded|already (?:sent|drafted)|was sent)/i;
+
+/**
+ * A turn that reports what happened to a reply card without having called a reply tool took that
+ * outcome from the conversation's history: an earlier card for other text, not this request. The
+ * reply tool itself reports an earlier card for this exact email, so the turn tries once more.
+ */
+export function unprovenReplyCardRetry(reply: string, request: string): DeclineRetry | undefined {
+  return REPLY_REQUEST.test(request) && REPLY_CARD_OUTCOME.test(reply)
+    ? {
+        sentence: "",
+        note: "No tool this turn showed a reply card for this request; an earlier card in this conversation was for other text. Read the original email in the role's mailbox and call reply_to_email (or native_instantly_reply_to_email) with its email id and the exact reply text now: it reports itself if this exact reply was already drafted or sent. Never say a card was drafted, discarded or sent without that call.",
+      }
+    : undefined;
+}
+
 export async function sendDeclineRetry(
   deps: Pick<TurnEndGuardDeps, "events" | "jobs">,
   run: TurnEndGuardInput["run"],
