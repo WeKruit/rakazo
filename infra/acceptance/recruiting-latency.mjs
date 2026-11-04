@@ -12,7 +12,8 @@
 //            --group <id>                     measure an existing role chat instead of starting one
 //            --scale-now                      with --group: send the scale-out request right away
 //            --skip-scale                     stop after the first ten
-//            --feedback [text]                after the first ten, give feedback on two of them and
+//            --feedback [text]                after the first ten, give feedback on two of them ({first}
+//                                             and {second} in the text become their names) and
 //                                             wait for the next round before scaling ("auto" or no
 //                                             text uses a built-in comment naming the first two)
 //            --target <n>                     scale target (default 100)
@@ -53,8 +54,8 @@ const SCALE_TEXT = option("--scale-text", `这 10 个方向可以，找 ${TARGET
 const FEEDBACK_RAW = flag("--feedback") ? option("--feedback", "auto") : null;
 const FEEDBACK = FEEDBACK_RAW?.startsWith("--") ? "auto" : FEEDBACK_RAW;
 const feedbackText = (round) => {
-  if (FEEDBACK !== "auto") return FEEDBACK;
   const [first, second] = round.candidates.map((c) => c.name).filter(Boolean);
+  if (FEEDBACK !== "auto") return FEEDBACK.replaceAll("{first}", first).replaceAll("{second}", second);
   return `${first} 和 ${second} 不太合适，他们没有直接带过现场小时工团队。多找在仓库或配送中心直接管过 50 人以上一线团队的人，其他人的方向可以。`;
 };
 const DEFAULT_JD =

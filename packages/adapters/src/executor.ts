@@ -912,6 +912,19 @@ const AUTOSAVED_PEOPLE_SHOWN = 100;
 const FEEDBACK_NOT_SAVED =
   "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
 
+/**
+ * What the agent is told when a feedback save is refused. A check that says what to change
+ * (the exact quote, a source reference) is passed on, so the next call can fix it.
+ */
+export function feedbackSaveRefused(error: Error): string {
+  const named =
+    error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
+  const fix = named
+    ? error.message
+    : "The quote must be the recruiter's exact words from their message, roleId the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
+  return `${FEEDBACK_NOT_SAVED} ${fix} Never run people searches again because this save failed.`;
+}
+
 /** Round feedback words that mean the round's direction, not its acceptance. */
 const ROUND_DIRECTION_OPERATIONS = new Set([
   "review",
@@ -10881,10 +10894,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (!(repeated && typeof repeated === "object" && "error" in repeated))
                   return candidateDecision ? repeated : finish(repeated);
               }
-              if (error instanceof IsolationError)
-                return finish({
-                  error: `${FEEDBACK_NOT_SAVED} The quote must be the recruiter's exact words from their message, roleId the conversation's current role, and candidateKeys saved people on it.`,
+              if (error instanceof IsolationError) {
+                getLogger().warn("recruiting.tool.rejected", {
+                  runId,
+                  tool: name,
+                  operation: args.operation,
+                  error: error.name,
+                  message: error.message,
+                  at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
+                return finish({ error: feedbackSaveRefused(error) });
+              }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (
