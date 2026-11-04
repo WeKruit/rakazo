@@ -11,6 +11,7 @@ import {
   recruitingRoundListText,
   roundPassage,
   turnRequestText,
+  unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
 
 const run = {
@@ -1278,6 +1279,25 @@ describe("planDeclineRetry", () => {
           blocks: [{ kind: "ask", text: "Confirm sending", status: "pending" }] as MessageBlock[],
         },
       ),
+    ).toBeUndefined();
+  });
+});
+
+describe("unprovenReplyCardRetry", () => {
+  const brief =
+    "Goal: 在「测试固定 · Agent 工程师 5」里，回复 noah-test@example.test 那封邮件（同一个线程），正文只写：Regression check T1m.";
+  it("retries a reply-card outcome the turn took from history", () => {
+    // Staging: the role team answered a fresh reply request from an older discarded card.
+    expect(
+      unprovenReplyCardRetry("Ti7eygm 的回复卡已被丢弃，邮件未发送。我没有重建卡片或重试。", brief)
+        ?.note,
+    ).toMatch(/call reply_to_email/);
+    expect(unprovenReplyCardRetry("The reply card was already sent earlier.", brief)).toBeDefined();
+  });
+  it("keeps other replies and turns that were not asked for a reply", () => {
+    expect(unprovenReplyCardRetry("已准备好回复，等你在卡片上确认。", brief)).toBeUndefined();
+    expect(
+      unprovenReplyCardRetry("这张回复卡已被丢弃，邮件未发送。", "那封邮件发出去了吗？"),
     ).toBeUndefined();
   });
 });

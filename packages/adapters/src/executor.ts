@@ -711,6 +711,7 @@ import {
   recruitingRoundPeople,
   sendDeclineRetry,
   turnRequestText,
+  unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -5870,6 +5871,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let handedOff = false;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
+        // A reply-card tool ran this turn, so what the turn says about that card came from it.
+        let mailReplyAttempted = false;
         let intakeHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
@@ -8298,6 +8301,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             "native_instantly_reply_to_email",
             "GMAIL_REPLY_TO_THREAD",
           ].includes(sendOperation ?? "");
+          if (mailReplyOperation) mailReplyAttempted = true;
           const recruiterSaidSend =
             !mailReplyOperation &&
             !nextApprovedTool &&
@@ -15325,7 +15329,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
-            turnReport.enabled &&
+            (!handedOff &&
+            !mailReplyAttempted &&
+            run.trigger !== "follow_up" &&
+            !blocks.some((block) => block.kind === "ask")
+              ? unprovenReplyCardRetry(text, turnRequestText(currentTurnMessage, undefined, bot.id))
+              : undefined) ??
+            (turnReport.enabled &&
             !handedOff &&
             !delegatedToRole &&
             !messagingChannelRun &&
@@ -15379,7 +15389,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   getLogger().error("run.decline guard", error);
                   return undefined;
                 })
-              : undefined;
+              : undefined);
           if (declineRetried?.card !== undefined) {
             // A retry still asked in text: its question goes on a card, answered like any card.
             text = declineRetried.keep ?? "";
