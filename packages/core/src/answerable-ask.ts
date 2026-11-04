@@ -15,6 +15,19 @@ export function isOpenAskBlock(block: { kind: string; status?: string }): boolea
   return block.kind === "ask" && block.status !== "answered" && block.status !== "expired";
 }
 
+/**
+ * A card still marked pending whose run no longer waits (stopped, failed or finished) reads as
+ * closed, the way an expired card reads, so history never presents it as waiting.
+ */
+export function closeEndedAsks<T extends { kind: string; status?: string }>(
+  blocks: readonly T[],
+  runWaits: boolean,
+): T[] {
+  return runWaits
+    ? [...blocks]
+    : blocks.map((block) => (isOpenAskBlock(block) ? { ...block, status: "expired" } : block));
+}
+
 export type ClosedAskAnswer = {
   /** The person's answer as an ordinary message. */
   text: string;
