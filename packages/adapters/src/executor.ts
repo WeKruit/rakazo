@@ -287,6 +287,7 @@ import {
   skipRateLimitedRun,
   unitVector,
   votePoll,
+  waitingCardBlocks,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -13719,18 +13720,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return undefined;
               }),
               run.trigger === "user" && currentTurnMessage?.role === "user"
-                ? deps.prisma.message
-                    .findMany({
-                      where: {
-                        threadId: thread.id,
-                        role: "bot",
-                        blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-                      },
-                      orderBy: { seq: "desc" },
-                      take: 20,
-                      select: { blocks: true },
-                    })
-                    .then((rows) => waitingApprovalCards(rows.map((row) => row.blocks)))
+                ? waitingCardBlocks(deps.prisma, thread.id)
+                    .then(waitingApprovalCards)
                     .catch(() => [])
                 : [],
               attachedFileReads().catch((error) => {

@@ -41,6 +41,33 @@ export async function closeRunAsksInTransaction(
   return closed;
 }
 
+/**
+ * Blocks of the cards in a thread that a run is still waiting on. A card left "pending" by a run
+ * that already ended (an older stop or expiry) is not waiting for anyone.
+ */
+export async function waitingCardBlocks(
+  tx: Pick<Prisma.TransactionClient, "run" | "message">,
+  threadId: string,
+): Promise<Prisma.JsonValue[]> {
+  const waiting = await tx.run.findMany({
+    where: { threadId, status: "waiting_input" },
+    select: { id: true },
+  });
+  if (!waiting.length) return [];
+  const cards = await tx.message.findMany({
+    where: {
+      threadId,
+      runId: { in: waiting.map((run) => run.id) },
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+    },
+    orderBy: { seq: "desc" },
+    take: 20,
+    select: { blocks: true },
+  });
+  return cards.map((card) => card.blocks);
+}
+
 export interface ClosedAskInput {
   spaceId: string;
   threadId: string;

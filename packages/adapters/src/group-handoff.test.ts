@@ -49,6 +49,7 @@ function harness(
         sourceMessage: { blocks: sourceBlocks },
       })),
       findUnique: vi.fn(async () => ({ status: "running" })),
+      findMany: vi.fn(async () => [{ id: "run-waiting" }]),
       create: runCreate,
     },
     chatGroupMember: { findFirst: vi.fn(async () => ({ botId: "bot-a" })) },

@@ -2676,6 +2676,15 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       );
     },
   );
+  it("does not read the card of a stopped wait as waiting", async () => {
+    const f = await questionFixture();
+    await recruiting.pauseRunForInput(prisma, f.pause);
+    expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toHaveLength(1);
+    await prisma.$transaction((tx) =>
+      recruiting.cancelRunsInTransaction(tx, [{ id: f.run.id, taskId: f.run.taskId }], new Date()),
+    );
+    expect(await recruiting.waitingCardBlocks(prisma, f.thread.id)).toEqual([]);
+  });
   it.each(["lease", "role", "attempt"])(
     "rolls back a question pause invalidated by %s before clearing the lease",
     async (boundary) => {
