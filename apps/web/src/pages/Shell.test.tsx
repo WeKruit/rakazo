@@ -1222,6 +1222,75 @@ it("refreshes a failed current-role CRM connection before reading its history", 
   expect(view.getPath()).not.toContain("crmServer");
 });
 
+it("keeps an open profile working after a shortlist save refreshes the role", async () => {
+  let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    isDeploymentOwner: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  const page = await shellApi.recruiting.listCandidates({ roleId: view.candidate.roleId });
+  let saved = view.candidate;
+  shellApi.recruiting.listCandidates.mockImplementation(async () => ({ ...page, items: [saved] }));
+  shellApi.recruiting.setCandidateShortlist.mockImplementation(async (input) => {
+    saved = { ...saved, shortlisted: input.shortlisted, revision: saved.revision + 1 };
+    return saved;
+  });
+  const profileShortlist = async (label: string) => {
+    let button: HTMLButtonElement | undefined;
+    await vi.waitFor(() => {
+      button = [...document.body.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")].find(
+        (item) => item.textContent === label && !item.disabled,
+      );
+      expect(button, label).toBeDefined();
+    });
+    await act(async () => button!.click());
+  };
+  await view.click(view.candidate.name);
+  const workbench = container!.querySelector(".recruiting-workspace-main");
+  // Hold the role re-reads that follow the save, as a slow network does.
+  const workspace = shellApi.recruiting.getWorkspace.getMockImplementation()!;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  shellApi.recruiting.getWorkspace.mockImplementation(async (input) => {
+    await held;
+    return workspace(input);
+  });
+  await profileShortlist("Shortlist");
+  expect(shellApi.recruiting.setCandidateShortlist).toHaveBeenCalledTimes(1);
+  const reads = shellApi.recruiting.getWorkspace.mock.calls.length;
+  // A search result saved meanwhile re-reads the role while the profile stays open.
+  await act(async () => {
+    stream.onEvent(
+      {
+        id: "saved-search",
+        type: "effect.recorded",
+        threadId: view.thread.threadId,
+        spaceId: "space-1",
+        seq: 90,
+        payload: { tool: "recruiting_research", status: "saved" },
+        createdAt: "2026-01-01T00:00:00Z",
+      } as never,
+      { threadId: view.thread.threadId, cursor: 90 },
+      { snapshotStale: false },
+    );
+  });
+  expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(reads);
+  expect(container!.querySelector(".recruiting-workspace-main")).toBe(workbench);
+  await act(async () => release());
+  await profileShortlist("Shortlisted");
+  expect(shellApi.recruiting.setCandidateShortlist).toHaveBeenLastCalledWith(
+    expect.objectContaining({ shortlisted: false, expectedRevision: view.candidate.revision + 1 }),
+  );
+  expect(document.body.textContent).not.toContain("Could not update shortlist");
+});
+
 it("does not map a failed or late role binding into the current role", async () => {
   let resolve!: () => void;
   const ready = new Promise<void>((done) => {
