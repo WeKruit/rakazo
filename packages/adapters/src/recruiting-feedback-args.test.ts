@@ -1,6 +1,11 @@
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
+import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { filledRecruitingFeedbackArgs, unsavedRoundFeedback } from "./executor.js";
+import {
+  feedbackSaveRefused,
+  filledRecruitingFeedbackArgs,
+  unsavedRoundFeedback,
+} from "./executor.js";
 import { recruitingFeedbackInputError } from "./recruiting-feedback.js";
 
 const people = [
@@ -164,5 +169,22 @@ describe("next round after feedback", () => {
     [{ wrote: true, saved: true }],
   ])("records the round when there is nothing to save first (%o)", async (options) => {
     await expect(unsavedRoundFeedback(gate(options), input)).resolves.toBeUndefined();
+  });
+});
+
+describe("feedbackSaveRefused", () => {
+  it("passes on which words to quote, so a refused save can be fixed instead of retried blindly", () => {
+    const text = feedbackSaveRefused(
+      new RecruitingIntentQuoteError("Jane Doe 很好。Sam Lee 不合适。"),
+    );
+    expect(text).toMatch(/^Not recorded/);
+    expect(text).toContain("Jane Doe 很好。Sam Lee 不合适。");
+    expect(text).toContain("Never run people searches again");
+  });
+
+  it("names every field to check when the refusal gives no reason", () => {
+    const text = feedbackSaveRefused(new IsolationError());
+    expect(text).toContain("sourceRefs");
+    expect(text).not.toContain("Resource not found");
   });
 });
