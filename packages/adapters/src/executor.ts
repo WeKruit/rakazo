@@ -112,12 +112,15 @@ import {
   containsSecret,
   createStreamingRedactor,
   createVendorNameStream,
+  creditEstimateNote,
   endsSentence,
   expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
   findSkillByName,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
+  GMAIL_MCP_ENDPOINT,
+  GMAIL_SEND_TOOLS,
   hideVendorBlocks,
   hideVendorNames,
   humanizeToolName,
@@ -279,6 +282,7 @@ import {
   readNativeReplyEmailProof,
   readRecruitingPlaybookStep,
   recordUsage,
+  remainingUsageCredits,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
@@ -8329,6 +8333,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                 ).server
               : undefined;
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            nativeMcpWriteServer?.endpoint?.replace(/\/$/, "") === GMAIL_MCP_ENDPOINT &&
+            (GMAIL_SEND_TOOLS as readonly string[]).includes(connectorCall.route.toolName) &&
+            (await ownMailboxSendsToday(deps.prisma, run)) >= OWN_MAILBOX_DAILY_SENDS
+          )
+            return {
+              error: `This account already sent ${OWN_MAILBOX_DAILY_SENDS} emails from the recruiter's own mailbox in the last 24 hours, the daily limit that protects it from being flagged as spam. Tell the recruiter the rest can go out tomorrow; never try another way to send them.`,
+            };
           // An email the recruiter explicitly told us to send, with text they wrote or were just
           // shown, goes out without a second card. Everything else keeps its one-time card.
           const sendOperation =
@@ -13857,6 +13870,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : "",
           );
         const lastRecruiterText = recruiterLanguageText(recruiterTexts);
+        const creditsLeft = hideVendors
+          ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
+          : null;
+        const creditsNote = creditsLeft === null ? undefined : creditEstimateNote(creditsLeft);
         const languageNote = !hideVendors
           ? undefined
           : isChineseText(lastRecruiterText)
@@ -13892,6 +13909,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           fileNote,
           dispatchNote,
           languageNote,
+          creditsNote,
           !linkRole &&
           !fileNote &&
           !thread.groupId?.startsWith("recruiting-global-") &&
@@ -17555,6 +17573,25 @@ export async function calendarChangeAlreadyWaiting(
   });
   const uid = `"bookingUid":${JSON.stringify(input.bookingUid)}`;
   return waiting.some((effect) => JSON.stringify(effect.request).includes(uid));
+}
+
+/** Emails a day from a recruiter's own mailbox: more than a person sends by hand gets it flagged. */
+export const OWN_MAILBOX_DAILY_SENDS = 50;
+
+/** Sends from this recruiter's own mailbox in the last 24 hours that were confirmed or went out. */
+async function ownMailboxSendsToday(
+  prisma: PrismaClient,
+  run: { spaceId: string; userId: string },
+): Promise<number> {
+  return prisma.externalEffect.count({
+    where: {
+      spaceId: run.spaceId,
+      run: { userId: run.userId },
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) },
+      OR: GMAIL_SEND_TOOLS.map((tool) => ({ kind: { endsWith: `__${tool}` } })),
+      NOT: { status: { in: ["intended", "discarded", "failed"] } },
+    },
+  });
 }
 
 export async function recordEffect(

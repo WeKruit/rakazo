@@ -3,6 +3,9 @@ import type { Actor } from "@rakazo/contracts";
 import { BOT_COLORS, GROUP_MEMBER_MAX } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
+  GMAIL_DRAFT_TOOLS,
+  GMAIL_MCP_ENDPOINT,
+  GMAIL_SEND_TOOLS,
   GOOGLE_CALENDAR_ENDPOINT,
   GOOGLE_CALENDAR_SCHEDULING_TOOLS,
   MEMORY_TIDY_ROUTINE_NAME,
@@ -1082,6 +1085,7 @@ export async function ensurePlatformServices(
     await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);
+  await ensureOutreachGmail(prisma, actor);
   await retireResearchTools(prisma, actor);
 }
 
@@ -1115,6 +1119,61 @@ async function ensureSchedulingCalendar(prisma: PrismaClient, actor: Actor): Pro
         serverId: server.id,
         allowAllTools: false,
         allowedTools: GOOGLE_CALENDAR_SCHEDULING_TOOLS,
+      })),
+    ),
+    skipDuplicates: true,
+  });
+}
+
+/**
+ * A Gmail the recruiter connected lets Outreach send from it, each email on its own card. An
+ * Outreach grant from before sending gains the send tools; nothing else in it changes.
+ */
+async function ensureOutreachGmail(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "outreach");
+  if (!role) return;
+  const servers = await prisma.mcpServer.findMany({
+    where: { ...scope, endpoint: GMAIL_MCP_ENDPOINT, enabled: true, secretId: { not: null } },
+    select: { id: true },
+  });
+  if (!servers.length) return;
+  const bots = await prisma.bot.findMany({
+    where: {
+      ...scope,
+      archivedAt: null,
+      OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
+    },
+    select: { id: true },
+  });
+  if (!bots.length) return;
+  const tools = [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS];
+  const grants = await prisma.botMcpServer.findMany({
+    where: {
+      ...scope,
+      botId: { in: bots.map((bot) => bot.id) },
+      serverId: { in: servers.map((server) => server.id) },
+    },
+    select: { botId: true, serverId: true, allowAllTools: true, allowedTools: true },
+  });
+  for (const grant of grants) {
+    const allowed = Array.isArray(grant.allowedTools)
+      ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
+      : [];
+    if (grant.allowAllTools || GMAIL_SEND_TOOLS.every((tool) => allowed.includes(tool))) continue;
+    await prisma.botMcpServer.updateMany({
+      where: { ...scope, botId: grant.botId, serverId: grant.serverId },
+      data: { allowedTools: [...new Set([...allowed, ...tools])] },
+    });
+  }
+  await prisma.botMcpServer.createMany({
+    data: servers.flatMap((server) =>
+      bots.map((bot) => ({
+        ...scope,
+        botId: bot.id,
+        serverId: server.id,
+        allowAllTools: false,
+        allowedTools: tools,
       })),
     ),
     skipDuplicates: true,

@@ -168,6 +168,10 @@ msgstr "{undated} without a recorded date"
 msgid "{value} minutes"
 msgstr "{value} minutes"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr "150 more people: about 600–1,000 credits"
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr "A bit of everything"
@@ -2593,6 +2597,10 @@ msgstr "Duration"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr "Each email address found: about 80–160 credits"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr "Earlier history"
@@ -2930,6 +2938,10 @@ msgstr "Finish signing in at <0>{0}</0>. The final page may not load; paste its 
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "Finishing MCP connection…"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr "First 10 people for a role: about 10–25 credits"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
@@ -7028,6 +7040,10 @@ msgstr "Weekdays"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "What about its memories?"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr "What credits buy"
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

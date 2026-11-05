@@ -28,6 +28,24 @@ import {
 } from "./action-approval.js";
 
 describe("internalMcpWriteEndpoint", () => {
+  it("confirms every send from the recruiter's own Gmail once, with no standing allowance", () => {
+    const gmail = "https://gmailmcp.googleapis.com/mcp/v1";
+    for (const toolName of ["send_message", "reply", "forward"]) {
+      const route = { connectorId: "mcp", toolName };
+      expect(toolRequiresExplicitApproval(toolName, route, {}, gmail)).toBe(true);
+      expect(toolRequiresExplicitApproval(toolName, route, {}, "https://mcp.example.test")).toBe(
+        false,
+      );
+    }
+    expect(
+      toolRequiresExplicitApproval(
+        "create_draft",
+        { connectorId: "mcp", toolName: "create_draft" },
+        {},
+        gmail,
+      ),
+    ).toBe(false);
+  });
   it("requires explicit confirmation only for sender creation and selection", () => {
     const route = { connectorId: "mcp", toolName: "native_instantly_ensure_sender" };
     for (const operation of ["read", "propose"])

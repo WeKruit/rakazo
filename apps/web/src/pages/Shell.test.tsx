@@ -330,7 +330,9 @@ function rerenderComposer(overrides: Partial<ComponentProps<typeof Composer>>) {
 }
 
 function pickAttachment() {
-  const input = container?.querySelector<HTMLInputElement>('input[type="file"]');
+  const input = container?.querySelector<HTMLInputElement>(
+    'input[type="file"]:not([data-testid="import-candidates"])',
+  );
   if (!input) throw new Error("attachment input not found");
   Object.defineProperty(input, "files", {
     configurable: true,
@@ -3772,6 +3774,25 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
   expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+});
+
+it("puts an imported candidate list in the role chat with a short ask, unsent", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", ["running"], {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  const input = container!.querySelector<HTMLInputElement>('[data-testid="import-candidates"]')!;
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File(["name,linkedin"], "people.csv", { type: "text/csv" })],
+  });
+  act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+  const draft = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  expect(draft.value).toBe("Import the candidates in this file into this role.");
+  expect(container!.textContent).toContain("people.csv");
   expect(shellApi.send).not.toHaveBeenCalled();
 });
 

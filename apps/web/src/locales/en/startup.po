@@ -2372,6 +2372,14 @@ msgstr "Image upload area"
 msgid "Import contacts"
 msgstr "Import contacts"
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Import CSV"
+msgstr "Import CSV"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Import the candidates in this file into this role."
+msgstr "Import the candidates in this file into this role."
+
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
 msgstr "in {hours}h"
@@ -3634,6 +3642,11 @@ msgstr "Preferred"
 msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 msgstr "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 
+#. placeholder {0}: chosen.length
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Prepare a shortlist PDF I can send to the client for these {0} selected candidates: each person's name, current title and company, location, LinkedIn and two lines on why they fit. Leave out grades, contact details and costs."
+msgstr "Prepare a shortlist PDF I can send to the client for these {0} selected candidates: each person's name, current title and company, location, LinkedIn and two lines on why they fit. Leave out grades, contact details and costs."
+
 #. placeholder {0}: people.length
 #. placeholder {1}: choice.name
 #. placeholder {2}: choice.roleTitle
@@ -4761,6 +4774,10 @@ msgstr "Shortlist"
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Shortlist board"
 msgstr "Shortlist board"
+
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Shortlist for client"
+msgstr "Shortlist for client"
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Shortlist in role"

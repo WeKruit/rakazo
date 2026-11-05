@@ -245,6 +245,12 @@ export function ShellConversation({
     dismissComposerError,
     userName,
   } = model;
+  // The recruiter's own list goes to the role chat with a short ask, ready for them to send.
+  const importCandidates = (files: FileList) => {
+    openRoleChat(t`Import the candidates in this file into this role.`);
+    if (emptyCrmChat) onAttachmentPick(files, composerDraftKey);
+    else onAttachmentPick(files);
+  };
   // While another role opens, its predecessor's pages and chat are not shown under its name.
   const switchingRole = Boolean(openingCrmRole && !openingCrmRole.error);
   return (
@@ -357,6 +363,7 @@ export function ShellConversation({
           {effectiveCrmSelection ? (
             <RecruitingPanel
               onAskChat={(text) => openRoleChat(text)}
+              onImportFile={importCandidates}
               workspaceRead={currentWorkspaceRead}
               threadId={activeSnapshot.threadId}
               botId={inGroup ? undefined : active?.id}
@@ -481,6 +488,7 @@ export function ShellConversation({
             ) : null}
             <RecruitingPanel
               onAskChat={(text) => openRoleChat(text)}
+              onImportFile={importCandidates}
               workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
               presentation="workspace"
@@ -1114,6 +1122,7 @@ export function ShellConversation({
               ) : null}
               <RecruitingPanel
                 onAskChat={(text) => openRoleChat(text)}
+                onImportFile={importCandidates}
                 workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"

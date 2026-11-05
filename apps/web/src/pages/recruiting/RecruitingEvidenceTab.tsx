@@ -46,6 +46,7 @@ export function RecruitingEvidenceTab({
     readCacheScope,
     refreshSignal,
     onDiscussCandidate,
+    onImportFile,
     showDiagnostics,
     presentation,
     view,
@@ -357,6 +358,7 @@ export function RecruitingEvidenceTab({
           ) : null}
           {contactsView ? (
             <ContactsTab
+              onImport={onImportFile}
               shortlistWeekFilter={shortlistWeekFilter}
               onClearShortlistWeekFilter={onClearShortlistWeekFilter}
               roleId={workspace.role.id}

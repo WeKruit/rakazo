@@ -588,12 +588,22 @@ it("gives a personal Gmail connection narrow native access to the current coordi
   expect(api.approve.mock.calls.map(([input]) => [input.botId, input.allowedTools])).toEqual([
     ["legacy-main", ["get_message", "get_thread", "search_threads"]],
     [
-      "managed-outreach",
+      "managed-scheduling",
       ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
     ],
     [
-      "managed-scheduling",
-      ["get_message", "get_thread", "search_threads", "list_drafts", "get_draft", "create_draft"],
+      "managed-outreach",
+      [
+        "get_message",
+        "get_thread",
+        "search_threads",
+        "list_drafts",
+        "get_draft",
+        "create_draft",
+        "send_message",
+        "reply",
+        "forward",
+      ],
     ],
   ]);
 });

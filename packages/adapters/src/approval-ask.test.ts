@@ -1014,4 +1014,32 @@ describe("buildApprovalAskBlock", () => {
     for (const rule of request.ruleChanges)
       expect(block.detail).toContain(rule.replace("token-secret", "[redacted]"));
   });
+
+  it("shows a send from the recruiter's own mailbox as the email itself, confirmed once", () => {
+    const block = buildApprovalAskBlock(
+      "gmail-effect",
+      "mcp__gmail__send_message",
+      {
+        to: ["ada@example.test"],
+        subject: "Senior Backend Engineer in New York",
+        body: "Hi Ada,\n\nA payments team in New York is hiring.",
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm sending email → ada@example.test");
+    expect(block.detail).toBe(
+      [
+        "To: ada@example.test",
+        "Subject: Senior Backend Engineer in New York",
+        "Body:",
+        "Hi Ada,",
+        "",
+        "A payments team in New York is hiring.",
+        "",
+        "Sends from your connected email account.",
+      ].join("\n"),
+    );
+    expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
+  });
 });
