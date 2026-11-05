@@ -44,7 +44,12 @@ export function KruitDock({
   );
   const [minimizedPref, setMinimized] = useState<boolean>();
   const [expanded, setExpanded] = useState(false);
-  const minimized = minimizedPref ?? chatting;
+  // On a phone the reminder would sit over the page's text: start as the small button.
+  const [narrow] = useState(
+    () =>
+      typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches,
+  );
+  const minimized = minimizedPref ?? (chatting || narrow);
   const showList = expanded && waiting.length > 0;
   const showReminder = !showList && !minimized && waiting.length > 0;
   useAttentionToasts(groups, groupId, kruit?.id, onOpen);
