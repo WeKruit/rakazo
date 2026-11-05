@@ -3,13 +3,14 @@ import { credentialIssue, signupRequiresEmailVerification } from "@rakazo/core";
 import { Button, Input, Label } from "@rakazo/ui-web";
 import { Eye, EyeOff } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth";
 import type { AuthCapabilities } from "../lib/auth-capabilities";
 import { fetchAuthCapabilities } from "../lib/auth-capabilities";
 import { clearSpaceSelection } from "../lib/rpc";
 import { runSsoFlow } from "../lib/sso-flow";
 import { authErrorText, credentialIssueText } from "../lib/user-error";
+import { LegalNotice } from "./Legal";
 
 type AuthMode = "in" | "up" | "forgot";
 
@@ -20,6 +21,7 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   const { t } = useLingui();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -32,7 +34,12 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   const [pending, setPending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   // Signup triggers a session refresh that remounts the anonymous auth page.
-  const sent = resetSent || searchParams.get("verify") === "email";
+  const verifying = searchParams.get("verify") === "email";
+  const sent = resetSent || verifying;
+  // Router state survives that remount without putting the address in the URL.
+  const verifyEmail =
+    typeof location.state?.email === "string" ? (location.state.email as string) : null;
+  const [resend, setResend] = useState<"idle" | "pending" | "sent" | "failed">("idle");
   const [reset, setReset] = useState<AuthCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState(false);
   const [capabilityAttempt, setCapabilityAttempt] = useState(0);
@@ -108,7 +115,7 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
         return;
       }
       if (mode === "up" && signupRequiresEmailVerification(result.data)) {
-        setSearchParams({ verify: "email" });
+        setSearchParams({ verify: "email" }, { state: { email: trimmedEmail } });
         return;
       }
       clearSpaceSelection();
@@ -123,6 +130,20 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
       setError(t`Could not reach the server`);
     } finally {
       setPending(false);
+    }
+  }
+
+  async function resendVerification() {
+    if (!verifyEmail || resend === "pending") return;
+    setResend("pending");
+    try {
+      const result = await authClient.sendVerificationEmail({
+        email: verifyEmail,
+        callbackURL: `${window.location.origin}/sign-in`,
+      });
+      setResend(result.error ? "failed" : "sent");
+    } catch {
+      setResend("failed");
     }
   }
 
@@ -175,7 +196,27 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   return (
     <AuthFrame onSubmit={submit} title={title}>
       {sent ? (
-        <div className="w-full text-center">
+        <div className="w-full space-y-4 text-center">
+          {verifying && verifyEmail ? (
+            <>
+              <p className="text-muted-foreground">
+                <Trans>We sent a link to {verifyEmail}.</Trans>
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={resend === "pending" || resend === "sent"}
+                onClick={() => void resendVerification()}
+              >
+                {resend === "sent" ? <Trans>Sent</Trans> : <Trans>Resend email</Trans>}
+              </Button>
+              {resend === "failed" ? (
+                <p role="alert" className="text-sm text-destructive">
+                  <Trans>Could not send. Try again in a minute.</Trans>
+                </p>
+              ) : null}
+            </>
+          ) : null}
           <Link to="/sign-in" className="font-medium text-foreground">
             <Trans>Back to sign in</Trans>
           </Link>
@@ -322,7 +363,8 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
                   <Trans>Create account</Trans>
                 )}
               </Button>
-              {reset.sso && mode !== "forgot" ? (
+              {mode === "up" ? <LegalNotice /> : null}
+              {reset.sso && mode === "in" ? (
                 <Button
                   type="button"
                   variant="link"

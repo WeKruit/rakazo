@@ -49,6 +49,7 @@ export type SettingsGeneralProps = {
   messagingEnabled?: boolean;
   onOpenMessaging?: () => void;
   isDeploymentOwner?: boolean;
+  staff?: boolean;
 };
 
 export function GeneralSettingsPanels({
@@ -59,6 +60,7 @@ export function GeneralSettingsPanels({
   messagingEnabled = false,
   onOpenMessaging,
   isDeploymentOwner = false,
+  staff = false,
 }: SettingsGeneralProps) {
   const { t } = useLingui();
   const [accountSecurity, setAccountSecurity] = useState<AccountSecurity | null>(null);
@@ -125,7 +127,7 @@ export function GeneralSettingsPanels({
         </h3>
         <p className="mt-3 text-[14px] text-foreground/75">{name}</p>
         {email ? <p className="mt-1 text-[13px] text-muted-foreground/70">{email}</p> : null}
-        <AccountAccess onSecurity={setAccountSecurity} />
+        <AccountAccess onSecurity={setAccountSecurity} ssoLink={staff} />
       </section>
 
       {accountSecurity?.hasPassword && accountSecurity.passwordChangeEnabled !== false ? (

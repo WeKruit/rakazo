@@ -71,6 +71,14 @@ it("shows a small reminder and lists what waits only when asked", async () => {
   expect(host.querySelector('[role="status"]')).not.toBeNull();
 });
 
+it("on a phone starts as the small button so the reminder doesn't cover the page", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width") }));
+  const { host } = await render([group(KRUIT), group("Designer", { attention: "approval" })]);
+  vi.unstubAllGlobals();
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(find(host, "Kruit")).toBeTruthy();
+});
+
 it("opens a single wait straight from the reminder or the Kruit button", async () => {
   const { host, onOpen } = await render([
     group(KRUIT),

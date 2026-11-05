@@ -13,6 +13,8 @@ export const authCapabilitiesSchema = z.object({
   passwordReset: z.boolean(),
   resetUrl: z.string().url().nullable(),
   billing: z.boolean().optional(),
+  // Older servers omit this field.
+  supportEmail: z.string().email().nullable().optional(),
 });
 export type AuthCapabilities = z.infer<typeof authCapabilitiesSchema>;
 

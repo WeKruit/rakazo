@@ -1,4 +1,8 @@
-import type { JobPublisher, NotificationProvider } from "@rakazo/adapter-kit";
+import type {
+  JobPublisher,
+  NotificationProvider,
+  TransactionalEmailProvider,
+} from "@rakazo/adapter-kit";
 import {
   messagingDeliverJob,
   recruitingCandidateProfilesJob,
@@ -119,6 +123,9 @@ export function createJobReconciler(
     notifications?: NotificationProvider;
     /** Account email is configured, so long stages may offer an email when they finish. */
     completionEmail?: boolean;
+    /** Emails the recruiter once when a card has waited on them (recruiting-question-nudge). */
+    email?: TransactionalEmailProvider;
+    webOrigin?: string;
     leadership?: ReconciliationLeadership;
     reconcileComputerUpdates?: () => Promise<void>;
     reconcileCloudAgents?: () => Promise<void>;

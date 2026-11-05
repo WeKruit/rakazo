@@ -60,8 +60,12 @@ export function asksSenderCompanyName(question: string): boolean {
 export const SENDER_READ_FIRST =
   "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
 
-const NO_SELF_SETUP =
-  "No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and that we can turn it on if they contact us. Never ask for a company name or propose an address; drafts and contact lookups still work.";
+function noSelfSetup(supportEmail: string | null | undefined) {
+  const contact = supportEmail
+    ? `that emailing ${supportEmail} turns it on`
+    : "that we can turn it on if they contact us";
+  return `No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and ${contact}. Never ask for a company name or propose an address; drafts and contact lookups still work.`;
+}
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
 const own = (context: AdapterContext) => ({ userId: context.userId, spaceId: context.spaceId });
 const receiptScope = (context: AdapterContext) => ({
@@ -438,7 +442,7 @@ export async function ensureSendingIdentity(
   await context.reauthorize?.();
   const settings = await prisma.deploymentSettings.findUnique({
     where: { id: "default" },
-    select: { sendingMailboxLimit: true, senderSelfSetup: true },
+    select: { sendingMailboxLimit: true, senderSelfSetup: true, supportEmail: true },
   });
   const limit = settings?.sendingMailboxLimit ?? 2;
   // Mailboxes are added for an account by us; a recruiter sets one up only where the deployment allows it.
@@ -490,7 +494,9 @@ export async function ensureSendingIdentity(
       mailboxLimit: limit,
       selfSetup,
       // The read itself says what to do, so an agent that never loaded sender setup still answers right.
-      ...(!selfSetup && !current.length && !pending.length ? { next: NO_SELF_SETUP } : {}),
+      ...(!selfSetup && !current.length && !pending.length
+        ? { next: noSelfSetup(settings?.supportEmail) }
+        : {}),
     };
   }
   if (input.operation === "select") {
@@ -530,7 +536,7 @@ export async function ensureSendingIdentity(
     };
   }
   if (!selfSetup && !(input.operation === "confirm" && input.mode === "attach"))
-    throw new Error(NO_SELF_SETUP);
+    throw new Error(noSelfSetup(settings?.supportEmail));
   const accounts =
     input.operation === "confirm" && input.mode === "attach" ? [] : await orderedAccounts(rest);
   if (input.operation === "propose") {

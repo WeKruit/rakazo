@@ -192,6 +192,10 @@ msgstr "{hidden, plural, other {+# 个更早的步骤}}"
 msgid "{hours}h ago"
 msgstr "{hours} 小时前"
 
+#: src/components/CreditsNotice.tsx
+msgid "{left} credits left"
+msgstr "剩余 {left} 额度"
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "{loadedCount} loaded"
 msgstr "已加载 {loadedCount}"
@@ -268,10 +272,6 @@ msgstr "@{0}"
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "≥ Observed in loaded records"
 msgstr "≥ 已加载记录中的数量"
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "≥ Saved minimum · — Not reported"
-msgstr "≥ 已存记录的最低数量 · — 未提供"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "14 day period"
@@ -792,6 +792,10 @@ msgstr "浏览全部候选人"
 msgid "Browser"
 msgstr "浏览器"
 
+#: src/pages/Legal.tsx
+msgid "By creating an account you agree to the <0>Terms</0> and <1>Privacy Policy</1>."
+msgstr "创建账号即表示你同意<0>服务条款</0>和<1>隐私政策</1>。"
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "By vendor"
 msgstr ""
@@ -1191,6 +1195,14 @@ msgstr "连接测试失败。"
 msgid "Contact layout"
 msgstr "联系人布局"
 
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Contact us"
+msgstr "联系我们"
+
+#: src/components/CreditsNotice.tsx
+msgid "Contact us to add more"
+msgstr "联系我们充值"
+
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Contacted"
@@ -1533,6 +1545,10 @@ msgstr "无法发送重置邮件"
 msgid "Could not send that"
 msgstr "无法发送"
 
+#: src/pages/Auth.tsx
+msgid "Could not send. Try again in a minute."
+msgstr "发送失败，请稍后再试。"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "无法开始学习"
@@ -1618,6 +1634,10 @@ msgstr ""
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Credits"
 msgstr ""
+
+#: src/components/CreditsNotice.tsx
+msgid "Credits used up"
+msgstr "额度已用完"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Criteria"
@@ -1820,6 +1840,7 @@ msgstr "Docker 已配置，但电脑没有响应。请确认沙盒管理程序�
 msgid "Don’t have an account?"
 msgstr "还没有账户？"
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/recruiting/TasksTab.tsx
@@ -2323,7 +2344,6 @@ msgstr "高"
 msgid "High"
 msgstr "高"
 
-#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Historical totals · — Not reported"
 msgstr "历史累计 · — 未提供"
@@ -2976,10 +2996,9 @@ msgstr "下一步"
 msgid "Next page"
 msgstr "下一页"
 
-#. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {0}"
-msgstr "下一步：{0}"
+msgid "Next: {next}"
+msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "No"
@@ -3650,6 +3669,10 @@ msgstr "上一页"
 msgid "Privacy"
 msgstr "隐私"
 
+#: src/pages/Legal.tsx
+msgid "Privacy Policy"
+msgstr "隐私政策"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Profile"
@@ -3674,6 +3697,10 @@ msgstr "拉取请求"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Qualifying work"
 msgstr "符合条件的工作"
+
+#: src/pages/Legal.tsx
+msgid "Questions: <0>{email}</0>"
+msgstr "有问题请联系：<0>{email}</0>"
 
 #: src/lib/roster-status.ts
 msgid "Queued"
@@ -3989,6 +4016,10 @@ msgstr "请求评审"
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Research round"
 msgstr "调研轮次"
+
+#: src/pages/Auth.tsx
+msgid "Resend email"
+msgstr "重新发送"
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
@@ -4604,6 +4635,7 @@ msgid "Sending…"
 msgstr "正在发送…"
 
 #: src/components/MailReplyAskContent.tsx
+#: src/pages/Auth.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -5125,6 +5157,10 @@ msgstr "协作"
 msgid "Terminal"
 msgstr "终端"
 
+#: src/pages/Legal.tsx
+msgid "Terms of Service"
+msgstr "服务条款"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Test"
 msgstr "测试"
@@ -5503,6 +5539,10 @@ msgstr "更新待确认。请刷新查看。"
 msgid "Updated"
 msgstr "已更新"
 
+#: src/pages/Legal.tsx
+msgid "Updated {UPDATED}"
+msgstr "更新于 {UPDATED}"
+
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Updating saved sequence records…"
 msgstr "正在更新已保存的序列记录…"
@@ -5553,6 +5593,10 @@ msgstr "UTC · 仅绘制已记录的发送时间"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Value"
 msgstr "值"
+
+#: src/lib/user-error.ts
+msgid "Verify your email first. We sent you a new link."
+msgstr "请先验证邮箱，我们已重新发送验证链接。"
 
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "View all contacts"
@@ -5622,6 +5666,10 @@ msgstr "正在等待 API 恢复…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "排队等候…"
+
+#: src/pages/Auth.tsx
+msgid "We sent a link to {verifyEmail}."
+msgstr "验证链接已发送到 {verifyEmail}。"
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Website"
@@ -5744,6 +5792,10 @@ msgstr "你已接管"
 #: src/lib/user-error.ts
 msgid "Your credits are used up. Contact us to add more."
 msgstr "额度已用完，请联系我们充值。"
+
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Email {email} to add more."
+msgstr "额度已用完，请发邮件到 {email} 充值。"
 
 #: src/pages/Auth.tsx
 msgid "Your email address"

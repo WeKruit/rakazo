@@ -32,6 +32,16 @@ function fixture(options: { approval?: boolean; answered?: boolean; previous?: b
   };
   const prisma = {
     run: { findMany: vi.fn(async () => [run]) },
+    thread: {
+      findUnique: vi.fn(async () => ({
+        userId: "user",
+        group: { id: "group" },
+        activeRecruitingRole: { title: "Staff Engineer" },
+      })),
+    },
+    user: {
+      findUnique: vi.fn(async () => ({ email: "recruiter@example.test", emailVerified: true })),
+    },
     $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
   };
   const notify = vi.fn(async () => undefined);
@@ -77,9 +87,35 @@ describe("recruiting question nudge", () => {
     "does not nudge an approval, answered card or duplicate: %j",
     async (options) => {
       const f = fixture(options);
-      await reconcileRecruitingQuestions(f.deps);
+      const send = vi.fn(async () => undefined);
+      await reconcileRecruitingQuestions({ ...f.deps, email: { send } });
       expect(f.tx.thread.update).not.toHaveBeenCalled();
       expect(f.notify).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
     },
   );
+  it("emails the verified owner once with a link to the conversation", async () => {
+    const f = fixture();
+    const send = vi.fn(async () => undefined);
+    await reconcileRecruitingQuestions({
+      ...f.deps,
+      email: { send },
+      webOrigin: "https://app.example.test",
+    });
+    expect(send).toHaveBeenCalledWith({
+      to: "recruiter@example.test",
+      subject: "Staff Engineer: your answer is needed",
+      text: "Kruit has a question before it can continue.\n\nOpen it: https://app.example.test/app/g/group",
+    });
+  });
+  it("does not email an unverified address", async () => {
+    const f = fixture();
+    f.prisma.user.findUnique.mockResolvedValueOnce({
+      email: "recruiter@example.test",
+      emailVerified: false,
+    });
+    const send = vi.fn(async () => undefined);
+    await reconcileRecruitingQuestions({ ...f.deps, email: { send } });
+    expect(send).not.toHaveBeenCalled();
+  });
 });

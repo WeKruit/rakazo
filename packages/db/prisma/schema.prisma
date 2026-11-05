@@ -350,6 +350,8 @@ model DeploymentSettings {
   usageGrossMargin                Float    @default(0.5)
   sendingMailboxLimit             Int      @default(2)
   senderSelfSetup                 Boolean  @default(false)
+  /// Where customers reach a person (credits, turning on sending, help). Null hides contact links.
+  supportEmail                    String?
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 

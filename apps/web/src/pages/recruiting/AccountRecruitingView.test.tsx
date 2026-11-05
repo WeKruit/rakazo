@@ -26,6 +26,7 @@ const updateReminder = vi.hoisted(() => vi.fn());
 const listContacts = vi.hoisted(() => vi.fn());
 const contactFacets = vi.hoisted(() => vi.fn());
 const updateTags = vi.hoisted(() => vi.fn());
+const listServers = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/auth", () => ({ authClient: { useSession: () => ({ data: null }) } }));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
@@ -35,6 +36,7 @@ vi.mock("../../lib/rpc", () => ({
       reminders: { update: updateReminder },
       contacts: { list: listContacts, facets: contactFacets, updateTags },
     },
+    mcp: { servers: { list: listServers } },
   },
 }));
 vi.mock("./RecruitingRoutines", () => ({ RecruitingRoutines: () => null }));
@@ -116,6 +118,7 @@ const mockIndex = (page: GlobalRecruitingInboxOutput) =>
   }));
 beforeEach(() => {
   mockIndex(indexPage([]));
+  listServers.mockResolvedValue([]);
 });
 const host = document.createElement("div");
 const root = createRoot(host);
@@ -1037,3 +1040,53 @@ it("keeps Work secondary links scoped and opens the existing global chat", async
     await act(async () => pageRoot.unmount());
   }
 });
+
+it.each([
+  [[], true],
+  [
+    [
+      {
+        enabled: true,
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        oauthStatus: "connected",
+      },
+    ],
+    false,
+  ],
+] as const)(
+  "offers Connect Gmail on the Inbox only when Gmail is not connected",
+  async (servers, shown) => {
+    listServers.mockResolvedValue(servers);
+    read.mockResolvedValue({ roles, items: [], nextCursor: null });
+    const onOpenConnections = vi.fn();
+    const container = document.createElement("div");
+    const pageRoot = createRoot(container);
+    try {
+      await act(async () =>
+        pageRoot.render(
+          <MemoryRouter initialEntries={["/app?view=inbox&role=all"]}>
+            <AccountRecruitingView
+              spaceId="space"
+              accountKey="user-space"
+              groups={[]}
+              bots={[]}
+              refreshSignal={0}
+              onOpenNavigation={() => {}}
+              onOpenConnections={onOpenConnections}
+            />
+          </MemoryRouter>,
+        ),
+      );
+      const button = [...container.querySelectorAll("button")].find(
+        (node) => node.textContent === "Connect Gmail",
+      );
+      expect(Boolean(button)).toBe(shown);
+      if (button) {
+        await act(async () => button.click());
+        expect(onOpenConnections).toHaveBeenCalled();
+      }
+    } finally {
+      await act(async () => pageRoot.unmount());
+    }
+  },
+);

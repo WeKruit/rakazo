@@ -1,7 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingOverviewRole } from "@rakazo/contracts";
 import { RecruitingOverviewRoleSchema } from "@rakazo/contracts";
-import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import {
   Badge,
   Button,
@@ -618,7 +617,6 @@ export function HomeDashboard({
   readCacheScope,
   refreshSignal = 0,
   onOpenRole,
-  onGlobalChat,
   onOpenWork,
   onOpenNavigation,
   navigationCollapsed = false,
@@ -631,7 +629,6 @@ export function HomeDashboard({
   refreshSignal?: number;
   onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
   onOpenNavigation?: () => void;
-  onGlobalChat?: () => void;
   onOpenWork?: (view: "tasks" | "routines") => void;
   navigationCollapsed?: boolean;
 }) {
@@ -682,11 +679,6 @@ export function HomeDashboard({
   return (
     <div className="rk-scroll min-h-0 flex-1 overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-        {onGlobalChat ? (
-          <Button className="self-start" variant="outline" onClick={onGlobalChat}>
-            {RECRUITING_GLOBAL_AGENT_NAME}
-          </Button>
-        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           {onOpenNavigation ? (
             <Button

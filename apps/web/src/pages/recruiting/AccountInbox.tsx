@@ -433,7 +433,7 @@ export function AccountInbox({
                     type="button"
                     aria-pressed={selected?.key === row.key}
                     aria-label={`${incoming.sender || t`Sender unavailable`} · ${roleTitle(row.roleId)} · ${latest.subject || t`No subject`}`}
-                    className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-4 text-start focus-visible:outline-2 focus-visible:outline-ring hover:border-primary/40 aria-pressed:border-primary aria-pressed:ring-1 aria-pressed:ring-primary"
+                    className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-4 text-start focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted/50 aria-pressed:bg-muted"
                     onClick={(event) => {
                       railTrigger.current = event.currentTarget;
                       setChosen(row.key);
