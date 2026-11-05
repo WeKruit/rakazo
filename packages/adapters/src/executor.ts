@@ -248,6 +248,7 @@ import {
   findModelCredential,
   findSameMailReply,
   getRecruitingCrmTarget,
+  hasUnclaimedSteering,
   humanMessageInclude,
   InvalidSpaceNameError,
   IsolationError,
@@ -11564,6 +11565,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   mode: args.mode === "any" ? "any" : "all",
                   timeoutSeconds,
                   signal: context.signal,
+                  userMessageWaiting: () =>
+                    hasUnclaimedSteering(deps.prisma, {
+                      threadId: run.threadId,
+                      botId: bot.id,
+                      runId: run.id,
+                    }),
                 }),
             );
           }
