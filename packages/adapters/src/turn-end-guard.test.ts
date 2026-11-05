@@ -1294,6 +1294,18 @@ describe("unprovenReplyCardRetry", () => {
     ).toMatch(/call reply_to_email/);
     expect(unprovenReplyCardRetry("The reply card was already sent earlier.", brief)).toBeDefined();
   });
+  it("reads the request from a teammate's handoff brief", () => {
+    // Staging: Main handed Outreach the reply in the role conversation; Outreach had no message.
+    const handoff = {
+      blocks: [{ kind: "handoff", toBotId: "outreach", text: brief }] as MessageBlock[],
+    };
+    expect(
+      unprovenReplyCardRetry(
+        "Txihxwm 的回复卡已被丢弃，邮件未发送。",
+        turnRequestText(undefined, handoff, "outreach"),
+      ),
+    ).toBeDefined();
+  });
   it("keeps other replies and turns that were not asked for a reply", () => {
     expect(unprovenReplyCardRetry("已准备好回复，等你在卡片上确认。", brief)).toBeUndefined();
     expect(

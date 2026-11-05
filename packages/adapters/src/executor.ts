@@ -712,6 +712,7 @@ import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import {
   answeredAsk,
+  declinedRunId,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
   intakeAnswers,
@@ -15368,9 +15369,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const declineRetried =
             (!handedOff &&
             !mailReplyAttempted &&
-            run.trigger !== "follow_up" &&
+            // Once per turn: never again from that turn's own retry.
+            !declinedRunId(run.clientNonce) &&
             !blocks.some((block) => block.kind === "ask")
-              ? unprovenReplyCardRetry(text, turnRequestText(currentTurnMessage, undefined, bot.id))
+              ? unprovenReplyCardRetry(
+                  text,
+                  // A teammate's handoff in this conversation carries the request in its brief.
+                  turnRequestText(
+                    currentTurnMessage,
+                    handedIn
+                      ? historyMessages.find((message) => message.id === run.sourceMessageId)
+                      : undefined,
+                    bot.id,
+                  ),
+                )
               : undefined) ??
             (turnReport.enabled &&
             !handedOff &&

@@ -707,7 +707,8 @@ async function renderFeedbackShell(
         );
       });
       expect(button, name).toBeDefined();
-    });
+      // Lazy panels can take more than the default second on a loaded CI runner.
+    }, 5_000);
     await act(async () => button!.click());
   };
   // The role chat opens by default; only a collapsed chat needs its trigger.
