@@ -56,3 +56,17 @@ it("shows the role's playbook stage and next step", async () => {
   expect(container!.textContent).toContain("Next: 给这 10 位候选人反馈");
   expect(container!.querySelector("button")).toBeNull();
 });
+
+it("does not repeat the stage as its next step", async () => {
+  await mount({
+    ready: true,
+    attention: null,
+    playbookStage: {
+      stage: "feedback",
+      label: "Calibration feedback",
+      nextStep: "Collect calibration feedback",
+    },
+    items: [],
+  });
+  expect(container!.textContent).toBe("Calibration feedback");
+});
