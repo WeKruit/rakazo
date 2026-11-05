@@ -1,5 +1,4 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import {
   FolderOpen,
@@ -18,6 +17,7 @@ import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { authClient } from "../../lib/auth";
 import { desktopBridge } from "../../lib/desktop";
+import { isEmptyHomeTeam } from "../../lib/home-team";
 import { withFeatureMessages } from "../../lib/i18n";
 import { clearSpaceSelection, rpc } from "../../lib/rpc";
 import { savedThreads } from "../../lib/saved-threads";
@@ -392,12 +392,4 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
       ) : null}
     </aside>
   );
-}
-
-/**
- * The team every new account gets before its first role. Until it holds a conversation it is not a
- * role, and a new recruiter saw it as an empty role named "Recruiting".
- */
-function isEmptyHomeTeam(group: Group): boolean {
-  return /^recruiting-[0-9a-f]+$/.test(group.id) && !group.preview.trim();
 }
