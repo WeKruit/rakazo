@@ -101,6 +101,12 @@ it("distinguishes duplicate role titles by creation time without showing interna
     expect(primary.textContent).not.toMatch(/New Role|Job Brief|Client feedback|Routines|Tasks/);
     expect(container.querySelector('button[aria-label="New role"]')).not.toBeNull();
     expect(container.textContent).toContain("All roles");
+    const allRoles = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "All roles",
+    )!;
+    // Only one sidebar item reads as the current page.
+    expect(primary.querySelector('a[aria-current="page"]')?.textContent).toBe("Kruit");
+    expect(allRoles.getAttribute("aria-current")).toBeNull();
     const times = [...container.querySelectorAll("time")];
     expect(times.map((item) => item.dateTime)).toEqual(
       groups

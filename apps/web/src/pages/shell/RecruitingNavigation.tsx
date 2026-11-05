@@ -302,6 +302,16 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
     { view: "inbox", label: t`Inbox`, Icon: Inbox },
     { view: "interview", label: t`Interview`, Icon: CalendarDays },
   ] as const;
+  // Kruit and "All roles" each mark a different kind of page, so only one is ever current.
+  const workspaceView = [
+    "roles",
+    "shortlist",
+    "contacts",
+    "sequence",
+    "inbox",
+    "interview",
+    "analytics",
+  ].includes(view);
   return (
     <div
       className="hire-navigation flex min-h-0 flex-1 flex-col"
@@ -351,19 +361,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
         <Button
           variant="ghost"
-          aria-current={
-            ![
-              "roles",
-              "shortlist",
-              "contacts",
-              "sequence",
-              "inbox",
-              "interview",
-              "analytics",
-            ].includes(view)
-              ? "page"
-              : undefined
-          }
+          aria-current={workspaceView ? undefined : "page"}
           role="link"
           aria-label={RECRUITING_GLOBAL_AGENT_NAME}
           title={RECRUITING_GLOBAL_AGENT_NAME}
@@ -530,7 +528,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           <Button
             variant="ghost"
             className="hire-role-button w-full justify-start px-2.5 text-sm font-normal"
-            aria-current={!groupId && !crmSelection ? "page" : undefined}
+            aria-current={workspaceView && !groupId && !crmSelection ? "page" : undefined}
             onClick={onAllRoles ?? (() => onView(view))}
           >
             <Users size={15} aria-hidden="true" />
