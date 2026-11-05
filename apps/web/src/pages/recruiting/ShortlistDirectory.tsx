@@ -226,7 +226,7 @@ export function ShortlistDirectory({
                 <Trans>No shortlisted candidates match these filters.</Trans>
               )
             ) : (
-              <Trans>No saved candidates</Trans>
+              <Trans>No candidates yet</Trans>
             )}
           </p>
           {shortlistView && model.onBrowseCandidates ? (

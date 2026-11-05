@@ -1326,10 +1326,10 @@ describe("Pi connector tool dispatch", () => {
       events.push(event);
     }
 
-    expect(events).toContainEqual({ type: "text", text: "The final answer." });
+    expect(events).toContainEqual({ type: "text", text: "\n\nThe final answer." });
     expect(events.at(-1)).toEqual({
       type: "done",
-      text: "I will check the destination first.The final answer.",
+      text: "I will check the destination first.\n\nThe final answer.",
     });
   });
 
@@ -1481,11 +1481,11 @@ describe("Pi connector tool dispatch", () => {
 
     expect(events).toContainEqual({
       type: "text",
-      text: "The inbox has 3 unread notes.",
+      text: "\n\nThe inbox has 3 unread notes.",
     });
     expect(events.at(-1)).toEqual({
       type: "done",
-      text: "I will check the destination first.The inbox has 3 unread notes.",
+      text: "I will check the destination first.\n\nThe inbox has 3 unread notes.",
     });
     expect(events).not.toContainEqual({
       type: "text",
@@ -1520,8 +1520,10 @@ describe("Pi connector tool dispatch", () => {
       events.push(event);
     }
 
-    expect(events.filter((event) => (event as { text?: string }).text === "Done.")).toHaveLength(2);
-    expect(events.at(-1)).toEqual({ type: "done", text: "Done.Done." });
+    expect(
+      events.filter((event) => (event as { text?: string }).text?.trim() === "Done."),
+    ).toHaveLength(2);
+    expect(events.at(-1)).toEqual({ type: "done", text: "Done.\n\nDone." });
   });
 
   it("emits only the final suffix that extends a streamed prefix", async () => {
@@ -1551,7 +1553,7 @@ describe("Pi connector tool dispatch", () => {
       events.push(event);
     }
 
-    expect(events).toContainEqual({ type: "text", text: "The inbox" });
+    expect(events).toContainEqual({ type: "text", text: "\n\nThe inbox" });
     expect(events).toContainEqual({
       type: "text",
       text: " has 3 unread notes.",
@@ -1562,7 +1564,7 @@ describe("Pi connector tool dispatch", () => {
     });
     expect(events.at(-1)).toEqual({
       type: "done",
-      text: "I will check the destination first.The inbox has 3 unread notes.",
+      text: "I will check the destination first.\n\nThe inbox has 3 unread notes.",
     });
   });
 
@@ -1593,11 +1595,13 @@ describe("Pi connector tool dispatch", () => {
       events.push(event);
     }
 
-    expect(events.filter((event) => (event as { text?: string }).text === "abc")).toHaveLength(2);
+    expect(
+      events.filter((event) => (event as { text?: string }).text?.trim() === "abc"),
+    ).toHaveLength(2);
     expect(events).not.toContainEqual({ type: "text", text: "abcabc" });
     expect(events.at(-1)).toEqual({
       type: "done",
-      text: "I will check the destination first.abcabc",
+      text: "I will check the destination first.\n\nabcabc",
     });
   });
 

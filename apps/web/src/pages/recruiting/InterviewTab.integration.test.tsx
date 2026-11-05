@@ -105,9 +105,9 @@ it("renders the actual calendar from the existing interview read and preserves c
 });
 
 it.each([
-  ["not_checked", "Calendar records have not been checked yet."],
-  ["unsupported", "Saved calendar records are unavailable from this source."],
-  ["failed", "Could not load saved calendar records. Try refreshing."],
+  ["not_checked", "No interviews yet."],
+  ["unsupported", "No calendar is connected."],
+  ["failed", "Could not load interviews. Try refreshing."],
 ] as const)("keeps %s distinct from an empty calendar", async (status, message) => {
   correspondence.mockResolvedValue({ ...saved, status, events: [] });
   await render();
@@ -139,7 +139,7 @@ it("preserves partial, changed-connection and access status with saved records",
     ],
   });
   await render();
-  expect(element.textContent).toContain("Some saved records could not be displayed.");
+  expect(element.textContent).toContain("Some interviews could not be shown.");
   expect(element.textContent).toContain("These saved records may be out of date.");
   expect(element.textContent).toContain("Synthetic calendar · Needs access · Failed");
   expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
@@ -157,7 +157,7 @@ it("shows a read failure and ignores a late response for a previous role", async
   correspondence.mockRejectedValueOnce(new Error("read failed"));
   await render({ roleId: "role-2", conversation: { groupId: "group-2" } });
   await act(async () => oldResponse(saved));
-  expect(element.textContent).toContain("Could not load saved calendar records. Try refreshing.");
+  expect(element.textContent).toContain("Could not load interviews. Try refreshing.");
   expect(element.querySelector('[data-event-id="candidate-event"]')).toBeNull();
 });
 

@@ -270,8 +270,8 @@ msgid "@{0}"
 msgstr "@{0}"
 
 #: src/pages/recruiting/SequenceOverview.tsx
-msgid "≥ Observed in loaded records"
-msgstr "≥ Observed in loaded records"
+msgid "≥ means at least this many."
+msgstr "≥ means at least this many."
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "14 day period"
@@ -1027,6 +1027,10 @@ msgstr "Client ID"
 msgid "Client secret"
 msgstr "Client secret"
 
+#: src/pages/shell/KruitWelcome.tsx
+msgid "Client: a Series B fintech in New York. Role: Senior Backend Engineer, 6+ years, Go or Java, payments experience, onsite 3 days a week, base $200–240k."
+msgstr "Client: a Series B fintech in New York. Role: Senior Backend Engineer, 6+ years, Go or Java, payments experience, onsite 3 days a week, base $200–240k."
+
 #: src/components/BackgroundTasks.tsx
 #: src/components/LazyOverlay.tsx
 #: src/components/StageTranscript.tsx
@@ -1693,10 +1697,6 @@ msgstr "Dashboard"
 msgid "Date added"
 msgstr "Date added"
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Date-filtered sequence metrics are not available. Historical totals stay unchanged below."
-msgstr "Date-filtered sequence metrics are not available. Historical totals stay unchanged below."
-
 #. placeholder {0}: draft.email.date
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Date: {0}"
@@ -2344,10 +2344,6 @@ msgstr "High"
 msgid "High"
 msgstr "High"
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Historical totals · — Not reported"
-msgstr "Historical totals · — Not reported"
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "How to check"
 msgstr "How to check"
@@ -2541,6 +2537,10 @@ msgstr "Key work"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Known"
 msgstr "Known"
+
+#: src/pages/shell/KruitWelcome.tsx
+msgid "Kruit asks a few questions, then finds ten people for you to review."
+msgstr "Kruit asks a few questions, then finds ten people for you to review."
 
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Languages"
@@ -2751,6 +2751,7 @@ msgstr "Match"
 msgid "Match group"
 msgstr "Match group"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Match score"
 msgstr "Match score"
@@ -2938,6 +2939,16 @@ msgstr "Name missing"
 msgid "Name: {0}"
 msgstr "Name: {0}"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Needs a closer look"
+msgstr "Needs a closer look"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Needs a new review"
+msgstr "Needs a new review"
+
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3033,6 +3044,11 @@ msgid "No breakdown"
 msgstr "No breakdown"
 
 #: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "No candidates yet"
+msgstr "No candidates yet"
+
+#: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No contacts for this role yet."
 msgstr "No contacts for this role yet."
@@ -3053,10 +3069,6 @@ msgstr "No contacts were returned for this sequence."
 msgid "No dated CRM messages are available for this scope."
 msgstr "No dated CRM messages are available for this scope."
 
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "No dated sends in the available records."
-msgstr "No dated sends in the available records."
-
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "No dated work history"
 msgstr "No dated work history"
@@ -3073,6 +3085,10 @@ msgstr "No delay before email {0}"
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "No email variants returned."
 msgstr "No email variants returned."
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No emails sent yet."
+msgstr "No emails sent yet."
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -3164,11 +3180,6 @@ msgstr "No roles yet."
 msgid "No saved activity metrics are available for these sequences."
 msgstr "No saved activity metrics are available for these sequences."
 
-#: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/ShortlistDirectory.tsx
-msgid "No saved candidates"
-msgstr "No saved candidates"
-
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "No saved data"
 msgstr "No saved data"
@@ -3259,10 +3270,20 @@ msgstr "Not a fit: {name}"
 msgid "Not interested"
 msgstr "Not interested"
 
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Not rated yet"
+msgstr "Not rated yet"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Not reported"
 msgstr "Not reported"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Not reviewed yet"
+msgstr "Not reviewed yet"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 #: src/pages/recruiting/SequenceEditor.tsx
@@ -3460,11 +3481,6 @@ msgstr "Original sender: {0}"
 msgid "Out of office"
 msgstr "Out of office"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Outdated review"
-msgstr "Outdated review"
-
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Output"
 msgstr "Output"
@@ -3525,11 +3541,6 @@ msgstr "Page {0} of {pages}"
 msgid "Pages"
 msgstr "Pages"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Partial"
-msgstr "Partial"
-
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Partial coverage"
@@ -3537,6 +3548,7 @@ msgstr "Partial coverage"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Partial match"
 msgstr "Partial match"
@@ -3565,6 +3577,10 @@ msgstr "Password updated"
 #: src/pages/Auth.tsx
 msgid "Passwords do not match"
 msgstr "Passwords do not match"
+
+#: src/pages/shell/KruitWelcome.tsx
+msgid "Paste a job description to start"
+msgstr "Paste a job description to start"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Paste your API key, then test again."
@@ -3826,10 +3842,6 @@ msgstr "Recovery restores the last saved workspace. Unsaved work may be lost."
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Recreate a computer that is not working."
 msgstr "Recreate a computer that is not working."
-
-#: src/pages/recruiting/SequenceOverview.tsx
-msgid "Recruiter messages are unavailable for this role."
-msgstr "Recruiter messages are unavailable for this role."
 
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -4358,10 +4370,6 @@ msgstr "Saved emails"
 msgid "Saved facts from the current shortlist and filters. People may appear in more than one category."
 msgstr "Saved facts from the current shortlist and filters. People may appear in more than one category."
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-msgid "Saved match score"
-msgstr "Saved match score"
-
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Saved results"
 msgstr "Saved results"
@@ -4604,8 +4612,8 @@ msgid "Send reset link"
 msgstr "Send reset link"
 
 #: src/pages/recruiting/SequenceOverview.tsx
-msgid "Send timing is not reported in saved sequence records."
-msgstr "Send timing is not reported in saved sequence records."
+msgid "Send times are not available yet."
+msgstr "Send times are not available yet."
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Sender"
@@ -5219,6 +5227,10 @@ msgstr "The sending address changed. Prepare a new reply for review."
 msgid "The workspace changed. Open the role again."
 msgstr "The workspace changed. Open the role again."
 
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "These totals cover all time."
+msgstr "These totals cover all time."
+
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Thinking"
 msgstr "Thinking"
@@ -5397,11 +5409,6 @@ msgstr "Unanswered messages"
 msgid "Unavailable"
 msgstr "Unavailable"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Uncertain"
-msgstr "Uncertain"
-
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Unclassified"
 msgstr "Unclassified"
@@ -5471,19 +5478,9 @@ msgstr "unread threads in saved mail"
 msgid "Unread threads in saved mail"
 msgstr "Unread threads in saved mail"
 
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Unreviewed"
-msgstr "Unreviewed"
-
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Unsaved changes"
 msgstr "Unsaved changes"
-
-#: src/pages/recruiting/CandidateDirectory.tsx
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Unscored"
-msgstr "Unscored"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -5565,6 +5562,10 @@ msgstr "Urgent"
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Usage"
 msgstr "Usage"
+
+#: src/pages/shell/KruitWelcome.tsx
+msgid "Use an example"
+msgstr "Use an example"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."

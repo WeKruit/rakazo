@@ -160,19 +160,19 @@ export function RecruitingEvidenceTab({
                 <Trans>Worth Talking</Trans>
               </NativeSelectOption>
               <NativeSelectOption value="partial">
-                <Trans>Partial</Trans>
+                <Trans>Partial match</Trans>
               </NativeSelectOption>
               <NativeSelectOption value="uncertain">
-                <Trans>Uncertain</Trans>
+                <Trans>Needs a closer look</Trans>
               </NativeSelectOption>
               <NativeSelectOption value="outdated">
-                <Trans>Outdated review</Trans>
+                <Trans>Needs a new review</Trans>
               </NativeSelectOption>
               <NativeSelectOption value="unreviewed">
-                <Trans>Unreviewed</Trans>
+                <Trans>Not reviewed yet</Trans>
               </NativeSelectOption>
               <NativeSelectOption value="unscored">
-                <Trans>Unscored</Trans>
+                <Trans>Not rated yet</Trans>
               </NativeSelectOption>
             </NativeSelect>
             {showInternalAssessments ? (

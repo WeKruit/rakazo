@@ -3740,7 +3740,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   await view.navigate("/app/g/group-1?view=shortlist");
   expect(container?.querySelector("h1")?.textContent).toBe("Candidates");
   expect(container?.textContent).toContain("No shortlisted candidates yet.");
-  expect(container?.textContent).not.toContain("No saved candidates");
+  expect(container?.textContent).not.toContain("No candidates yet");
   await view.click("Browse all candidates");
   expect(view.getProps().view).toBe("contacts");
   expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);

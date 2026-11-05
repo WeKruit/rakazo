@@ -765,7 +765,7 @@ function CrmOutbox({ model }: { model: ReturnType<typeof useCrmWorkbenchModel> }
       "outboxScope" in contactRead.data &&
       contactRead.data.outboxScope === "unavailable_for_role" ? (
         <p>
-          <Trans>Recruiter messages are unavailable for this role.</Trans>
+          <Trans>No emails sent yet.</Trans>
         </p>
       ) : outbox.length ? (
         outbox.map((message) => (

@@ -13,7 +13,7 @@ export function RoleSetup({ status }: { status: RecruitingRoleSetup | undefined 
   const { t } = useLingui();
   const stage = status?.playbookStage;
   if (!stage) return null;
-  // Say it once: "Calibration feedback · Next: Collect calibration feedback" repeats the stage.
+  // Say it once: "Your feedback · Next: Give your feedback" repeats the stage.
   const next =
     stage.nextStep && !stage.nextStep.toLowerCase().includes(stage.label.toLowerCase())
       ? stage.nextStep

@@ -884,10 +884,6 @@ msgstr ""
 msgid "Calendar last checked"
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar records have not been checked yet."
-msgstr ""
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar start date"
 msgstr ""
@@ -1887,6 +1883,10 @@ msgstr "Impossible de charger les intégrations"
 msgid "Could not load interview plans."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load interviews. Try refreshing."
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "Impossible de charger les serveurs MCP"
@@ -1917,10 +1917,6 @@ msgstr "Impossible de charger l’historique des exécutions"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Could not load saved availability. Check the calendar in role chat."
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Could not load saved calendar records. Try refreshing."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2964,10 +2960,6 @@ msgstr ""
 msgid "From this role’s saved requirements"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
-msgstr ""
-
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Gateway ID"
@@ -3155,10 +3147,6 @@ msgstr ""
 msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
 msgstr ""
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Historical totals · — Not reported"
-msgstr "Totaux historiques · — Non renseigné"
-
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
 msgstr ""
@@ -3319,6 +3307,7 @@ msgstr "Unité de l'intervalle"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Interview"
@@ -4036,6 +4025,14 @@ msgstr "pas d'authentification"
 msgid "No authentication"
 msgstr "Aucune authentification"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No calendar is connected."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No candidates yet"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "Aucune application de discussion connectée pour le moment."
@@ -4056,16 +4053,25 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No email sequences yet."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No emails sent yet."
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No emails yet."
+msgstr ""
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "No events match these statuses in this date range."
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "No feedback yet."
-msgstr ""
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No future confirmed event appears in these saved checks."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4076,16 +4082,20 @@ msgstr "Aucune conversation de groupe pour le moment."
 msgid "No Important records matched this filter."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No indexed mail matches this view."
-msgstr ""
-
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No internal review was returned."
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No interviews booked yet."
+msgstr ""
+
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No interviews in progress for this role."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No interviews yet."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4191,6 +4201,10 @@ msgstr ""
 msgid "No roles yet."
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No roles yet. Paste a job description in Kruit to start one."
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
 msgstr ""
@@ -4205,10 +4219,6 @@ msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
-msgstr ""
-
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "No saved candidates"
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -4231,10 +4241,6 @@ msgstr ""
 msgid "No saved memory in these scopes"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No saved overview for these projects."
-msgstr ""
-
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "No saved questions"
 msgstr ""
@@ -4249,10 +4255,6 @@ msgstr "Aucune ligne de résultat enregistrée"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No saved results"
-msgstr ""
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "No saved sequences for this role yet."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4456,6 +4458,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Observed unread"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Older mail is still loading."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5040,10 +5046,6 @@ msgstr "Reconnexion en cours"
 msgid "Recorded availability"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Recorded event"
-msgstr ""
-
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Recorded times"
 msgstr ""
@@ -5083,11 +5085,6 @@ msgstr "Recréation de l'ordinateur"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Recruiter messages"
-msgstr ""
-
-#: src/pages/recruiting/CrmHistory.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Recruiter messages are unavailable for this role."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -5678,20 +5675,12 @@ msgstr "Enregistré"
 msgid "Saved before latest role update"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Saved calendar checks"
-msgstr "Vérifications du calendrier enregistrées"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Saved calendar records are unavailable from this source."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -5728,14 +5717,6 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saved interview plans"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail · partial source coverage"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail is indexing in the background."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -6276,15 +6257,15 @@ msgid "Slack not enabled"
 msgstr "Slack non activé"
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Some role calendar records are unavailable or partial."
+msgid "Some calendars are unavailable."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some interviews could not be shown."
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Some roles could not be read."
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Some saved records could not be displayed."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -6828,7 +6809,7 @@ msgid "Unsubscribed"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Upcoming recorded bookings"
+msgid "Upcoming interviews"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx

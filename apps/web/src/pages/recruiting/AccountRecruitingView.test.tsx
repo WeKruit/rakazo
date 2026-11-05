@@ -304,14 +304,13 @@ it.each([
           </MemoryRouter>,
         ),
       );
-      expect(container.textContent?.includes("No indexed mail matches this view.")).toBe(empty);
+      expect(container.textContent?.includes("No emails yet.")).toBe(empty);
       expect(container.textContent?.includes("Could not load recruiting records.")).toBe(retry);
       expect(container.textContent).not.toContain("0 replies");
       expect(container.textContent).not.toContain("0 unread");
-      expect(container.textContent?.includes("Saved mail is indexing in the background.")).toBe(
+      expect(container.textContent?.includes("Older mail is still loading.")).toBe(
         !retry && (partial || !!nextCursor),
       );
-      if (!retry) expect(container.textContent).toContain("Saved mail · partial source coverage");
     } finally {
       await act(async () => pageRoot.unmount());
     }
@@ -387,7 +386,7 @@ it("keeps the Inbox loading through a failed read right after a deploy, then sho
     await act(async () => vi.advanceTimersByTimeAsync(1_500));
     expect(globalRead).toHaveBeenCalledTimes(2);
     expect(container.textContent).not.toContain("Could not load recruiting records.");
-    expect(container.textContent).toContain("No indexed mail matches this view.");
+    expect(container.textContent).toContain("No emails yet.");
   } finally {
     await act(async () => pageRoot.unmount());
     vi.useRealTimers();

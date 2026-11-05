@@ -222,8 +222,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "settle the language requirement",
     in: ["Main", "Recruitment intake and handoff skill"],
-    phrase: /always settle the language requirement/i,
+    phrase: /settle the language requirement/i,
     why: "Briefs left the language requirement open and rounds ignored it.",
+  },
+  {
+    rule: "ask about language only when it matters",
+    in: ["RECRUITING_BRIEF_CHECKLIST", "Recruitment intake and handoff skill"],
+    phrase: "point to a second language",
+    why: "A New York role's first question asked whether English was required.",
   },
   {
     rule: "an unconfirmed limit stays a preference",
