@@ -451,6 +451,8 @@ describe("removeGroup", () => {
     ];
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: "group-1" }]),
+      recruitingReply: { deleteMany: vi.fn() },
+      recruitingRole: { deleteMany: vi.fn() },
       chatGroup: {
         findUnique: vi.fn(async () => ({ members: [{ botId: "bot-1" }], artifacts: [] })),
         delete: vi.fn(async () => {

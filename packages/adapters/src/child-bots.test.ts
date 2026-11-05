@@ -352,6 +352,7 @@ describe("destroyBot", () => {
         },
       },
     ]);
+    const deleteRoles = vi.fn();
     const transaction = vi.fn(async (callback: (tx: unknown) => Promise<void>) =>
       callback({
         $queryRaw: queryRaw,
@@ -386,6 +387,8 @@ describe("destroyBot", () => {
           ]),
           deleteMany: deleteGroups,
         },
+        recruitingReply: { deleteMany: vi.fn() },
+        recruitingRole: { deleteMany: deleteRoles },
         run: {
           findMany: findRuns,
           updateMany: cancelRuns,
@@ -430,6 +433,13 @@ describe("destroyBot", () => {
       { deleteMemories: true },
     );
 
+    // Their roles go first: saved search pages point at the conversations' files.
+    expect(deleteRoles).toHaveBeenCalledWith({
+      where: { sourceThread: { groupId: { in: ["group-1", "group-3"] } } },
+    });
+    expect(deleteRoles.mock.invocationCallOrder[0]).toBeLessThan(
+      deleteGroups.mock.invocationCallOrder[0]!,
+    );
     expect(deleteGroups).toHaveBeenCalledWith({ where: { id: { in: ["group-1", "group-3"] } } });
     expect(deleteMemberships).toHaveBeenCalledWith({ where: { botId: "bot-1" } });
     expect(deleteMemberships.mock.invocationCallOrder[0]!).toBeLessThan(
