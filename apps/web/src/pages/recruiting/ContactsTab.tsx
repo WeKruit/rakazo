@@ -1,8 +1,8 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
-import { Bookmark, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Bookmark, Sparkles, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { isInShortlistWeek } from "./dashboard-drilldown";
@@ -55,10 +55,12 @@ export function ContactsTab(
     onClearShortlistWeekFilter?: () => void;
     criterionRevision?: ProfileCriterionRevision;
     onRefine?: () => void;
+    onImport?: (files: FileList) => void;
   },
 ) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
+  const importInput = useRef<HTMLInputElement>(null);
   const { autumn } = props;
   const [lookupReload, setLookupReload] = useState(0);
   const saved = useSavedCorrespondence(
@@ -204,8 +206,37 @@ export function ContactsTab(
           <Trans>Showing the first {rows.length}</Trans>
         </p>
       ) : null}
+      {props.onImport ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={() => importInput.current?.click()}
+        >
+          <Upload size={14} aria-hidden />
+          <Trans>Import CSV</Trans>
+        </Button>
+      ) : null}
+      {props.onImport ? (
+        <input
+          ref={importInput}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          data-testid="import-candidates"
+          onChange={(event) => {
+            if (event.currentTarget.files?.length) props.onImport?.(event.currentTarget.files);
+            event.currentTarget.value = "";
+          }}
+        />
+      ) : null}
       {props.onRefine ? (
-        <Button size="sm" variant="outline" className="ml-auto" onClick={props.onRefine}>
+        <Button
+          size="sm"
+          variant="outline"
+          className={props.onImport ? undefined : "ml-auto"}
+          onClick={props.onRefine}
+        >
           <Sparkles size={14} aria-hidden />
           <Trans>Refine in chat</Trans>
         </Button>
@@ -231,7 +262,9 @@ export function ContactsTab(
           ) : null}
         </div>
       ) : null}
-      {!rows.length && props.onRefine ? <div className="mb-2">{toolbar}</div> : null}
+      {!rows.length && (props.onRefine || props.onImport) ? (
+        <div className="mb-2">{toolbar}</div>
+      ) : null}
       {!autumn && list.crm.status !== "loading" && list.crm.status !== "failed" ? (
         <CrmGate crm={list.crm} />
       ) : null}

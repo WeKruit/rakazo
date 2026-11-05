@@ -168,6 +168,10 @@ msgstr ""
 msgid "{value} minutes"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr ""
@@ -2593,6 +2597,10 @@ msgstr ""
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "örn. Hivenet Agent, Presales, puantaj botu"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr ""
@@ -2930,6 +2938,10 @@ msgstr "<0>{0}</0> adresinde oturum açmayı tamamla. Son sayfa yüklenmeyebilir
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "MCP bağlantısı tamamlanıyor…"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
@@ -7025,6 +7037,10 @@ msgstr "Hafta içi"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "Hafızası ne olsun?"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

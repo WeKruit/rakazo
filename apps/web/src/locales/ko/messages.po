@@ -168,6 +168,10 @@ msgstr ""
 msgid "{value} minutes"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr ""
@@ -2593,6 +2597,10 @@ msgstr ""
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "예: Hivenet Agent, Presales, 근무표 봇"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr ""
@@ -2930,6 +2938,10 @@ msgstr "<0>{0}</0>에서 로그인을 마치세요. 마지막 페이지가 열�
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "MCP 연결을 마무리하는 중…"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
@@ -7025,6 +7037,10 @@ msgstr "주중"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "이 Bot의 기억은 어떻게 할까요?"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

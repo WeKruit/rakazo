@@ -2372,6 +2372,14 @@ msgstr "图片上传区域"
 msgid "Import contacts"
 msgstr "导入联系人"
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Import CSV"
+msgstr "导入 CSV"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Import the candidates in this file into this role."
+msgstr "把这个文件里的候选人导入到这个岗位。"
+
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
 msgstr ""
@@ -3634,6 +3642,11 @@ msgstr "优先"
 msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 msgstr "根据我们已保存的证据和招聘手册，为这个人准备个性化的第一封邮件和跟进邮件。未知信息保持标注，不要编造邮箱地址，草稿保存在这里，不要发送。"
 
+#. placeholder {0}: chosen.length
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Prepare a shortlist PDF I can send to the client for these {0} selected candidates: each person's name, current title and company, location, LinkedIn and two lines on why they fit. Leave out grades, contact details and costs."
+msgstr "为选中的 {0} 位候选人准备一份可以发给客户的短名单 PDF：每人的姓名、当前职位和公司、所在地、LinkedIn，以及两行说明为什么合适。不要包含评分、联系方式和费用。"
+
 #. placeholder {0}: people.length
 #. placeholder {1}: choice.name
 #. placeholder {2}: choice.roleTitle
@@ -4761,6 +4774,10 @@ msgstr "候选名单"
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Shortlist board"
 msgstr "候选名单看板"
+
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Shortlist for client"
+msgstr "给客户的短名单"
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Shortlist in role"

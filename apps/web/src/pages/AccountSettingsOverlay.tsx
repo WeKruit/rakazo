@@ -351,6 +351,24 @@ export function UsageSettingsPanel({
               { key: "total", name: t`All time`, value: usage.total },
             ]}
           />
+          {usage.remaining == null ? null : (
+            <details data-testid="credit-guide" className="text-[13px] text-muted-foreground">
+              <summary className="cursor-pointer">
+                <Trans>What credits buy</Trans>
+              </summary>
+              <ul className="mt-2 space-y-1">
+                <li>
+                  <Trans>First 10 people for a role: about 10–25 credits</Trans>
+                </li>
+                <li>
+                  <Trans>150 more people: about 600–1,000 credits</Trans>
+                </li>
+                <li>
+                  <Trans>Each email address found: about 80–160 credits</Trans>
+                </li>
+              </ul>
+            </details>
+          )}
           {usage.roles.length ? (
             <section className="space-y-2">
               <h4 className="text-[13px] font-medium text-foreground/80">

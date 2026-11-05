@@ -14,6 +14,10 @@ import {
   buildFeaturedConnectorTiles,
   CONNECTION_CATALOG_PAGE_SIZE,
   filterConnectionCatalogItems,
+  GMAIL_DRAFT_TOOLS,
+  GMAIL_MCP_ENDPOINT,
+  GMAIL_READ_TOOLS,
+  GMAIL_SEND_TOOLS,
   GOOGLE_CALENDAR_ENDPOINT,
   GOOGLE_CALENDAR_READ_TOOLS,
   GOOGLE_CALENDAR_SCHEDULING_TOOLS,
@@ -417,11 +421,13 @@ export function PluginsOverlay({
     )
       throw new Error(t`Could not connect`);
     const recipients = new Map<string, string[] | undefined>();
-    const mailReads = ["get_message", "get_thread", "search_threads"];
-    if (endpoint === "https://gmailmcp.googleapis.com/mcp/v1") {
-      recipients.set(coordinatorBotId, mailReads);
-      for (const id of [recruitingBotIds?.outreach, recruitingBotIds?.scheduling])
-        if (id) recipients.set(id, [...mailReads, "list_drafts", "get_draft", "create_draft"]);
+    if (endpoint === GMAIL_MCP_ENDPOINT) {
+      recipients.set(coordinatorBotId, GMAIL_READ_TOOLS);
+      if (recruitingBotIds?.scheduling)
+        recipients.set(recruitingBotIds.scheduling, GMAIL_DRAFT_TOOLS);
+      // Outreach sends from the recruiter's own Gmail; every send waits for its own card.
+      if (recruitingBotIds?.outreach)
+        recipients.set(recruitingBotIds.outreach, [...GMAIL_DRAFT_TOOLS, ...GMAIL_SEND_TOOLS]);
     } else if (endpoint === GOOGLE_CALENDAR_ENDPOINT) {
       recipients.set(coordinatorBotId, GOOGLE_CALENDAR_READ_TOOLS);
       if (recruitingBotIds?.scheduling)

@@ -168,6 +168,10 @@ msgstr "{undated} 条未记录日期"
 msgid "{value} minutes"
 msgstr "{value} 分钟"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr "再找 150 人：约 600–1,000 额度"
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr "什么都做一点"
@@ -2593,6 +2597,10 @@ msgstr "时长"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr "每找到一个邮箱：约 80–160 额度"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr "更早的记录"
@@ -2930,6 +2938,10 @@ msgstr "在 <0>{0}</0> 完成登录。最后一页可能无法加载；把 URL �
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "正在完成 MCP 连接…"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr "一个岗位的前 10 人：约 10–25 额度"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
@@ -7028,6 +7040,10 @@ msgstr "工作日"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "它的记忆怎么处理？"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr "额度能做什么"
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

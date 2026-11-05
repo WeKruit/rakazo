@@ -62,6 +62,8 @@ export type RecruitingWorkspaceRead = {
 export type Props = {
   /** Opens the existing role chat with draft context; never dispatches an external action. */
   onAskChat?: (text: string) => void;
+  /** Attaches the recruiter's own candidate list to the role chat, ready for them to send. */
+  onImportFile?: (files: FileList) => void;
   /** Fresh only for the Shell navigation and refresh generation that performed the read. */
   workspaceRead?: RecruitingWorkspaceRead;
   shortlistWeekFilter?: ShortlistWeekFilter;

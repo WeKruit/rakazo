@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  creditEstimateNote,
   isChineseText,
   isEnglishText,
   RECRUITER_LANGUAGE,
@@ -127,5 +128,14 @@ describe("recruiterLanguageText", () => {
   it("falls back to the latest message when none has a clear language", () => {
     expect(recruiterLanguageText(["OK"])).toBe("OK");
     expect(recruiterLanguageText([])).toBe("");
+  });
+});
+
+describe("creditEstimateNote", () => {
+  it("tells the agent the balance and what each step usually costs, without asking permission", () => {
+    const note = creditEstimateNote(9876.4);
+    expect(note).toContain("9,876 left");
+    expect(note).toContain("150 people about 600 to 1,000");
+    expect(note).toContain("Never ask permission because of cost alone");
   });
 });

@@ -2372,6 +2372,14 @@ msgstr "Bild-Upload-Bereich"
 msgid "Import contacts"
 msgstr ""
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Import CSV"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Import the candidates in this file into this role."
+msgstr ""
+
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
 msgstr ""
@@ -3634,6 +3642,11 @@ msgstr ""
 msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 msgstr ""
 
+#. placeholder {0}: chosen.length
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Prepare a shortlist PDF I can send to the client for these {0} selected candidates: each person's name, current title and company, location, LinkedIn and two lines on why they fit. Leave out grades, contact details and costs."
+msgstr ""
+
 #. placeholder {0}: people.length
 #. placeholder {1}: choice.name
 #. placeholder {2}: choice.roleTitle
@@ -4760,6 +4773,10 @@ msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Shortlist board"
+msgstr ""
+
+#: src/pages/recruiting/ShortlistDirectory.tsx
+msgid "Shortlist for client"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
