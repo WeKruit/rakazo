@@ -1,13 +1,21 @@
+import type { TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import { pendingInputAttention } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 
 const QUESTION_NUDGE_AFTER_MS = 10 * 60_000;
 
-/** Surface the original pending card once; never answer it or start another model run. */
+/**
+ * Surface the original pending card once; never answer it or start another model run. With
+ * account email configured, the recruiter also gets one email per card so work does not sit
+ * waiting while they are away.
+ */
 export async function reconcileRecruitingQuestions(deps: {
   prisma: PrismaClient;
   events?: ThreadEvents;
+  email?: TransactionalEmailProvider;
+  webOrigin?: string;
   now: Date;
   batchSize: number;
   cursor?: { at: Date; id: string };
@@ -64,7 +72,7 @@ export async function reconcileRecruitingQuestions(deps: {
       });
       if (previous) return null;
       await tx.thread.update({ where: { id: run.threadId }, data: { unread: true } });
-      return appendEventInTransaction(tx, {
+      const appended = await appendEventInTransaction(tx, {
         spaceId: run.spaceId,
         threadId: run.threadId,
         botId: run.botId,
@@ -72,9 +80,49 @@ export async function reconcileRecruitingQuestions(deps: {
         type: "thread.meta",
         payload: { questionNudgeCardId: card.id, unread: true },
       });
+      return appended;
     });
-    if (event) await deps.events?.notify(run.threadId, event.seq);
+    if (!event) continue;
+    await deps.events?.notify(run.threadId, event.seq);
+    if (deps.email) await emailWaitingQuestion(deps, run.threadId);
   }
   const last = runs.at(-1);
   return runs.length === deps.batchSize && last ? { at: last.updatedAt, id: last.id } : undefined;
+}
+
+/** One short email to the conversation owner; the card itself stays the only place to answer. */
+async function emailWaitingQuestion(
+  deps: { prisma: PrismaClient; email?: TransactionalEmailProvider; webOrigin?: string },
+  threadId: string,
+) {
+  try {
+    const thread = await deps.prisma.thread.findUnique({
+      where: { id: threadId },
+      select: {
+        userId: true,
+        group: { select: { id: true } },
+        activeRecruitingRole: { select: { title: true } },
+      },
+    });
+    if (!thread || !deps.email) return;
+    const user = await deps.prisma.user.findUnique({
+      where: { id: thread.userId },
+      select: { email: true, emailVerified: true },
+    });
+    if (!user?.emailVerified || !user.email) return;
+    const title = thread.activeRecruitingRole?.title?.trim() || "Your role";
+    const link =
+      deps.webOrigin && thread.group
+        ? new URL(`/app/g/${thread.group.id}`, deps.webOrigin).href
+        : "";
+    await deps.email.send({
+      to: user.email,
+      subject: `${title}: your answer is needed`,
+      text: ["Kruit has a question before it can continue.", link ? `Open it: ${link}` : ""]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+  } catch (error) {
+    getLogger().error("waiting question email", error);
+  }
 }

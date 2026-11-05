@@ -192,7 +192,7 @@ it("shows assigned native services without a managed catalog or internal configu
     /plugin catalog|MCP|private-service|read_saved|Tool sources/,
   );
   expect(api.capabilities).not.toHaveBeenCalled();
-  await act(async () => button(host, "Connect an app").click());
+  // No Gmail or calendar connected yet, so the apps to connect are already open.
   expect(host.querySelector('[data-testid="app-search"]')?.getAttribute("data-product-view")).toBe(
     "true",
   );
@@ -505,6 +505,9 @@ it("reuses the public app search without presenting server configuration to ordi
     await act(async () => root.render(<IntegrationSetup productView />));
     expect(host.querySelector('input[aria-label="Search apps"]')).not.toBeNull();
     expect(button(host, "Search")).toBeDefined();
+    expect(host.querySelector('[data-testid="featured-apps"]')?.textContent).toBe(
+      "GmailConnectGoogle CalendarConnectCal.comConnect",
+    );
     expect(host.querySelector('input[aria-label="Server URL"]')).toBeNull();
     expect(host.textContent).not.toMatch(/MCP|integrations\.sh|Client ID|API key/);
     expect(api.connect).not.toHaveBeenCalled();
@@ -551,7 +554,11 @@ it("does not show Added before the native connection assignment completes", asyn
         .querySelector("form")!
         .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
     );
-    await act(async () => button(host, "Connect").click());
+    const connect = [...host.querySelectorAll("button")].filter(
+      (element) => element.textContent === "Connect",
+    );
+    // Gmail, Google Calendar and Cal.com come first; the search result is last.
+    await act(async () => connect.at(-1)!.click());
     expect(assigned).toHaveBeenCalledWith("Mailbox");
     expect(host.textContent).not.toContain("Added");
     await act(async () => finish());

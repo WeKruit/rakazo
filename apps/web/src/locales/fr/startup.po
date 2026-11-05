@@ -192,6 +192,10 @@ msgstr ""
 msgid "{hours}h ago"
 msgstr "il y a {hours} h"
 
+#: src/components/CreditsNotice.tsx
+msgid "{left} credits left"
+msgstr ""
+
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "{loadedCount} loaded"
 msgstr "{loadedCount} loaded"
@@ -267,10 +271,6 @@ msgstr "@{0}"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "≥ Observed in loaded records"
-msgstr ""
-
-#: src/pages/recruiting/AccountSequences.tsx
-msgid "≥ Saved minimum · — Not reported"
 msgstr ""
 
 #: src/pages/recruiting/SequenceOverview.tsx
@@ -792,6 +792,10 @@ msgstr ""
 msgid "Browser"
 msgstr ""
 
+#: src/pages/Legal.tsx
+msgid "By creating an account you agree to the <0>Terms</0> and <1>Privacy Policy</1>."
+msgstr ""
+
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "By vendor"
 msgstr ""
@@ -1191,6 +1195,14 @@ msgstr "Le test de connexion a échoué."
 msgid "Contact layout"
 msgstr ""
 
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Contact us"
+msgstr ""
+
+#: src/components/CreditsNotice.tsx
+msgid "Contact us to add more"
+msgstr ""
+
 #: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Contacted"
@@ -1533,6 +1545,10 @@ msgstr "Impossible d'envoyer l'e-mail de réinitialisation"
 msgid "Could not send that"
 msgstr "Impossible d'envoyer cela"
 
+#: src/pages/Auth.tsx
+msgid "Could not send. Try again in a minute."
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "Impossible de démarrer l'enseignement"
@@ -1617,6 +1633,10 @@ msgstr ""
 
 #: src/pages/InternalCostsSettingsPanel.tsx
 msgid "Credits"
+msgstr ""
+
+#: src/components/CreditsNotice.tsx
+msgid "Credits used up"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1820,6 +1840,7 @@ msgstr ""
 msgid "Don’t have an account?"
 msgstr "Vous n'avez pas de compte ?"
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceEditor.tsx
 #: src/pages/recruiting/TasksTab.tsx
@@ -2323,7 +2344,6 @@ msgstr "Élevé"
 msgid "High"
 msgstr "Élevé"
 
-#: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Historical totals · — Not reported"
 msgstr "Totaux historiques · — Non renseigné"
@@ -2976,9 +2996,8 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
-#. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
-msgid "Next: {0}"
+msgid "Next: {next}"
 msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
@@ -3650,6 +3669,10 @@ msgstr ""
 msgid "Privacy"
 msgstr ""
 
+#: src/pages/Legal.tsx
+msgid "Privacy Policy"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Profile"
@@ -3673,6 +3696,10 @@ msgstr "Demande de fusion"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Qualifying work"
+msgstr ""
+
+#: src/pages/Legal.tsx
+msgid "Questions: <0>{email}</0>"
 msgstr ""
 
 #: src/lib/roster-status.ts
@@ -3988,6 +4015,10 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Research round"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Resend email"
 msgstr ""
 
 #: src/components/ComputerMaintenanceActions.tsx
@@ -4604,6 +4635,7 @@ msgid "Sending…"
 msgstr "Envoi en cours…"
 
 #: src/components/MailReplyAskContent.tsx
+#: src/pages/Auth.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -5125,6 +5157,10 @@ msgstr ""
 msgid "Terminal"
 msgstr ""
 
+#: src/pages/Legal.tsx
+msgid "Terms of Service"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Test"
 msgstr "Tester"
@@ -5503,6 +5539,10 @@ msgstr ""
 msgid "Updated"
 msgstr "Mis à jour"
 
+#: src/pages/Legal.tsx
+msgid "Updated {UPDATED}"
+msgstr ""
+
 #: src/pages/recruiting/AccountSequences.tsx
 msgid "Updating saved sequence records…"
 msgstr "Mise à jour des séquences enregistrées…"
@@ -5552,6 +5592,10 @@ msgstr ""
 
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Value"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Verify your email first. We sent you a new link."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
@@ -5622,6 +5666,10 @@ msgstr "En attente du retour de l'API…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "En attente dans la file…"
+
+#: src/pages/Auth.tsx
+msgid "We sent a link to {verifyEmail}."
+msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Website"
@@ -5743,6 +5791,10 @@ msgstr "Vous avez le contrôle"
 
 #: src/lib/user-error.ts
 msgid "Your credits are used up. Contact us to add more."
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Your credits are used up. Email {email} to add more."
 msgstr ""
 
 #: src/pages/Auth.tsx

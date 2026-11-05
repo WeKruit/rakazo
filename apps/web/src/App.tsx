@@ -46,6 +46,10 @@ const PasswordResetPage = lazy(() =>
   loadAuth().then((module) => ({ default: module.PasswordResetPage })),
 );
 
+const LegalPage = lazy(() =>
+  import("./pages/Legal").then((module) => ({ default: module.LegalPage })),
+);
+
 const AUTH_PATHS = new Set(["/sign-in", "/sign-up", "/forgot-password", "/reset-password"]);
 
 /** Every page except the SSO popup and local settings starts by reading the session. */
@@ -219,6 +223,8 @@ function SessionApp() {
             }
           />
           <Route path="/reset-password" element={<PasswordResetPage />} />
+          <Route path="/terms" element={<LegalPage kind="terms" />} />
+          <Route path="/privacy" element={<LegalPage kind="privacy" />} />
           <Route
             path="/mcp/oauth/callback"
             element={user ? <McpOAuthCallbackPage /> : <Navigate to="/sign-in" replace />}

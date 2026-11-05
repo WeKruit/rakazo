@@ -36,7 +36,12 @@ vi.mock("@rakazo/ui-web", () => ({
   ),
 }));
 vi.mock("../lib/auth-capabilities", () => ({ fetchAuthCapabilities: vi.fn() }));
-vi.mock("../lib/auth", () => ({ authClient: { signIn: { social: vi.fn(async () => ({})) } } }));
+vi.mock("../lib/auth", () => ({
+  authClient: {
+    signIn: { social: vi.fn(async () => ({})) },
+    sendVerificationEmail: vi.fn(async () => ({})),
+  },
+}));
 const capabilities: AuthCapabilities = {
   passwordAuth: false,
   sso: { name: "Example", availability: "unavailable" },
@@ -100,7 +105,7 @@ it("retries failed capabilities without exposing a password form", async () => {
   expect(fetchAuthCapabilities).toHaveBeenCalledTimes(2);
   expect(host.textContent).toContain("Continue with Example");
 });
-it.each(["in", "up"] as const)("puts quiet SSO below the primary action on %s", async (mode) => {
+it.each(["in"] as const)("puts quiet SSO below the primary action on %s", async (mode) => {
   vi.mocked(fetchAuthCapabilities).mockResolvedValue({ ...capabilities, passwordAuth: true });
   await render(mode);
   const email = host.querySelector('input[name="email"]')!;
@@ -119,6 +124,14 @@ it.each(["in", "up"] as const)("puts quiet SSO below the primary action on %s", 
   expect(submit.getAttribute("data-variant")).toBe("default");
   expect(sso.dataset.variant).toBe("link");
   expect(sso.dataset.size).toBe("sm");
+});
+
+it("keeps company SSO off sign-up and links the terms there", async () => {
+  vi.mocked(fetchAuthCapabilities).mockResolvedValue({ ...capabilities, passwordAuth: true });
+  await render("up");
+  expect(host.textContent).not.toContain("Continue with Example");
+  expect(host.querySelector('a[href="/terms"]')).not.toBeNull();
+  expect(host.querySelector('a[href="/privacy"]')).not.toBeNull();
 });
 
 it("hides SSO in password recovery", async () => {
@@ -187,4 +200,28 @@ it("keeps SSO available for retry while an authorization request is pending", as
   expect(button.disabled).toBe(false);
   await act(async () => button.click());
   expect(authClient.signIn.social).toHaveBeenCalledTimes(2);
+});
+
+it("names the address on the check-email page and resends the link", async () => {
+  vi.mocked(fetchAuthCapabilities).mockResolvedValue({ ...capabilities, passwordAuth: true });
+  await act(async () =>
+    root.render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/sign-up", search: "?verify=email", state: { email: "new@example.test" } },
+        ]}
+      >
+        <AuthPage mode="up" />
+      </MemoryRouter>,
+    ),
+  );
+  expect(host.textContent).toContain("We sent a link to new@example.test.");
+  const resend = [...host.querySelectorAll("button")].find(
+    (button) => button.textContent === "Resend email",
+  )!;
+  await act(async () => resend.click());
+  expect(authClient.sendVerificationEmail).toHaveBeenCalledWith(
+    expect.objectContaining({ email: "new@example.test" }),
+  );
+  expect(host.textContent).toContain("Sent");
 });

@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { IntegrationCatalogResult, IntegrationSetupState } from "@rakazo/contracts";
+import { GOOGLE_CALENDAR_ENDPOINT } from "@rakazo/core";
 import { Button, Input } from "@rakazo/ui-web";
 import { Check } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
@@ -9,6 +10,21 @@ import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 
 type Choice = "direct" | "composio" | "pipedream" | "executor";
+
+/** The recruiter's own accounts the product works with; shown before any search. */
+const FEATURED_APPS = [
+  {
+    name: "Gmail",
+    endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+    logo: "/connectors/gmail.png",
+  },
+  {
+    name: "Google Calendar",
+    endpoint: GOOGLE_CALENDAR_ENDPOINT,
+    logo: "/connectors/google-calendar.png",
+  },
+  { name: "Cal.com", endpoint: "https://mcp.cal.com/mcp", logo: "/connectors/cal-com.png" },
+];
 
 export function IntegrationSetup({
   onDone,
@@ -261,6 +277,25 @@ export function IntegrationSetup({
       ) : null}
       {choice === "direct" ? (
         <>
+          {productView ? (
+            <div className="space-y-2" data-testid="featured-apps">
+              {FEATURED_APPS.map((app) => (
+                <div key={app.endpoint} className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <img src={app.logo} alt="" className="size-6 shrink-0 object-contain" />
+                    <span className="truncate">{app.name}</span>
+                  </span>
+                  <Button
+                    variant="outline"
+                    disabled={busy || connected.includes(app.endpoint)}
+                    onClick={() => void connect(app.name, app.endpoint)}
+                  >
+                    {connected.includes(app.endpoint) ? t`Added` : t`Connect`}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <form
             className="flex gap-2"
             onSubmit={(event) => {
@@ -398,11 +433,13 @@ export function IntegrationSetup({
               else onDone();
             }}
           >
-            {busy ? t`Connecting…` : t`Continue`}
+            {busy ? t`Connecting…` : productView ? t`Done` : t`Continue`}
           </Button>
-          <Button variant="ghost" disabled={busy} onClick={onDone}>
-            <Trans>Skip</Trans>
-          </Button>
+          {productView ? null : (
+            <Button variant="ghost" disabled={busy} onClick={onDone}>
+              <Trans>Skip</Trans>
+            </Button>
+          )}
         </div>
       ) : null}
     </div>

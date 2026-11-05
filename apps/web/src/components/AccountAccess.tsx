@@ -9,8 +9,11 @@ import { authErrorText } from "../lib/user-error";
 
 export function AccountAccess({
   onSecurity,
+  ssoLink = true,
 }: {
   onSecurity?: (security: AccountSecurity) => void;
+  /** Company SSO is for the team running the deployment, not outside customers. */
+  ssoLink?: boolean;
 }) {
   const { t } = useLingui();
   const [security, setSecurity] = useState<AccountSecurity | null>(null);
@@ -53,7 +56,7 @@ export function AccountAccess({
   }
   return (
     <div className="mt-3 space-y-3">
-      {security?.sso && !security.ssoLinked ? (
+      {ssoLink && security?.sso && !security.ssoLinked ? (
         <Button
           variant="outline"
           disabled={pending}
