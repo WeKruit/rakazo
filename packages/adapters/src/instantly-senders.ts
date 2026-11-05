@@ -69,6 +69,12 @@ function noSelfSetup(supportEmail: string | null | undefined, ownEmail: boolean)
   return `No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and ${contact}. Never ask for a company name or propose an address; drafts and contact lookups still work.`;
 }
 
+/** A recruiter asking to send from their own email account. */
+export const OWN_EMAIL_REQUEST =
+  /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
+export const OUTREACH_MAILBOX_ONLY_NOTE =
+  "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
+
 /**
  * Accounts we set up send through their product mailbox, never the recruiter's own email: those
  * with a sending mailbox, and accounts without a credit limit (ours, added by hand). Only
