@@ -278,6 +278,11 @@ msgstr ""
 msgid "Add {name} to shortlist"
 msgstr "将{name}加入候选名单"
 
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
+msgstr "添加客户，并把 {0} 归到这个客户下。"
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
 msgstr "请在设置中添加模型后再使用。"
@@ -1204,6 +1209,7 @@ msgstr "正在清空…"
 msgid "Clicked"
 msgstr "已点击"
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr "客户"
@@ -1670,6 +1676,10 @@ msgstr "无法访问"
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not add"
 msgstr "无法添加"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr "无法添加客户"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
@@ -3934,6 +3944,11 @@ msgstr "需要接管"
 msgid "New bot"
 msgstr "新建 Bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr "新客户"
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "新建群组"
@@ -4049,6 +4064,10 @@ msgstr "还没有候选人"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "还没有关联聊天应用。"
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
+msgstr "无客户"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No contact campaign associations were returned."
@@ -5190,6 +5209,11 @@ msgstr "已移除，但列表刷新失败"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "正在移除…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr "重命名客户"
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx

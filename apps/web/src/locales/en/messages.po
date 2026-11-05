@@ -278,6 +278,11 @@ msgstr "Add {0}"
 msgid "Add {name} to shortlist"
 msgstr "Add {name} to shortlist"
 
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
+msgstr "Add a client and put {0} under it."
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
 msgstr "Add a model in Settings to use this."
@@ -1204,6 +1209,7 @@ msgstr "Clearing…"
 msgid "Clicked"
 msgstr "Clicked"
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr "Client"
@@ -1670,6 +1676,10 @@ msgstr "Could not access"
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not add"
 msgstr "Could not add"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr "Could not add client"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
@@ -3934,6 +3944,11 @@ msgstr "Needs takeover"
 msgid "New bot"
 msgstr "New bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr "New client"
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "New group"
@@ -4049,6 +4064,10 @@ msgstr "No candidates yet"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
+msgstr "No client"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No contact campaign associations were returned."
@@ -5190,6 +5209,11 @@ msgstr "Removed, but list refresh failed"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "Removing…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr "Rename client"
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx

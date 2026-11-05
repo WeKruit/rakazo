@@ -36,6 +36,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
   const supportEmail = useSupportEmail();
   const {
     groupId,
+    botSections,
     navigate,
     groups,
     archivedGroups,
@@ -156,6 +157,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             </div>
           ) : null}
           <RecruitingNavigation
+            clients={botSections}
             onViewAllRoles={() => {
               setPanel(null);
               setMobileSidebarOpen(false);

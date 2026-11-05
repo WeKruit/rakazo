@@ -278,6 +278,11 @@ msgstr ""
 msgid "Add {name} to shortlist"
 msgstr ""
 
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
 msgstr "Ajoutez un modèle dans les Paramètres pour utiliser cette fonctionnalité."
@@ -1204,6 +1209,7 @@ msgstr "Effacement en cours…"
 msgid "Clicked"
 msgstr ""
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr ""
@@ -1670,6 +1676,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not add"
 msgstr "Impossible d'ajouter"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
@@ -3933,6 +3943,11 @@ msgstr "Nécessite une intervention"
 msgid "New bot"
 msgstr "Nouveau bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "Nouveau groupe"
@@ -4048,6 +4063,10 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "Aucune application de discussion connectée pour le moment."
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
+msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No contact campaign associations were returned."
@@ -5189,6 +5208,11 @@ msgstr "Retiré, mais l'actualisation de la liste a échoué"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "Retrait en cours…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx

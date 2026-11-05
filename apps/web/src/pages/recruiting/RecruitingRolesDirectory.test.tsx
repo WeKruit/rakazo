@@ -116,3 +116,22 @@ it("does not issue an unscoped read, hides a failed catalog, and retries the own
   await settle();
   expect(container.textContent).toContain("Role 000");
 });
+
+it("shows each role's client, keeps a client's roles together, and finds roles by client", async () => {
+  accountView.mockResolvedValue({ ...output, roles: [role(1), role(2), role(3)] });
+  const clients: Record<string, string> = { "group-1": "Acme", "group-3": "Acme" };
+  await act(async () =>
+    root.render(
+      <RecruitingRolesDirectory
+        spaceId="space"
+        onNavigate={vi.fn()}
+        clientOf={(groupId) => clients[groupId]}
+      />,
+    ),
+  );
+  await settle();
+  const titles = () => [...container.querySelectorAll("li a")].map((item) => item.textContent);
+  expect(titles()).toEqual(["Role 001Acme", "Role 003Acme", "Role 002"]);
+  await type("acme");
+  expect(titles()).toEqual(["Role 001Acme", "Role 003Acme"]);
+});

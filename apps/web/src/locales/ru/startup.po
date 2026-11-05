@@ -4506,6 +4506,10 @@ msgstr ""
 msgid "Search roles"
 msgstr ""
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Search roles or clients"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Search roles, contacts, sequences and saved mail."
 msgstr ""

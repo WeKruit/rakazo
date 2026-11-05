@@ -4506,6 +4506,10 @@ msgstr "搜索调整"
 msgid "Search roles"
 msgstr "搜索岗位"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Search roles or clients"
+msgstr "搜索职位或客户"
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Search roles, contacts, sequences and saved mail."
 msgstr "搜索职位、联系人、邮件序列和已存邮件。"

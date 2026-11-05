@@ -271,3 +271,72 @@ it("counts every archived role and pages through them twenty at a time", () => {
     act(() => root.unmount());
   }
 });
+
+it("shows the client a role is filed under and finds roles by client", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const group = (id: string, name: string, sectionId: string | null): Group => ({
+    id,
+    name,
+    createdAt: "2026-01-01T10:00:00Z",
+    updatedAt: "2026-01-01T10:00:00Z",
+    spaceId: "space-test",
+    threadId: `thread-${id}`,
+    members: [],
+    pinned: false,
+    sectionId,
+    archivedAt: null,
+    preview: "",
+    unread: false,
+  });
+  const render = (query: string) =>
+    act(() =>
+      root.render(
+        <RecruitingNavigation
+          viewHref={(view) => `/app?view=${view}`}
+          kruitHref="/app?view=conversation"
+          groups={[group("one", "Engineer", "client-acme"), group("two", "Designer", null)]}
+          clients={[
+            {
+              id: "client-acme",
+              name: "Acme",
+              position: 0,
+              createdAt: "2026-01-01T10:00:00Z",
+              updatedAt: "2026-01-01T10:00:00Z",
+            },
+          ]}
+          archivedGroups={[]}
+          archivedGroupTotal={0}
+          archivedGroupPage={0}
+          onArchivedGroupPage={vi.fn()}
+          archivedOpen={false}
+          query={query}
+          canOpenDashboard
+          canCreateRole
+          onQueryChange={vi.fn()}
+          view="results"
+          onView={vi.fn()}
+          onCollapse={vi.fn()}
+          onOpenRole={vi.fn()}
+          onNewRole={vi.fn()}
+          canCreateRoleFrom={() => true}
+          onNewRoleFrom={vi.fn()}
+          onRoleMenu={vi.fn()}
+          onToggleArchived={vi.fn()}
+          onRestoreRole={vi.fn()}
+        />,
+      ),
+    );
+  try {
+    render("");
+    const roles = () =>
+      [...container.querySelectorAll('nav[aria-label="Role conversations"] button')]
+        .map((button) => button.textContent)
+        .filter((text) => text && text !== "All roles");
+    expect(roles()).toEqual(["EngineerAcme", "Designer"]);
+    render("acme");
+    expect(roles()).toEqual(["EngineerAcme"]);
+  } finally {
+    act(() => root.unmount());
+  }
+});
