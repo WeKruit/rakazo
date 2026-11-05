@@ -740,7 +740,7 @@ body,
 [data-product-view="recruiting"] .hire-eyebrow {
   display: block;
   margin-bottom: 13px;
-  color: var(--link);
+  color: var(--muted-foreground);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.16em;
@@ -939,7 +939,7 @@ body,
   font-size: 11px;
 }
 [data-product-view="recruiting"] .hire-inbox-filter strong {
-  color: var(--link);
+  color: var(--foreground);
 }
 [data-product-view="recruiting"] .hire-inbox-filter > span {
   color: var(--muted-foreground);
@@ -958,7 +958,7 @@ body,
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  color: var(--link);
+  color: var(--muted-foreground);
   text-align: center;
 }
 [data-product-view="recruiting"] .hire-empty h2 {
@@ -993,7 +993,7 @@ body,
     box-shadow 150ms;
 }
 [data-product-view="recruiting"] .hire-candidate-card:hover {
-  border-color: color-mix(in srgb, var(--link) 25%, var(--border));
+  border-color: color-mix(in srgb, var(--foreground) 25%, var(--border));
   box-shadow: 0 6px 22px color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 [data-product-view="recruiting"] .hire-card-top {
@@ -1003,7 +1003,7 @@ body,
   min-width: 0;
 }
 [data-product-view="recruiting"] .hire-card-top > input {
-  accent-color: var(--link);
+  accent-color: var(--primary);
 }
 [data-product-view="recruiting"] .hire-candidate-identity {
   display: flex;
@@ -1094,7 +1094,7 @@ body,
   border-radius: 8px;
   background: color-mix(in srgb, var(--secondary) 40%, var(--background));
   padding: 8px 10px;
-  color: var(--link);
+  color: var(--foreground);
 }
 [data-product-view="recruiting"] .hire-peer-evidence {
   align-items: center;
@@ -1141,7 +1141,7 @@ body,
   font-size: 10px;
 }
 [data-product-view="recruiting"] .hire-card-actions button:hover {
-  color: var(--link);
+  color: var(--foreground);
 }
 [data-product-view="recruiting"] .hire-card-actions button:last-child {
   margin-left: auto;
