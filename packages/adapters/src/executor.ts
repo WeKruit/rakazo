@@ -491,6 +491,9 @@ import {
 import {
   asksSenderCompanyName,
   isSenderRead,
+  OUTREACH_MAILBOX_ONLY_NOTE,
+  OWN_EMAIL_REQUEST,
+  ownMailboxSendingAllowed,
   SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
@@ -13874,6 +13877,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
         const creditsNote = creditsLeft === null ? undefined : creditEstimateNote(creditsLeft);
+        // Accounts we set up send only through their outreach mailbox; say so when asked.
+        const mailboxNote =
+          hideVendors &&
+          OWN_EMAIL_REQUEST.test(lastRecruiterText) &&
+          !(await ownMailboxSendingAllowed(deps.prisma, run).catch(() => true))
+            ? OUTREACH_MAILBOX_ONLY_NOTE
+            : undefined;
         const languageNote = !hideVendors
           ? undefined
           : isChineseText(lastRecruiterText)
@@ -13910,6 +13920,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           dispatchNote,
           languageNote,
           creditsNote,
+          mailboxNote,
           !linkRole &&
           !fileNote &&
           !thread.groupId?.startsWith("recruiting-global-") &&

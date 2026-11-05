@@ -60,11 +60,36 @@ export function asksSenderCompanyName(question: string): boolean {
 export const SENDER_READ_FIRST =
   "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
 
-function noSelfSetup(supportEmail: string | null | undefined) {
+function noSelfSetup(supportEmail: string | null | undefined, ownEmail: boolean) {
+  if (ownEmail)
+    return "No product sending mailbox: this account sends from the recruiter's own connected email, one send_message per person, each on its own card. When send_message is not among your tools, tell the recruiter in one line, in their language, that connecting their email in Integrations lets them send from it. Never ask for a company name or propose an address; drafts and contact lookups still work.";
   const contact = supportEmail
     ? `that emailing ${supportEmail} turns it on`
     : "that we can turn it on if they contact us";
   return `No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and ${contact}. Never ask for a company name or propose an address; drafts and contact lookups still work.`;
+}
+
+/** A recruiter asking to send from their own email account. */
+export const OWN_EMAIL_REQUEST =
+  /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
+export const OUTREACH_MAILBOX_ONLY_NOTE =
+  "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
+
+/**
+ * Accounts we set up send through their product mailbox, never the recruiter's own email: those
+ * with a sending mailbox, and accounts without a credit limit (ours, added by hand). Only
+ * self-signup accounts, which start with credits and no mailbox, send from their own email.
+ */
+export async function ownMailboxSendingAllowed(
+  prisma: Pick<PrismaClient, "externalEffect" | "user">,
+  context: Pick<AdapterContext, "userId" | "spaceId">,
+): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: context.userId },
+    select: { usageCreditLimit: true },
+  });
+  if (user?.usageCreditLimit == null) return false;
+  return (await confirmedSendingMailboxes(prisma, context)).length === 0;
 }
 const key = (email: string) => `instantly-sender-mailbox:${email.trim().toLowerCase()}`;
 const own = (context: AdapterContext) => ({ userId: context.userId, spaceId: context.spaceId });
@@ -494,8 +519,18 @@ export async function ensureSendingIdentity(
       mailboxLimit: limit,
       selfSetup,
       // The read itself says what to do, so an agent that never loaded sender setup still answers right.
+      ...(current.length
+        ? {
+            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.",
+          }
+        : {}),
       ...(!selfSetup && !current.length && !pending.length
-        ? { next: noSelfSetup(settings?.supportEmail) }
+        ? {
+            next: noSelfSetup(
+              settings?.supportEmail,
+              await ownMailboxSendingAllowed(prisma, context),
+            ),
+          }
         : {}),
     };
   }
@@ -536,7 +571,9 @@ export async function ensureSendingIdentity(
     };
   }
   if (!selfSetup && !(input.operation === "confirm" && input.mode === "attach"))
-    throw new Error(noSelfSetup(settings?.supportEmail));
+    throw new Error(
+      noSelfSetup(settings?.supportEmail, await ownMailboxSendingAllowed(prisma, context)),
+    );
   const accounts =
     input.operation === "confirm" && input.mode === "attach" ? [] : await orderedAccounts(rest);
   if (input.operation === "propose") {
