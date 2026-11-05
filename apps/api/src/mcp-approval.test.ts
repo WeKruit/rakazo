@@ -218,6 +218,10 @@ describe("resolveMcpApprovalCards", () => {
         spaceId: "space",
         userId: "user",
         OR: [{ botId: "bot" }, { groupId: { not: null }, messages: { some: { botId: "bot" } } }],
+        // Only chats holding this server's card, so a coordinator in hundreds of chats stays fast.
+        messages: {
+          some: { blocks: { array_contains: [{ kind: "mcp_approval", serverId: "srv-a" }] } },
+        },
       },
       select: { id: true, botId: true },
     });

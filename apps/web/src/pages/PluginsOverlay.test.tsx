@@ -666,6 +666,24 @@ it("gives Scheduling its calendar access on reconnect and keeps only one calenda
   expect(api.disconnect.mock.calls).toEqual([[{ serverId: "Booking" }]]);
 });
 
+it("shows a Gmail sign-in that went through even when giving the assistants access fails", async () => {
+  const endpoint = "https://gmailmcp.googleapis.com/mcp/v1";
+  api.servers.mockResolvedValue([server("Mailbox", { endpoint })]);
+  api.assignments.mockResolvedValue([{ ...assignment("Mailbox"), allowAllTools: true }]);
+  api.connect.mockImplementation(async () => {
+    api.servers.mockResolvedValue([
+      server("Mailbox", { endpoint, oauthStatus: "connected", hasSecret: true }),
+    ]);
+    return "connected";
+  });
+  api.approve.mockRejectedValue(new Error("Internal server error"));
+  const host = await open("main", false, { coordinatorBotId: "main" });
+  expect(host.textContent).toContain("Needs connection");
+  await act(async () => button(host, "Connect").click());
+  expect(host.textContent).not.toContain("Needs connection");
+  expect(host.textContent).toContain("Disconnect");
+});
+
 it("reuses an explicit generic app Connect on the actual coordinator only", async () => {
   api.servers.mockResolvedValue([server("App", { endpoint: "https://generic.example.test/mcp" })]);
   api.approve.mockImplementation(async (input) => ({

@@ -435,11 +435,94 @@ function localContactTools(
   return [tool];
 }
 
+const GMAIL_SEND = "send_message";
+const GmailSendInput = z.strictObject({
+  to: z
+    .array(z.email().max(254))
+    .length(1)
+    .describe("The one person this email is for. Never several people."),
+  subject: z.string().trim().min(1).max(500),
+  body: z.string().trim().min(1).max(50_000).describe("Plain-text body."),
+  replyThreadId: z
+    .string()
+    .regex(/^[0-9a-f]{6,64}$/i)
+    .optional()
+    .describe("To follow up, the Gmail thread id of the earlier email to this person."),
+});
+
+/**
+ * Google's Gmail MCP server reads and drafts but cannot send, so a grant that allows
+ * send_message gets it over Gmail's REST API with the same authorized connection.
+ */
+function localGmailTools(
+  assignment: Parameters<typeof localInstantlyTools>[0],
+  listed: readonly { name: string }[],
+): ConnectorTool[] {
+  if (
+    assignment.server.transport !== "streamable_http" ||
+    assignment.server.endpoint !== GMAIL_MCP ||
+    !(
+      assignment.allowAllTools ||
+      (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(GMAIL_SEND))
+    ) ||
+    listed.some((tool) => tool.name === GMAIL_SEND)
+  )
+    return [];
+  return [
+    {
+      name: `mcp__${assignment.server.slug}__${GMAIL_SEND}`,
+      description:
+        "Send one plain-text email from the recruiter's own connected Gmail to one person. The recruiter confirms each email on its own card before it goes out. To follow up, pass replyThreadId (the thread id of the earlier email) so it goes as a reply in that thread.",
+      inputSchema: z.toJSONSchema(GmailSendInput, { io: "input" }),
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: assignment.serverId,
+        resourceRevision: assignment.server.revision,
+        toolName: GMAIL_SEND,
+        catalogGroup: assignment.server.slug,
+      },
+    },
+  ];
+}
+
+/** RFC 2047 header text, so a non-ASCII subject arrives intact. */
+function mimeHeader(value: string): string {
+  const clean = value.replace(/[\r\n]+/g, " ");
+  return /^[\x20-\x7e]*$/.test(clean)
+    ? clean
+    : `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+}
+
+export function gmailRawMessage(input: {
+  to: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+}): string {
+  const headers = [
+    `To: ${input.to}`,
+    `Subject: ${mimeHeader(input.subject)}`,
+    ...(input.inReplyTo
+      ? [`In-Reply-To: ${input.inReplyTo}`, `References: ${input.inReplyTo}`]
+      : []),
+    "MIME-Version: 1.0",
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+  ];
+  const body = Buffer.from(input.body, "utf8").toString("base64").replace(/.{76}/g, "$&\r\n");
+  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`, "utf8").toString("base64url");
+}
+
 function localTools(
   assignment: Parameters<typeof localInstantlyTools>[0],
   listed: readonly { name: string }[],
 ): ConnectorTool[] {
-  return [...localInstantlyTools(assignment, listed), ...localContactTools(assignment, listed)];
+  return [
+    ...localInstantlyTools(assignment, listed),
+    ...localContactTools(assignment, listed),
+    ...localGmailTools(assignment, listed),
+  ];
 }
 
 /** Runtime MCP connector. Authorization is re-checked against the bot assignment on every call. */
@@ -1097,6 +1180,21 @@ export class McpConnector implements ConnectorProvider {
         yield* this.findContactEmails(call, context);
         return;
       }
+      if (
+        call.route.toolName === GMAIL_SEND &&
+        (await this.prisma.mcpServer.count({
+          where: {
+            id: call.route.resourceId,
+            userId: context.userId,
+            spaceId: context.spaceId,
+            endpoint: GMAIL_MCP,
+            transport: "streamable_http",
+          },
+        }))
+      ) {
+        yield* this.sendGmail(call, context);
+        return;
+      }
       const localInstantlyServer =
         nativeInstantlyReads.some((tool) => tool.toolName === call.route!.toolName) ||
         isNativeInstantlyWrite(call.route.toolName)
@@ -1717,6 +1815,90 @@ export class McpConnector implements ConnectorProvider {
         // A network failure mid-request may still have reached the provider.
         ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
       };
+    } finally {
+      await safeFetch.close().catch(() => undefined);
+    }
+  }
+
+  private async *sendGmail(
+    call: ConnectorCall,
+    context: AdapterContext,
+  ): AsyncIterable<ConnectorEvent> {
+    const redactions: string[] = [];
+    const safeFetch = createSafeRemoteFetch(
+      this.options.network?.fetch,
+      this.options.network?.resolveHostname,
+    );
+    try {
+      const input = GmailSendInput.parse(call.args);
+      const { server } = await requireMcpToolAssignment(
+        this.prisma,
+        context,
+        call.route!,
+        GMAIL_SEND,
+      );
+      if (server.endpoint !== GMAIL_MCP || server.transport !== "streamable_http")
+        throw new IsolationError();
+      const provider = await this.oauth?.providerFor(server, context);
+      const token = (await provider?.tokens())?.access_token;
+      if (!token)
+        throw new Error(
+          `${server.name} is not connected; call request_connection with serverId "${server.id}".`,
+        );
+      redactions.push(token);
+      const gmail = async (path: string, init?: RequestInit) => {
+        const response = await safeFetch(
+          new URL(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`),
+          {
+            ...init,
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            signal: AbortSignal.any([context.signal, AbortSignal.timeout(REMOTE_READ_MS)]),
+          },
+        );
+        const { text } = await readBoundedText(response, 1_000_000);
+        if (!response.ok)
+          throw new Error(`Gmail answered ${response.status}: ${text.slice(0, 300)}`);
+        return JSON.parse(text) as Record<string, unknown>;
+      };
+      let inReplyTo: string | undefined;
+      if (input.replyThreadId) {
+        const thread = await gmail(
+          `threads/${input.replyThreadId}?format=metadata&metadataHeaders=Message-ID`,
+        );
+        const messages = Array.isArray(thread.messages) ? thread.messages : [];
+        const headers = (messages.at(-1) as { payload?: { headers?: unknown } } | undefined)
+          ?.payload?.headers;
+        inReplyTo = (Array.isArray(headers) ? headers : []).find(
+          (header: { name?: unknown }) =>
+            typeof header.name === "string" && header.name.toLowerCase() === "message-id",
+        )?.value;
+      }
+      const sent = await gmail("messages/send", {
+        method: "POST",
+        body: JSON.stringify({
+          raw: gmailRawMessage({ ...input, to: input.to[0]!, inReplyTo }),
+          ...(input.replyThreadId ? { threadId: input.replyThreadId } : {}),
+        }),
+      });
+      yield {
+        type: "result",
+        data: {
+          structuredContent: {
+            sent: true,
+            to: input.to[0],
+            messageId: sent.id,
+            threadId: sent.threadId,
+          },
+        },
+      };
+    } catch (error) {
+      const detail =
+        error instanceof z.ZodError
+          ? ` Invalid arguments: ${z.prettifyError(error)}`
+          : error instanceof Error && !(error instanceof IsolationError)
+            ? ` ${sanitizeConnectorError(error, redactions)}`
+            : " Check the current assigned connection.";
+      yield { type: "error", message: `Email not sent.${detail}` };
     } finally {
       await safeFetch.close().catch(() => undefined);
     }
