@@ -520,10 +520,6 @@ export function ShellPage() {
         <HomeDashboard
           userName={session.data?.user.name}
           onOpenWork={model.openRecruitingView}
-          onGlobalChat={() => {
-            const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
-            if (main) navigate(`/app/g/${main.id}?view=conversation`);
-          }}
           groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
           readCache={recruitingReadCache.current}
           readCacheScope={
