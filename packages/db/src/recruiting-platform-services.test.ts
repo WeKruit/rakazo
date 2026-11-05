@@ -27,6 +27,15 @@ function fixture(
     /** Connected Google Calendars and the Scheduling bots of the crew. */
     calendars?: { id: string }[];
     scheduling?: { id: string }[];
+    /** Connected Gmail, the Outreach bots of the crew and their existing Gmail grants. */
+    gmail?: { id: string }[];
+    outreach?: { id: string }[];
+    gmailGrants?: {
+      botId: string;
+      serverId: string;
+      allowAllTools: boolean;
+      allowedTools: string[];
+    }[];
   } = {},
 ) {
   const servers = { ...options.servers };
@@ -42,7 +51,9 @@ function fixture(
         current = where.slug;
         return servers[current] ?? null;
       }),
-      findMany: vi.fn(async () => options.calendars ?? []),
+      findMany: vi.fn(async ({ where }: { where: { endpoint?: string } }) =>
+        where.endpoint?.includes("gmailmcp") ? (options.gmail ?? []) : (options.calendars ?? []),
+      ),
       create: vi.fn(async ({ data }: { data: { slug: string; endpoint: string } }) => {
         servers[data.slug] = {
           id: data.slug,
@@ -59,11 +70,13 @@ function fixture(
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
         JSON.stringify(where).includes(":scheduling")
           ? (options.scheduling ?? [])
-          : (missing[current] ?? []).map((id) => ({
-              id,
-              name: id.startsWith("outreach") ? "Outreach" : id,
-              spawnKey: null,
-            })),
+          : options.outreach && JSON.stringify(where).includes(":outreach")
+            ? options.outreach
+            : (missing[current] ?? []).map((id) => ({
+                id,
+                name: id.startsWith("outreach") ? "Outreach" : id,
+                spawnKey: null,
+              })),
       ),
     },
     chatGroup: {
@@ -81,7 +94,9 @@ function fixture(
       findMany: vi.fn(async ({ where }: { where: unknown }) =>
         JSON.stringify(where).includes(":reviewer")
           ? (options.reviewerGrants ?? [])
-          : (options.grants ?? []),
+          : options.gmailGrants && JSON.stringify(where).includes("serverId")
+            ? options.gmailGrants
+            : (options.grants ?? []),
       ),
       updateMany: vi.fn(async () => ({ count: 1 })),
       createMany: vi.fn(async () => {
@@ -305,6 +320,29 @@ describe("ensurePlatformServices", () => {
         data: [expect.objectContaining({ botId: "scheduling-bot", serverId: "calendar" })],
       }),
     );
+  });
+
+  it("lets Outreach send from a connected Gmail, adding only the send tools to its grant", async () => {
+    const drafts = [
+      "get_message",
+      "get_thread",
+      "search_threads",
+      "list_drafts",
+      "get_draft",
+      "create_draft",
+    ];
+    const f = fixture({
+      gmail: [{ id: "gmail" }],
+      outreach: [{ id: "outreach-bot" }],
+      gmailGrants: [
+        { botId: "outreach-bot", serverId: "gmail", allowAllTools: false, allowedTools: drafts },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ botId: "outreach-bot", serverId: "gmail" }),
+      data: { allowedTools: [...drafts, "send_message", "reply", "forward"] },
+    });
   });
 
   it("connects every crew to the product's outreach mail, with no key from the user", async () => {

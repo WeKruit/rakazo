@@ -337,12 +337,11 @@ it("shows only exact role campaign associations and withholds unscoped messages"
   expect(view.textContent).not.toContain("Other client association");
   expect(view.textContent).not.toContain("Campaign not synced");
   expect(view.textContent).not.toContain("Hi Ada");
-  expect(view.textContent).toContain("Recruiter messages are unavailable for this role.");
+  expect(view.textContent).toContain("No emails sent yet.");
   const sendActivity = view.querySelector('[aria-label="Recorded send activity"]')!;
   expect(sendActivity.querySelector("ol")).toBeNull();
   expect(sendActivity.querySelector('select[aria-label="Schedule period"]')).toBeNull();
   expect(sendActivity.querySelector('[role="img"]')).toBeNull();
-  expect(sendActivity.textContent).not.toContain("No dated sends");
   expect([...view.querySelectorAll("button")].some((b) => /send/i.test(b.textContent ?? ""))).toBe(
     false,
   );

@@ -158,6 +158,7 @@ export function ShellPage() {
     userId,
     groups,
     bots,
+    botSections,
     setNewRoleSourceId,
     newRoleDescription,
     setNewRoleDescription,
@@ -546,6 +547,10 @@ export function ShellPage() {
           key={JSON.stringify([userId, bootstrapMe?.spaceId])}
           spaceId={bootstrapMe?.spaceId}
           refreshSignal={recruitingRefresh}
+          clientOf={(groupId) => {
+            const sectionId = groups.find((group) => group.id === groupId)?.sectionId;
+            return botSections.find((section) => section.id === sectionId)?.name;
+          }}
           onNavigate={navigate}
           onOpenNavigation={() => {
             setBotsSidebarCollapsedPref(false);

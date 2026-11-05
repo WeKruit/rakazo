@@ -63,10 +63,10 @@ it("does not repeat the stage as its next step", async () => {
     attention: null,
     playbookStage: {
       stage: "feedback",
-      label: "Calibration feedback",
-      nextStep: "Collect calibration feedback",
+      label: "Your feedback",
+      nextStep: "Give your feedback",
     },
     items: [],
   });
-  expect(container!.textContent).toBe("Calibration feedback");
+  expect(container!.textContent).toBe("Your feedback");
 });

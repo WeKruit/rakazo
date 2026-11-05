@@ -876,20 +876,12 @@ export function SequenceTab(
           </div>
           {!sequenceRows.length && !campaigns.loading ? (
             <p className="p-8 text-center text-sm text-muted-foreground">
-              {search
-                ? t`No loaded sequences match your search.`
-                : t`No saved sequences for this role yet.`}
+              {search ? t`No loaded sequences match your search.` : t`No email sequences yet.`}
             </p>
           ) : null}
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t p-3 text-xs text-muted-foreground">
             <span>
-              <Trans>Historical totals · — Not reported</Trans>
-              {campaigns.hasMore ? (
-                <>
-                  {" "}
-                  · <Trans>Search and sorting cover loaded sequences</Trans>
-                </>
-              ) : null}
+              {campaigns.hasMore ? <Trans>Search and sorting cover loaded sequences</Trans> : null}
             </span>
             <LoadMore pages={campaigns} />
           </footer>
@@ -1305,7 +1297,7 @@ export function SequenceTab(
                   ) : null}
                   {details.data ? (
                     <TabNotice>
-                      <Trans>Recruiter messages are unavailable for this role.</Trans>
+                      <Trans>No emails sent yet.</Trans>
                     </TabNotice>
                   ) : null}
                 </section>

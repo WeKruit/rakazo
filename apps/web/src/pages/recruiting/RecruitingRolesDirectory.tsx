@@ -22,11 +22,14 @@ export function RecruitingRolesDirectory({
   onNavigate,
   onOpenNavigation,
   refreshSignal = 0,
+  clientOf = () => undefined,
 }: {
   spaceId?: string;
   onNavigate: (href: string) => void;
   onOpenNavigation?: () => void;
   refreshSignal?: number;
+  /** The client a recruiter filed this role's conversation under, if any. */
+  clientOf?: (groupId: string) => string | undefined;
 }) {
   const { t } = useLingui();
   const [query, setQuery] = useState("");
@@ -37,9 +40,18 @@ export function RecruitingRolesDirectory({
     () => rpc.recruiting.accountView({ view: "roles", limit: 1 }),
   );
   const needle = query.trim().toLocaleLowerCase();
-  const roles = (read.data?.roles ?? []).filter((role) =>
-    role.title.toLocaleLowerCase().includes(needle),
-  );
+  const client = (role: Role) => (role.groupId ? clientOf(role.groupId) : undefined);
+  const roles = (read.data?.roles ?? [])
+    .filter((role) => `${role.title} ${client(role) ?? ""}`.toLocaleLowerCase().includes(needle))
+    // Roles for the same client sit together; roles without one keep the catalog order.
+    .map((role, order) => ({ role, order }))
+    .sort(
+      (a, b) =>
+        Number(!client(a.role)) - Number(!client(b.role)) ||
+        (client(a.role) ?? "").localeCompare(client(b.role) ?? "") ||
+        a.order - b.order,
+    )
+    .map(({ role }) => role);
   const pages = Math.max(1, Math.ceil(roles.length / PAGE_SIZE));
   const page = pagination.query === needle ? Math.min(pagination.page, pages - 1) : 0;
   const offset = page * PAGE_SIZE;
@@ -74,7 +86,7 @@ export function RecruitingRolesDirectory({
         <Input
           type="search"
           aria-label={t`Search roles`}
-          placeholder={t`Search roles`}
+          placeholder={t`Search roles or clients`}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -127,6 +139,11 @@ export function RecruitingRolesDirectory({
                       >
                         <span className="min-w-0 break-words" dir="auto">
                           {role.title}
+                          {client(role) ? (
+                            <span className="block text-xs text-muted-foreground">
+                              {client(role)}
+                            </span>
+                          ) : null}
                         </span>
                         <ArrowUpRight
                           size={16}

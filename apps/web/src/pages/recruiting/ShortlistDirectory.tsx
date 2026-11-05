@@ -196,6 +196,18 @@ export function ShortlistDirectory({
           >
             <Trans>Find similar</Trans>
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!onAskChat}
+            onClick={() =>
+              ask(
+                t`Prepare a shortlist PDF I can send to the client for these ${chosen.length} selected candidates: each person's name, current title and company, location, LinkedIn and two lines on why they fit. Leave out grades, contact details and costs.`,
+              )
+            }
+          >
+            <Trans>Shortlist for client</Trans>
+          </Button>
           <Button size="sm" variant="ghost" onClick={exportSelected}>
             <Trans>Export selected</Trans>
           </Button>
@@ -226,7 +238,7 @@ export function ShortlistDirectory({
                 <Trans>No shortlisted candidates match these filters.</Trans>
               )
             ) : (
-              <Trans>No saved candidates</Trans>
+              <Trans>No candidates yet</Trans>
             )}
           </p>
           {shortlistView && model.onBrowseCandidates ? (

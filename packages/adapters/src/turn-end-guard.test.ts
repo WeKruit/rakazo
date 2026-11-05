@@ -765,7 +765,7 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: promisedFix.postAssistant,
     });
     expect(promisedFix.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.not.stringContaining("Scaled search") }),
+      expect.objectContaining({ prompt: expect.not.stringContaining("Wider search") }),
     );
 
     // The coordinator's own continuation still gets the step.
@@ -839,7 +839,7 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result).toMatchObject({
       action: "continued",
       stage: "feedback",
-      label: "Collect calibration feedback",
+      label: "Review the first 10 people",
     });
   });
 
@@ -858,7 +858,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result).toMatchObject({
         action: "continued",
         stage: "calibration_10",
-        label: "Show the 10-person calibration list",
+        label: "Show the first 10 people",
       });
     }
   });
@@ -1293,6 +1293,18 @@ describe("unprovenReplyCardRetry", () => {
         ?.note,
     ).toMatch(/call reply_to_email/);
     expect(unprovenReplyCardRetry("The reply card was already sent earlier.", brief)).toBeDefined();
+  });
+  it("reads the request from a teammate's handoff brief", () => {
+    // Staging: Main handed Outreach the reply in the role conversation; Outreach had no message.
+    const handoff = {
+      blocks: [{ kind: "handoff", toBotId: "outreach", text: brief }] as MessageBlock[],
+    };
+    expect(
+      unprovenReplyCardRetry(
+        "Txihxwm 的回复卡已被丢弃，邮件未发送。",
+        turnRequestText(undefined, handoff, "outreach"),
+      ),
+    ).toBeDefined();
   });
   it("keeps other replies and turns that were not asked for a reply", () => {
     expect(unprovenReplyCardRetry("已准备好回复，等你在卡片上确认。", brief)).toBeUndefined();

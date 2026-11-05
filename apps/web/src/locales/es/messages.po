@@ -168,6 +168,10 @@ msgstr ""
 msgid "{value} minutes"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr ""
@@ -272,6 +276,11 @@ msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
+msgstr ""
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
 msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
@@ -884,10 +893,6 @@ msgstr ""
 msgid "Calendar last checked"
 msgstr ""
 
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar records have not been checked yet."
-msgstr ""
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar start date"
 msgstr ""
@@ -1204,6 +1209,7 @@ msgstr "Borrando…"
 msgid "Clicked"
 msgstr ""
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr ""
@@ -1671,6 +1677,10 @@ msgstr ""
 msgid "Could not add"
 msgstr "No se pudo agregar"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
 msgstr "No se pudo agregar el servidor MCP"
@@ -1887,6 +1897,10 @@ msgstr "No se pudieron cargar las integraciones"
 msgid "Could not load interview plans."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load interviews. Try refreshing."
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "No se pudieron cargar los servidores MCP"
@@ -1917,10 +1931,6 @@ msgstr "No se pudo cargar el historial de ejecuciones"
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Could not load saved availability. Check the calendar in role chat."
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Could not load saved calendar records. Try refreshing."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2597,6 +2607,10 @@ msgstr ""
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "p. ej. Hivenet Agent, Presales, bot de hojas de horas"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr ""
@@ -2935,6 +2949,10 @@ msgstr "Termina de iniciar sesión en <0>{0}</0>. Es posible que la página fina
 msgid "Finishing MCP connection…"
 msgstr "Finalizando conexión MCP…"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr ""
+
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
 msgstr ""
@@ -2962,10 +2980,6 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "From this role’s saved requirements"
-msgstr ""
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3155,10 +3169,6 @@ msgstr ""
 msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
 msgstr ""
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Historical totals · — Not reported"
-msgstr "Totales históricos · — No informado"
-
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
 msgstr ""
@@ -3319,6 +3329,7 @@ msgstr "Unidad del intervalo"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Interview"
@@ -3932,6 +3943,11 @@ msgstr "Necesita toma de control"
 msgid "New bot"
 msgstr "Nuevo bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "Nuevo grupo"
@@ -4036,9 +4052,21 @@ msgstr "sin autenticación"
 msgid "No authentication"
 msgstr "Sin autenticación"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No calendar is connected."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No candidates yet"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "Aún no hay apps de chat vinculadas."
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
+msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No contact campaign associations were returned."
@@ -4056,16 +4084,25 @@ msgstr ""
 msgid "No credentials saved for this bot."
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No email sequences yet."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No emails sent yet."
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No emails yet."
+msgstr ""
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "No events match these statuses in this date range."
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "No feedback yet."
-msgstr ""
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No future confirmed event appears in these saved checks."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4076,16 +4113,20 @@ msgstr "Aún no hay chats de grupo."
 msgid "No Important records matched this filter."
 msgstr ""
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No indexed mail matches this view."
-msgstr ""
-
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No internal review was returned."
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No interviews booked yet."
+msgstr ""
+
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No interviews in progress for this role."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No interviews yet."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4191,6 +4232,10 @@ msgstr ""
 msgid "No roles yet."
 msgstr ""
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No roles yet. Paste a job description in Kruit to start one."
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
 msgstr ""
@@ -4205,10 +4250,6 @@ msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
-msgstr ""
-
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "No saved candidates"
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -4231,10 +4272,6 @@ msgstr ""
 msgid "No saved memory in these scopes"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No saved overview for these projects."
-msgstr ""
-
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "No saved questions"
 msgstr ""
@@ -4249,10 +4286,6 @@ msgstr "No hay filas de resultados guardadas"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No saved results"
-msgstr ""
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "No saved sequences for this role yet."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -4456,6 +4489,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Observed unread"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Older mail is still loading."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5040,10 +5077,6 @@ msgstr "Reconectando"
 msgid "Recorded availability"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Recorded event"
-msgstr ""
-
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Recorded times"
 msgstr ""
@@ -5083,11 +5116,6 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Recruiter messages"
-msgstr ""
-
-#: src/pages/recruiting/CrmHistory.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Recruiter messages are unavailable for this role."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -5180,6 +5208,11 @@ msgstr "Eliminado, pero falló la actualización de la lista"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "Quitando…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
@@ -5678,20 +5711,12 @@ msgstr "Guardado"
 msgid "Saved before latest role update"
 msgstr ""
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Saved calendar checks"
-msgstr "Consultas de calendario guardadas"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Saved calendar records are unavailable from this source."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -5728,14 +5753,6 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saved interview plans"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail · partial source coverage"
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail is indexing in the background."
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -6276,15 +6293,15 @@ msgid "Slack not enabled"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Some role calendar records are unavailable or partial."
+msgid "Some calendars are unavailable."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some interviews could not be shown."
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Some roles could not be read."
-msgstr ""
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Some saved records could not be displayed."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -6828,7 +6845,7 @@ msgid "Unsubscribed"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Upcoming recorded bookings"
+msgid "Upcoming interviews"
 msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
@@ -7044,6 +7061,10 @@ msgstr "Días laborables"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "¿Qué hay de sus memorias?"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

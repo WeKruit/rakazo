@@ -13,8 +13,13 @@ export type BackgroundWaitResult = {
   running: Work[];
   waitedSeconds: number;
   timedOut: boolean;
+  /** The user wrote while this waited: answer them before waiting again. */
+  userMessage?: boolean;
   note?: string;
 };
+
+const USER_MESSAGE_NOTE =
+  "The user sent a new message while you waited. Read it and answer it now; wait again afterwards if the work still matters.";
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -44,6 +49,8 @@ export async function waitForBackgroundWork(
     timeoutSeconds?: number;
     signal: AbortSignal;
     pollMs?: number;
+    /** True while a user message this run would read is waiting unread. */
+    userMessageWaiting?: () => Promise<boolean>;
   },
 ): Promise<BackgroundWaitResult> {
   const mode = input.mode ?? "all";
@@ -74,16 +81,18 @@ export async function waitForBackgroundWork(
     };
   }
   let running = watched;
+  let userMessage = false;
   for (;;) {
     const settled = mode === "all" ? running.length === 0 : running.length < watched.length;
     const timedOut = Date.now() - startedAt >= timeoutSeconds * 1000;
-    if (settled || timedOut || input.signal.aborted) {
+    if (settled || timedOut || userMessage || input.signal.aborted) {
       const live = new Set(running.map((work) => work.id));
       return {
         done: watched.filter((work) => !live.has(work.id)),
         running,
         waitedSeconds: waitedSeconds(),
-        timedOut: !settled && timedOut,
+        timedOut: !settled && !userMessage && timedOut,
+        ...(userMessage && !settled ? { userMessage: true, note: USER_MESSAGE_NOTE } : {}),
       };
     }
     await sleep(
@@ -92,5 +101,6 @@ export async function waitForBackgroundWork(
     );
     const current = new Set((await list()).map((work) => work.id));
     running = watched.filter((work) => current.has(work.id));
+    userMessage = (await input.userMessageWaiting?.().catch(() => false)) ?? false;
   }
 }

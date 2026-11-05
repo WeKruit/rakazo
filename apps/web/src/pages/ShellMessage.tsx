@@ -89,7 +89,7 @@ const ViewBlockView = lazyPanel(() =>
 );
 
 const FALLBACK_BOT_COLOR = "#85858A";
-export function MessageHoverActions({
+export const MessageHoverActions = memo(function MessageHoverActions({
   message,
   side,
   below = false,
@@ -195,7 +195,7 @@ export function MessageHoverActions({
       </div>
     </MessageHoverMetadata>
   );
-}
+});
 
 export const MessageView = memo(function MessageView({
   artifactTarget,
@@ -237,7 +237,7 @@ export const MessageView = memo(function MessageView({
   onAddRoutine: (name: string, prompt: string) => void;
   voiceReady: boolean;
   speaking: boolean;
-  onSpeak: () => void;
+  onSpeak: (message: ThreadMessage) => void;
   onOpenComputer: (botId?: string) => void;
   showToolActivity: boolean;
   /** Only on the newest message: continues work a stop ended. */
@@ -348,7 +348,7 @@ export const MessageView = memo(function MessageView({
               <button
                 type="button"
                 aria-label={speaking ? t`Stop speaking` : t`Speak this reply`}
-                onClick={onSpeak}
+                onClick={() => onSpeak(message)}
                 className="text-[12px] text-muted-foreground hover:text-foreground"
               >
                 {speaking ? <Trans>Stop</Trans> : <Trans>Speak</Trans>}
@@ -707,7 +707,7 @@ export const MessageView = memo(function MessageView({
                   <button
                     type="button"
                     aria-label={speaking ? t`Stop speaking` : t`Speak this reply`}
-                    onClick={onSpeak}
+                    onClick={() => onSpeak(message)}
                     className="mt-2 text-[12px] text-muted-foreground hover:text-foreground"
                   >
                     {speaking ? <Trans>Stop</Trans> : <Trans>Speak</Trans>}

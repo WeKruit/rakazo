@@ -104,20 +104,20 @@ export function InterviewTab({
         </TabNotice>
       ) : calendar.failed || calendar.data?.status === "failed" ? (
         <TabNotice alert>
-          <Trans>Could not load saved calendar records. Try refreshing.</Trans>
+          <Trans>Could not load interviews. Try refreshing.</Trans>
         </TabNotice>
       ) : calendar.data?.status === "unsupported" ? (
         <TabNotice>
-          <Trans>Saved calendar records are unavailable from this source.</Trans>
+          <Trans>No calendar is connected.</Trans>
         </TabNotice>
       ) : calendar.data?.status === "not_checked" ? (
         <TabNotice>
-          <Trans>Calendar records have not been checked yet.</Trans>
+          <Trans>No interviews yet.</Trans>
         </TabNotice>
       ) : null}
       {calendar.data?.partial ? (
         <TabNotice>
-          <Trans>Some saved records could not be displayed.</Trans>
+          <Trans>Some interviews could not be shown.</Trans>
         </TabNotice>
       ) : null}
       {calendar.data?.connectionChanged ? (

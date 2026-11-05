@@ -64,6 +64,24 @@ describe("waitForBackgroundWork", () => {
     expect(idle.note).toMatch(/Nothing is running/);
   });
 
+  it("ends the wait when the user writes, so the reply does not wait behind the work", async () => {
+    const userMessageWaiting = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const result = await waitForBackgroundWork(prisma([research]), {
+      ...base,
+      timeoutSeconds: 1800,
+      userMessageWaiting,
+      signal: new AbortController().signal,
+    });
+    expect(result).toMatchObject({
+      done: [],
+      running: [{ id: "research-1" }],
+      timedOut: false,
+      userMessage: true,
+    });
+    expect(result.note).toMatch(/new message/);
+    expect(userMessageWaiting).toHaveBeenCalledTimes(2);
+  });
+
   it("stops at once when the turn is stopped", async () => {
     const controller = new AbortController();
     controller.abort();

@@ -254,29 +254,25 @@ export const Composer = memo(function Composer({
     };
   }, [onRunErrorPresented, runError, runErrorId]);
 
+  // Height follows the text: one measurement per edit, and a width change rewraps it.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) syncTextareaHeight(textarea);
+  }, [draft]);
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-
-    function syncHeight() {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.style.height = `${measureTextareaHeight(textarea)}px`;
-    }
-
-    syncHeight();
-    let lastWidth = el.getBoundingClientRect().width;
-    const observer = new ResizeObserver(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const width = textarea.getBoundingClientRect().width;
-      if (width === lastWidth) return;
+    let lastWidth: number | undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry?.contentRect.width;
+      if (width === undefined || width === lastWidth) return;
+      const first = lastWidth === undefined;
       lastWidth = width;
-      syncHeight();
+      if (!first) syncTextareaHeight(el);
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [draft]);
+  }, []);
 
   function markEdited() {
     editRevision.current += 1;
@@ -1037,13 +1033,13 @@ function highlightUrls(text: string) {
   );
 }
 
-function measureTextareaHeight(textarea: HTMLTextAreaElement) {
+function syncTextareaHeight(textarea: HTMLTextAreaElement) {
   const { style } = textarea;
   style.overflowY = "hidden";
   style.height = "0px";
   const height = textarea.scrollHeight;
   style.overflowY = "";
-  return height;
+  style.height = `${height}px`;
 }
 
 function slashActionLabel(id: SlashActionId) {

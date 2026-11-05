@@ -168,6 +168,10 @@ msgstr "{undated} 条未记录日期"
 msgid "{value} minutes"
 msgstr "{value} 分钟"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "150 more people: about 600–1,000 credits"
+msgstr "再找 150 人：约 600–1,000 额度"
+
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
 msgstr "什么都做一点"
@@ -273,6 +277,11 @@ msgstr ""
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
 msgstr "将{name}加入候选名单"
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
+msgstr "添加客户，并把 {0} 归到这个客户下。"
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
@@ -884,10 +893,6 @@ msgstr "日历时间刻度"
 msgid "Calendar last checked"
 msgstr "上次查看日历"
 
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Calendar records have not been checked yet."
-msgstr "尚未查看日历记录。"
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar start date"
 msgstr "日历开始日期"
@@ -1204,6 +1209,7 @@ msgstr "正在清空…"
 msgid "Clicked"
 msgstr "已点击"
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr "客户"
@@ -1671,6 +1677,10 @@ msgstr "无法访问"
 msgid "Could not add"
 msgstr "无法添加"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr "无法添加客户"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
 msgstr "无法添加 MCP 服务器"
@@ -1887,6 +1897,10 @@ msgstr "无法加载集成"
 msgid "Could not load interview plans."
 msgstr "无法加载面试安排。"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load interviews. Try refreshing."
+msgstr "面试加载失败，请刷新重试。"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "无法加载 MCP 服务器"
@@ -1918,10 +1932,6 @@ msgstr "无法加载运行历史记录"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Could not load saved availability. Check the calendar in role chat."
 msgstr "无法加载已保存的空闲时间。请在岗位对话中查看日历。"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Could not load saved calendar records. Try refreshing."
-msgstr "无法加载已保存的日历记录，请刷新重试。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not load saved results. Try refreshing."
@@ -2226,7 +2236,7 @@ msgstr "凭据已加密，不会发送给模型。"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Credits"
-msgstr ""
+msgstr "额度"
 
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
@@ -2597,6 +2607,10 @@ msgstr "时长"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "例如 Hivenet Agent、Presales、工时表机器人"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Each email address found: about 80–160 credits"
+msgstr "每找到一个邮箱：约 80–160 额度"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
 msgstr "更早的记录"
@@ -2935,6 +2949,10 @@ msgstr "在 <0>{0}</0> 完成登录。最后一页可能无法加载；把 URL �
 msgid "Finishing MCP connection…"
 msgstr "正在完成 MCP 连接…"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "First 10 people for a role: about 10–25 credits"
+msgstr "一个岗位的前 10 人：约 10–25 额度"
+
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Fit rationale"
 msgstr "匹配理由"
@@ -2963,10 +2981,6 @@ msgstr "来自 {0}"
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "From this role’s saved requirements"
 msgstr "来自这个岗位已保存的需求"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
-msgstr "来自已保存日历检查的未来已确认日程，按你的本地时间显示。这只是已记录的部分，不是全部预约或空闲时间。"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3155,10 +3169,6 @@ msgstr "用人经理"
 msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
 msgstr "与这个客户和岗位匹配的历史记录。这些不是新的搜索结果，也不是已核实的候选名单。"
 
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Historical totals · — Not reported"
-msgstr "历史累计 · — 未提供"
-
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "History"
 msgstr "历史"
@@ -3320,6 +3330,7 @@ msgstr "间隔单位"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Interview"
@@ -3854,7 +3865,7 @@ msgstr "更多"
 
 #: src/pages/RoutineEditor.tsx
 msgid "More options"
-msgstr ""
+msgstr "更多选项"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
@@ -3933,6 +3944,11 @@ msgstr "需要接管"
 msgid "New bot"
 msgstr "新建 Bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr "新客户"
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "新建群组"
@@ -3986,7 +4002,7 @@ msgstr "下一步"
 
 #: src/pages/RoutineList.tsx
 msgid "Next {next}"
-msgstr ""
+msgstr "下一步 {next}"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Next campaigns"
@@ -4037,9 +4053,21 @@ msgstr "无认证"
 msgid "No authentication"
 msgstr "无认证"
 
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No calendar is connected."
+msgstr "还没有连接日历。"
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No candidates yet"
+msgstr "还没有候选人"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "还没有关联聊天应用。"
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
+msgstr "无客户"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No contact campaign associations were returned."
@@ -4057,6 +4085,19 @@ msgstr "尚无对话。"
 msgid "No credentials saved for this bot."
 msgstr "这个助手没有保存凭据。"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No email sequences yet."
+msgstr "还没有邮件序列。"
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No emails sent yet."
+msgstr "还没有发出邮件。"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No emails yet."
+msgstr "还没有邮件。"
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "No events match these statuses in this date range."
 msgstr "此日期范围内没有符合这些状态的事件。"
@@ -4064,10 +4105,6 @@ msgstr "此日期范围内没有符合这些状态的事件。"
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "No feedback yet."
 msgstr "尚无反馈。"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No future confirmed event appears in these saved checks."
-msgstr "这些已保存的检查中没有未来已确认的日程。"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -4077,17 +4114,21 @@ msgstr "还没有群聊。"
 msgid "No Important records matched this filter."
 msgstr "没有符合这个筛选的重要记录。"
 
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No indexed mail matches this view."
-msgstr "此视图中没有匹配的已索引邮件。"
-
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No internal review was returned."
 msgstr "未返回内部审核。"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No interviews booked yet."
+msgstr "还没有约好的面试。"
+
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No interviews in progress for this role."
 msgstr "这个岗位暂无进行中的面试。"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No interviews yet."
+msgstr "还没有面试。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
@@ -4192,6 +4233,10 @@ msgstr "尚未关联岗位。请在这个对话中描述岗位。"
 msgid "No roles yet."
 msgstr "还没有职位。"
 
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No roles yet. Paste a job description in Kruit to start one."
+msgstr "还没有岗位。在 Kruit 里贴一个职位描述就能开始。"
+
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
 msgstr "没有符合筛选的运行记录。"
@@ -4207,10 +4252,6 @@ msgstr "暂无已保存的评估"
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "No saved calendar records matched this candidate."
 msgstr "没有匹配此候选人的已保存日历记录。"
-
-#: src/pages/recruiting/RecruitingLegacyResults.tsx
-msgid "No saved candidates"
-msgstr "暂无已保存的候选人"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "No saved discovery sources"
@@ -4232,10 +4273,6 @@ msgstr "此岗位未返回已保存的招聘信息详情。"
 msgid "No saved memory in these scopes"
 msgstr "这些范围内没有已保存的记忆"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "No saved overview for these projects."
-msgstr "这些项目没有已保存的总览。"
-
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "No saved questions"
 msgstr "暂无已保存的问题"
@@ -4251,10 +4288,6 @@ msgstr "暂无已保存的结果行"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No saved results"
 msgstr "暂无已保存的结果"
-
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "No saved sequences for this role yet."
-msgstr "此岗位尚无已保存的邮件序列。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No service configured for this role."
@@ -4458,6 +4491,10 @@ msgstr "已读"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Observed unread"
 msgstr "未读"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Older mail is still loading."
+msgstr "更早的邮件还在加载。"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Older messages"
@@ -5041,10 +5078,6 @@ msgstr "正在重新连接"
 msgid "Recorded availability"
 msgstr "已记录的可用时间"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Recorded event"
-msgstr "已记录的事件"
-
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Recorded times"
 msgstr "已记录时间"
@@ -5085,11 +5118,6 @@ msgstr "正在重新创建电脑"
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Recruiter messages"
 msgstr "招聘方消息"
-
-#: src/pages/recruiting/CrmHistory.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-msgid "Recruiter messages are unavailable for this role."
-msgstr "此岗位的招聘人员消息暂不可用。"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Recruiter verified"
@@ -5181,6 +5209,11 @@ msgstr "已移除，但列表刷新失败"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "正在移除…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr "重命名客户"
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
@@ -5681,10 +5714,6 @@ msgstr "已保存"
 msgid "Saved before latest role update"
 msgstr "保存于岗位最近一次更新之前"
 
-#: src/pages/recruiting/HomeDashboard.tsx
-msgid "Saved calendar checks"
-msgstr "已保存的日历检查"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved calendar checks in this conversation."
 msgstr "这个对话中保存的日历检查。"
@@ -5692,10 +5721,6 @@ msgstr "这个对话中保存的日历检查。"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
 msgstr "已保存的日历日程"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Saved calendar records are unavailable from this source."
-msgstr "此来源无法提供已保存的日历记录。"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved candidate sources"
@@ -5732,14 +5757,6 @@ msgstr "已保存的文件"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saved interview plans"
 msgstr "已保存的面试安排"
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail · partial source coverage"
-msgstr "已保存邮件 · 来源覆盖不完整"
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "Saved mail is indexing in the background."
-msgstr "正在后台为已保存的邮件建立索引。"
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Saved mailbox"
@@ -6279,16 +6296,16 @@ msgid "Slack not enabled"
 msgstr "未启用 Slack"
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Some role calendar records are unavailable or partial."
-msgstr "部分岗位日历记录不可用或不完整。"
+msgid "Some calendars are unavailable."
+msgstr "部分日历暂时无法读取。"
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some interviews could not be shown."
+msgstr "部分面试无法显示。"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Some roles could not be read."
 msgstr "部分职位无法读取。"
-
-#: src/pages/recruiting/InterviewTab.tsx
-msgid "Some saved records could not be displayed."
-msgstr "部分已保存的记录无法显示。"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
@@ -6831,8 +6848,8 @@ msgid "Unsubscribed"
 msgstr "已退订"
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Upcoming recorded bookings"
-msgstr "即将进行的已记录预约"
+msgid "Upcoming interviews"
+msgstr "即将进行的面试"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Update failed"
@@ -7047,6 +7064,10 @@ msgstr "工作日"
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "它的记忆怎么处理？"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "What credits buy"
+msgstr "额度能做什么"
 
 #: src/pages/shell/message-cards.tsx
 msgid "What do you want me on first?"

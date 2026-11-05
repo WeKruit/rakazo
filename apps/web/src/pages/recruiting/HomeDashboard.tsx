@@ -788,7 +788,7 @@ export function HomeDashboard({
                 </RetryNotice>
               ) : (
                 <p className="py-6 text-sm text-muted-foreground">
-                  <Trans>No saved overview for these projects.</Trans>
+                  <Trans>No roles yet. Paste a job description in Kruit to start one.</Trans>
                 </p>
               )
             ) : (
@@ -820,12 +820,12 @@ export function HomeDashboard({
             <CardHeader>
               <CardTitle>
                 <h2>
-                  <Trans>Upcoming recorded bookings</Trans>
+                  <Trans>Upcoming interviews</Trans>
                 </h2>
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-2" aria-label={t`Upcoming recorded bookings`}>
+              <ul className="space-y-2" aria-label={t`Upcoming interviews`}>
                 {overview.data.bookings
                   .filter((booking) => !project || booking.groupId === project)
                   .sort(
@@ -842,9 +842,7 @@ export function HomeDashboard({
                           onClick={() => onOpenRole(booking.groupId, "interview")}
                         >
                           <span>
-                            <span className="block">
-                              {booking.event.title || t`Recorded event`}
-                            </span>
+                            <span className="block">{booking.event.title || t`Interview`}</span>
                             <span className="block text-xs text-muted-foreground">
                               {group.name}
                             </span>
@@ -861,25 +859,14 @@ export function HomeDashboard({
                 (booking) => !project || booking.groupId === project,
               ) ? (
                 <p className="text-sm text-muted-foreground">
-                  <Trans>No future confirmed event appears in these saved checks.</Trans>
+                  <Trans>No interviews booked yet.</Trans>
                 </p>
               ) : null}
               {overview.data.bookingUnknownGroups.some((id) => !project || id === project) ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  <Trans>Some role calendar records are unavailable or partial.</Trans>
+                  <Trans>Some calendars are unavailable.</Trans>
                 </p>
               ) : null}
-              <details className="mt-2 text-xs text-muted-foreground">
-                <summary className="cursor-pointer">
-                  <Trans>Saved calendar checks</Trans>
-                </summary>
-                <p className="mt-2">
-                  <Trans>
-                    Future confirmed events from saved calendar checks, shown in your local time.
-                    This is a recorded subset, not all bookings or availability.
-                  </Trans>
-                </p>
-              </details>
             </CardContent>
           </Card>
         ) : null}

@@ -407,7 +407,7 @@ it("shows exact candidate native correspondence with CRM history without treatin
     groupId: "group-1",
     crmBrowse: browse,
   });
-  expect(view.container.textContent).toContain("Recruiter messages are unavailable for this role.");
+  expect(view.container.textContent).toContain("No emails sent yet.");
   expect(view.container.textContent).not.toContain("No recruiter messages were found.");
   await act(async () => {
     await vi.dynamicImportSettled();
@@ -4567,7 +4567,7 @@ it("distinguishes candidate index failures from an empty result and clears denie
   const view = await mounted();
   await view.click("Evidence");
   expect(view.container.textContent).toContain("Could not load candidates");
-  expect(view.container.textContent).not.toContain("No saved candidates");
+  expect(view.container.textContent).not.toContain("No candidates yet");
   api.listCandidates.mockResolvedValue(candidatePage());
   await view.click("Refresh");
   expect(view.container.textContent).toContain("candidate-1");
@@ -7903,7 +7903,7 @@ it("distinguishes an empty shortlist from the saved pool and browses all candida
     onBrowseCandidates: browse,
   });
   expect(view.container.textContent).toContain("No shortlisted candidates yet.");
-  expect(view.container.textContent).not.toContain("No saved candidates");
+  expect(view.container.textContent).not.toContain("No candidates yet");
   expect(view.container.textContent).toContain("12");
   await view.click("Browse all candidates");
   expect(browse).toHaveBeenCalledOnce();
@@ -8029,7 +8029,7 @@ it("distinguishes empty saved assessments from a successful candidate search", a
   api.listAssessments.mockResolvedValue([]);
   const view = await mounted();
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("No saved candidates");
+  expect(view.container.textContent).toContain("No candidates yet");
   expect(api.search).not.toHaveBeenCalled();
 });
 it("keeps saved facts and sources inspectable even before a criterion judgment exists", async () => {
@@ -8133,7 +8133,7 @@ it("rechecks the binding and revision after reading lists before publishing them
   const view = await mounted();
   expect(view.container.textContent).toContain("Version 3");
   await view.click("Evidence");
-  expect(view.container.textContent).toContain("No saved candidates");
+  expect(view.container.textContent).toContain("No candidates yet");
   expect(api.listAssessments).toHaveBeenCalledTimes(2);
 });
 it("drops cached Artifact metadata when its exact reference changes", async () => {

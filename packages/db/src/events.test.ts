@@ -29,6 +29,7 @@ import {
   finalizeRun,
   followSidebar,
   followThreadEvents,
+  hasUnclaimedSteering,
   MAX_PENDING_TRANSIENTS,
   pauseRunForInput,
   pauseRunForTakeover,
@@ -4628,6 +4629,34 @@ describe("sendUserMessage", () => {
     expect(tx.steeringMessage.create).toHaveBeenCalledWith({
       data: { messageId: "message-1", botId: "bot-1", userId: "user-1", runId: "run-user" },
     });
+  });
+});
+
+describe("hasUnclaimedSteering", () => {
+  it("looks for an unread message with the same filter the run claims by", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "row" });
+    const prisma = {
+      run: { findFirst: vi.fn().mockResolvedValue({ trigger: "user", clientNonce: null }) },
+      steeringMessage: { findFirst },
+    } as never;
+    const input = { threadId: "thread", botId: "bot", runId: "run" };
+    expect(await hasUnclaimedSteering(prisma, input)).toBe(true);
+    expect(findFirst.mock.calls[0]![0].where).toMatchObject({
+      botId: "bot",
+      claimedAt: null,
+      OR: [{ runId: null, originTrigger: null }, { runId: "run" }],
+      message: { threadId: "thread" },
+    });
+    // A routine turn takes only messages addressed to it.
+    const routine = {
+      run: { findFirst: vi.fn().mockResolvedValue({ trigger: "routine", clientNonce: null }) },
+      steeringMessage: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as never;
+    expect(await hasUnclaimedSteering(routine, input)).toBe(false);
+    expect(
+      (routine as { steeringMessage: { findFirst: ReturnType<typeof vi.fn> } }).steeringMessage
+        .findFirst.mock.calls[0]![0].where.OR,
+    ).toEqual([{ runId: "run" }]);
   });
 });
 

@@ -192,7 +192,7 @@ const Fit = memo(function Fit({
   const score = ranking
     ? ranking.state === "outdated" || ranking.score === null
       ? null
-      : { label: t`Saved match score`, value: ranking.score.toLocaleString() }
+      : { label: t`Match score`, value: ranking.score.toLocaleString() }
     : sections.fit?.score;
   const groupLabel =
     ranking?.group === "strong_match"
@@ -200,15 +200,15 @@ const Fit = memo(function Fit({
       : ranking?.group === "worth_talking"
         ? t`Worth Talking`
         : ranking?.group === "partial"
-          ? t`Partial`
+          ? t`Partial match`
           : ranking?.group === "uncertain"
-            ? t`Uncertain`
+            ? t`Needs a closer look`
             : ranking?.group === "outdated"
-              ? t`Outdated review`
+              ? t`Needs a new review`
               : ranking?.group === "unreviewed"
-                ? t`Unreviewed`
+                ? t`Not reviewed yet`
                 : ranking?.group === "unscored"
-                  ? t`Unscored`
+                  ? t`Not rated yet`
                   : null;
   const tier = groupLabel
     ? { label: ranking?.grade ?? groupLabel, value: groupLabel }

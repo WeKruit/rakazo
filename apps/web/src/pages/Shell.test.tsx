@@ -330,7 +330,9 @@ function rerenderComposer(overrides: Partial<ComponentProps<typeof Composer>>) {
 }
 
 function pickAttachment() {
-  const input = container?.querySelector<HTMLInputElement>('input[type="file"]');
+  const input = container?.querySelector<HTMLInputElement>(
+    'input[type="file"]:not([data-testid="import-candidates"])',
+  );
   if (!input) throw new Error("attachment input not found");
   Object.defineProperty(input, "files", {
     configurable: true,
@@ -707,7 +709,8 @@ async function renderFeedbackShell(
         );
       });
       expect(button, name).toBeDefined();
-    });
+      // Lazy panels can take more than the default second on a loaded CI runner.
+    }, 5_000);
     await act(async () => button!.click());
   };
   // The role chat opens by default; only a collapsed chat needs its trigger.
@@ -2725,8 +2728,13 @@ it("archives and restores an ordinary role through the native lifecycle without 
     await import("./BotContextMenu");
   });
   const menu = document.body.querySelector('[role="menu"]')!;
-  expect(menu.textContent).toBe("Archive");
-  await act(async () => menu.querySelector<HTMLElement>('[role="menuitem"]')!.click());
+  // A recruiter files a role under a client; everything else stays in the developer view.
+  expect(menu.textContent).toBe("ClientArchive");
+  await act(async () =>
+    [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent === "Archive")!
+      .click(),
+  );
   expect(shellApi.archiveGroup).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
   expect(
     container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,
@@ -3740,7 +3748,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   await view.navigate("/app/g/group-1?view=shortlist");
   expect(container?.querySelector("h1")?.textContent).toBe("Candidates");
   expect(container?.textContent).toContain("No shortlisted candidates yet.");
-  expect(container?.textContent).not.toContain("No saved candidates");
+  expect(container?.textContent).not.toContain("No candidates yet");
   await view.click("Browse all candidates");
   expect(view.getProps().view).toBe("contacts");
   expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);
@@ -3771,6 +3779,25 @@ it("opens a normal recruiting role on native candidate results and restores coll
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   expect(shellApi.recruiting.setCandidateShortlist).not.toHaveBeenCalled();
   expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.send).not.toHaveBeenCalled();
+});
+
+it("puts an imported candidate list in the role chat with a short ask, unsent", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", ["running"], {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=contacts",
+  });
+  const input = container!.querySelector<HTMLInputElement>('[data-testid="import-candidates"]')!;
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [new File(["name,linkedin"], "people.csv", { type: "text/csv" })],
+  });
+  act(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+  const draft = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  expect(draft.value).toBe("Import the candidates in this file into this role.");
+  expect(container!.textContent).toContain("people.csv");
   expect(shellApi.send).not.toHaveBeenCalled();
 });
 

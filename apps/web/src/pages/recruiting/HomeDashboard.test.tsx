@@ -283,7 +283,7 @@ it("flags roles whose outreach could not be read and keeps the rest", async () =
 it("shows an empty overview when no role is bound yet", async () => {
   getWorkspace.mockResolvedValue(null);
   await render();
-  expect(text()).toContain("No saved overview for these projects.");
+  expect(text()).toContain("No roles yet. Paste a job description in Kruit to start one.");
   expect(listCandidates).not.toHaveBeenCalled();
 });
 
@@ -474,7 +474,7 @@ it("keeps a missing project's metrics partial and offers retry instead of a fals
   expect(text()).not.toContain("Some roles could not be read.");
   await select("Project", "g2");
   expect(text()).toContain("Could not load your overview.");
-  expect(text()).not.toContain("No saved overview");
+  expect(text()).not.toContain("No roles yet");
 });
 
 it("opens the source project from selected metric and weekly-chart breakdowns", async () => {
@@ -605,15 +605,15 @@ it.each(["confirmed", "accepted"])(
       ],
     }));
     await render();
-    const list = container.querySelector('[aria-label="Upcoming recorded bookings"]')!;
+    const list = container.querySelector('[aria-label="Upcoming interviews"]')!;
     expect(list.querySelectorAll("li")).toHaveLength(2);
     expect(list.textContent).not.toMatch(/Cancelled|Pending|Free slot|Unknown status|Past/);
     await act(async () => list.querySelectorAll<HTMLButtonElement>("button")[1]!.click());
     expect(onOpenRole).toHaveBeenLastCalledWith("g2", "interview");
-    expect(text()).toContain("Some role calendar records are unavailable or partial.");
+    expect(text()).toContain("Some calendars are unavailable.");
     await select("Project", "g1");
     expect(list.querySelectorAll("li")).toHaveLength(1);
-    expect(text()).not.toContain("Some role calendar records are unavailable or partial.");
+    expect(text()).not.toContain("Some calendars are unavailable.");
   },
 );
 it("does not present another role's retained calendar events as this role's bookings", async () => {
@@ -632,10 +632,10 @@ it("does not present another role's retained calendar events as this role's book
     ],
   });
   await render();
-  expect(
-    container.querySelector('[aria-label="Upcoming recorded bookings"]')!.textContent,
-  ).not.toContain("Wrong role");
-  expect(text()).toContain("Some role calendar records are unavailable or partial.");
+  expect(container.querySelector('[aria-label="Upcoming interviews"]')!.textContent).not.toContain(
+    "Wrong role",
+  );
+  expect(text()).toContain("Some calendars are unavailable.");
 });
 
 it("opens with the last finished numbers while a fresh read is still running", async () => {

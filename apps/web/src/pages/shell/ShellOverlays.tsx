@@ -193,6 +193,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
           <BotContextMenu
             bot={contextChat}
             showDeveloperActions={showToolActivity}
+            clients={!!contextGroup}
             position={botMenu.position}
             onClose={closeBotMenu}
             sections={botSections}
@@ -432,6 +433,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
         {newSectionTarget ? (
           <NewBotSectionDialog
             bot={newSectionTarget.chat}
+            client={!showToolActivity}
             onCancel={() => setNewSectionTarget(null)}
             onConfirm={async (name) => {
               await rpc.botSections.create(
@@ -448,6 +450,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
         {renameSectionTarget ? (
           <RenameBotSectionDialog
             section={renameSectionTarget.section}
+            client={!showToolActivity}
             onCancel={() => setRenameSectionTarget(null)}
             onConfirm={async (name) => {
               await rpc.botSections.update(

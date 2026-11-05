@@ -296,6 +296,9 @@ const OUTBOUND_TITLES: Record<string, string> = {
   gmail_send_email: "Confirm sending email",
   gmail_send_draft: "Confirm sending email",
   gmail_forward_message: "Confirm forwarding email",
+  gmail_send_message: "Confirm sending email",
+  gmail_reply: "Confirm reply",
+  gmail_forward: "Confirm forwarding email",
   create_lead: "Confirm adding candidates to the campaign",
   add_leads_to_campaign_or_list_bulk: "Confirm adding candidates to the campaign",
   create_booking: "Confirm interview booking",
@@ -383,6 +386,8 @@ function formatApprovalDetail(
 ): string | undefined {
   const booking = formatBooking(toolName, args) ?? formatBookingChange(toolName, args);
   if (booking) return booking;
+  const mail = formatGmailSend(toolName, args);
+  if (mail) return mail;
   if (toolName === "allow_computer_site") return String(args.reason ?? "") || undefined;
   if (toolName === "recruiting_crm_target") {
     const target = args.target as RecruitingCrmTarget;
@@ -538,6 +543,35 @@ function formatApprovalDetail(
   }
   if (lines.length === 0) return undefined;
   return lines.join("\n");
+}
+
+/** A send from the recruiter's own Gmail, written out as the email itself: who, subject, body. */
+function formatGmailSend(toolName: string, args: Record<string, unknown>) {
+  const operation = toolName.split("__").at(-1);
+  if (!toolName.toLowerCase().includes("gmail") || !operation) return undefined;
+  if (!["send_message", "reply", "forward"].includes(operation)) return undefined;
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item) => typeof item === "string").join(", ") : "";
+  const body =
+    typeof args.body === "string" && args.body.trim()
+      ? args.body
+      : typeof args.htmlBody === "string"
+        ? htmlToPlainText(args.htmlBody)
+        : "";
+  return [
+    ...(operation === "send_message" || list(args.to) ? [`To: ${list(args.to) || "unknown"}`] : []),
+    ...(list(args.cc) ? [`Cc: ${list(args.cc)}`] : []),
+    ...(list(args.bcc) ? [`Bcc: ${list(args.bcc)}`] : []),
+    ...(typeof args.subject === "string" ? [`Subject: ${args.subject}`] : []),
+    ...(operation === "send_message" ? [] : ["In reply to the earlier email in this thread"]),
+    ...(Array.isArray(args.attachments) && args.attachments.length
+      ? [`Attachments: ${args.attachments.length}`]
+      : []),
+    "Body:",
+    body || "no email content",
+    "",
+    "Sends from your connected email account.",
+  ].join("\n");
 }
 
 type BookingAttendee = { name?: string; email?: string; timeZone?: string };

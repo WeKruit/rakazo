@@ -93,6 +93,7 @@ import {
   userHoldsComputerControl,
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
+import { useSameContent } from "../../lib/use-same-content";
 import { useWorkEstimate } from "../../lib/work-estimate";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { RoutineDraftState } from "../routine-draft";
@@ -849,14 +850,18 @@ export function useShellController() {
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);
   }, []);
-  const transcriptMembers = activeSnapshot?.members ?? activeGroup?.members;
+  const transcriptMembers = useSameContent(activeSnapshot?.members ?? activeGroup?.members);
+  // Every list refresh brings new arrays; keep the lookups stable so settled messages skip re-rendering.
+  const transcriptBots = useSameContent(
+    bots.map(({ id, name, color, status }) => ({ id, name, color, status })),
+  );
   const resolveTranscriptBot = useCallback(
     (botId: string) => {
-      const bot = bots.find((candidate) => candidate.id === botId);
+      const bot = transcriptBots.find((candidate) => candidate.id === botId);
       if (bot) return bot;
       return transcriptMembers?.find((member) => member.botId === botId);
     },
-    [bots, transcriptMembers],
+    [transcriptBots, transcriptMembers],
   );
   const workingBots = useMemo(
     () =>

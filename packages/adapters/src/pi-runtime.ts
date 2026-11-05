@@ -756,9 +756,12 @@ export class PiAgentRuntime implements AgentRuntime {
                 toolActivityShowing = false;
                 queue.push({ type: "progress", text: "", activity: true });
               }
-              streamed += delta;
+              // A new model message starts a new paragraph: two replies in one turn once
+              // rendered as "…for this role.Absolutely."
+              const text = currentMessageStreamed ? delta : paragraphBreak(streamed) + delta;
+              streamed += text;
               currentMessageStreamed += delta;
-              queue.push({ type: "text", text: delta });
+              queue.push({ type: "text", text });
             }
           }
           if (event.type === "turn_end" && interjected) {
@@ -784,8 +787,9 @@ export class PiAgentRuntime implements AgentRuntime {
                 // A provider can put the answer only on the completed message after
                 // narration already filled `streamed`, so message_end will not emit it.
                 if (messageText.trim() && !streamedFinal) {
-                  streamed += messageText;
-                  queue.push({ type: "text", text: messageText });
+                  const text = paragraphBreak(streamed) + messageText;
+                  streamed += text;
+                  queue.push({ type: "text", text });
                 }
               } else if (
                 // A provider failure is not an empty success. Do not schedule
@@ -824,8 +828,9 @@ export class PiAgentRuntime implements AgentRuntime {
               !continued &&
               (streamedThisMessage.includes(text) || sincePendingFinal.endsWith(text));
             if (textToEmit && !messageHasToolCall(event.message) && !alreadyEmitted) {
-              streamed += textToEmit;
-              queue.push({ type: "text", text: textToEmit });
+              const emitted = continued ? textToEmit : paragraphBreak(streamed) + textToEmit;
+              streamed += emitted;
+              queue.push({ type: "text", text: emitted });
             } else if (text && !streamed) {
               streamed = text;
               queue.push({ type: "text", text });
@@ -4344,4 +4349,9 @@ export function untilStopped<T>(
       signal.removeEventListener("abort", onAbort);
     });
   });
+}
+
+/** The separator before a new model message's text: none at the start or after a line break. */
+export function paragraphBreak(streamed: string): string {
+  return streamed && !/\s$/.test(streamed) ? "\n\n" : "";
 }

@@ -72,6 +72,14 @@ const GOOGLE_MCP_GMAIL_WRITES = new Set([
   "unlabel_message",
   "unlabel_thread",
 ]);
+export const GMAIL_MCP_ENDPOINT = "https://gmailmcp.googleapis.com/mcp/v1";
+/** Mail the recruiting agents read. */
+export const GMAIL_READ_TOOLS = ["get_message", "get_thread", "search_threads"];
+/** Outreach and Scheduling also keep drafts, and Outreach sends each email after its card. */
+export const GMAIL_DRAFT_TOOLS = [...GMAIL_READ_TOOLS, "list_drafts", "get_draft", "create_draft"];
+/** Gmail sends from the recruiter's own mailbox: each one is confirmed on its own card. */
+export const GMAIL_SEND_TOOLS = ["send_message", "reply", "forward"] as const;
+const GOOGLE_MCP_GMAIL_SENDS = new Set<string>(GMAIL_SEND_TOOLS);
 const GOOGLE_MCP_CALENDAR_WRITES = new Set([
   "create_event",
   "update_event",
@@ -108,7 +116,7 @@ export function internalMcpWriteEndpoint(toolName: string): string | undefined {
     GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
     (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
   )
-    return "https://gmailmcp.googleapis.com/mcp/v1";
+    return GMAIL_MCP_ENDPOINT;
   if (INSTANTLY_NATIVE_INTERNAL_WRITES.has(toolName)) return INSTANTLY_MCP_ENDPOINT;
   return undefined;
 }
@@ -121,6 +129,11 @@ export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
   )
     return "https://calendarmcp.googleapis.com/mcp/v1";
   if (CAL_MCP_BOOKING_WRITES.has(toolName)) return "https://mcp.cal.com/mcp";
+  if (
+    GOOGLE_MCP_GMAIL_SENDS.has(toolName) ||
+    (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_SENDS.has(toolName.slice(6)))
+  )
+    return GMAIL_MCP_ENDPOINT;
   return undefined;
 }
 

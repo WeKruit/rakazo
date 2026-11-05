@@ -222,8 +222,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "settle the language requirement",
     in: ["Main", "Recruitment intake and handoff skill"],
-    phrase: /always settle the language requirement/i,
+    phrase: /settle the language requirement/i,
     why: "Briefs left the language requirement open and rounds ignored it.",
+  },
+  {
+    rule: "ask about language only when it matters",
+    in: ["RECRUITING_BRIEF_CHECKLIST", "Recruitment intake and handoff skill"],
+    phrase: "point to a second language",
+    why: "A New York role's first question asked whether English was required.",
   },
   {
     rule: "an unconfirmed limit stays a preference",
@@ -965,6 +971,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     phrase:
       "so the call itself is the draft for review: call it rather than refusing or pasting the text in chat",
     why: "Agents refused to reply to a candidate, saying there was no approval flow.",
+  },
+  {
+    rule: "a new reply request is never judged by an older card",
+    in: ["Main", "Outreach"],
+    phrase:
+      "Never judge a new reply request, or brief anyone to, by an earlier card for other text.",
+    why: "Main briefed Outreach to stop if the new reply's card was discarded, and Outreach said it was without calling a tool, so no Send card appeared.",
   },
   {
     rule: "a candidate reply ends follow-ups",

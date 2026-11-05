@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  creditEstimateNote,
   isChineseText,
   isEnglishText,
   RECRUITER_LANGUAGE,
@@ -106,6 +107,9 @@ describe("isEnglishText", () => {
     expect(isEnglishText("Book Adam Test for Nov 3 at 2pm Central")).toBe(true);
     expect(isEnglishText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(false);
     expect(isEnglishText("Adam Test")).toBe(false);
+    expect(
+      isEnglishText("测试固定 · Senior Backend Engineer in New York, 6+ years of Go or Java"),
+    ).toBe(true);
   });
 });
 
@@ -124,5 +128,14 @@ describe("recruiterLanguageText", () => {
   it("falls back to the latest message when none has a clear language", () => {
     expect(recruiterLanguageText(["OK"])).toBe("OK");
     expect(recruiterLanguageText([])).toBe("");
+  });
+});
+
+describe("creditEstimateNote", () => {
+  it("tells the agent the balance and what each step usually costs, without asking permission", () => {
+    const note = creditEstimateNote(9876.4);
+    expect(note).toContain("9,876 left");
+    expect(note).toContain("150 people about 600 to 1,000");
+    expect(note).toContain("Never ask permission because of cost alone");
   });
 });
