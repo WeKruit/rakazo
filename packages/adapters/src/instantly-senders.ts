@@ -513,6 +513,11 @@ export async function ensureSendingIdentity(
       mailboxLimit: limit,
       selfSetup,
       // The read itself says what to do, so an agent that never loaded sender setup still answers right.
+      ...(current.length
+        ? {
+            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.",
+          }
+        : {}),
       ...(!selfSetup && !current.length && !pending.length
         ? {
             next: noSelfSetup(
