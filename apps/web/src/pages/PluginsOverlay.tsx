@@ -360,7 +360,11 @@ export function PluginsOverlay({
         }
       } else if (coordinatorBotId && personalService(server)) {
         // A reconnect also gives specialists their narrow access, which older grants may lack.
-        await connectProductServer(server.id);
+        // The sign-in itself already went through, so a failure here still shows it connected.
+        await connectProductServer(server.id).catch(async (error: unknown) => {
+          if (current()) await refresh().catch(() => undefined);
+          throw error;
+        });
         if (!current()) return;
       }
       const fresh = await refresh();

@@ -42,7 +42,7 @@ async function threadsForDecision(
   actor: Actor,
   input: McpApprovalResolution,
 ): Promise<ApprovalThread[]> {
-  if (!input.threadId) return threadsForBot(deps.prisma, actor, input.botId);
+  if (!input.threadId) return threadsForBot(deps.prisma, actor, input.botId, input.serverId);
   const member = await deps.prisma.thread.findMany({
     where: {
       id: input.threadId,
@@ -74,16 +74,21 @@ async function threadsForDecision(
 
 type ApprovalThread = { id: string; botId: string | null };
 
+/** Only threads that hold a card for this server: a coordinator is in hundreds of chats. */
 async function threadsForBot(
   db: Prisma.TransactionClient | PrismaClient,
   actor: Actor,
   botId: string,
+  serverId: string,
 ): Promise<ApprovalThread[]> {
   return db.thread.findMany({
     where: {
       spaceId: actor.spaceId,
       userId: actor.userId,
       OR: [{ botId }, { groupId: { not: null }, messages: { some: { botId } } }],
+      messages: {
+        some: { blocks: { array_contains: [{ kind: "mcp_approval", serverId }] } },
+      },
     },
     select: { id: true, botId: true },
   });
@@ -192,8 +197,8 @@ export async function revertConnectedMcpApprovals(
     input.status === "dismissed" ? block.status !== "dismissed" : block.status === "connected";
   const paint = (client: Prisma.TransactionClient, threads: ApprovalThread[]) =>
     rewriteCards(client, actor, threads, input, selectable).then((painted) => painted.seqs);
-  if (tx) return paint(tx, await threadsForBot(tx, actor, input.botId));
-  const threads = await threadsForBot(deps.prisma, actor, input.botId);
+  if (tx) return paint(tx, await threadsForBot(tx, actor, input.botId, input.serverId));
+  const threads = await threadsForBot(deps.prisma, actor, input.botId, input.serverId);
   const seqs = await withTransactionRetry(() =>
     deps.prisma.$transaction((client) => paint(client, threads), {
       isolationLevel: "Serializable",
