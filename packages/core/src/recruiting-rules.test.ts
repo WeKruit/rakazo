@@ -967,6 +967,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Agents refused to reply to a candidate, saying there was no approval flow.",
   },
   {
+    rule: "a new reply request is never judged by an older card",
+    in: ["Main", "Outreach"],
+    phrase:
+      "Never judge a new reply request, or brief anyone to, by an earlier card for other text.",
+    why: "Main briefed Outreach to stop if the new reply's card was discarded, and Outreach said it was without calling a tool, so no Send card appeared.",
+  },
+  {
     rule: "a candidate reply ends follow-ups",
     in: "Outreach",
     phrase:
