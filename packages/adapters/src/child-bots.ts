@@ -15,6 +15,7 @@ import {
   computerScopeKey,
   createRepos,
   createThreadMessageInTransaction,
+  deleteRecruitingRoles,
   expireComputerExecutionLeases,
   type Prisma,
   type PrismaClient,
@@ -560,6 +561,7 @@ async function detachBotFromGroups(tx: Prisma.TransactionClient, botId: string) 
       })
     : [];
   if (dissolvedGroupIds.length) {
+    await deleteRecruitingRoles(tx, { sourceThread: { groupId: { in: dissolvedGroupIds } } });
     await tx.chatGroup.deleteMany({ where: { id: { in: dissolvedGroupIds } } });
   }
   return {
