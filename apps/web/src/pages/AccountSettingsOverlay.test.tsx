@@ -308,7 +308,9 @@ it("shows only product credits in usage for both customer and staff accounts", a
       );
       expect(container.textContent).toContain("Quality manager");
       expect(container.textContent).toContain("Credits");
-      expect(container.textContent).toContain("150.1256");
+      expect(container.textContent).toContain("150");
+      expect(container.textContent).not.toContain("150.1");
+      expect(container.textContent).toContain("9,772");
       expect(container.textContent).toContain("Remaining");
       expect(container.textContent).toContain("Pending usage");
       for (const hidden of [

@@ -430,8 +430,11 @@ export function UsageSettingsPanel({
   );
 }
 
+/** Credits read as whole numbers; a fraction shows only while the amount is small. */
 function formatUsageNumber(value: number) {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(value);
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: Math.abs(value) < 10 ? 1 : 0,
+  }).format(value);
 }
 
 function UsageTable({
