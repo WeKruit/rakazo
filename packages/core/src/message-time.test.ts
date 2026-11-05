@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMessageTime } from "./message-time.js";
+import { dateTimeFormat, formatMessageTime } from "./message-time.js";
 
 const now = new Date(2026, 9, 4, 15, 30);
 
@@ -21,5 +21,27 @@ describe("message time label", () => {
 
   it("returns an empty label for an invalid timestamp", () => {
     expect(formatMessageTime("not a date", "en-US", now)).toBe("");
+  });
+
+  it("reuses one formatter per locale and options", () => {
+    // Building an Intl formatter per message made long transcripts slow to stream.
+    const original = Intl.DateTimeFormat;
+    let built = 0;
+    Intl.DateTimeFormat = class extends original {
+      constructor(...args: ConstructorParameters<typeof original>) {
+        super(...args);
+        built += 1;
+      }
+    } as typeof original;
+    try {
+      for (let minute = 0; minute < 50; minute += 1)
+        expect(formatMessageTime(new Date(2026, 9, 4, 9, minute), "en-US", now)).toMatch(/AM$/);
+      expect(built).toBe(1);
+      expect(dateTimeFormat("en-US", { hour: "numeric" })).toBe(
+        dateTimeFormat("en-US", { hour: "numeric" }),
+      );
+    } finally {
+      Intl.DateTimeFormat = original;
+    }
   });
 });

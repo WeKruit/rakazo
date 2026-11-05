@@ -78,10 +78,14 @@ import { transcriptIsNearEnd, transcriptMovedDown } from "../../lib/transcript-s
 import { TimeSeparator } from "./chat-context";
 import { TranscriptWindow } from "./TranscriptWindow";
 
-const MessageHoverActions = lazyPanel(() =>
-  import("../ShellMessage").then((module) => module.MessageHoverActions),
+// Memo outside the lazy boundary too: while a reply streams, unchanged messages skip rendering.
+const MessageHoverActions = memo(
+  lazyPanel(() => import("../ShellMessage").then((module) => module.MessageHoverActions)),
 );
-const MessageView = lazyPanel(() => import("../ShellMessage").then((module) => module.MessageView));
+const MessageView = memo(
+  lazyPanel(() => import("../ShellMessage").then((module) => module.MessageView)),
+);
+const noop = () => {};
 
 export const Transcript = memo(function Transcript({
   narrow,
@@ -622,7 +626,7 @@ export const Transcript = memo(function Transcript({
                         onAddRoutine={onAddRoutine}
                         voiceReady={voiceReady}
                         speaking={speakingMessageId === message.id}
-                        onSpeak={() => onSpeak(message)}
+                        onSpeak={onSpeak}
                         onOpenComputer={onOpenComputer}
                         showToolActivity={showToolActivity}
                         onContinue={
@@ -802,7 +806,7 @@ export const Transcript = memo(function Transcript({
               onAddRoutine={onAddRoutine}
               voiceReady={false}
               speaking={false}
-              onSpeak={() => {}}
+              onSpeak={noop}
               onOpenComputer={onOpenComputer}
               showToolActivity={showToolActivity}
             />
