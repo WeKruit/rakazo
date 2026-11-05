@@ -1,3 +1,5 @@
+import { dateTimeFormat } from "./message-time.js";
+
 /** Calendar comparisons use the viewer's local zone, including DST transitions. */
 function dayNumber(date: Date): number {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
@@ -26,7 +28,7 @@ export function formatTimeSeparator(
   const timeFallback = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   const format = (options: Intl.DateTimeFormatOptions, fallback: string): string => {
     try {
-      return new Intl.DateTimeFormat(locale, options).format(date);
+      return dateTimeFormat(locale, options).format(date);
     } catch {
       // Hermes builds and invalid/unsupported locales must never prevent opening a thread.
       return fallback;
