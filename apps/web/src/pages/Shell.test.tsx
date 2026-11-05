@@ -2728,8 +2728,13 @@ it("archives and restores an ordinary role through the native lifecycle without 
     await import("./BotContextMenu");
   });
   const menu = document.body.querySelector('[role="menu"]')!;
-  expect(menu.textContent).toBe("Archive");
-  await act(async () => menu.querySelector<HTMLElement>('[role="menuitem"]')!.click());
+  // A recruiter files a role under a client; everything else stays in the developer view.
+  expect(menu.textContent).toBe("ClientArchive");
+  await act(async () =>
+    [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent === "Archive")!
+      .click(),
+  );
   expect(shellApi.archiveGroup).toHaveBeenCalledExactlyOnceWith({ groupId: "group-1" });
   expect(
     container?.querySelector('nav[aria-label="Role conversations"]')?.textContent,

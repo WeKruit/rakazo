@@ -14,6 +14,7 @@ import {
   Archive,
   Bell,
   BellDot,
+  Briefcase,
   Check,
   Copy,
   Eraser,
@@ -44,6 +45,7 @@ export function BotContextMenu({
   onArchive,
   onDelete,
   showDeveloperActions,
+  clients = false,
 }: {
   bot: ChatMenuTarget;
   position: ContextMenuPosition;
@@ -60,6 +62,8 @@ export function BotContextMenu({
   onArchive: () => void;
   onDelete: () => void;
   showDeveloperActions: boolean;
+  /** Recruiting roles: the same sections, named as the client each role is for. */
+  clients?: boolean;
 }) {
   const { t } = useLingui();
 
@@ -144,6 +148,36 @@ export function BotContextMenu({
               {t`Clear conversation`}
             </DropdownMenuItem>
           </>
+        ) : clients ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Briefcase />
+              {t`Client`}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-[min(420px,calc(100vh-16px))] min-w-[180px] overflow-y-auto">
+              {sections.map((section) => (
+                <DropdownMenuItem key={section.id} onClick={() => onMoveToSection(section.id)}>
+                  <span dir="auto">{section.name}</span>
+                  {bot.sectionId === section.id ? <Check className="ms-auto" /> : null}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={() => onMoveToSection(null)}>
+                {t`No client`}
+                {bot.sectionId === null ? <Check className="ms-auto" /> : null}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onCreateSection}>
+                <FolderPlus />
+                {t`New client`}
+              </DropdownMenuItem>
+              {bot.sectionId && onRenameSection ? (
+                <DropdownMenuItem onClick={() => onRenameSection(bot.sectionId!)}>
+                  <Pencil />
+                  {t`Rename client`}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         ) : null}
         <DropdownMenuItem onClick={onArchive}>
           <Archive />

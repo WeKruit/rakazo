@@ -4506,6 +4506,10 @@ msgstr "Search refinement"
 msgid "Search roles"
 msgstr "Search roles"
 
+#: src/pages/recruiting/RecruitingRolesDirectory.tsx
+msgid "Search roles or clients"
+msgstr "Search roles or clients"
+
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
 msgid "Search roles, contacts, sequences and saved mail."
 msgstr "Search roles, contacts, sequences and saved mail."

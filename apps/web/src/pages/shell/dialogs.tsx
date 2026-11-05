@@ -214,10 +214,12 @@ export function PickerInfoDialog({
 
 export function NewBotSectionDialog({
   bot,
+  client = false,
   onCancel,
   onConfirm,
 }: {
   bot: Pick<Bot, "name">;
+  client?: boolean;
   onCancel: () => void;
   onConfirm: (name: string) => Promise<void>;
 }) {
@@ -239,17 +241,23 @@ export function NewBotSectionDialog({
             setSaving(true);
             setError(null);
             void onConfirm(trimmed).catch((err: unknown) => {
-              setError(errorText(err, t`Could not create section`));
+              setError(
+                errorText(err, client ? t`Could not add client` : t`Could not create section`),
+              );
               setSaving(false);
             });
           }}
         >
           <DialogHeader>
             <DialogTitle>
-              <Trans>New section</Trans>
+              {client ? <Trans>New client</Trans> : <Trans>New section</Trans>}
             </DialogTitle>
             <DialogDescription>
-              <Trans>Create a section and move {bot.name} into it.</Trans>
+              {client ? (
+                <Trans>Add a client and put {bot.name} under it.</Trans>
+              ) : (
+                <Trans>Create a section and move {bot.name} into it.</Trans>
+              )}
             </DialogDescription>
           </DialogHeader>
           <label htmlFor={nameId} className="block text-[13.5px] text-foreground/75">
@@ -279,10 +287,12 @@ export function NewBotSectionDialog({
 
 export function RenameBotSectionDialog({
   section,
+  client = false,
   onCancel,
   onConfirm,
 }: {
   section: Pick<BotSection, "name">;
+  client?: boolean;
   onCancel: () => void;
   onConfirm: (name: string) => Promise<void>;
 }) {
@@ -312,7 +322,7 @@ export function RenameBotSectionDialog({
         >
           <DialogHeader>
             <DialogTitle>
-              <Trans>Rename section</Trans>
+              {client ? <Trans>Rename client</Trans> : <Trans>Rename section</Trans>}
             </DialogTitle>
           </DialogHeader>
           <label htmlFor={nameId} className="block text-[13.5px] text-foreground/75">

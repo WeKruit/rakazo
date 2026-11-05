@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
+import type { BotSection, Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
@@ -108,6 +108,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   onViewAllRoles,
   onSearch,
   compact = false,
+  clients = [],
 }: {
   /** The role list has not arrived yet. */
   loading?: boolean;
@@ -122,6 +123,8 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   onViewAllRoles?: () => void;
   onSearch?: () => void;
   compact?: boolean;
+  /** Sections a recruiter named as clients; each role shows its own. */
+  clients?: readonly BotSection[];
   /** Hover or focus on a role: start reading its conversation before the click. */
   onPrefetchRole?: (id: string) => void;
   crmContext?: {
@@ -266,8 +269,13 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
   // Roles waiting on the recruiter come first; the rest keep their order.
+  const clientOf = (group: Group) => clients.find((client) => client.id === group.sectionId)?.name;
   const visibleGroups = groups
-    .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    .filter((group) =>
+      `${group.name} ${clientOf(group) ?? ""}`
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase()),
+    )
     .sort(
       (a, b) =>
         Number(creating(b)) - Number(creating(a)) ||
@@ -598,6 +606,11 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
                   dir="auto"
                 >
                   <span className="block truncate">{group.name}</span>
+                  {clientOf(group) ? (
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {clientOf(group)}
+                    </span>
+                  ) : null}
                   {(titleCounts.get(group.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? (
                     <time
                       dateTime={group.createdAt}

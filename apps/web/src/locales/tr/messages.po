@@ -278,6 +278,11 @@ msgstr ""
 msgid "Add {name} to shortlist"
 msgstr ""
 
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Add a client and put {0} under it."
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
 msgstr ""
@@ -1204,6 +1209,7 @@ msgstr "Temizleniyor…"
 msgid "Clicked"
 msgstr ""
 
+#: src/pages/BotContextMenu.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
 msgstr ""
@@ -1670,6 +1676,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not add"
 msgstr "Eklenemedi"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not add client"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not add MCP server"
@@ -3933,6 +3943,11 @@ msgstr "Devralma bekliyor"
 msgid "New bot"
 msgstr "Yeni bot"
 
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "New client"
+msgstr ""
+
 #: src/pages/GroupPanel.tsx
 msgid "New group"
 msgstr "Yeni grup"
@@ -4047,6 +4062,10 @@ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
+msgstr ""
+
+#: src/pages/BotContextMenu.tsx
+msgid "No client"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -5189,6 +5208,11 @@ msgstr "Kaldırıldı ama liste yenilenemedi"
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "Kaldırılıyor…"
+
+#: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Rename client"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
