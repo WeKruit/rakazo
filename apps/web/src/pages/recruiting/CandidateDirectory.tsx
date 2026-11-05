@@ -502,12 +502,12 @@ export function CandidateDirectory({
         <CandidateWindow
           key="table"
           mode="table"
-          tableClassName="w-full min-w-[1120px] table-fixed border-collapse text-left text-sm"
+          tableClassName="w-full table-fixed border-collapse text-left text-sm"
           itemKeys={itemKeys}
           offsets={offsets}
           label={t`Candidate table`}
           header={
-            <thead className="sticky top-0 z-20 bg-muted text-xs text-muted-foreground">
+            <thead className="sticky top-0 z-20 whitespace-nowrap bg-muted text-xs text-muted-foreground">
               <tr>
                 {selection ? (
                   <th scope="col" className="sticky left-0 z-20 w-10 bg-muted px-3 py-2">
@@ -530,10 +530,10 @@ export function CandidateDirectory({
                 >
                   <Trans>Name</Trans>
                 </th>
-                <th scope="col" className="w-[18%] px-3 py-2 font-medium">
+                <th scope="col" className="w-52 px-3 py-2 font-medium">
                   <Trans>Current role</Trans>
                 </th>
-                <th scope="col" className="w-[15%] px-3 py-2 font-medium">
+                <th scope="col" className="w-44 px-3 py-2 font-medium">
                   <Trans>Company</Trans>
                 </th>
                 {showEducation ? (
@@ -542,11 +542,11 @@ export function CandidateDirectory({
                   </th>
                 ) : null}
                 {!hiddenColumns.has("location") ? (
-                  <th scope="col" className="w-[11%] px-3 py-2 font-medium">
+                  <th scope="col" className="w-36 px-3 py-2 font-medium">
                     <Trans>Location</Trans>
                   </th>
                 ) : null}
-                <th scope="col" className="w-[10%] px-3 py-2 font-medium">
+                <th scope="col" className="w-32 px-3 py-2 font-medium">
                   <Trans>Status</Trans>
                 </th>
                 <th scope="col" className="w-28 px-3 py-2 font-medium">
@@ -559,7 +559,7 @@ export function CandidateDirectory({
                   <Trans>Date added</Trans>
                 </th>
                 {showFit ? (
-                  <th scope="col" className="w-[13%] px-3 py-2 font-medium">
+                  <th scope="col" className="w-40 px-3 py-2 font-medium">
                     <Trans>Fit</Trans>
                   </th>
                 ) : null}
