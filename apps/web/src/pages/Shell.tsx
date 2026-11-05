@@ -1,3 +1,4 @@
+import { isEmptyHomeTeam } from "../lib/home-team";
 import { withFeatureMessages } from "../lib/i18n";
 import { computerLabel, DesktopKindEmptyState } from "./shell/computer-presentation";
 
@@ -521,7 +522,9 @@ export function ShellPage() {
         <HomeDashboard
           userName={session.data?.user.name}
           onOpenWork={model.openRecruitingView}
-          groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
+          groups={groups.filter(
+            (group) => !group.id.startsWith("recruiting-global-") && !isEmptyHomeTeam(group),
+          )}
           readCache={recruitingReadCache.current}
           readCacheScope={
             userId && bootstrapMe?.spaceId

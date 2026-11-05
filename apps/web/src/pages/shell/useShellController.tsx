@@ -93,7 +93,6 @@ import {
   userHoldsComputerControl,
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
-import { useSameContent } from "../../lib/use-same-content";
 import { useWorkEstimate } from "../../lib/work-estimate";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { RoutineDraftState } from "../routine-draft";
@@ -102,7 +101,7 @@ import type { SettingsSection } from "../SettingsOverlay";
 import type { PendingAttachment } from "../shell/Composer";
 import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
 import { FALLBACK_BOT_COLOR } from "../shell/constants";
-import { memberName } from "../shell/group-members";
+import { useTranscriptLookups } from "./use-transcript-lookups";
 import { useShellComputer } from "./useShellComputer";
 
 export function useShellController() {
@@ -850,19 +849,8 @@ export function useShellController() {
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);
   }, []);
-  const transcriptMembers = useSameContent(activeSnapshot?.members ?? activeGroup?.members);
-  // Every list refresh brings new arrays; keep the lookups stable so settled messages skip re-rendering.
-  const transcriptBots = useSameContent(
-    bots.map(({ id, name, color, status }) => ({ id, name, color, status })),
-  );
-  const resolveTranscriptBot = useCallback(
-    (botId: string) => {
-      const bot = transcriptBots.find((candidate) => candidate.id === botId);
-      if (bot) return bot;
-      return transcriptMembers?.find((member) => member.botId === botId);
-    },
-    [transcriptBots, transcriptMembers],
-  );
+  const { resolveBot: resolveTranscriptBot, resolveMemberName: resolveTranscriptMemberName } =
+    useTranscriptLookups(bots, activeSnapshot?.members ?? activeGroup?.members);
   const workingBots = useMemo(
     () =>
       workingRuns.map((run): GroupAvatarMember => {
@@ -875,10 +863,6 @@ export function useShellController() {
         };
       }),
     [workingRuns, resolveTranscriptBot],
-  );
-  const resolveTranscriptMemberName = useCallback(
-    (botId: string | undefined) => memberName(transcriptMembers, botId),
-    [transcriptMembers],
   );
   const replyTargetName = activeReplyTarget
     ? activeReplyTarget.role === "user"
