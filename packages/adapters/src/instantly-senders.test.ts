@@ -656,6 +656,29 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
   expect(f.rows).toHaveLength(0);
 });
 
+it("tells an account with a product mailbox that it never sends from the recruiter's own email", async () => {
+  const f = fixture();
+  vi.mocked(f.prisma.externalEffect.findMany).mockImplementation((async (args: {
+    where: { kind?: string };
+  }) =>
+    args.where.kind === "instantly_sender_account"
+      ? [
+          {
+            result: {
+              email: "jo@send.example.test",
+              displayName: "Jo",
+              domain: "send.example.test",
+              attached: true,
+            },
+          },
+        ]
+      : []) as never);
+  const read = await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  });
+  expect(read).toMatchObject({ next: expect.stringContaining("never the recruiter's own email") });
+});
+
 it("tells a self-signup account without a mailbox to send from its own email", async () => {
   const f = fixture(2, false);
   vi.mocked(f.prisma.user.findUnique).mockResolvedValue({ usageCreditLimit: 10_000 } as never);
