@@ -570,7 +570,7 @@ function formatGmailSend(toolName: string, args: Record<string, unknown>) {
     "Body:",
     body || "no email content",
     "",
-    "Sends from your connected email account.",
+    "Sends from your connected email account. Google may limit or suspend accounts that send bulk outreach; that risk is yours.",
   ].join("\n");
 }
 

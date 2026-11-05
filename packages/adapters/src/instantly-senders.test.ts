@@ -656,6 +656,16 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
   expect(f.rows).toHaveLength(0);
 });
 
+it("tells a self-signup account without a mailbox to send from its own email", async () => {
+  const f = fixture(2, false);
+  vi.mocked(f.prisma.user.findUnique).mockResolvedValue({ usageCreditLimit: 10_000 } as never);
+  const read = await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  });
+  expect(read).toMatchObject({ senders: [], next: expect.stringContaining("own connected email") });
+  expect(JSON.stringify(read)).not.toContain("cannot email candidates yet");
+});
+
 it("asks no company name until the turn read the sending email", () => {
   // Kruit once asked "which company name" first on an account that cannot set one up.
   expect(asksSenderCompanyName("请提供用于准备发件地址的公司名称")).toBe(true);

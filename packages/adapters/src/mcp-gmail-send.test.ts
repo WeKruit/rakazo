@@ -83,9 +83,14 @@ describe("Gmail send from the recruiter's own mailbox", () => {
       allowedTools: ["get_message", "send_message"],
       server: GMAIL,
     };
+    // A self-signup account: a credit limit and no product sending mailbox.
+    const account = { usageCreditLimit: 10_000 as number | null };
+    const mailboxes: { result: unknown }[] = [];
     const prisma = {
       mcpServer: { count: vi.fn(async () => 1) },
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
+      user: { findUnique: vi.fn(async () => account) },
+      externalEffect: { findMany: vi.fn(async () => mailboxes) },
     };
     const connector = new McpConnector(prisma as never, {} as never, { network }, {
       providerFor: vi.fn(async () => ({ tokens: async () => ({ access_token: "tok-1" }) })),
@@ -129,5 +134,30 @@ describe("Gmail send from the recruiter's own mailbox", () => {
     expect(mail.head).toContain("In-Reply-To: <m1@mail.test>");
     expect(mail.body).toBe("Following up.");
     expect(JSON.stringify(sent)).not.toContain("tok-1");
+
+    // Accounts we set up send through their product mailbox, never the recruiter's own email.
+    const sends = requests.length;
+    for (const onboarded of [
+      () => {
+        account.usageCreditLimit = null;
+      },
+      () => {
+        account.usageCreditLimit = 10_000;
+        mailboxes.push({
+          result: {
+            email: "jo@send.example.test",
+            displayName: "Jo",
+            domain: "send.example.test",
+            attached: true,
+          },
+        });
+      },
+    ]) {
+      onboarded();
+      expect(await run({ to: ["a@example.test"], subject: "Hi", body: "Hello" })).toEqual([
+        { type: "error", message: expect.stringMatching(/outreach mailbox/) },
+      ]);
+    }
+    expect(requests).toHaveLength(sends);
   });
 });

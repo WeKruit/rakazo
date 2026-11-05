@@ -1037,7 +1037,7 @@ describe("buildApprovalAskBlock", () => {
         "",
         "A payments team in New York is hiring.",
         "",
-        "Sends from your connected email account.",
+        "Sends from your connected email account. Google may limit or suspend accounts that send bulk outreach; that risk is yours.",
       ].join("\n"),
     );
     expect(block.actions?.map((action) => action.id)).toEqual(["allow", "deny"]);
