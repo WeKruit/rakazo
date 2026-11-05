@@ -306,6 +306,7 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     emailVerification: {
       sendOnSignIn: true,
       autoSignInAfterVerification: false,
+      expiresIn: 24 * 60 * 60,
       sendVerificationEmail: env.email
         ? async ({ user, url }) => {
             const verificationUrl = new URL(url);
@@ -623,8 +624,8 @@ export function verificationEmail(email: string, url: string): TransactionalEmai
   return {
     to: email,
     subject: "Verify your WeKruit Headhunter email",
-    text: `Verify your email, then return to WeKruit Headhunter to sign in:\n\n${url}\n\nThis link expires in one hour. If you did not register, ignore this email.`,
-    html: `<p><a href="${escapeHtml(url)}">Verify email</a>, then return to WeKruit Headhunter to sign in.</p><p>This link expires in one hour. If you did not register, ignore this email.</p>`,
+    text: `Verify your email, then return to WeKruit Headhunter to sign in:\n\n${url}\n\nThis link expires in 24 hours. If you did not register, ignore this email.`,
+    html: `<p><a href="${escapeHtml(url)}">Verify email</a>, then return to WeKruit Headhunter to sign in.</p><p>This link expires in 24 hours. If you did not register, ignore this email.</p>`,
   };
 }
 

@@ -1,8 +1,17 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
-import { FolderOpen, Gauge, LayoutGrid, LogOut, Settings, SquareKanban } from "lucide-react";
+import {
+  FolderOpen,
+  Gauge,
+  LayoutGrid,
+  LifeBuoy,
+  LogOut,
+  Settings,
+  SquareKanban,
+} from "lucide-react";
 import type { CSSProperties } from "react";
 import { useMemo } from "react";
+import { CreditsNotice } from "../../components/CreditsNotice";
 import { DeferredPopover } from "../../components/DeferredPopover";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
@@ -11,6 +20,7 @@ import { desktopBridge } from "../../lib/desktop";
 import { withFeatureMessages } from "../../lib/i18n";
 import { clearSpaceSelection, rpc } from "../../lib/rpc";
 import { savedThreads } from "../../lib/saved-threads";
+import { supportMailto, useSupportEmail } from "../../lib/support";
 import { useKeyedRead } from "../recruiting/shared";
 
 import { RecruitingNavigation } from "../shell/RecruitingNavigation";
@@ -22,6 +32,7 @@ const DeveloperSidebar = lazyPanel(() =>
 );
 export function ShellSidebar({ model }: { model: ReturnType<typeof useShellController> }) {
   const { t } = useLingui();
+  const supportEmail = useSupportEmail();
   const {
     groupId,
     navigate,
@@ -240,6 +251,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
         </>
       ) : null}
       {showToolActivity ? <DeveloperSidebar model={model} /> : null}
+      {botsSidebarCollapsed && !showToolActivity ? null : <CreditsNotice />}
       <DeferredPopover
         open={menuOpen}
         onOpenChange={setMenuOpen}
@@ -332,6 +344,18 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
           <Gauge className="text-muted-foreground" strokeWidth={1.75} />
           <Trans>Usage</Trans>
         </Button>
+        {supportEmail ? (
+          <Button
+            variant="ghost"
+            className="w-full justify-start font-normal"
+            nativeButton={false}
+            render={<a href={supportMailto(supportEmail, "WeKruit Headhunter")} />}
+            onClick={() => setMenuOpen(false)}
+          >
+            <LifeBuoy className="text-muted-foreground" strokeWidth={1.75} />
+            <Trans>Contact us</Trans>
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           className="w-full justify-start font-normal"

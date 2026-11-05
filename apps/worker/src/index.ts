@@ -387,6 +387,8 @@ async function main() {
     events,
     notifications,
     completionEmail: Boolean(email),
+    email,
+    webOrigin: process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
     leadership: createPostgresReconciliationLeadership(sessionPool),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),

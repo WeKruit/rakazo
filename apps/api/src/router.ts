@@ -1132,7 +1132,7 @@ export function createRouter(deps: RouterDeps) {
     if (remaining === 0) {
       throw new ORPCError("CREDITS_EXHAUSTED", {
         status: 402,
-        message: "Your credits are used up. Contact us to add more.",
+        message: "Your credits are used up.",
       });
     }
     if ("error" in resolvedTarget) throw resolvedTarget.error;
@@ -1576,6 +1576,7 @@ export function createRouter(deps: RouterDeps) {
             ownerUserId: context.actor.userId,
             sendingMailboxLimit: input.sendingMailboxLimit ?? 2,
             senderSelfSetup: input.senderSelfSetup ?? false,
+            supportEmail: input.supportEmail ?? null,
             signupsEnabled: input.signupsEnabled ?? true,
             signupAllowlist: (input.signupAllowlist ?? []).join(","),
             signupPolicyInitialized: true,
@@ -1588,6 +1589,7 @@ export function createRouter(deps: RouterDeps) {
             ...(input.senderSelfSetup === undefined
               ? {}
               : { senderSelfSetup: input.senderSelfSetup }),
+            ...(input.supportEmail === undefined ? {} : { supportEmail: input.supportEmail }),
             ...(input.signupsEnabled === undefined ? {} : { signupsEnabled: input.signupsEnabled }),
             ...(input.signupAllowlist ? { signupAllowlist: input.signupAllowlist.join(",") } : {}),
             ...(input.signupsEnabled === undefined && input.signupAllowlist === undefined
@@ -8071,6 +8073,7 @@ async function deploymentDto(prisma: PrismaClient, sandboxProvider: string) {
   return {
     sendingMailboxLimit: settings?.sendingMailboxLimit ?? 2,
     senderSelfSetup: settings?.senderSelfSetup ?? false,
+    supportEmail: settings?.supportEmail ?? null,
     ownerUserId: settings?.ownerUserId ?? null,
     signupsEnabled: settings?.signupsEnabled ?? true,
     signupAllowlist: settings?.signupAllowlist

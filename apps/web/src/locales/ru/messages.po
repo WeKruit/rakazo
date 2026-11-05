@@ -1519,6 +1519,10 @@ msgstr ""
 msgid "Connect Executor"
 msgstr "Подключить Executor"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Connect Gmail"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Connect MCP server “{name}”"
 msgstr "Подключите MCP-сервер «{name}»"

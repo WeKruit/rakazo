@@ -746,7 +746,19 @@ export async function createApp(
       c.header("cache-control", "no-store");
     });
   }
-  app.get("/api/auth/capabilities", (c) => {
+  // Public and hit on every cold page; the support address changes rarely.
+  let supportEmailCache: { value: string | null; expiresAt: number } | undefined;
+  async function supportEmail() {
+    if (supportEmailCache && supportEmailCache.expiresAt > Date.now())
+      return supportEmailCache.value;
+    const settings = await prisma.deploymentSettings
+      .findUnique({ where: { id: "default" }, select: { supportEmail: true } })
+      .catch(() => null);
+    const value = settings?.supportEmail ?? null;
+    supportEmailCache = { value, expiresAt: Date.now() + 60_000 };
+    return value;
+  }
+  app.get("/api/auth/capabilities", async (c) => {
     return c.json({
       sso: env.oidc
         ? { name: env.oidc.name, availability: auth.ssoAvailability() ?? "checking" }
@@ -757,6 +769,7 @@ export async function createApp(
       resetUrl:
         env.passwordAuth !== false && email ? new URL("/reset-password", env.webOrigin).href : null,
       billing: Boolean(billing),
+      supportEmail: await supportEmail(),
     } satisfies AuthCapabilities);
   });
   if (localEmailEmulator && env.nodeEnv === "development") {

@@ -221,6 +221,13 @@ export function PluginsOverlay({
     if (!mounted.current || version !== refreshVersion.current) return null;
     setServers(nativeServers);
     setAssignments(nativeAssignments);
+    // Nothing of the recruiter's own connected yet: open straight to the apps to connect.
+    if (
+      version === 1 &&
+      !developerView &&
+      !nativeServers.some((s) => personalService(s) && nativeServerConfigured(s))
+    )
+      setSetupOpen(true);
     setCatalog(items);
     setConnections(rows);
     setLabelDrafts((current) => {

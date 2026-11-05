@@ -17,6 +17,8 @@ import { RecruitingRoutines } from "./RecruitingRoutines";
 import { RetryNotice } from "./RetryNotice";
 import { formatDate, TabLoading } from "./shared";
 
+const GMAIL_MCP_ENDPOINT = "https://gmailmcp.googleapis.com/mcp/v1";
+
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
 const MAIL_PER_PAGE = 30;
@@ -62,6 +64,29 @@ export function AccountRecruitingView({
     globalInbox && role !== "all" && params.get("mailThread") && params.get("mailMessage")
       ? { roleId: role, key: params.get("mailThread")!, emailId: params.get("mailMessage")! }
       : undefined;
+  // null while unknown, so the connect button never flashes for a connected inbox.
+  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!globalInbox) return;
+    let active = true;
+    rpc.mcp.servers
+      .list()
+      .then((servers) => {
+        if (!active) return;
+        setGmailConnected(
+          servers.some(
+            (server) =>
+              server.enabled &&
+              server.endpoint?.startsWith(GMAIL_MCP_ENDPOINT) &&
+              server.oauthStatus === "connected",
+          ),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [globalInbox]);
   function clearMailAnchor() {
     if (!params.has("mailThread")) return;
     const next = new URLSearchParams(params);
@@ -735,6 +760,11 @@ export function AccountRecruitingView({
           <div className="space-y-6">
             {view === "inbox" && !renderCorrespondence ? (
               <>
+                {gmailConnected === false ? (
+                  <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
+                    <Trans>Connect Gmail</Trans>
+                  </Button>
+                ) : null}
                 {indexedMail?.key === readKey ? (
                   <div
                     data-dock-avoid

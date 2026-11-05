@@ -289,6 +289,7 @@ export function SettingsOverlay({
                     onOpenMessaging ? () => leaveSettings(onOpenMessaging) : undefined
                   }
                   isDeploymentOwner={isDeploymentOwner}
+                  staff={Boolean(usage?.canViewInternalCosts)}
                 />
               ) : null}
               {section === "usage" ? (
