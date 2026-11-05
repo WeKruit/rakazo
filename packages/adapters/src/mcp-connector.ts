@@ -62,6 +62,7 @@ import {
   readInstantlyEmailPage,
   sameInstantlyAddresses,
 } from "./instantly-reply.js";
+import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -517,11 +518,12 @@ export function gmailRawMessage(input: {
 function localTools(
   assignment: Parameters<typeof localInstantlyTools>[0],
   listed: readonly { name: string }[],
+  ownMailbox: boolean,
 ): ConnectorTool[] {
   return [
     ...localInstantlyTools(assignment, listed),
     ...localContactTools(assignment, listed),
-    ...localGmailTools(assignment, listed),
+    ...(ownMailbox ? localGmailTools(assignment, listed) : []),
   ];
 }
 
@@ -982,6 +984,8 @@ export class McpConnector implements ConnectorProvider {
       },
       include: { server: true, bot: { select: { name: true, spawnKey: true } } },
     });
+    let allowed: Promise<boolean> | undefined;
+    const ownMailbox = () => (allowed ??= ownMailboxSendingAllowed(this.prisma, context));
     const groups = await Promise.all(
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const core = coreTools(assignment.bot);
@@ -1058,7 +1062,11 @@ export class McpConnector implements ConnectorProvider {
             }));
           if (assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
             for (const tool of remoteTools) directTools.add(tool);
-          const local = localTools(assignment, listed.tools);
+          const local = localTools(
+            assignment,
+            listed.tools,
+            assignment.server.endpoint === GMAIL_MCP && (await ownMailbox()),
+          );
           // Contact lookups go through find_emails, which never pays twice for one person.
           const lookup = local.some((tool) => tool.route?.toolName === FIND_EMAILS);
           return withCore([
@@ -1839,6 +1847,10 @@ export class McpConnector implements ConnectorProvider {
       );
       if (server.endpoint !== GMAIL_MCP || server.transport !== "streamable_http")
         throw new IsolationError();
+      if (!(await ownMailboxSendingAllowed(this.prisma, context)))
+        throw new Error(
+          "This account sends through its outreach mailbox, never the recruiter's own email: send with the role's campaign instead.",
+        );
       const provider = await this.oauth?.providerFor(server, context);
       const token = (await provider?.tokens())?.access_token;
       if (!token)
