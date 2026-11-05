@@ -910,7 +910,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "wait_for_work",
     description:
-      'Wait, without spending tokens, for work running in the background of this conversation: research, large people searches, teammates\' handed-off work, cloud agents and automations. mode "all" (default) returns when all of it is done, "any" when the first finishes. Returns done and still running, with ids, kinds and seconds waited. Use it instead of checking again and again. On a long job, wait up to 30 minutes, tell the user the progress, and wait again. New messages from the user still reach you while you wait. For helpers started with run_subagent, use run_subagent wait instead.',
+      'Wait, without spending tokens, for work running in the background of this conversation: research, large people searches, teammates\' handed-off work, cloud agents and automations. mode "all" (default) returns when all of it is done, "any" when the first finishes. Returns done and still running, with ids, kinds and seconds waited. Use it instead of checking again and again. On a long job, wait up to 30 minutes, tell the user the progress, and wait again. A new message from the user ends the wait early so you can answer it. For helpers started with run_subagent, use run_subagent wait instead.',
     inputSchema: {
       type: "object",
       properties: {

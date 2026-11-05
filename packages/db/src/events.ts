@@ -789,6 +789,67 @@ export async function sendUserMessage(
   };
 }
 
+/** The steering rows a run takes: the same filter for claiming them and for noticing them. */
+function steeringForRunWhere(
+  run: {
+    trigger: string | null;
+    clientNonce?: string | null;
+    sourceMessage?: { blocks: unknown } | null;
+  },
+  input: { threadId: string; botId: string; runId: string },
+): Prisma.SteeringMessageWhereInput {
+  // A background search follow-up never takes the recruiter's message: it waits for the
+  // recruiter's own turn, which the follow-up gives way to.
+  const takesPending = takesMessages(run);
+  const channelId =
+    run.trigger === "messaging"
+      ? messagingChannelId(run.sourceMessage?.blocks as MessageBlock[] | undefined)
+      : undefined;
+  const directMessage = run.trigger === "messaging" && !channelId;
+  // Pending rows from another chat stay for their own continuation.
+  const pendingWhere = directMessage
+    ? { runId: null, originTrigger: "messaging" }
+    : channelId
+      ? { runId: null }
+      : { runId: null, originTrigger: null };
+  return {
+    botId: input.botId,
+    AND: [{ OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }] }],
+    // A routine or webhook turn only takes steering addressed to it; pending user messages
+    // wait for the conversational continuation that starts once it finishes.
+    OR: takesPending ? [pendingWhere, { runId: input.runId }] : [{ runId: input.runId }],
+    message: {
+      threadId: input.threadId,
+      // Private follow-ups remain unclaimed for the existing private continuation.
+      ...(channelId
+        ? { blocks: { array_contains: [{ kind: "channel_message", channelId }] } }
+        : directMessage
+          ? { NOT: { blocks: { array_contains: [{ kind: "channel_message" }] } } }
+          : {}),
+    },
+  };
+}
+
+/**
+ * Whether a message this run would take is waiting unread. A long tool wait checks it so the
+ * user is answered now instead of after the wait.
+ */
+export async function hasUnclaimedSteering(
+  prisma: Pick<PrismaClient, "run" | "steeringMessage">,
+  input: { threadId: string; botId: string; runId: string },
+): Promise<boolean> {
+  const run = await prisma.run.findFirst({
+    where: { id: input.runId, threadId: input.threadId, status: "running" },
+    select: { trigger: true, clientNonce: true, sourceMessage: { select: { blocks: true } } },
+  });
+  if (!run || run.trigger === "created") return false;
+  const row = await prisma.steeringMessage.findFirst({
+    where: { ...steeringForRunWhere(run, input), claimedAt: null },
+    select: { id: true },
+  });
+  return Boolean(row);
+}
+
 export async function claimSteering(
   prisma: PrismaClient,
   input: ClaimSteeringInput,
@@ -813,37 +874,10 @@ export async function claimSteering(
       },
     });
     if (!run || run.trigger === "created") return [];
-    // A background search follow-up never takes the recruiter's message: it waits for the
-    // recruiter's own turn, which the follow-up gives way to.
-    const takesPending = takesMessages(run);
-    const channelId =
-      run.trigger === "messaging"
-        ? messagingChannelId(run.sourceMessage?.blocks as MessageBlock[] | undefined)
-        : undefined;
-    const directMessage = run.trigger === "messaging" && !channelId;
-    // Pending rows from another chat stay for their own continuation.
-    const pendingWhere = directMessage
-      ? { runId: null, originTrigger: "messaging" }
-      : channelId
-        ? { runId: null }
-        : { runId: null, originTrigger: null };
     const steering = await tx.steeringMessage.findMany({
       where: {
-        botId: input.botId,
-        AND: [{ OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }] }],
+        ...steeringForRunWhere(run, input),
         id: input.seenIds.length ? { notIn: input.seenIds } : undefined,
-        // A routine or webhook turn only takes steering addressed to it; pending user messages
-        // wait for the conversational continuation that starts once it finishes.
-        OR: takesPending ? [pendingWhere, { runId: input.runId }] : [{ runId: input.runId }],
-        message: {
-          threadId: input.threadId,
-          // Private follow-ups remain unclaimed for the existing private continuation.
-          ...(channelId
-            ? { blocks: { array_contains: [{ kind: "channel_message", channelId }] } }
-            : directMessage
-              ? { NOT: { blocks: { array_contains: [{ kind: "channel_message" }] } } }
-              : {}),
-        },
       },
       include: { message: { select: { blocks: true, seq: true } } },
       orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
