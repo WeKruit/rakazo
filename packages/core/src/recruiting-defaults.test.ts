@@ -106,6 +106,9 @@ describe("isEnglishText", () => {
     expect(isEnglishText("Book Adam Test for Nov 3 at 2pm Central")).toBe(true);
     expect(isEnglishText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(false);
     expect(isEnglishText("Adam Test")).toBe(false);
+    expect(
+      isEnglishText("测试固定 · Senior Backend Engineer in New York, 6+ years of Go or Java"),
+    ).toBe(true);
   });
 });
 

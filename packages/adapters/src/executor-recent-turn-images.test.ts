@@ -550,7 +550,7 @@ describe("run budget guardrails", () => {
           {
             kind: "text",
             text: expect.stringContaining(
-              "10 saved candidate profiles. Next step: Show the 10-person calibration list.",
+              "10 saved candidate profiles. Next step: Show the first 10 people.",
             ),
           },
         ],

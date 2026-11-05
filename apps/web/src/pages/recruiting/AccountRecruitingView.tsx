@@ -770,13 +770,10 @@ export function AccountRecruitingView({
                     data-dock-avoid
                     className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
                   >
-                    <span>
-                      <Trans>Saved mail · partial source coverage</Trans>
-                    </span>
                     {!indexedMail.data.coverage.importsComplete ||
                     !indexedMail.data.coverage.crmComplete ? (
                       <span role="status">
-                        <Trans>Saved mail is indexing in the background.</Trans>
+                        <Trans>Older mail is still loading.</Trans>
                       </span>
                     ) : null}
                   </div>
@@ -786,7 +783,7 @@ export function AccountRecruitingView({
                 indexedMail.data.coverage.importsComplete &&
                 indexedMail.data.coverage.crmComplete ? (
                   <p data-dock-avoid className="mb-3 text-sm text-muted-foreground">
-                    <Trans>No indexed mail matches this view.</Trans>
+                    <Trans>No emails yet.</Trans>
                   </p>
                 ) : null}
                 <AccountInbox

@@ -12656,7 +12656,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish({
               ok: true,
               team: `${title} team`,
-              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line that the team will ask its questions there; do not paste a link.",
+              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line, in their language, that the role is open and its first question is waiting there (for example \"I opened the role. Its first question is waiting there.\"); never say intake, and do not paste a link.",
             });
           }
           if (name === "render_view") {
@@ -14153,7 +14153,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
           quickReplySaid
-            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it; go on with the full answer.`
+            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or open with an acknowledgement such as "Absolutely" or "Sure"; go on with the full answer.`
             : undefined,
         ]
           .filter(Boolean)

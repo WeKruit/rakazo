@@ -43,11 +43,11 @@ it.each([false, true])(
       act(() =>
         root.render(<AskCard block={block} canAnswer expiresAt={expiresAt} onAnswer={vi.fn()} />),
       );
+      expect(container.querySelector("time")).toBeNull();
+      act(() => vi.advanceTimersByTime(23 * 60 * 60_000 + 60_000));
       expect(container.querySelector("time")?.dateTime).toBe(expiresAt);
-      expect(container.textContent).toContain("Expires in 24h 0m");
-      act(() => vi.advanceTimersByTime(60_000));
-      expect(container.textContent).toContain("Expires in 23h 59m");
-      act(() => vi.advanceTimersByTime(24 * 60 * 60_000));
+      expect(container.textContent).toContain("Expires in 59m");
+      act(() => vi.advanceTimersByTime(60 * 60_000));
       expect(container.querySelector("time")?.textContent).toBe("Expired");
       act(() =>
         root.render(

@@ -329,7 +329,7 @@ export function ContactsTab(
           {filter ? (
             <Trans>No loaded candidates match this date filter.</Trans>
           ) : autumn ? (
-            <Trans>No saved candidates</Trans>
+            <Trans>No candidates yet</Trans>
           ) : (
             <Trans>No contacts for this role yet.</Trans>
           )}

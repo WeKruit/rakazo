@@ -278,11 +278,11 @@ export const RECRUITING_PLAYBOOK_STAGES = [
 export type RecruitingPlaybookStage = (typeof RECRUITING_PLAYBOOK_STAGES)[number];
 
 export const recruitingPlaybookStageLabels = {
-  intake: "Role intake",
-  calibration_10: "Calibration search (10 people)",
-  feedback: "Calibration feedback",
-  scale: "Scaled search",
-  enrichment: "Contact lookup",
+  intake: "Role setup",
+  calibration_10: "First 10 people",
+  feedback: "Your feedback",
+  scale: "Wider search",
+  enrichment: "Finding emails",
   outreach: "Outreach",
   replies: "Candidate replies",
   screening: "Screening",
@@ -349,7 +349,7 @@ export function nextPlaybookStep(
       return facts.hasBrief && facts.title
         ? {
             stage,
-            label: "Start the calibration search",
+            label: "Find the first 10 people",
             prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → pick ${CALIBRATION_TARGET} people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
           }
         : {
@@ -362,9 +362,7 @@ export function nextPlaybookStep(
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);
       return {
         stage,
-        label: remaining
-          ? `Calibration search (${remaining} more needed)`
-          : "Show the 10-person calibration list",
+        label: remaining ? `Finding ${remaining} more of the first 10` : "Show the first 10 people",
         prompt: remaining
           ? `Run the calibration quick search with people data search until ${CALIBRATION_TARGET} people are saved (now ${facts.savedCandidates}), then record the round (the list is posted in chat automatically). ${ONLY_OWN_LIST}`
           : `Pick 10 of the saved people and record them as this round (recruiting_research calibration_round), shown in the Results calibration panel. Search again only when fewer than ten saved people fit the role's hard requirements such as its location: then run four new, differently worded people searches together in one step and record the ten from all saved people; never ask the recruiter to relax a requirement before that search. The panel already has per-person feedback controls, so do not build a separate per-person rating card. ${NEXT_STEP_CARD}Let the recruiter give feedback once on anyone, any subset or the overall direction; do not require a rating for every person.`,
@@ -373,13 +371,13 @@ export function nextPlaybookStep(
     case "feedback":
       return {
         stage,
-        label: "Collect calibration feedback",
+        label: "Review the first 10 people",
         prompt: `${facts.hasBrief ? "" : "The brief is not saved yet: first save the JD and the recruiter's answers as the brief with one recruiting_role update (if it fails, fix it once from the error and save again; do not search again). "}Read the recruiter's latest message first. If it asks to find more or similar people, widen the search or just start (for example "find 100", "just search", "no need to confirm", or picking find-more on the next-step card), that accepts this round: record it now with recruiting_feedback (target round, operation approve, quoting their words), then start scaling in this turn by the scale rules. Do not run another calibration round or ask for confirmation again. Otherwise, first record this round's feedback with recruiting_feedback, quoting their words (people they named go in candidate review with their keys; a changed search direction goes in round scope). Then fold all feedback into the next quick search (same brief plus the feedback, worded differently, excluding everyone already returned for this role), save_search, pick 10 new people, record them as the next round, and say what changed. ${NEXT_STEP_CARD}Comments on individual people are not acceptance. Rejecting some of this round's people or changing the search direction is feedback for the next round, not acceptance, even if they also say "find more people like …". When there is no new feedback, do not ask again.`,
       };
     case "scale":
       return {
         stage,
-        label: "Scaled search",
+        label: "Wider search",
         prompt:
           "This round is accepted, so widen the search. First scale up yourself with people search in batches: each batch runs 4 differently worded web_search_advanced_exa people searches in parallel in one step, then save_search in the next step. Do not read or rank people between batches. Continue until peopleInResults, the role's total returned with each search, reaches the target count (default 100) or a batch adds fewer than 5 new people. Then use message_user to say in two or three sentences how many people are in the results and whether a deep search is still running. Only if people search cannot reach the target, hand off once at the end (your reply after it is not shown): give the sourcing colleague the remaining count for a deep search, with the confirmed brief and every round's feedback, excluding people already returned. If the target is reached, do not hand off and do not run a deep search. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };

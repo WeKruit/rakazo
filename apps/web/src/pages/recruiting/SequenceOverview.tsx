@@ -196,24 +196,16 @@ export function SequenceOverview({
           </div>
         ))}
       </dl>
-      <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">
-          <Trans>Historical totals · — Not reported</Trans>
-        </summary>
-        {period !== "all" ? (
-          <span role="status">
-            <Trans>
-              Date-filtered sequence metrics are not available. Historical totals stay unchanged
-              below.
-            </Trans>
-          </span>
-        ) : null}
-        {metrics.some((metric) => metric.observed && metric.value !== null) ? (
-          <span>
-            <Trans>≥ Observed in loaded records</Trans>
-          </span>
-        ) : null}
-      </details>
+      {period !== "all" ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          <Trans>These totals cover all time.</Trans>
+        </p>
+      ) : null}
+      {metrics.some((metric) => metric.observed && metric.value !== null) ? (
+        <p className="text-xs text-muted-foreground">
+          <Trans>≥ means at least this many.</Trans>
+        </p>
+      ) : null}
       <section
         aria-label={t`Recorded send activity`}
         className="min-w-0 rounded-lg border bg-card p-3"
@@ -229,12 +221,12 @@ export function SequenceOverview({
             <p className="text-sm text-muted-foreground">
               {sendDates === null ? (
                 overviewCounts ? (
-                  <Trans>Send timing is not reported in saved sequence records.</Trans>
+                  <Trans>Send times are not available yet.</Trans>
                 ) : (
-                  <Trans>Recruiter messages are unavailable for this role.</Trans>
+                  <Trans>No emails sent yet.</Trans>
                 )
               ) : (
-                <Trans>No dated sends in the available records.</Trans>
+                <Trans>No emails sent yet.</Trans>
               )}
             </p>
           </>
@@ -326,12 +318,12 @@ export function SequenceOverview({
                       <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
                         {sendDates === null ? (
                           overviewCounts ? (
-                            <Trans>Send timing is not reported in saved sequence records.</Trans>
+                            <Trans>Send times are not available yet.</Trans>
                           ) : (
-                            <Trans>Recruiter messages are unavailable for this role.</Trans>
+                            <Trans>No emails sent yet.</Trans>
                           )
                         ) : (
-                          <Trans>No dated sends in the available records.</Trans>
+                          <Trans>No emails sent yet.</Trans>
                         )}
                       </p>
                     </div>

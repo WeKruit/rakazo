@@ -49,6 +49,7 @@ import { EffortPicker } from "../shell/effort-picker";
 import { Transcript } from "../shell/Transcript";
 import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
+import { KruitWelcome } from "./KruitWelcome";
 
 const RecruitingPanel = lazyPanel(() =>
   import("../RecruitingPanel").then(
@@ -847,6 +848,16 @@ export function ShellConversation({
                 </div>
               ) : !activeSnapshot ? (
                 <MessageSkeleton label={t`Loading…`} />
+              ) : !showToolActivity &&
+                groupId?.startsWith("recruiting-global-") &&
+                !transcriptMessages.length &&
+                !transcriptRunning &&
+                !activeSnapshot.olderCursor ? (
+                <KruitWelcome
+                  onExample={(text) =>
+                    composerRef.current?.insertContext({ draftKey: composerDraftKey, text })
+                  }
+                />
               ) : (
                 <Transcript
                   key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}

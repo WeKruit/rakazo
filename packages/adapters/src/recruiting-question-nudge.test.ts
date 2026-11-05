@@ -1,3 +1,4 @@
+import type { TransactionalEmailProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
@@ -88,7 +89,7 @@ describe("recruiting question nudge", () => {
     async (options) => {
       const f = fixture(options);
       const send = vi.fn(async () => undefined);
-      await reconcileRecruitingQuestions({ ...f.deps, email: { send } });
+      await reconcileRecruitingQuestions({ ...f.deps, email: mailer(send) });
       expect(f.tx.thread.update).not.toHaveBeenCalled();
       expect(f.notify).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
@@ -99,7 +100,7 @@ describe("recruiting question nudge", () => {
     const send = vi.fn(async () => undefined);
     await reconcileRecruitingQuestions({
       ...f.deps,
-      email: { send },
+      email: mailer(send),
       webOrigin: "https://app.example.test",
     });
     expect(send).toHaveBeenCalledWith({
@@ -115,7 +116,19 @@ describe("recruiting question nudge", () => {
       emailVerified: false,
     });
     const send = vi.fn(async () => undefined);
-    await reconcileRecruitingQuestions({ ...f.deps, email: { send } });
+    await reconcileRecruitingQuestions({ ...f.deps, email: mailer(send) });
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+function mailer(send: TransactionalEmailProvider["send"]): TransactionalEmailProvider {
+  return {
+    describe: () => ({
+      id: "test",
+      contractVersion: "1",
+      adapterVersion: "1",
+      capabilities: { transactional: true },
+    }),
+    send,
+  };
+}

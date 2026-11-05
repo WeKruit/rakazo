@@ -477,7 +477,7 @@ describe("playbook stage machine", () => {
   it("starts calibration once title and brief exist", () => {
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: true, savedCandidates: 0 })?.label,
-    ).toBe("Start the calibration search");
+    ).toBe("Find the first 10 people");
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: false, savedCandidates: 0 })?.label,
     ).toBe("Complete the role details");
@@ -486,7 +486,7 @@ describe("playbook stage machine", () => {
   it("counts remaining calibration profiles and stops at human-owned stages", () => {
     expect(
       nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
-    ).toBe("Calibration search (6 more needed)");
+    ).toBe("Finding 6 more of the first 10");
     const present = nextPlaybookStep("calibration_10", {
       title: "x",
       hasBrief: true,

@@ -765,7 +765,7 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: promisedFix.postAssistant,
     });
     expect(promisedFix.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.not.stringContaining("Scaled search") }),
+      expect.objectContaining({ prompt: expect.not.stringContaining("Wider search") }),
     );
 
     // The coordinator's own continuation still gets the step.
@@ -839,7 +839,7 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result).toMatchObject({
       action: "continued",
       stage: "feedback",
-      label: "Collect calibration feedback",
+      label: "Review the first 10 people",
     });
   });
 
@@ -858,7 +858,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result).toMatchObject({
         action: "continued",
         stage: "calibration_10",
-        label: "Show the 10-person calibration list",
+        label: "Show the first 10 people",
       });
     }
   });

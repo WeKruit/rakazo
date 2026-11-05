@@ -1,4 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import type { Group } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import {
   FolderOpen,
@@ -181,7 +182,11 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
                   : "results",
               )
             }
-            groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
+            groups={groups.filter(
+              (group) =>
+                !group.id.startsWith("recruiting-global-") &&
+                !(isEmptyHomeTeam(group) && group.id !== roleGroup),
+            )}
             archivedGroups={archivedGroups}
             archivedGroupTotal={archivedGroupTotal}
             archivedGroupPage={archivedGroupPage}
@@ -385,4 +390,12 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
       ) : null}
     </aside>
   );
+}
+
+/**
+ * The team every new account gets before its first role. Until it holds a conversation it is not a
+ * role, and a new recruiter saw it as an empty role named "Recruiting".
+ */
+function isEmptyHomeTeam(group: Group): boolean {
+  return /^recruiting-[0-9a-f]+$/.test(group.id) && !group.preview.trim();
 }
