@@ -13,6 +13,7 @@ import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import { appendEventInTransaction } from "./events.js";
 import { getRecruitingGroupCrmReferences, recruitingCrmConversationId } from "./recruiting.js";
+import { deleteRecruitingRoles } from "./recruiting-role-delete.js";
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
 import {
@@ -673,6 +674,7 @@ export function createGroupRepos(prisma: PrismaClient) {
         await tx.routine.deleteMany({
           where: { spaceId: actor.spaceId, userId: actor.userId, thread: { groupId } },
         });
+        await deleteRecruitingRoles(tx, { sourceThread: { groupId } });
         await tx.chatGroup.delete({ where: { id: groupId } });
         return {
           contextBotId,

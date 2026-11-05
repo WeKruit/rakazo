@@ -99,6 +99,7 @@ import {
   createPool,
   createSpaceForMember,
   createThreadEvents,
+  deleteRecruitingRoles,
   ensureRecruitingWorkspace,
   IsolationError,
   parsePositiveInteger,
@@ -496,6 +497,8 @@ export async function createApp(
     beforeDeleteUser: async (userId) => {
       // First, so a provider failure aborts deletion before anything is destroyed.
       await billing?.cancelForDeletedUser(userId);
+      // Every role, including one started outside a conversation this deletes, goes first.
+      await prisma.$transaction((tx) => deleteRecruitingRoles(tx, { userId }));
       const bots = await prisma.bot.findMany({
         where: { userId },
         select: { id: true, userId: true, spaceId: true, name: true, archivedAt: true },
