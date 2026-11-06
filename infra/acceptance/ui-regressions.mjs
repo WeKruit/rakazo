@@ -512,6 +512,16 @@ try {
     await rpc("groups/archive", { groupId: created.id }).catch(() => {});
   });
 
+  // A role page opens with its chat closed (also in calibration review), so open it first.
+  const openComposer = async (page) => {
+    const composer = page.locator('fieldset[aria-label="Message composer"]').first();
+    const openChat = page.getByRole("button", { name: "Open role chat", exact: true });
+    await composer.or(openChat).first().waitFor({ timeout: 20_000 });
+    if (await openChat.isVisible()) await openChat.click();
+    await composer.waitFor({ timeout: 20_000 });
+    return composer;
+  };
+
   await check("greeting", async (page, failures) => {
     if (!kruit?.members.length) return failures.push("no Kruit crew on this account");
     // A role team with no role, like the one every new account starts with.
@@ -527,12 +537,8 @@ try {
       replies.some((message) => message.role === "bot" && textOf(message).trim());
     try {
       await page.goto(`${ORIGIN}/app/g/${id}`);
+      await openComposer(page);
       const box = page.locator('fieldset[aria-label="Message composer"] textarea').first();
-      // A role page opens with its chat closed.
-      const openChat = page.getByRole("button", { name: "Open role chat", exact: true });
-      await box.or(openChat).first().waitFor({ timeout: 20_000 });
-      if (await openChat.isVisible()) await openChat.click();
-      await box.waitFor({ timeout: 20_000 });
       const before = new Set((await messages(id)).map((message) => message.id));
       await box.fill(`${FIXTURE_MARK}你好，你能帮我做什么？`);
       await box.press("Enter");
@@ -568,8 +574,7 @@ try {
     ]) {
       await page.setViewportSize(viewport);
       await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}`);
-      const composer = page.locator('fieldset[aria-label="Message composer"]').first();
-      await composer.waitFor({ timeout: 20_000 });
+      const composer = await openComposer(page);
       await sleep(3_000);
       const box = await composer.boundingBox();
       // The dock: the reminder pill or the Kruit button, whichever shows.
@@ -592,10 +597,7 @@ try {
   await check("dock", async (page, failures) => {
     if (!fixtureRole) return failures.push(`no ${FIXTURE_MARK}role on this account`);
     await page.goto(`${ORIGIN}/app/g/${fixtureRole.id}`);
-    await page
-      .locator('fieldset[aria-label="Message composer"]')
-      .first()
-      .waitFor({ timeout: 20_000 });
+    await openComposer(page);
     await sleep(3_000);
     const logo = page.getByRole("button", { name: /^Kruit/ });
     // Without anything waiting there is no corner entry in a chat; nothing to drag.
