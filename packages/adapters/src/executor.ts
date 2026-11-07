@@ -6832,7 +6832,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ),
                 )
               : name === "recruiting_role"
-                ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
+                ? normalizeRecruitingRoleArgs(
+                    rawArgs,
+                    new Date().toISOString(),
+                    currentMessageSourceRef(currentTurnMessage),
+                  )
                 : rawArgs;
           // A lookup for the first N people of the role: the server picks the next batch in Results
           // order, so the agent never pages the list or decides the order itself.
@@ -16253,6 +16257,29 @@ async function renewRunLease(
 
 function computerRetryDelay(fence: number): number {
   return Math.min(10_000, 250 * 2 ** Math.min(Math.max(fence - 1, 0), 5));
+}
+
+/** The person's current message as a role citation, used when a criterion arrives uncited. */
+function currentMessageSourceRef(
+  message:
+    | { id: string; role: string; botId: string | null; blocks: readonly MessageBlock[] }
+    | null
+    | undefined,
+): Record<string, unknown> | undefined {
+  if (message?.role !== "user" || message.botId !== null) return undefined;
+  const blockIndex = message.blocks.findIndex(
+    (block) => block.kind === "text" && block.text.trim().length > 0,
+  );
+  const block = message.blocks[blockIndex];
+  if (block?.kind !== "text") return undefined;
+  return {
+    id: "current-message-source",
+    kind: "original_material",
+    anchor: { kind: "message", messageId: message.id, locator: `blocks[${blockIndex}].text` },
+    readState: "read",
+    readAt: new Date().toISOString(),
+    quote: block.text.trim(),
+  };
 }
 
 function nativeMessageSourceInstruction(messageId: string, blocks: readonly MessageBlock[]) {
