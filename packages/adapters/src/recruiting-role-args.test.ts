@@ -144,6 +144,25 @@ describe("source reference repair", () => {
     expect(result.criteria).toEqual([{ id: "c1", sourceRefs: [jd] }]);
   });
 
+  it("cites the current message when a pasted JD's criteria come uncited (2026-11-07 staging)", () => {
+    const turnRef = {
+      id: "current-message-source",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "m1", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: now,
+      quote: "Warehouse supervisor, 5+ years",
+    };
+    const criterion = { id: "c1", priority: "hard", sourceRefs: [] };
+    const created = normalizeRecruitingRoleArgs(
+      { operation: "create", title: "Supervisor", sourceRefs: [], criteria: [criterion] },
+      now,
+      turnRef,
+    );
+    expect(created.criteria).toEqual([{ ...criterion, sourceRefs: [turnRef] }]);
+    expect(created.sourceRefs).toEqual([]);
+  });
+
   it("keeps a message citation and drops a quote on unread material", () => {
     const result = normalizeRecruitingRoleArgs(
       {

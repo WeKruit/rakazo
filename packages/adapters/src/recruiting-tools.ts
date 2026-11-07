@@ -159,11 +159,13 @@ export function repairSourceRefs(
  * Repairs harmless slips before the schema check, so they never cost a rejected call and a
  * regenerated brief: a read carries only its operation; a read human-message reference without
  * readAt gets the call time (message reads have no receipt time); brief lists written next to
- * the brief move into it, and role lists written inside it move out.
+ * the brief move into it, and role lists written inside it move out. A criterion left without a
+ * citation cites the role's first source, or else the person's current message (turnRef).
  */
 export function normalizeRecruitingRoleArgs(
   args: Record<string, unknown>,
   now: string,
+  turnRef?: Record<string, unknown>,
 ): Record<string, unknown> {
   if (args.operation === "read") return { operation: "read" };
   const visit = (value: unknown): unknown => {
@@ -189,7 +191,8 @@ export function normalizeRecruitingRoleArgs(
       ? list.map((criterion) => {
           if (!object(criterion) || criterion.sourceRefs === undefined) return criterion;
           const refs = repairSourceRefs(criterion.sourceRefs, now) ?? [];
-          return { ...criterion, sourceRefs: refs.length ? refs : (roleRefs ?? []).slice(0, 1) };
+          const fallback = roleRefs?.length ? roleRefs.slice(0, 1) : turnRef ? [turnRef] : [];
+          return { ...criterion, sourceRefs: refs.length ? refs : fallback };
         })
       : list;
   if (Array.isArray(visited.criteria))
