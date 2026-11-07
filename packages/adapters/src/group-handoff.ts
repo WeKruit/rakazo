@@ -110,11 +110,19 @@ export async function handoffToGroupBot(
         return { ok: true, botId: nextRun.botId, runId: nextRun.id, eventSeq: event.seq } as const;
       }
 
-      let targetId = input.bot_id?.trim();
-      if (!targetId && input.confirm_name?.trim()) {
-        const name = input.confirm_name.trim().toLowerCase();
-        targetId = group.members.find((member) => member.bot.name.toLowerCase() === name)?.bot.id;
-      }
+      // Models sometimes pass a stale id or a name as bot_id; a member's exact name still counts.
+      const byName = (value: string | undefined) => {
+        const name = value?.trim().toLowerCase();
+        return name
+          ? group.members.find((member) => member.bot.name.toLowerCase() === name)
+          : undefined;
+      };
+      const requestedId = input.bot_id?.trim();
+      const targetId =
+        group.members.find((member) => member.bot.id === requestedId)?.bot.id ??
+        byName(input.confirm_name)?.bot.id ??
+        byName(requestedId)?.bot.id ??
+        requestedId;
       if (!targetId) return { error: "handoff target bot is required" } as const;
       if (targetId === run.botId) return { error: "cannot hand off to yourself" } as const;
       const target = group.members.find((member) => member.bot.id === targetId);
