@@ -771,7 +771,9 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
-  const variables = draftVariables(input.reply);
+  // A template the recruiter asked for is meant to keep its blanks.
+  const askedTemplate = /template|模板|模版/i.test(input.personRequest ?? input.request);
+  const variables = askedTemplate ? undefined : draftVariables(input.reply);
   const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
     : undefined;
