@@ -1,4 +1,5 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
+import { isChineseText } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 
 const TIMEOUT_MS = 4_000;
@@ -15,6 +16,13 @@ const INSTRUCTIONS = [
   "You cannot see their data yet: never say what you can or cannot see or find. Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
 ].join(" ");
+
+/** Earlier turns in another language must not pull the sentence away from the latest message's. */
+export function replyLanguage(userText: string): string {
+  return isChineseText(userText)
+    ? "Write the sentence in Chinese."
+    : "Write the sentence in the language of the latest message, not Chinese, even if earlier messages were.";
+}
 
 function clip(text: string, max: number): string {
   const trimmed = text.trim();
@@ -70,6 +78,8 @@ export function quickReply(input: {
     ...(earlier.length ? ["Earlier in the conversation:", ...earlier, ""] : []),
     "Latest message from the person:",
     clip(input.userText, MAX_USER_CHARS),
+    "",
+    replyLanguage(input.userText),
   ].join("\n");
   return new Promise((resolve, reject) => {
     let settled = false;
