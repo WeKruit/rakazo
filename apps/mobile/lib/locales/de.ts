@@ -241,6 +241,7 @@ export const DE_MESSAGES: Record<string, string> = {
   "Messaged {peer}": "Nachricht an {peer} gesendet",
   "Message…": "Nachricht…",
   "No longer active": "Nicht mehr aktiv",
+  "We can't continue without your answer.": "Ohne deine Antwort können wir nicht weitermachen.",
   "Opened its thread.": "Thread geöffnet.",
   "Open role": "Stelle öffnen",
   "Photo library": "Fotomediathek",

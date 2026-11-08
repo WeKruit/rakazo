@@ -603,8 +603,17 @@ try {
     // Without anything waiting there is no corner entry in a chat; nothing to drag.
     if (!(await logo.count())) return;
     await page.evaluate(() => localStorage.removeItem("kruit-dock-position"));
+    // While another chat waits on the recruiter, a reload can open the dock as the reminder pill;
+    // its Minimize turns it back into the logo this check drags.
+    const showLogo = async () => {
+      const pill = page.getByRole("status").filter({ hasText: /needs? your attention/ });
+      await logo.first().or(pill.first()).waitFor({ timeout: 20_000 });
+      if (!(await logo.count()) && (await pill.count()))
+        await pill.getByRole("button", { name: "Minimize" }).click();
+      await logo.first().waitFor({ timeout: 20_000 });
+    };
     await page.reload();
-    await logo.first().waitFor({ timeout: 20_000 });
+    await showLogo();
     const center = async () => {
       const box = await logo.first().boundingBox();
       return box && { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -636,7 +645,7 @@ try {
     )
       failures.push("the logo could not be dragged again right after the first drag");
     await page.reload();
-    await logo.first().waitFor({ timeout: 20_000 });
+    await showLogo();
     const remembered = await center();
     if (
       afterSecond &&

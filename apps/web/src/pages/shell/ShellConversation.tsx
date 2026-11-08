@@ -2,7 +2,14 @@ import { i18n } from "@lingui/core";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import type { ThreadMessage } from "@rakazo/contracts";
-import { attachmentsForThread, currentSuggestion, isActive, threadTailPhase } from "@rakazo/core";
+import {
+  attachmentsForThread,
+  currentSuggestion,
+  isActive,
+  isApprovalAskBlock,
+  threadTailPhase,
+  timedOutAskMessageId,
+} from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
 import {
   BriefcaseBusiness,
@@ -17,6 +24,8 @@ import {
 import type { ComponentProps, CSSProperties } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { MessageSkeleton } from "../../components/ai/primitives";
+import type { AskPanel } from "../../components/ask-panel";
+import { AskPanelContext } from "../../components/ask-panel";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { startCall } from "../../lib/call-session";
@@ -28,6 +37,9 @@ import { errorText } from "../../lib/user-error";
 
 const CalibrationRoundCard = lazyPanel(() =>
   import("../recruiting/CalibrationRound").then((m) => m.CalibrationRoundCard),
+);
+const CalibrationRoundView = lazyPanel(() =>
+  import("../recruiting/CalibrationRound").then((m) => m.CalibrationRoundView),
 );
 
 import {
@@ -43,7 +55,7 @@ const RoleSetupCard = lazyPanel(() =>
 );
 
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
-import { TabLoading } from "../recruiting/shared";
+import { TabLoading, useKeyedRead } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
 import { EffortPicker } from "../shell/effort-picker";
 import { Transcript } from "../shell/Transcript";
@@ -251,6 +263,33 @@ export function ShellConversation({
     if (emptyCrmChat) onAttachmentPick(files, composerDraftKey);
     else onAttachmentPick(files);
   };
+  // A card whose wait timed out still takes an answer until the recruiter says something else.
+  const timedOutAskId = timedOutAskMessageId(
+    activeSnapshot ? { ...activeSnapshot, messages: transcriptMessages } : null,
+  );
+  const transcriptAskIds = useMemo(
+    () => (timedOutAskId ? [...answerableAskIds, timedOutAskId] : answerableAskIds),
+    [answerableAskIds, timedOutAskId],
+  );
+  // The card after a calibration round takes votes on its people right in the chat.
+  const latestAskId = inGroup && !emptyCrmChat ? transcriptAskIds.at(-1) : undefined;
+  const calibration = useKeyedRead(
+    latestAskId && groupId ? JSON.stringify(["chatCalibrationRound", groupId, latestAskId]) : null,
+    () => rpc.recruiting.calibrationRound({ groupId: groupId! }),
+  );
+  const calibrationRound = latestAskId ? calibration.data?.round : undefined;
+  const askPanel = useCallback<AskPanel>(
+    (message, block, answer) =>
+      calibrationRound &&
+      calibrationRound.approvedAt === null &&
+      message.id === latestAskId &&
+      block.actions?.length &&
+      !isApprovalAskBlock(block) &&
+      Date.parse(message.createdAt) >= Date.parse(calibrationRound.createdAt) ? (
+        <CalibrationRoundView round={calibrationRound} onSendFeedback={answer} />
+      ) : null,
+    [calibrationRound, latestAskId],
+  );
   // While another role opens, its predecessor's pages and chat are not shown under its name.
   const switchingRole = Boolean(openingCrmRole && !openingCrmRole.error);
   return (
@@ -867,56 +906,58 @@ export function ShellConversation({
                   }
                 />
               ) : (
-                <Transcript
-                  key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
-                  narrow={roleChatWorkspace || !showToolActivity}
-                  visible={!roleChatHidden}
-                  scrollRef={messageScroll}
-                  scrollRequest={scrollRequest}
-                  onScrollRequestHandled={clearScrollRequest}
-                  artifactTarget={transcriptArtifactTarget}
-                  messages={emptyCrmChat ? NO_ITEMS : transcriptMessages}
-                  showToolActivity={showToolActivity}
-                  olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
-                  loadingOlder={loadingOlder}
-                  answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : answerableAskIds}
-                  waitingRuns={
-                    emptyCrmChat
-                      ? NO_ITEMS
-                      : (activeSnapshot?.activeRuns ??
-                        (activeSnapshot?.run ? [activeSnapshot.run] : []))
-                  }
-                  running={!emptyCrmChat && transcriptRunning}
-                  tailPhase={
-                    emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
-                  }
-                  workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
-                  workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
-                  backgroundWork={emptyCrmChat ? NO_ITEMS : activeSnapshot?.backgroundWork}
-                  onLoadOlder={loadOlder}
-                  onOpenBot={openBot}
-                  onAnswer={answerMessage}
-                  onReply={replyTo}
-                  onQuote={quoteFrom}
-                  onReact={reactToMessage}
-                  onJumpToMessage={jumpToReplyMessage}
-                  onOpenPeerMessages={setPeerConversation}
-                  memberName={resolveTranscriptMemberName}
-                  peerBot={resolveTranscriptBot}
-                  onRefresh={refreshActiveThread}
-                  onBotChanged={refreshBots}
-                  onAddRoutine={addSkillRoutine}
-                  onContinue={() =>
-                    void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), true)
-                  }
-                  voiceReady={Boolean(voiceStatus?.ready)}
-                  speakingMessageId={speakingMessageId}
-                  onSpeak={speakMessage}
-                  onOpenComputer={onOpenComputer}
-                  onStopRun={stopRun}
-                  liveDetail={liveDetail}
-                  workEstimate={workEstimate}
-                />
+                <AskPanelContext.Provider value={askPanel}>
+                  <Transcript
+                    key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
+                    narrow={roleChatWorkspace || !showToolActivity}
+                    visible={!roleChatHidden}
+                    scrollRef={messageScroll}
+                    scrollRequest={scrollRequest}
+                    onScrollRequestHandled={clearScrollRequest}
+                    artifactTarget={transcriptArtifactTarget}
+                    messages={emptyCrmChat ? NO_ITEMS : transcriptMessages}
+                    showToolActivity={showToolActivity}
+                    olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
+                    loadingOlder={loadingOlder}
+                    answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : transcriptAskIds}
+                    waitingRuns={
+                      emptyCrmChat
+                        ? NO_ITEMS
+                        : (activeSnapshot?.activeRuns ??
+                          (activeSnapshot?.run ? [activeSnapshot.run] : []))
+                    }
+                    running={!emptyCrmChat && transcriptRunning}
+                    tailPhase={
+                      emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
+                    }
+                    workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
+                    workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
+                    backgroundWork={emptyCrmChat ? NO_ITEMS : activeSnapshot?.backgroundWork}
+                    onLoadOlder={loadOlder}
+                    onOpenBot={openBot}
+                    onAnswer={answerMessage}
+                    onReply={replyTo}
+                    onQuote={quoteFrom}
+                    onReact={reactToMessage}
+                    onJumpToMessage={jumpToReplyMessage}
+                    onOpenPeerMessages={setPeerConversation}
+                    memberName={resolveTranscriptMemberName}
+                    peerBot={resolveTranscriptBot}
+                    onRefresh={refreshActiveThread}
+                    onBotChanged={refreshBots}
+                    onAddRoutine={addSkillRoutine}
+                    onContinue={() =>
+                      void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), true)
+                    }
+                    voiceReady={Boolean(voiceStatus?.ready)}
+                    speakingMessageId={speakingMessageId}
+                    onSpeak={speakMessage}
+                    onOpenComputer={onOpenComputer}
+                    onStopRun={stopRun}
+                    liveDetail={liveDetail}
+                    workEstimate={workEstimate}
+                  />
+                </AskPanelContext.Provider>
               )}
               {showToolActivity && inGroup && composerRunning ? (
                 <div className="flex flex-wrap gap-1 px-6 pb-2">

@@ -12,6 +12,7 @@ import {
   pendingInputAttention,
   resolveAskChoice,
   selectedAskActionLabel,
+  timedOutAskMessageId,
   waitingApprovalCards,
   waitingApprovalNote,
 } from "./answerable-ask.js";
@@ -318,9 +319,57 @@ describe("waiting approval cards", () => {
       ...approval("Confirm reply", "pending"),
       mailReply: { to: ["bo@example.com"], body },
     });
-    expect(waitingApprovalCards([[reply("Thanks,\n see you Tue")], [reply("Another note")]])).toEqual([
+    expect(
+      waitingApprovalCards([[reply("Thanks,\n see you Tue")], [reply("Another note")]]),
+    ).toEqual([
       'Confirm reply to bo@example.com: "Thanks, see you Tue"',
       'Confirm reply to bo@example.com: "Another note"',
     ]);
+  });
+});
+
+describe("timedOutAskMessageId", () => {
+  const card = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    role: "bot",
+    runId: `run-${id}`,
+    blocks: [{ kind: "ask", status: "expired", ...extra }],
+  });
+
+  it("reopens the newest timed-out question until the person says something", () => {
+    expect(timedOutAskMessageId({ messages: [card("a"), card("b")] })).toBe("b");
+    expect(
+      timedOutAskMessageId({
+        messages: [card("a"), { id: "c", role: "bot", blocks: [{ kind: "text" }] }],
+      }),
+    ).toBe("a");
+    expect(
+      timedOutAskMessageId({
+        messages: [card("a"), { id: "u", role: "user", blocks: [{ kind: "text" }] }],
+      }),
+    ).toBeNull();
+  });
+
+  it("never reopens an approval, a secret, a connection or a card that was not timed out", () => {
+    expect(timedOutAskMessageId({ messages: [card("a", { approvalEffectId: "e" })] })).toBeNull();
+    expect(timedOutAskMessageId({ messages: [card("a", { input: "secret" })] })).toBeNull();
+    expect(timedOutAskMessageId({ messages: [card("a", { connection: {} })] })).toBeNull();
+    expect(timedOutAskMessageId({ messages: [card("a", { status: "pending" })] })).toBeNull();
+    expect(timedOutAskMessageId({ messages: [card("a", { status: "answered" })] })).toBeNull();
+  });
+
+  it("leaves the choice to a card that still waits", () => {
+    const waiting = {
+      id: "w",
+      role: "bot",
+      runId: "run-w",
+      blocks: [{ kind: "ask", status: "pending" }],
+    };
+    expect(
+      timedOutAskMessageId({
+        messages: [card("a"), waiting],
+        activeRuns: [{ id: "run-w", status: "waiting_input" }],
+      }),
+    ).toBeNull();
   });
 });
