@@ -291,6 +291,31 @@ describe("approval state on a handoff", () => {
   });
 });
 
+describe("handoff target", () => {
+  it("falls back to a member's exact name when the id is stale or a name", async () => {
+    const stale = harness([{ kind: "text", text: "find them" }]);
+    await expect(
+      handoffToGroupBot(stale.deps as never, run, "group-1", {
+        bot_id: "bot-old",
+        confirm_name: "bot-b",
+        message: "Find",
+      }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
+    const named = harness([{ kind: "text", text: "find them" }]);
+    await expect(
+      handoffToGroupBot(named.deps as never, run, "group-1", { bot_id: "BOT-C", message: "Find" }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-c" });
+  });
+
+  it("still refuses a target outside the group", async () => {
+    const { deps, runCreate } = harness([{ kind: "text", text: "find them" }]);
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", { bot_id: "bot-x", message: "Find" }),
+    ).resolves.toEqual({ error: "handoff target is not a group member" });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe("coordinator search handoff", () => {
   const spawnKeys = { "bot-a": "recruiting:user-1:main", "bot-b": "recruiting:user-1:sourcer" };
 
@@ -406,19 +431,17 @@ describe("group handoff report back", () => {
     ]);
     Object.assign(h.tx, {
       externalEffect: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            {
-              id: "private-effect",
-              runId: worker.id,
-              status: "denied",
-              request: {},
-              result: null,
-              updatedAt: new Date(),
-              run: { status: "completed" },
-            },
-          ]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "private-effect",
+            runId: worker.id,
+            status: "denied",
+            request: {},
+            result: null,
+            updatedAt: new Date(),
+            run: { status: "completed" },
+          },
+        ]),
       },
     });
     await reportGroupHandoffOutcome(h.deps as never, worker, "group-1", { status: "completed" });
