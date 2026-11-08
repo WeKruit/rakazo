@@ -493,6 +493,7 @@ export const RU_MESSAGES: Record<string, string> = {
   Now: "Сейчас",
   Notifications: "Уведомления",
   "No longer active": "Больше не активно",
+  "We can't continue without your answer.": "Без вашего ответа мы не можем продолжить.",
   "Notification settings": "Настройки уведомлений",
   "Notifications silenced": "Уведомления отключены",
   "notifications silenced": "уведомления отключены",

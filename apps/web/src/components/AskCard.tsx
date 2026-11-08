@@ -21,6 +21,7 @@ import {
 } from "@rakazo/core";
 import { Button, Checkbox, Input, Textarea } from "@rakazo/ui-web";
 import { Plug } from "lucide-react";
+import type { ReactNode } from "react";
 import { useId, useState } from "react";
 import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
@@ -114,11 +115,14 @@ export function AskCard({
   canAnswer,
   expiresAt,
   onAnswer,
+  panel,
 }: {
   block: AskBlock;
   canAnswer: boolean;
   expiresAt?: string | null;
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
+  /** Inputs the question needs beyond its choices (such as votes on people); they answer the card. */
+  panel?: ReactNode;
 }) {
   if (block.connection) {
     return (
@@ -137,6 +141,7 @@ export function AskCard({
       canAnswer={canAnswer}
       expiresAt={expiresAt}
       onAnswer={onAnswer}
+      panel={canAnswer && block.status !== "answered" ? panel : undefined}
     />
   );
 }
@@ -262,11 +267,13 @@ function QuestionAskCard({
   canAnswer,
   expiresAt,
   onAnswer,
+  panel,
 }: {
   block: AskBlock;
   canAnswer: boolean;
   expiresAt?: string | null;
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
+  panel?: ReactNode;
 }) {
   const { t } = useLingui();
   const [answer, setAnswer] = useState("");
@@ -360,7 +367,11 @@ function QuestionAskCard({
               {block.approvalEffectId ? approvalTitle(block.text) : block.text}
             </ChatMarkdown>
           </div>
-          {canAnswer && block.status !== "answered" && expiresAt ? (
+          {canAnswer && block.status === "expired" ? (
+            <p role="status" className="mt-2 text-[13.5px] font-medium text-warning">
+              <Trans>We can't continue without your answer.</Trans>
+            </p>
+          ) : canAnswer && block.status !== "answered" && expiresAt ? (
             <AskDeadline expiresAt={expiresAt} />
           ) : null}
           {secretInput && block.credential ? (
@@ -378,6 +389,7 @@ function QuestionAskCard({
               {block.detail}
             </pre>
           ) : null}
+          {panel ? <div className="mt-3.5">{panel}</div> : null}
           {block.status === "answered" ? (
             <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
               {formatAnsweredState(
@@ -640,6 +652,7 @@ function QuestionAskCard({
           ) : null}
           {block.status !== "answered" &&
           canAnswer &&
+          !panel &&
           !secretInput &&
           !approvalActions &&
           !block.requestedSchema ? (
