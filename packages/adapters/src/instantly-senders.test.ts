@@ -56,6 +56,7 @@ type Row = {
 };
 function fixture(limit = 2, senderSelfSetup = true) {
   const rows: Row[] = [];
+  const assignments: { email: string; userId: string; displayName: string; createdAt: Date }[] = [];
   const observed = [
     {
       email: "existing@product.test",
@@ -129,6 +130,11 @@ function fixture(limit = 2, senderSelfSetup = true) {
   };
   const fake = {
     externalEffect: effect,
+    sendingMailboxAssignment: {
+      findFirst: vi.fn(
+        async ({ where }: any) => assignments.find((row) => row.userId === where.userId) ?? null,
+      ),
+    },
     deploymentSettings: {
       findUnique: vi.fn(async () => ({ sendingMailboxLimit: limit, senderSelfSetup })),
     },
@@ -238,6 +244,7 @@ function fixture(limit = 2, senderSelfSetup = true) {
     prisma: fake as unknown as PrismaClient,
     effect,
     rows,
+    assignments,
     rest,
     observed,
     accounts,
@@ -713,4 +720,52 @@ it("asks no company name until the turn read the sending email", () => {
   )?.description;
   expect(description).toContain("Always call read first");
   expect(description).not.toContain("First ask the company name");
+});
+
+it("records an owner-assigned mailbox as this account's sender on its first read", async () => {
+  const f = fixture(2, false);
+  const email = "trial@product.test";
+  f.accounts.set(email, {
+    email,
+    first_name: "Previous",
+    last_name: "",
+    setup_pending: false,
+    status: 1,
+    warmup_status: 1,
+  });
+  f.assignments.push({ email, userId: "owner", displayName: "Jane Agency", createdAt: new Date() });
+  const read = await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  });
+  expect(read).toMatchObject({
+    senders: [{ email, displayName: "Jane Agency", state: "active" }],
+    defaultMailbox: email,
+  });
+  expect(f.accounts.get(email)?.first_name).toBe("Jane Agency");
+  expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(1);
+  expect(f.rows[0]!.request).toMatchObject({ serverId: "source", adopted: "owner_assignment" });
+  expect(f.orders()).toBe(0);
+  await ensureSendingIdentity(f.prisma, f.rest, context, "source", { operation: "read" });
+  expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(1);
+});
+it("never adopts an assigned mailbox another account already holds", async () => {
+  const f = fixture(2, false);
+  const email = "held@product.test";
+  f.accounts.set(email, { email, first_name: "Other", status: 1, setup_pending: false });
+  f.rows.push({
+    id: "foreign",
+    kind: "instantly_sender_account",
+    status: "completed",
+    idempotencyKey: `instantly-sender-mailbox:${email}`,
+    result: { email, displayName: "Other", domain: "product.test", attached: true },
+    request: { serverId: "source" },
+    run: { userId: "someone-else", spaceId: "elsewhere" },
+    spaceId: "elsewhere",
+  });
+  f.assignments.push({ email, userId: "owner", displayName: "", createdAt: new Date() });
+  const read = await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  });
+  expect(read).toMatchObject({ senders: [], defaultMailbox: null });
+  expect(f.accounts.get(email)?.first_name).toBe("Other");
 });

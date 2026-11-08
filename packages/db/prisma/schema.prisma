@@ -50,6 +50,7 @@ model User {
   avatarStyle                 String                       @default("organic")
   /// Product credits this account may spend; null is unlimited. New accounts get $50 of cost.
   usageCreditLimit            Float?
+  sendingMailboxAssignments   SendingMailboxAssignment[]
   sessions                    Session[]
   pushToken                   PushToken?
   accounts                    Account[]
@@ -356,6 +357,20 @@ model DeploymentSettings {
   updatedAt                       DateTime @updatedAt
 
   @@map("deployment_settings")
+}
+
+/// A product sending mailbox the deployment owner set aside for one account. The account's next
+/// run records it as that account's sender receipt; nothing else reads it.
+model SendingMailboxAssignment {
+  email            String   @id
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName      String   @default("")
+  assignedByUserId String
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+  @@map("sending_mailbox_assignments")
 }
 
 model UserModelCredential {
