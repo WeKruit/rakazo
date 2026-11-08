@@ -134,8 +134,17 @@ export function askFormContent(schema: AskRequestedSchema, values: AskFormConten
 type AskSnapshot = {
   messages: readonly {
     id: string;
+    role?: string;
+    internal?: boolean;
     runId?: string | null;
-    blocks: readonly { kind: string; status?: string }[];
+    blocks: readonly {
+      kind: string;
+      status?: string;
+      approvalEffectId?: unknown;
+      input?: unknown;
+      credential?: unknown;
+      connection?: unknown;
+    }[];
   }[];
   run?: { id: string; status: string } | null;
   activeRuns?: readonly { id: string; status: string }[];
@@ -163,6 +172,30 @@ export function answerableAskMessageIds(snapshot: AskSnapshot | null): string[] 
     }
   }
   return ids;
+}
+
+/**
+ * The newest card, when its wait timed out with nobody answering and nothing was said since. It
+ * still takes an answer: the press starts the work the way a message does (`closedAskAnswer`).
+ * Approvals, secrets and connections never reopen.
+ */
+export function timedOutAskMessageId(snapshot: AskSnapshot | null): string | null {
+  if (!snapshot || answerableAskMessageIds(snapshot).length) return null;
+  for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+    const message = snapshot.messages[index]!;
+    if (message.internal) continue;
+    if (message.role === "user") return null;
+    const ask = message.blocks.find((block) => block.kind === "ask");
+    if (!ask) continue;
+    const reopens =
+      ask.status === "expired" &&
+      !ask.approvalEffectId &&
+      ask.input !== "secret" &&
+      !ask.credential &&
+      !ask.connection;
+    return reopens ? message.id : null;
+  }
+  return null;
 }
 
 export function selectedAskActionLabel(

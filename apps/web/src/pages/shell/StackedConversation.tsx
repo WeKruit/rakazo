@@ -1,6 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
-import { answerableAskMessageIds, threadTailPhase, userVisibleMessages } from "@rakazo/core";
+import {
+  answerableAskMessageIds,
+  threadTailPhase,
+  timedOutAskMessageId,
+  userVisibleMessages,
+} from "@rakazo/core";
 import { Button, cn, Textarea } from "@rakazo/ui-web";
 import { ArrowDown, ArrowLeft, Maximize2 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -137,7 +142,10 @@ export function StackedConversation({
     return () => window.removeEventListener("keydown", onKey);
   }, [onBack, docked]);
 
-  const answerable = answerableAskMessageIds(snapshot);
+  const timedOut = timedOutAskMessageId(snapshot);
+  const answerable = timedOut
+    ? [...answerableAskMessageIds(snapshot), timedOut]
+    : answerableAskMessageIds(snapshot);
   const pending = pendingSince !== null && Date.now() - pendingSince < PENDING_MS;
   const phase = snapshot ? threadTailPhase(snapshot, { sending: sending || pending }) : null;
   const workingLabel =

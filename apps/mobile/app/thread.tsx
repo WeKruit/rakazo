@@ -51,6 +51,7 @@ import {
   stuckWorkExpiresAt,
   threadTailPhase,
   threadWindowMessages,
+  timedOutAskMessageId,
   timeSeparatorIds,
   trackWork,
   userVisibleMessages,
@@ -2073,7 +2074,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
   }
 
-  const answerableAskIds = answerableAskMessageIds(snap);
+  // A card whose wait timed out still takes an answer until the person says something else.
+  const timedOutAskId = timedOutAskMessageId(snap);
+  const answerableAskIds = timedOutAskId
+    ? [...answerableAskMessageIds(snap), timedOutAskId]
+    : answerableAskMessageIds(snap);
   const runErrorNeedsReconnect = Boolean(
     snap?.run?.error && runRecoveryAction(snap.run.error) === "model_connection",
   );
@@ -3854,7 +3859,13 @@ const MessageBubble = memo(function MessageBubble({
         >
           {askBlock.mailReply ? (
             <>
-              {canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
+              {canAnswer && askBlock.status === "expired" ? (
+                <Text
+                  style={{ color: tokens.warning, marginTop: 8, fontSize: 13.5, fontWeight: "600" }}
+                >
+                  {t("We can't continue without your answer.")}
+                </Text>
+              ) : canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
                 <AskDeadline expiresAt={askExpiresAt} />
               ) : null}
               <MailReplyAskContent

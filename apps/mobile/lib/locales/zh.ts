@@ -471,6 +471,7 @@ export const ZH_MESSAGES: Record<string, string> = {
   Now: "现在",
   Notifications: "通知",
   "No longer active": "已失效",
+  "We can't continue without your answer.": "没有你的答案我们不能继续。",
   "Notification settings": "通知设置",
   "Notifications silenced": "通知已静音",
   "notifications silenced": "通知已静音",
