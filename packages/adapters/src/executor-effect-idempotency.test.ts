@@ -6140,6 +6140,8 @@ describe("native recruiting assessment effect delivery", () => {
     expect(pastedJobTitle(`Job title:\n**Field Engineer**\n${body}`)).toBe("Field Engineer");
     expect(pastedJobTitle(`# Senior Analyst\n${body}`)).toBe("Senior Analyst");
     expect(pastedJobTitle(`职位：仓储经理\n${body}`)).toBe("仓储经理");
+    expect(pastedJobTitle(`招一名奥斯汀的高级后端工程师\n${body}`)).toBe("奥斯汀的高级后端工程师");
+    expect(pastedJobTitle(`招聘经理\n${body}`)).toBe("招聘经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
     expect(
       pastedJobTitle(
