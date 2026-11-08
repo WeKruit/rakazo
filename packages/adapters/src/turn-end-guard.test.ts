@@ -1233,6 +1233,24 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("keeps the blanks in a template the recruiter asked for (2026-11-08 staging)", async () => {
+    const reply =
+      "Here is the template.\n\n### Email 1\n**Subject:** Thanks\n\nHi {{firstName}},\n\nThanks.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    expect(
+      await planDeclineRetry(human, { ...input, reply, request: "帮我写一封面试后跟进邮件的模板" }),
+    ).toBeUndefined();
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply,
+        request: "Draft a follow-up for the team",
+        handedIn: true,
+        personRequest: "write me a follow-up email template",
+      }),
+    ).toBeUndefined();
+  });
+
   it("puts a question the retry still typed into its reply on a card", async () => {
     const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
     const reply =
