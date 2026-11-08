@@ -1421,7 +1421,13 @@ export function pastedJobTitle(text: string): string | null {
   let title = ((labelled && !after ? lines[1] : after) ?? "").replace(/^[#*\s]+|[*\s]+$/g, "");
   if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
   if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
-  return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
+  // "招一名奥斯汀的高级后端工程师" names the role after its lead-in.
+  return (
+    title
+      .replace(/^[#*\s]+|[*\s]+$/g, "")
+      .replace(/^(?:帮我|我要|我想)?招(?:聘)?[一两几1-9](?:名|个|位)/, "")
+      .slice(0, 120) || null
+  );
 }
 
 /**
