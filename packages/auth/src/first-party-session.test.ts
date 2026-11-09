@@ -88,4 +88,30 @@ describe("first-party CRM session", () => {
     const token = createFirstPartyAccessToken({ prisma, auth, oidc, session, fetch });
     await expect(token(context)).rejects.toThrow("Your CRM access is unavailable right now.");
   });
+
+  it("stops opening sessions while the provider is rate limiting, then resumes", async () => {
+    vi.useFakeTimers();
+    try {
+      const ok = provider();
+      let limited = true;
+      const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) =>
+        limited && String(url).endsWith("/verify")
+          ? new Response("too many", { status: 429, headers: { "retry-after": "30" } })
+          : ok(url, init),
+      );
+      const token = createFirstPartyAccessToken({ prisma, auth, oidc, session, fetch });
+      await expect(token(context)).rejects.toThrow("Your CRM access is unavailable right now.");
+      expect(fetch).toHaveBeenCalledTimes(2);
+      // Another person signing in during the pause does not reach the provider at all.
+      await expect(token({ userId: "user-2", spaceId: "space-1" })).rejects.toThrow(
+        "Your CRM access is unavailable right now.",
+      );
+      expect(fetch).toHaveBeenCalledTimes(2);
+      limited = false;
+      vi.advanceTimersByTime(30_001);
+      expect(await token(context)).toBe("token-hash-2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
