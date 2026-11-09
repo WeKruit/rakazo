@@ -3633,6 +3633,35 @@ describe("deployment Instantly credentials", () => {
   });
 });
 
+describe("deployment contact enrichment", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const context = { userId: "user", spaceId: "space", signal: new AbortController().signal };
+  const saved = {
+    secretId: "saved-secret",
+    transport: "streamable_http",
+    endpoint: "https://mcp.fullenrich.com/mcp",
+  };
+
+  it("uses the product's key even for an account holding an old or undecryptable saved key", async () => {
+    vi.stubEnv("FULLENRICH_API_KEY", "platform-enrich-key");
+    const findFirst = vi.fn();
+    const load = vi
+      .fn()
+      .mockRejectedValue(new Error("Unsupported state or unable to authenticate data"));
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst } } as never,
+      { load } as never,
+      saved,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-enrich-key" });
+    expect(result.secret).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+    expect(hasPlatformMcpCredential(saved)).toBe(true);
+  });
+});
+
 describe.each([
   ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
   ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
@@ -3685,7 +3714,8 @@ describe.each([
   });
 
   it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
-    vi.stubEnv(env, "platform-service-key");
+    // FullEnrich ships with the product: a configured platform key replaces a saved one (below).
+    vi.stubEnv(env, name === "FullEnrich" ? " " : "platform-service-key");
     const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
     const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
     const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');

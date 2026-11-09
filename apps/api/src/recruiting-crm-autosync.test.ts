@@ -107,6 +107,45 @@ describe("CRM auto-sync", () => {
   });
 });
 
+describe("CRM auto-sync pacing", () => {
+  beforeEach(() => vi.mocked(syncRecruitingCrm).mockReset());
+
+  it("spaces owners apart so a pass never bursts CRM sign-ins", async () => {
+    vi.useFakeTimers();
+    vi.mocked(syncRecruitingCrm).mockResolvedValue(report(null));
+    vi.mocked(indexRecruitingInboxBatch).mockResolvedValue({
+      importsComplete: true,
+      crmComplete: true,
+    });
+    const owners = ["a", "b", "c"].map((id) => ({ ...owner, userId: id }));
+    const base = deps(null).prisma as unknown as Record<string, unknown>;
+    const prisma = {
+      ...base,
+      $queryRaw: vi.fn(async () => owners),
+    } as unknown as PrismaClient;
+    const abort = new AbortController();
+    try {
+      startRecruitingCrmAutoSync({
+        prisma,
+        connectors: { execute: vi.fn() },
+        firstPartyMcpUrl: "https://crm.example.test/mcp",
+        signal: abort.signal,
+      });
+      await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(syncRecruitingCrm).toHaveBeenCalledTimes(3);
+    } finally {
+      abort.abort();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("saved-mail background indexing", () => {
   beforeEach(() => {
     vi.mocked(syncRecruitingCrm).mockReset();

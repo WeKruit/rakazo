@@ -29,6 +29,8 @@ type Cached = { email: string; token: string; expiresAt: number };
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const EXPIRY_MARGIN_MS = 60_000;
+/** How long to stop opening sessions after the identity provider says too many were opened. */
+const RATE_LIMIT_PAUSE_MS = 60_000;
 
 /** The caller's verified product email, which the backend may sign in to the CRM. */
 export async function firstPartySessionEmail(prisma: PrismaClient, context: Context) {
@@ -52,8 +54,13 @@ export function createFirstPartyAccessToken(deps: {
   const request = deps.fetch ?? fetch;
   const cache = new Map<string, Cached>();
   const pending = new Map<string, Promise<Cached>>();
+  // The provider limits sign-ins per server address. Asking again while it refuses only keeps the
+  // limit tripped for everyone, so every caller waits until the provider says to retry.
+  let pausedUntil = 0;
 
   async function post(path: string, body: unknown, signal?: AbortSignal) {
+    if (Date.now() < pausedUntil)
+      throw new IsolationError("Your CRM access is unavailable right now.");
     const config = session!;
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -68,6 +75,12 @@ export function createFirstPartyAccessToken(deps: {
       body: JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      pausedUntil =
+        Date.now() +
+        (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : RATE_LIMIT_PAUSE_MS);
+    }
     if (!response.ok) throw new IsolationError("Your CRM access is unavailable right now.");
     return (await response.json()) as Record<string, unknown>;
   }
