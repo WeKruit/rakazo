@@ -12,6 +12,12 @@ const CHECK_EVERY_MS = 60 * 60 * 1000;
 /** A complete pass at most this often per person; an unfinished one resumes at the next check. */
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_SLICES = 2_000;
+/**
+ * Time between owners. Each owner's pass may open a CRM session, and the identity provider limits
+ * sign-ins per server address (30 per 5 minutes by default), so a background pass over many
+ * accounts must leave room for people signing in.
+ */
+const OWNER_GAP_MS = 20_000;
 
 type Owner = { userId: string; spaceId: string; email: string };
 
@@ -140,10 +146,14 @@ export function startRecruitingCrmAutoSync(
       const owners = deps.firstPartyMcpUrl
         ? await dueRecruitingCrmOwners(deps.prisma, deps.firstPartyMcpUrl, new Date())
         : [];
+      let started = false;
       for (const owner of owners) {
         if (deps.signal.aborted) break;
         const key = JSON.stringify([owner.userId, owner.spaceId]);
         if (Date.now() - (finished.get(key) ?? 0) < STALE_AFTER_MS) continue;
+        if (started) await new Promise((resolve) => setTimeout(resolve, OWNER_GAP_MS));
+        started = true;
+        if (deps.signal.aborted) break;
         await syncRecruitingCrmOwner(deps, owner).then(
           () => finished.set(key, Date.now()),
           (error) => getLogger().warn("crm.autosync.failed", { reason: String(error) }),
