@@ -590,7 +590,11 @@ import {
   gradingTools,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
-import { languageFilters, withRequiredLanguage } from "./recruiting-language.js";
+import {
+  plannedLanguageFilters,
+  statedLanguageRequirement,
+  withRequiredLanguage,
+} from "./recruiting-language.js";
 import {
   COMMUTE_MILES,
   isRegionOnlyLocation,
@@ -947,6 +951,30 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (the exact quote, a source reference) is passed on, so the next call can fix it.
  */
+/** The recruiter's own recent words in a conversation, newest first; empty when unreadable. */
+async function recruiterWords(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<string[]> {
+  try {
+    const messages = await prisma.message.findMany({
+      where: { threadId, role: "user", botId: null },
+      orderBy: { seq: "desc" },
+      take: 20,
+      select: { blocks: true },
+    });
+    return messages.flatMap((message) =>
+      Array.isArray(message.blocks)
+        ? (message.blocks as { kind?: unknown; text?: unknown }[]).flatMap((block) =>
+            block.kind === "text" && typeof block.text === "string" ? [block.text] : [],
+          )
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function feedbackSaveRefused(error: Error): string {
   const named =
     error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
@@ -1258,7 +1286,7 @@ const WAITING_CARDS_NEW_MESSAGE_NOTE =
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. Each query carries the role's location and must-haves; a required language goes into every query the way profiles list it (for example \"Mandarin\"). They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
@@ -10245,7 +10273,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   const people = Array.isArray(shown)
                     ? await withRequiredLanguage(
                         deps.judge,
-                        { revision: role.currentRevision, query: connectorCall.args?.query },
+                        {
+                          revision: role.currentRevision,
+                          query: connectorCall.args?.query,
+                          stated: statedLanguageRequirement(
+                            await recruiterWords(deps.prisma, thread.id),
+                          ),
+                        },
                         shown,
                         returned,
                       )
@@ -13644,14 +13678,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!role || role.title === NEW_ROLE_TITLE) return undefined;
           const startedAt = Date.now();
-          // A language most of the searches ask for is required on the profile in two of them:
-          // worded into a query alone, it still returned people with no sign of it.
-          const languages = languageFilters(planned.data.queries);
+          // A required language is required on the profile in two of the searches: worded into a
+          // query alone, it still returned people with no sign of it. When the planned queries
+          // left it out, the recruiter's own words name it and the other two queries carry it.
+          const { filters: languages, queriesNameIt } = plannedLanguageFilters(
+            planned.data.queries,
+            await recruiterWords(deps.prisma, thread.id),
+          );
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
               {
-                query,
+                query:
+                  languages.length && !queriesNameIt && index >= 2
+                    ? `${query}. Languages: ${languages.join(", ")}`
+                    : query,
                 category: "people",
                 numResults: 25,
                 enableHighlights: true,
