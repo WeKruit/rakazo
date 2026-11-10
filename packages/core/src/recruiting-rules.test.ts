@@ -732,6 +732,30 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "People under six months in role could not be screened out.",
   },
   {
+    rule: "a required language is searched for",
+    in: ["RECRUITING_CALIBRATION_QUICK_SEARCH", "RECRUITING_SEARCH_BRIEF_TEMPLATE"],
+    phrase: /includeText with the language|A required language is part of who to find/,
+    why: "A Mandarin role ran generic searches and labeled almost every person's language unknown.",
+  },
+  {
+    rule: "no sign of a required language never makes the ten",
+    in: ["RECRUITING_SEARCH_SAVED_NEXT_STEP", "RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP"],
+    phrase: "shows no sign of it never makes the ten",
+    why: "The ten for a Mandarin role were people with no sign of Mandarin.",
+  },
+  {
+    rule: "never guess language or origin from names",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "Never guess a language, origin or ethnicity from a name",
+    why: "Ranking by name would be national-origin profiling.",
+  },
+  {
+    rule: "a missed requirement means a new search",
+    in: "Recruitment sourcing continuation skill",
+    phrase: "never answer by only rechecking or relabeling",
+    why: "Asked about a missed language rule, the agent rechecked the same ten instead of searching.",
+  },
+  {
     rule: "core work over title",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "rather than just a matching title",
