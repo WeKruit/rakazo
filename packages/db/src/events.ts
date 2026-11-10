@@ -30,6 +30,7 @@ import {
   resolveAskChoice,
   runsBesidePerson,
   sanitizeJsonValue,
+  takesPersonMessages,
   type WorkActivity,
   workActivityForTool,
 } from "@rakazo/core";
@@ -680,14 +681,20 @@ export async function sendUserMessage(
               select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
             })
           : [];
-      // Steer a conversational run when there is one. A person's message is never held behind
-      // other work (grading, check-ins, reports, routines): it starts its own turn beside it.
-      // Server input and inbound apps still wait their turn behind it.
+      // A person's message is steered into the work already running for them (their own turn,
+      // a teammate's report, a check-in, a routine), never queued as a second turn. Only internal
+      // grading and background waits run beside it. Server input and inbound apps still wait
+      // their turn behind conversational work.
       const person = !input.internal && (input.trigger === "user" || input.trigger === "follow_up");
       const holding = activeRuns.filter(
         (run) => !person || !runsBesidePerson(run.trigger) || run.status === "waiting_input",
       );
-      const busy = holding.find(takesMessages) ?? holding[0] ?? null;
+      const steers = (run: (typeof activeRuns)[number]) =>
+        takesMessages(run) ||
+        (person &&
+          takesPersonMessages(run.trigger) &&
+          !run.clientNonce?.startsWith(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX));
+      const busy = holding.find(steers) ?? holding[0] ?? null;
       let task = null;
       let run = null;
       if (createRun && !busy) {
@@ -727,7 +734,7 @@ export async function sendUserMessage(
           await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
         }
       } else if (createRun && busy) {
-        const held = !takesMessages(busy);
+        const held = !steers(busy);
         await tx.steeringMessage.create({
           data: {
             messageId: message.id,

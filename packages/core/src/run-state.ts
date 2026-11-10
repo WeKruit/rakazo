@@ -92,12 +92,19 @@ export function isTerminal(status: RunStatus): boolean {
 }
 
 /**
- * Work that never holds a person's message: grading, check-ins, teammates' reports, routines
- * and other automation run beside the person's own turn instead of making them wait. Only the
- * creation intro still holds it (a second run would overlap it on a dedicated computer).
+ * Internal work that has no conversation to take a person's message into: grading, tickets, background
+ * tool waits and polls run beside the person's own turn. Every other run, including a teammate's
+ * report, a check-in or a routine working on the recruiter's request, takes the message as
+ * steering, so it lands in the work already running instead of starting a second turn.
  */
+const RUNS_BESIDE_PERSON = new Set(["recruiting_grade", "tickets", "tool_background", "poll"]);
 export function runsBesidePerson(trigger: string | null | undefined): boolean {
-  return !isConversationalRun(trigger) && trigger !== "created";
+  return RUNS_BESIDE_PERSON.has(trigger ?? "");
+}
+
+/** Whether a person's message is steered into this active run. */
+export function takesPersonMessages(trigger: string | null | undefined): boolean {
+  return trigger !== "created" && !runsBesidePerson(trigger);
 }
 
 /** Whether a run's turn is part of the thread's conversation and may take user steering. */

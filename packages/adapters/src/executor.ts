@@ -590,6 +590,7 @@ import {
   gradingTools,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
+import { languageFilters, withRequiredLanguage } from "./recruiting-language.js";
 import {
   COMMUTE_MILES,
   isRegionOnlyLocation,
@@ -10192,7 +10193,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               for (const attempt of ["", ":2"]) {
                 const role = await deps.prisma.recruitingRole.findFirst({
                   where: { id: roleId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
-                  select: { revision: true },
+                  select: {
+                    revision: true,
+                    currentRevision: { select: { brief: true, criteria: true } },
+                  },
                 });
                 if (!role) return null;
                 const request = {
@@ -10229,13 +10233,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // never needs a follow-up read of the clipped output.
                   const rows = (saved as { candidateRows?: unknown }).candidateRows;
                   // An agent run can return hundreds; the rest stay in Results, not in context.
-                  const people = Array.isArray(rows)
+                  const shown = Array.isArray(rows)
                     ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map((row: Record<string, unknown>) => ({
                         ...row,
                         snippet:
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
+                  // A required language is checked on each person's full profile text, which
+                  // the short passage rarely holds; those who show it come first.
+                  const people = Array.isArray(shown)
+                    ? await withRequiredLanguage(
+                        deps.judge,
+                        { revision: role.currentRevision, query: connectorCall.args?.query },
+                        shown,
+                        returned,
+                      )
+                    : shown;
                   // People new to the role get the research service's grade once the turn settles.
                   if ((saved as { newPeople?: unknown }).newPeople)
                     await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
@@ -13630,6 +13644,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!role || role.title === NEW_ROLE_TITLE) return undefined;
           const startedAt = Date.now();
+          // A language most of the searches ask for is required on the profile in two of them:
+          // worded into a query alone, it still returned people with no sign of it.
+          const languages = languageFilters(planned.data.queries);
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -13640,6 +13657,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
+                ...(languages.length && index < 2
+                  ? { includeText: [languages[index] ?? languages[0]] }
+                  : {}),
               },
               `${runId}:planned-search:${plan.id}:${index}`,
             ).catch((error) => ({ error: String(error) })),

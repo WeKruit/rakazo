@@ -645,3 +645,24 @@ describe("a failed save never stops the work", () => {
     expect(step?.prompt).toContain("never wait on it or stop over it");
   });
 });
+
+describe("a missed requirement is searched for again", () => {
+  it("feedback that the list missed a requirement runs new searches instead of relabeling", () => {
+    const step = nextPlaybookStep("feedback", {
+      title: "Engineer",
+      hasBrief: true,
+      savedCandidates: 10,
+    });
+    expect(step?.prompt).toContain("run new searches that target it");
+    expect(step?.prompt).toContain("never answer by only rechecking or relabeling");
+  });
+
+  it("every scale query carries a required language", () => {
+    const step = nextPlaybookStep("scale", {
+      title: "Engineer",
+      hasBrief: true,
+      savedCandidates: 10,
+    });
+    expect(step?.prompt).toContain("a required language included");
+  });
+});

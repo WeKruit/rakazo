@@ -408,6 +408,64 @@ async function ownedLegacySender(
 }
 
 /**
+ * A mailbox the deployment owner assigned to this account becomes its sender on the account's
+ * next run, recorded as the same native receipt, unless another account already holds it.
+ */
+export async function adoptAssignedSender(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+) {
+  if (!context.runId) return null;
+  const assignment = await prisma.sendingMailboxAssignment.findFirst({
+    where: { userId: context.userId },
+    orderBy: { createdAt: "asc" },
+    select: { email: true, displayName: true },
+  });
+  if (!assignment) return null;
+  const email = assignment.email.trim().toLowerCase();
+  let account: Record<string, unknown>;
+  try {
+    account = await rest("GET", `/accounts/${encodeURIComponent(email)}`);
+  } catch (error) {
+    if (is404(error)) return null;
+    throw error;
+  }
+  if (typeof account.email !== "string" || account.email.toLowerCase() !== email)
+    throw new IsolationError();
+  const current = [account.first_name, account.last_name]
+    .filter((part) => typeof part === "string" && part.trim())
+    .join(" ");
+  const value: Sender = {
+    email,
+    displayName: assignment.displayName.trim() || current,
+    domain: email.split("@")[1]!,
+    attached: true,
+  };
+  const runId = context.runId;
+  const adopted = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["sending-identity", context.userId, context.spaceId])}, 0))`;
+    if (await tx.externalEffect.findUnique({ where: { idempotencyKey: key(email) } })) return false;
+    await tx.externalEffect.create({
+      data: {
+        spaceId: context.spaceId,
+        runId,
+        kind: "instantly_sender_account",
+        status: "completed",
+        idempotencyKey: key(email),
+        request: { serverId, adopted: "owner_assignment" },
+        result: value as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return true;
+  });
+  if (!adopted) return null;
+  if (value.displayName !== current) await refreshMailbox(rest, email, value.displayName);
+  return email;
+}
+
+/**
  * An account whose own campaigns already sent from a mailbox no other account used keeps it as
  * its sender: the same exclusive proof as an attach, recorded once, with no new name and no card.
  */
@@ -418,6 +476,8 @@ export async function adoptLegacySender(
   serverId: string,
 ) {
   if (!context.runId || (await confirmedSendingMailboxes(prisma, context)).length) return null;
+  const assigned = await adoptAssignedSender(prisma, rest, context, serverId);
+  if (assigned) return assigned;
   const [last] = await prisma.$queryRaw<{ email: string }[]>(Sql.sql`
     SELECT lower(e.result->>'eaccount') AS "email"
     FROM external_effects e JOIN runs r ON r.id=e."runId"
@@ -472,7 +532,9 @@ export async function ensureSendingIdentity(
   const limit = settings?.sendingMailboxLimit ?? 2;
   // Mailboxes are added for an account by us; a recruiter sets one up only where the deployment allows it.
   const selfSetup = settings?.senderSelfSetup === true;
-  const mine = await confirmedSendingMailboxes(prisma, context);
+  let mine = await confirmedSendingMailboxes(prisma, context);
+  if (!mine.length && (await adoptAssignedSender(prisma, rest, context, serverId)))
+    mine = await confirmedSendingMailboxes(prisma, context);
   if (input.operation === "read") {
     const pending = await prisma.externalEffect.findMany({
       where: { ...receiptScope(context), status: { in: ["executing", "unknown"] } },
