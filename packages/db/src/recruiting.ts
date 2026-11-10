@@ -2194,6 +2194,42 @@ async function requireCurrentHumanSource(
   return { source: humanSource, message: source };
 }
 
+/**
+ * The recruiter's latest message in a conversation as the source of record keeping, quoting the
+ * cited words when that message holds them and otherwise its first text.
+ */
+async function latestHumanSource(
+  tx: Tx,
+  threadId: string,
+  quote: string,
+): Promise<{ source: RecruitingSourceRef; message: SourceMessage } | null> {
+  const recent = await tx.message.findMany({
+    where: { threadId, role: "user", botId: null },
+    orderBy: { seq: "desc" },
+    take: 20,
+    include: humanMessageInclude,
+  });
+  const message = recent.find(isNativeHumanMessage);
+  if (!message) return null;
+  const blocks = message.blocks as { kind: string; text?: string }[];
+  const texts = blocks.flatMap((block, index) =>
+    block.kind === "text" && block.text ? [{ index, text: block.text }] : [],
+  );
+  const cited = texts.find((block) => block.text.includes(quote)) ?? texts[0];
+  if (!cited) return null;
+  return {
+    source: {
+      id: `human-message:${message.id}`,
+      kind: "original_material",
+      anchor: { kind: "message", messageId: message.id, locator: `blocks[${cited.index}].text` },
+      readState: "read",
+      readAt: new Date().toISOString(),
+      quote: cited.text.includes(quote) ? quote : cited.text,
+    },
+    message,
+  };
+}
+
 function verifiedFeedbackChoice(
   message: SourceMessage,
   roleId: string | undefined,
@@ -2406,6 +2442,12 @@ export async function readRecruitingFeedbackContext(
     candidateKeys?: readonly string[];
     /** A round acceptance may cite the recruiter's earlier message from this run. */
     acceptEarlierQuote?: boolean;
+    /**
+     * Record keeping (a round's direction, reviews of people) is never refused over which
+     * recruiter message it cites: when the run's own message can't be traced, it cites the
+     * recruiter's latest message in the conversation. Account, run and role checks still apply.
+     */
+    recordKeeping?: boolean;
   },
 ): Promise<{
   source: RecruitingSourceRef;
@@ -2438,7 +2480,16 @@ async function feedbackContextInTransaction(
     false,
     new Set(),
     input.acceptEarlierQuote,
-  );
+  ).catch(async (error: unknown) => {
+    if (
+      !input.recordKeeping ||
+      !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
+    )
+      throw error;
+    const latest = await latestHumanSource(tx, run.threadId, intent.quote);
+    if (!latest) throw error;
+    return latest;
+  });
   const workspace = thread.activeRecruitingRoleId
     ? await roleSnapshot(
         tx,

@@ -2,6 +2,7 @@ import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   answeredAsk,
+  answerSearchFilters,
   autoContinueMax,
   countTrailingAutoContinues,
   guardRecruitingRoleCreate,
@@ -1330,4 +1331,38 @@ describe("unprovenReplyCardRetry", () => {
       unprovenReplyCardRetry("这张回复卡已被丢弃，邮件未发送。", "那封邮件发出去了吗？"),
     ).toBeUndefined();
   });
+});
+
+describe("answerSearchFilters", () => {
+  it("turns a stated must-have into a filter every search applies", () => {
+    expect(
+      answerSearchFilters([
+        {
+          key: "Should Mandarin and English both be required?",
+          value: "Require Mandarin and English",
+        },
+        { key: "Where?", value: "On-site within 30 miles of 07036" },
+      ]),
+    ).toEqual([
+      {
+        id: "recruiter-answer-1",
+        mode: "include",
+        origin: "user_instruction",
+        statement: "Require Mandarin and English",
+      },
+      {
+        id: "recruiter-answer-2",
+        mode: "include",
+        origin: "user_instruction",
+        statement: "On-site within 30 miles of 07036",
+      },
+    ]);
+  });
+
+  it.each(["Prefer bilingual; consider either-language candidates", "不限地点", "No requirement"])(
+    "leaves a preference or a lifted limit out (%s)",
+    (value) => {
+      expect(answerSearchFilters([{ key: "q", value }])).toEqual([]);
+    },
+  );
 });

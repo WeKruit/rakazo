@@ -1539,3 +1539,27 @@ describe("a turn-end nudge that reaches a run already working", () => {
     );
   });
 });
+
+describe("record keeping is never refused over which recruiter message it cites", () => {
+  it("cites the recruiter's latest message when the run's own message can't be traced", async () => {
+    const f = reportFixture();
+    f.asked.clientNonce = "something-else";
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, {
+      ...f.input,
+      recordKeeping: true,
+    });
+    expect(result.source).toMatchObject({
+      id: "human-message:human",
+      anchor: { messageId: f.source.id },
+      quote,
+    });
+  });
+
+  it("still refuses another account's run", async () => {
+    const f = reportFixture();
+    f.tx.run.findFirst.mockImplementation(async () => null as never);
+    await expect(
+      readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, recordKeeping: true }),
+    ).rejects.toThrow(IsolationError);
+  });
+});

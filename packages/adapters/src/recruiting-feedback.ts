@@ -149,6 +149,10 @@ export async function executeRecruitingFeedback(
     ...(feedback.target === "round" && feedback.operation === "approve"
       ? { acceptEarlierQuote: true }
       : {}),
+    ...((feedback.target === "round" && feedback.operation === "scope") ||
+    (feedback.target === "candidate" && feedback.operation === "review")
+      ? { recordKeeping: true }
+      : {}),
   });
   if (runBotId !== botId)
     throw new RecruitingFeedbackValidationError("Recruiting feedback does not belong to this run");
