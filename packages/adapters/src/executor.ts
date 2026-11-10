@@ -10193,7 +10193,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               for (const attempt of ["", ":2"]) {
                 const role = await deps.prisma.recruitingRole.findFirst({
                   where: { id: roleId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
-                  select: { revision: true, brief: true },
+                  select: {
+                    revision: true,
+                    currentRevision: { select: { brief: true, criteria: true } },
+                  },
                 });
                 if (!role) return null;
                 const request = {
@@ -10240,7 +10243,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // A required language is checked on each person's full profile text, which
                   // the short passage rarely holds; those who show it come first.
                   const people = Array.isArray(shown)
-                    ? await withRequiredLanguage(deps.judge, role.brief, shown, returned)
+                    ? await withRequiredLanguage(deps.judge, role.currentRevision, shown, returned)
                     : shown;
                   // People new to the role get the research service's grade once the turn settles.
                   if ((saved as { newPeople?: unknown }).newPeople)

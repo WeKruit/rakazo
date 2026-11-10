@@ -41,10 +41,17 @@ function fakeJudge(seen: string[]): TextJudge {
 
 describe("required language", () => {
   it("reads the language requirement from the brief", () => {
-    expect(requiredLanguage(brief)).toBe("Must speak Mandarin and English");
+    expect(requiredLanguage({ brief })).toBe("Must speak Mandarin and English");
+    // Before the brief is saved, the role's criteria hold the JD's requirements.
+    expect(
+      requiredLanguage({
+        brief: null,
+        criteria: [{ text: "3+ years of PLC work. Must speak Mandarin Chinese and English." }],
+      }),
+    ).toBe("Must speak Mandarin Chinese and English.");
     expect(
       requiredLanguage({ searchFilters: [], fields: [{ key: "语言", value: "会说中文" }] }),
-    ).toBe("语言: 会说中文");
+    ).toBe("会说中文");
     expect(requiredLanguage({ searchFilters: [], fields: [{ key: "title", value: "PLC" }] })).toBe(
       undefined,
     );

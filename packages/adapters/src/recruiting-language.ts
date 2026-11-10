@@ -11,23 +11,27 @@ export type LanguageSignal = "shown" | "unclear" | "no sign";
 const LANGUAGE_WORDS =
   /\b(mandarin|chinese|cantonese|spanish|japanese|korean|vietnamese|french|german|portuguese|arabic|hindi|russian|italian|thai|tagalog|bilingual)\b|中文|普通话|國語|国语|粤语|廣東話|广东话|双语|日语|韩语|西班牙语/i;
 
-type BriefLike = {
-  searchFilters?: Array<{ statement?: unknown; mode?: unknown }>;
-  fields?: Array<{ key?: unknown; value?: unknown }>;
-};
-
-/** The brief's required-language statement, or undefined when it requires none. */
-export function requiredLanguage(brief: unknown): string | undefined {
-  if (!brief || typeof brief !== "object") return undefined;
-  const { searchFilters = [], fields = [] } = brief as BriefLike;
-  const statements = [
-    ...searchFilters
-      .filter((filter) => filter.mode === "include")
-      .map((filter) => String(filter.statement ?? "")),
-    ...fields.map((field) => `${String(field.key ?? "")}: ${String(field.value ?? "")}`),
-  ];
-  const found = statements.filter((text) => LANGUAGE_WORDS.test(text));
-  return found.length ? found.join("; ").slice(0, 400) : undefined;
+/**
+ * The role's required-language statement, or undefined when it requires none. Reads the saved
+ * brief and the role's criteria: the first round runs before the brief is saved, while the
+ * criteria already hold the JD's requirements.
+ */
+export function requiredLanguage(role: unknown): string | undefined {
+  const sentences: string[] = [];
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 8 || value === null || value === undefined) return;
+    if (typeof value === "string") {
+      for (const sentence of value.split(/(?<=[.;!?。；！？\n])\s*/))
+        if (LANGUAGE_WORDS.test(sentence)) sentences.push(sentence.trim());
+      return;
+    }
+    if (Array.isArray(value)) for (const item of value) visit(item, depth + 1);
+    else if (typeof value === "object")
+      for (const item of Object.values(value as Record<string, unknown>)) visit(item, depth + 1);
+  };
+  visit(role, 0);
+  const unique = [...new Set(sentences.filter(Boolean))];
+  return unique.length ? unique.join("; ").slice(0, 400) : undefined;
 }
 
 const PROFILE_TEXT_LIMIT = 4_000;
@@ -131,17 +135,17 @@ export function withLanguageSignals<T extends { candidateKey?: unknown }>(
 }
 
 /**
- * A people search's rows with the brief's required language checked, when the brief requires
+ * A people search's rows with the role's required language checked, when the role requires
  * one and the deployment has a judge. Any failure returns the rows unchanged.
  */
 export async function withRequiredLanguage<T extends { candidateKey?: unknown; name?: unknown }>(
   judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
-  brief: unknown,
+  role: unknown,
   rows: readonly T[],
   result: unknown,
 ): Promise<Array<T & { requiredLanguage?: LanguageSignal }>> {
   try {
-    const requirement = requiredLanguage(brief);
+    const requirement = requiredLanguage(role);
     const judge = requirement ? await judgeSettings?.resolve() : undefined;
     if (!requirement || !judge) return [...rows];
     const people = rows.map((row) => ({
