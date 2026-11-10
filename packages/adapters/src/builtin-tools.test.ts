@@ -93,6 +93,8 @@ describe("native recruiting approval tool", () => {
     expect(feedback?.description).toContain('operation:"replace" replaces only the anchored span');
     expect(feedback?.description).toContain('operation:"revoke" removes only that span');
     expect(feedback?.description).toContain("unknown write outcome");
+    expect(feedback?.description).toContain("path preferences/recruiting-collaboration.md");
+    expect(feedback?.description).toContain("never start another preference file");
 
     for (const name of ["remember", "save_shared_memory"]) {
       const tool = builtinAgentTools.find((entry) => entry.name === name)!;
