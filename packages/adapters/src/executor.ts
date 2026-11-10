@@ -14297,6 +14297,90 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     Boolean(recruitingBotKey(bot))),
               });
         let runModel = configuredRunModel;
+        /**
+         * One small call for the gray next-message text the composer shows (Tab accepts it). A
+         * follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last word
+         * too, so it gets a suggestion based on what the user last wrote. Null when not offered.
+         */
+        const startReplySuggestion = (replyText: string): Promise<string | null> | null => {
+          const suggestionTurns = historyMessages.filter(
+            (message) =>
+              message.id !== currentTurnMessage?.id &&
+              ((message.role === "user" && !message.internal) || message.role === "bot") &&
+              blocksText(message.blocks).trim(),
+          );
+          const lastUserIndex =
+            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
+          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
+          if (
+            !deps.replySuggestions ||
+            scripted ||
+            !(run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) ||
+            messagingChannelRun ||
+            handedOff
+          )
+            return null;
+          return suggestNextMessage({
+            runtime: deps.runtime,
+            model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+            earlier: (lastUserTurn ? suggestionTurns.slice(0, lastUserIndex) : suggestionTurns).map(
+              (message) => ({
+                role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                text: blocksText(message.blocks),
+              }),
+            ),
+            userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
+            // Replies already sent in this turn come before this one.
+            replyText: [
+              ...(lastUserTurn
+                ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
+                : []),
+              replyText,
+            ]
+              .filter((part) => part.trim())
+              .join("\n\n"),
+            runId,
+            spaceId: run.spaceId,
+            userId: run.userId,
+            botId: bot.id,
+            threadId: thread.id,
+            onUsage: (event) =>
+              recordUsage(
+                deps.prisma,
+                event,
+                {
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  parentRunId: runId,
+                  runId,
+                  operationId: `suggestion:${runId}`,
+                  operationKind: "setup",
+                },
+                estimateCatalogTokenCostUsd,
+              ),
+          }).catch((error) => {
+            getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+            return null;
+          });
+        };
+        const saveReplySuggestion = (pending: Promise<string | null>, card = false) =>
+          void pending
+            .then((suggestion) =>
+              suggestion
+                ? deps.events.append({
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    type: "thread.suggestion",
+                    runId,
+                    payload: { text: suggestion, ...(card ? { card: true } : {}) },
+                  })
+                : undefined,
+            )
+            .catch((error) =>
+              getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+            );
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
           provider,
           id: modelId,
@@ -14984,6 +15068,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
+              // The recruiter's likely answer, typed for them in the composer and the card (Tab).
+              const cardSuggestion = event.requestedSchema
+                ? null
+                : startReplySuggestion(
+                    [
+                      ...midTurnUserTexts,
+                      safeText,
+                      ...(safeActions?.length
+                        ? [`Choices: ${safeActions.map((action) => action.label).join(" / ")}`]
+                        : []),
+                    ].join("\n\n"),
+                  );
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
@@ -15032,6 +15128,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .catch((error) => getLogger().error("steering answer enqueue", error));
                 return;
               }
+              if (cardSuggestion) saveReplySuggestion(cardSuggestion, true);
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,
@@ -15530,69 +15627,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.
-          // A follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last
-          // word too, so it gets a suggestion based on what the user last wrote.
-          const suggestionTurns = historyMessages.filter(
-            (message) =>
-              message.id !== currentTurnMessage?.id &&
-              ((message.role === "user" && !message.internal) || message.role === "bot") &&
-              blocksText(message.blocks).trim(),
-          );
-          const lastUserIndex =
-            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
-          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
           const suggestionPending =
-            deps.replySuggestions &&
-            !scripted &&
-            (run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) &&
-            !messagingChannelRun &&
-            !handedOff &&
-            text.trim() &&
-            !blocks.some((block) => block.kind === "ask")
-              ? suggestNextMessage({
-                  runtime: deps.runtime,
-                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-                  earlier: (lastUserTurn
-                    ? suggestionTurns.slice(0, lastUserIndex)
-                    : suggestionTurns
-                  ).map((message) => ({
-                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                    text: blocksText(message.blocks),
-                  })),
-                  userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
-                  // Replies already sent in this turn come before this one.
-                  replyText: [
-                    ...(lastUserTurn
-                      ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
-                      : []),
-                    text,
-                  ]
-                    .filter((part) => part.trim())
-                    .join("\n\n"),
-                  runId,
-                  spaceId: run.spaceId,
-                  userId: run.userId,
-                  botId: bot.id,
-                  threadId: thread.id,
-                  onUsage: (event) =>
-                    recordUsage(
-                      deps.prisma,
-                      event,
-                      {
-                        spaceId: run.spaceId,
-                        userId: run.userId,
-                        botId: bot.id,
-                        parentRunId: runId,
-                        runId,
-                        operationId: `suggestion:${runId}`,
-                        operationKind: "setup",
-                      },
-                      estimateCatalogTokenCostUsd,
-                    ),
-                }).catch((error) => {
-                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
-                  return null;
-                })
+            text.trim() && !blocks.some((block) => block.kind === "ask")
+              ? startReplySuggestion(text)
               : null;
           const markUnread = completionMarksUnread(
             run.trigger,
@@ -15641,24 +15678,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           logRunTiming("completed");
           // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
           // only while this reply is the newest message and nothing is running.
-          if (suggestionPending && !completed.continuationRunId) {
-            void suggestionPending
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.append({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
-              );
-          }
+          if (suggestionPending && !completed.continuationRunId)
+            saveReplySuggestion(suggestionPending);
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>

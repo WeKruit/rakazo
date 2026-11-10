@@ -14,3 +14,6 @@ export type AskPanel = (
 ) => ReactNode;
 
 export const AskPanelContext = createContext<AskPanel | null>(null);
+
+/** The gray suggested answer for the newest card; Tab in its answer box accepts it. */
+export const AskSuggestionContext = createContext<{ messageId: string; text: string } | null>(null);
