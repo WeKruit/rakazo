@@ -270,8 +270,9 @@ export function chatReplyToAsk(text: string): string {
 }
 
 /**
- * The bot's last question, when a message typed in the chat closed its card and the bot has asked
- * nothing since. A teammate's report back then reminds the bot to ask it again.
+ * The bot's last question, when a message typed in the chat closed its card and the bot has said
+ * nothing since. A teammate's report back then reminds the bot to act on that reply or ask again;
+ * once the bot has replied after it, the reply is handled and a reminder would only repeat it.
  */
 export async function questionClosedByChat(
   tx: Prisma.TransactionClient,
@@ -285,12 +286,17 @@ export async function questionClosedByChat(
       blocks: { array_contains: [{ kind: "ask" }] },
     },
     orderBy: { seq: "desc" },
-    select: { blocks: true, runId: true },
+    select: { blocks: true, runId: true, seq: true },
   });
   const parsed = MessageBlockSchema.array().safeParse(latest?.blocks);
   const ask = parsed.success ? parsed.data.findLast((block) => block.kind === "ask") : undefined;
   if (ask?.kind !== "ask" || ask.status !== "answered" || typeof ask.answer !== "string") return;
   if (!latest?.runId) return;
+  const spokeSince = await tx.message.findFirst({
+    where: { threadId: input.threadId, botId: input.botId, role: "bot", seq: { gt: latest.seq } },
+    select: { id: true },
+  });
+  if (spokeSince) return;
   const run = await tx.run.findFirst({
     where: { id: latest.runId, threadId: input.threadId },
     select: { task: { select: { prompt: true } } },
