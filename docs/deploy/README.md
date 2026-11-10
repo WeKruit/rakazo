@@ -21,4 +21,12 @@ A full copy of production for development and test runs, so they never block pro
 - A test deploy passes only after the quick staging journeys (`regression.mjs --suite staging-quick`: sign-in, Home and the Contacts, Sequence, Inbox and Interview pages in a browser with no supplier names, a preference told to Kruit saved and recalled in a role chat, and browser checks for bugs that came back: multi-select cards, Kruit's LinkedIn-style people list, new role titles, the corner reminder over the composer, raw ID chips and internal tool names; free, about 8 minutes). The booking-card check (`--only approval`) waits for a Cal.com connection on staging.. `RELEASE_TARGET=test release-cloud.sh <SHA> journeys` runs the full staging journeys, the one paid test run, once a day after a batch deploy: the first question within 4 s, a progress question, a mid-search requirement, a find-20 whose server restarts mid-search and still reaches its target, and a bare "再来点" (about 15 minutes, searches capped at 20 people, nothing sent). Both need `RELEASE_CASES` and the test account (`RAKAZO_EMAIL`/`RAKAZO_PASSWORD`).
 - A production deploy refuses a commit whose code (outside `docs/`) has not passed on the test environment. Rollbacks are exempt; `RELEASE_SKIP_TEST_ENV=<short SHA>` is the explicit emergency override.
 
+## Giving an onboarded account a sending mailbox
+
+Outreach goes through the product's shared outreach account. Accounts we onboard by hand get one of its existing mailboxes; recruiters cannot set one up themselves.
+
+1. Pick a mailbox no other account or campaign uses.
+2. Signed in as the deployment owner, call `POST /rpc/deployment/assignSendingMailbox` with `{"json":{"accountEmail":"<the account's sign-in email>","mailbox":"<mailbox>","displayName":"<name candidates see>"}}`. An empty `displayName` keeps the mailbox's current name. A mailbox already held by another account is refused.
+3. The account's next conversation records the mailbox as its sender (renaming it to `displayName`), and from then on its outreach sends from it after the recruiter confirms each send.
+
 Later work on split services and worker slots is tracked as C5 in [../wekruit/ARCHITECTURE-WORKPLAN.md](../wekruit/ARCHITECTURE-WORKPLAN.md) and the `../wekruit/C5-*.md` notes.

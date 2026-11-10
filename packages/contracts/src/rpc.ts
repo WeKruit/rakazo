@@ -476,6 +476,21 @@ export const appContract = {
         }),
       )
       .output(z.object({ userId: Id })),
+    /** The owner sets aside one existing product sending mailbox for an account it onboards. */
+    assignSendingMailbox: oc
+      .input(
+        z.object({
+          accountEmail: z.string().trim().email().max(320),
+          mailbox: z.string().trim().email().max(320),
+          displayName: z
+            .string()
+            .trim()
+            .max(100)
+            .regex(/^[^\r\n<>]*$/)
+            .default(""),
+        }),
+      )
+      .output(z.object({ userId: Id, mailbox: z.string() })),
   },
   /**
    * Deployment-owner product updates. When the Compose updater sidecar is reachable, these proxy

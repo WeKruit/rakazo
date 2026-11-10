@@ -1615,6 +1615,41 @@ export function createRouter(deps: RouterDeps) {
           });
         }
       }),
+      assignSendingMailbox: authed.deployment.assignSendingMailbox.handler(
+        async ({ context, input }) => {
+          if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+          const mailbox = input.mailbox.toLowerCase();
+          const user = await deps.prisma.user.findFirst({
+            where: { email: { equals: input.accountEmail, mode: "insensitive" } },
+            select: { id: true },
+          });
+          if (!user) throw new ORPCError("NOT_FOUND", { message: "No account uses that email." });
+          // A mailbox already recorded as another account's sender stays with that account.
+          const claim = await deps.prisma.externalEffect.findUnique({
+            where: { idempotencyKey: `instantly-sender-mailbox:${mailbox}` },
+            select: { run: { select: { userId: true } } },
+          });
+          const assigned = await deps.prisma.sendingMailboxAssignment.findUnique({
+            where: { email: mailbox },
+            select: { userId: true },
+          });
+          if ((claim && claim.run.userId !== user.id) || (assigned && assigned.userId !== user.id))
+            throw new ORPCError("CONFLICT", {
+              message: "That mailbox belongs to another account.",
+            });
+          await deps.prisma.sendingMailboxAssignment.upsert({
+            where: { email: mailbox },
+            create: {
+              email: mailbox,
+              userId: user.id,
+              displayName: input.displayName,
+              assignedByUserId: context.actor.userId,
+            },
+            update: { displayName: input.displayName },
+          });
+          return { userId: user.id, mailbox };
+        },
+      ),
     },
     updater: {
       status: authed.updater.status.handler(async ({ context }) => {
