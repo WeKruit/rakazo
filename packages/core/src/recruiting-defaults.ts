@@ -51,7 +51,7 @@ export const RECRUITING_CALIBRATION_QUICK_SEARCH = `For a list that is not a job
 
 /** Returned with a saved people search, so the pick happens in the next step for every account. */
 export const RECRUITING_SEARCH_SAVED_NEXT_STEP =
-  "Pick the ten from candidateRows now in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location), and call calibration_round at once; save the brief only after the round is recorded, never before it. Work from these rows directly: no files, shell, scratchpad, profile reads or other lookups before the round is recorded; a requirement the rows cannot show stays unknown and never holds the round.";
+  "Pick the ten from candidateRows now in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location, and every requirement the recruiter stated, such as a language), and call calibration_round at once; when the recruiter stated a must-have rows rarely show, such as a language, people whose rows show it come first, and the list says for whom it is unknown, never that it is met; save the brief only after the round is recorded, never before it. Work from these rows directly: no files, shell, scratchpad, profile reads or other lookups before the round is recorded; a requirement the rows cannot show stays unknown and never holds the round.";
 
 /** Returned with each people search the server saved as it returned. */
 export const RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP =

@@ -622,3 +622,26 @@ describe("clarifications before the search", () => {
     expect(recruitingBriefClarifications(brief)).toEqual([]);
   });
 });
+
+describe("a failed save never stops the work", () => {
+  const stopsWork =
+    /because (a|this) save failed|save it first|fix it once from the error and save again; do not search/i;
+  it.each(["intake", "calibration_10", "feedback", "scale"] as const)(
+    "the %s step never makes the next search wait on a save",
+    (stage) => {
+      for (const hasBrief of [true, false]) {
+        const step = nextPlaybookStep(stage, { title: "Engineer", hasBrief, savedCandidates: 10 });
+        expect(step?.prompt ?? "").not.toMatch(stopsWork);
+      }
+    },
+  );
+
+  it("feedback is recorded without waiting on the save", () => {
+    const step = nextPlaybookStep("feedback", {
+      title: "Engineer",
+      hasBrief: true,
+      savedCandidates: 10,
+    });
+    expect(step?.prompt).toContain("never wait on it or stop over it");
+  });
+});

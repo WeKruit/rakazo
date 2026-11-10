@@ -249,6 +249,7 @@ describe("recruiting feedback", () => {
       sourceRefs: [],
       roleId: "role",
       expectedRoleRevision: 1,
+      recordKeeping: true,
     });
     expect(f.read).not.toHaveBeenCalled();
     expect(f.commit).not.toHaveBeenCalled();

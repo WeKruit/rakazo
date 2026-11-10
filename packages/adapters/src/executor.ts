@@ -348,6 +348,7 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
+import { saveInBackground, savesFeedbackInBackground } from "./background-save.js";
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
@@ -719,6 +720,7 @@ import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import {
   answeredAsk,
+  answerSearchFilters,
   declinedRunId,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
@@ -932,6 +934,14 @@ const AUTOSAVED_PEOPLE_SHOWN = 100;
 const FEEDBACK_NOT_SAVED =
   "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
 
+/** Marks a feedback call naming people who are not saved on the role, which only the agent can fix. */
+const FEEDBACK_INPUT_ERROR = "FEEDBACK_INPUT";
+
+function feedbackInputError(result: unknown): boolean {
+  const payload = (result as { details?: unknown } | null)?.details ?? result;
+  return (payload as { code?: unknown } | null)?.code === FEEDBACK_INPUT_ERROR;
+}
+
 /**
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (the exact quote, a source reference) is passed on, so the next call can fix it.
@@ -942,7 +952,7 @@ export function feedbackSaveRefused(error: Error): string {
   const fix = named
     ? error.message
     : "The quote must be the recruiter's exact words from their message, roleId the conversation's current role, candidateKeys saved people on it, and sourceRefs only references this conversation's tools returned (or none).";
-  return `${FEEDBACK_NOT_SAVED} ${fix} Never run people searches again because this save failed.`;
+  return `${FEEDBACK_NOT_SAVED} ${fix} Either way, carry on with the rest of the recruiter's request now; a failed save never holds it up.`;
 }
 
 /** Round feedback words that mean the round's direction, not its acceptance. */
@@ -1078,47 +1088,6 @@ export async function filledRecruitingFeedbackArgs(
       .filter(Boolean)
       .join(" "),
   };
-}
-
-/**
- * The next round needs the recruiter's feedback on the last one saved first: later rounds, the
- * scale-out and the research provider read it from the saved record, not from the chat.
- */
-export async function unsavedRoundFeedback(
-  prisma: Pick<PrismaClient, "recruitingCalibrationRound" | "message" | "externalEffect">,
-  input: { roleId: string; threadId: string; spaceId: string },
-): Promise<string | undefined> {
-  const previous = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId },
-    orderBy: { round: "desc" },
-    select: { round: true, createdAt: true, approvedAt: true },
-  });
-  if (!previous || previous.approvedAt) return undefined;
-  const wrote = await prisma.message.findFirst({
-    where: { threadId: input.threadId, role: "user", createdAt: { gt: previous.createdAt } },
-    select: { id: true },
-  });
-  if (!wrote) return undefined;
-  const saved = await prisma.externalEffect.findFirst({
-    where: {
-      spaceId: input.spaceId,
-      kind: "recruiting_feedback",
-      status: "completed",
-      createdAt: { gt: previous.createdAt },
-      AND: [
-        { request: { path: ["roleId"], equals: input.roleId } },
-        {
-          OR: [
-            { result: { path: ["status"], equals: "recorded" } },
-            { result: { path: ["status"], equals: "already_recorded" } },
-          ],
-        },
-      ],
-    },
-    select: { id: true },
-  });
-  if (saved) return undefined;
-  return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they praised and fit "good_example", another call with the people they turned down and fit "not_fit", and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
 }
 
 /** The topic a step may show beside its label, as a payload field. */
@@ -6391,6 +6360,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // The playbook's default tenure preference, shown so the recruiter can lift it. An
                 // inferred filter may only prefer, so it is worded as the people it prefers.
                 searchFilters: [
+                  ...answerSearchFilters(answers),
                   {
                     id: "tenure",
                     mode: "prefer",
@@ -7133,12 +7103,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId
           ) {
-            const unsaved = await unsavedRoundFeedback(deps.prisma, {
-              roleId: thread.activeRecruitingRoleId,
-              threadId: run.threadId,
-              spaceId: run.spaceId,
-            });
-            if (unsaved) return { error: unsaved };
             const { regionOnly, outliers } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
@@ -9157,7 +9121,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 at: error.stack?.split("\n").slice(1, 4).join(" | "),
               });
             const retry =
-              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).";
+              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.";
             if (
               error instanceof RecruitingIntentQuoteError ||
               error instanceof RecruitingSourceCheckError
@@ -10876,7 +10840,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }, finish);
           }
           if (name === "recruiting_feedback" || guardedMemory) {
-            if (feedbackArgsError) return finish({ error: feedbackArgsError });
+            if (feedbackArgsError)
+              return finish({ error: feedbackArgsError, code: FEEDBACK_INPUT_ERROR });
             if (guardedMemory) {
               const invalid =
                 name === "save_memory"
@@ -13277,6 +13242,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
               throw error;
             },
           );
+          if (savesFeedbackInBackground(name, rawArgs)) {
+            const save = saveInBackground({
+              first: applied,
+              retry: (attempt) => applyToolNow(name, rawArgs, `${executionId}:retry-${attempt}`),
+              failed: (result) => toolResultError(result) !== undefined,
+              inputError: (result) => feedbackInputError(result),
+              onGiveUp: (result) =>
+                getLogger().warn("recruiting.feedback.not_saved", {
+                  runId,
+                  target: rawArgs.target,
+                  operation: rawArgs.operation,
+                  error: redactSecrets(String(toolResultError(result)), runSecrets).slice(0, 300),
+                }),
+            });
+            const settled = save.settled.catch(() => undefined);
+            savesInFlight.add(settled);
+            void settled.then(() => savesInFlight.delete(settled));
+            return save.reply;
+          }
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
           if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
@@ -15315,6 +15299,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
 
           await linkRole?.saving;
+          await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
+            getLogger().warn("run.end.saves_still_running", { runId }),
+          );
           runComputer.throwIfFailed();
           if (approvalPausePending || !leaseValid) return;
           approvedEffectReplays.assertDrained();
