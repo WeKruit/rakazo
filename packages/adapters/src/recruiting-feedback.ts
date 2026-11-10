@@ -9,7 +9,11 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import { applyRecruitingPreferenceEdit, RECRUITING_SCALE_START } from "@rakazo/core";
+import {
+  applyRecruitingPreferenceEdit,
+  RECRUITING_SCALE_START,
+  tidyPreferenceDocument,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
@@ -18,6 +22,10 @@ import {
 } from "@rakazo/db";
 import type { ZodError } from "zod";
 import { peopleTargetFrom } from "./people-target.js";
+
+/** Why a preference naming the chat's role is not saved to memory shared by every role. */
+export const ROLE_PREFERENCE_ERROR =
+  'Not saved: shared preferences apply to every role, so a requirement for one role goes on that role. Save it with recruiting_role update (or recruiting_feedback target:"role"), and keep only what the recruiter said for all roles as a preference.';
 
 /** People to reach when the recruiter accepts a round without naming a number. */
 const DEFAULT_SCALE_TARGET = 150;
@@ -203,6 +211,19 @@ export async function executeRecruitingFeedback(
     throw new RecruitingFeedbackValidationError(
       "Memory target does not match the recruiting preference proposal",
     );
+  // Shared preferences apply to every role; a line naming this chat's role belongs on the role.
+  if (feedback.operation !== "revoke") {
+    const role = await deps.prisma.thread
+      .findUnique({
+        where: { id: threadId },
+        select: { activeRecruitingRole: { select: { title: true } } },
+      })
+      .then((found) => found?.activeRecruitingRole?.title.trim());
+    if (role && role.length >= 6 && feedback.content.toLowerCase().includes(role.toLowerCase()))
+      throw new RecruitingFeedbackValidationError(
+        `${ROLE_PREFERENCE_ERROR} This one names the role "${role}".`,
+      );
+  }
   const target = {
     scope: feedback.scope,
     path: feedback.path,
@@ -220,7 +241,16 @@ export async function executeRecruitingFeedback(
       error instanceof Error ? error.message : "Invalid preference edit",
     );
   }
-  if (expected && expected.content !== edited.content)
+  if (
+    feedback.operation === "add" &&
+    edited.previousAnchor &&
+    edited.content === tidyPreferenceDocument(document?.content ?? "")
+  )
+    return { ...result, status: "already_recorded" };
+  if (
+    expected &&
+    tidyPreferenceDocument(expected.content) !== tidyPreferenceDocument(edited.content)
+  )
     throw new RecruitingFeedbackValidationError(
       'Memory content does not match the recruiting preference edit. Nothing was written. Use recruiting_feedback with target:"preference", the loaded scope, path and expectedRevision, and the full exact edit: add appends content; replace changes only its exact anchor; revoke removes only that anchor. Do not substitute a summary for content. Correct and resubmit only the originally authorized edit; required approvals still apply.',
     );

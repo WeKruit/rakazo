@@ -208,6 +208,19 @@ describe("exact recruiting preference edits", () => {
     });
   });
 
+  it("adds a preference once and collapses blank lines left by removals", () => {
+    const input = { ...preference, operation: "add" as const, content: "No agency recruiters" };
+    expect(core.applyRecruitingPreferenceEdit?.("Keep it short\n\n\n\n\n", input)?.content).toBe(
+      "Keep it short\n\nNo agency recruiters",
+    );
+    const again = core.applyRecruitingPreferenceEdit?.(
+      "No agency recruiters\n\n\n\nKeep it short",
+      input,
+    );
+    expect(again?.content).toBe("No agency recruiters\n\nKeep it short");
+    expect(again?.anchor).toEqual({ start: 0, end: 20, quote: "No agency recruiters" });
+  });
+
   it("replaces only the selected duplicate span and preserves every surrounding character", () => {
     const content = "🙂 old\nkeep old\n";
     const start = content.lastIndexOf("old");

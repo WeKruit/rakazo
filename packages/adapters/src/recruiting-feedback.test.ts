@@ -51,7 +51,7 @@ const preference: RecruitingPreferenceFeedbackInput = {
   content: "Show the complete prompt",
 };
 
-function fixture(content = "keep this preference", revision = 1) {
+function fixture(content = "keep this preference", revision = 1, roleTitle?: string) {
   const read = vi.fn(async () => ({
     documents: revision ? [{ id: "doc", path: preference.path, content, revision }] : [],
   }));
@@ -64,7 +64,16 @@ function fixture(content = "keep this preference", revision = 1) {
   return {
     read,
     commit,
-    deps: { prisma: {} as PrismaClient, memory: { read, commit } as unknown as MemoryStore },
+    deps: {
+      prisma: {
+        thread: {
+          findUnique: vi.fn(async () => ({
+            activeRecruitingRole: roleTitle ? { title: roleTitle } : null,
+          })),
+        },
+      } as unknown as PrismaClient,
+      memory: { read, commit } as unknown as MemoryStore,
+    },
   };
 }
 
@@ -114,6 +123,47 @@ describe("recruiting feedback", () => {
     await expect(executeRecruitingFeedback(f.deps, trusted, feedback, context)).rejects.toThrow(
       "native effect and live lease",
     );
+  });
+
+  it("keeps a preference saved again as its one line and collapses blank lines", async () => {
+    const f = fixture("Show the complete prompt\n\n\n\n\nkeep this preference\n\n");
+    await expect(
+      executeRecruitingFeedback(f.deps, trusted, preference, context),
+    ).resolves.toMatchObject({ status: "already_recorded" });
+    expect(f.commit).not.toHaveBeenCalled();
+    const g = fixture("keep this preference\n\n\n\n");
+    await executeRecruitingFeedback(g.deps, trusted, preference, context);
+    expect(g.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "keep this preference\n\nShow the complete prompt" }),
+      context,
+    );
+  });
+
+  it("refuses to save one role's requirement as a preference shared by every role", async () => {
+    // Staging saved "For the Senior Talent Acquisition Partner (in-house) role, require …" to the
+    // shared preferences, while the role itself kept no criteria.
+    const f = fixture("keep this preference", 1, "Senior Talent Acquisition Partner (in-house)");
+    await expect(
+      executeRecruitingFeedback(
+        f.deps,
+        trusted,
+        {
+          ...preference,
+          content:
+            "For the Senior Talent Acquisition Partner (in-house) role, require experience hiring hardware engineers.",
+        },
+        context,
+      ),
+    ).rejects.toThrow(/goes on that role[\s\S]*Senior Talent Acquisition Partner \(in-house\)/);
+    expect(f.commit).not.toHaveBeenCalled();
+    // A preference for every role saves as usual in that same chat.
+    await executeRecruitingFeedback(
+      f.deps,
+      trusted,
+      { ...preference, content: "Never show people from staffing agencies" },
+      context,
+    );
+    expect(f.commit).toHaveBeenCalledOnce();
   });
 
   it("constructs and commits one reusable preference with runtime provenance and the loaded revision", async () => {
