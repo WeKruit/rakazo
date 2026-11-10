@@ -497,33 +497,46 @@ describe("group handoff report back", () => {
   });
 
   it.each([
-    ["typed in the chat", chatReplyToAsk("我们外联用哪些发件邮箱？"), true],
-    ["picked on the card", "Selected choice choice-1: 不要求", false],
-  ])("reminds the sender of a question closed by a message %s", async (_, answer, reminds) => {
-    const question = "语言要求按哪种处理？";
-    const reply = "我们外联用哪些发件邮箱？";
-    const { deps, messageCreate, tx } = harness([asked]);
-    tx.message.findFirst.mockImplementation((async (query?: { where?: { botId?: string } }) =>
-      query?.where?.botId === "bot-a"
-        ? {
-            runId: "run-a",
-            blocks: [{ kind: "ask", text: question, status: "answered", answer: reply }],
-          }
-        : { blocks: [asked] }) as never);
-    tx.run.findFirst.mockImplementation((async () => ({
-      task: { prompt: `新岗位\n\n${question}\nAnswer: ${answer}` },
-    })) as never);
-    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
-    const text = (
-      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]
-    )[0].data.blocks[0].text;
-    expect(text.includes(`Your question "${question}" was closed when the recruiter typed`)).toBe(
-      reminds,
-    );
-    // Staging 11-10: "继续深搜，保留全部硬性要求" answered the card, yet the old wording made the
-    // agent ask the same question again. A typed answer is acted on, never asked again.
-    if (reminds) expect(text).toContain("act on that answer and never ask it again");
-  });
+    ["typed in the chat", chatReplyToAsk("我们外联用哪些发件邮箱？"), true, false],
+    ["picked on the card", "Selected choice choice-1: 不要求", false, false],
+    // Staging 11-10: the sender already acted on the typed answer, then a report back told it to
+    // act on it again, and it restated the recruiter's feedback a second time.
+    ["typed in the chat and already replied to", chatReplyToAsk("仅本轮不合适"), false, true],
+  ])(
+    "reminds the sender of a question closed by a message %s",
+    async (_, answer, reminds, replied) => {
+      const question = "语言要求按哪种处理？";
+      const reply = "我们外联用哪些发件邮箱？";
+      const { deps, messageCreate, tx } = harness([asked]);
+      tx.message.findFirst.mockImplementation((async (query?: {
+        where?: { botId?: string; seq?: unknown };
+      }) =>
+        query?.where?.botId === "bot-a"
+          ? query.where.seq
+            ? replied
+              ? { id: "reply-1" }
+              : null
+            : {
+                runId: "run-a",
+                seq: 5,
+                blocks: [{ kind: "ask", text: question, status: "answered", answer: reply }],
+              }
+          : { blocks: [asked] }) as never);
+      tx.run.findFirst.mockImplementation((async () => ({
+        task: { prompt: `新岗位\n\n${question}\nAnswer: ${answer}` },
+      })) as never);
+      await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+      const text = (
+        messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]
+      )[0].data.blocks[0].text;
+      expect(text.includes(`Your question "${question}" was closed when the recruiter typed`)).toBe(
+        reminds,
+      );
+      // Staging 11-10: "继续深搜，保留全部硬性要求" answered the card, yet the old wording made the
+      // agent ask the same question again. A typed answer is acted on, never asked again.
+      if (reminds) expect(text).toContain("act on that answer and never ask it again");
+    },
+  );
 
   it("lets the sender hand a correction back after a report", async () => {
     const { deps } = harness([
