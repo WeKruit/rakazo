@@ -60,6 +60,35 @@ export function languageFilters(queries: readonly string[]): string[] {
   return [];
 }
 
+const REQUIRES =
+  /\b(must|required?|requires|needs?|needed|fluent|fluency|bilingual|mandatory)\b|必须|要求|需要|会说|流利|精通|双语/i;
+
+/**
+ * The recruiter's own sentences that require a language (from their messages or pasted JD), so a
+ * search that left the language out still filters on it.
+ */
+export function statedLanguageRequirement(texts: readonly string[]): string | undefined {
+  const found = texts
+    .flatMap((text) => text.split(/(?<=[.;!?。；！？\n])\s*/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => LANGUAGE_WORDS.test(sentence) && REQUIRES.test(sentence));
+  return found.length ? [...new Set(found)].join("; ").slice(0, 400) : undefined;
+}
+
+/**
+ * Profile filters for planned people searches: the language most queries name, else the one the
+ * recruiter's own words require.
+ */
+export function plannedLanguageFilters(
+  queries: readonly string[],
+  recruiterTexts: readonly string[],
+): { filters: string[]; queriesNameIt: boolean } {
+  const named = languageFilters(queries);
+  if (named.length) return { filters: named, queriesNameIt: true };
+  const stated = statedLanguageRequirement(recruiterTexts);
+  return { filters: stated ? languageFilters([stated]) : [], queriesNameIt: false };
+}
+
 const PROFILE_TEXT_LIMIT = 4_000;
 
 /**
@@ -160,27 +189,61 @@ export function withLanguageSignals<T extends { candidateKey?: unknown }>(
     .map((entry) => entry.row);
 }
 
+/** Places whose study or work signals the language, for the check without a judge. */
+const LANGUAGE_PLACES: Record<string, RegExp> = {
+  Mandarin:
+    /\b(china|taiwan|beijing|shanghai|shenzhen|guangzhou|hangzhou|taipei|tsinghua|peking university|fudan|zhejiang university)\b|中文|普通话/i,
+  Cantonese: /\b(hong kong|guangzhou|macau)\b|粤语|廣東話/i,
+};
+
 /**
- * A people search's rows with the role's required language checked, when the role requires
- * one and the deployment has a judge. Any failure returns the rows unchanged.
+ * Without the judge, a profile shows the language when its text names it (or, for Mandarin and
+ * Cantonese, a place where it is spoken); otherwise it shows no sign of it.
+ */
+export function textLanguageJudge(requirement: string): TextJudge {
+  const names = languageFilters([requirement]);
+  const named = names.length ? new RegExp(`\\b(${names.join("|")})\\b`, "i") : null;
+  const places = names.map((name) => LANGUAGE_PLACES[name]).filter(Boolean) as RegExp[];
+  return {
+    async yes(_instructions, state) {
+      if (!named) return undefined;
+      const profile = String(state.profile ?? "");
+      return named.test(profile) || places.some((place) => place.test(profile)) ? 0.9 : 0.1;
+    },
+  };
+}
+
+/**
+ * A people search's rows with the role's required language checked: people whose profile shows
+ * it first, and people whose profile shows no sign of it left out of what the agent picks from
+ * (they stay in Results). Uses the deployment's judge, or the profile text alone without one.
+ * Any failure returns the rows unchanged.
  */
 export async function withRequiredLanguage<T extends { candidateKey?: unknown; name?: unknown }>(
   judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
   role: unknown,
   rows: readonly T[],
   result: unknown,
-): Promise<Array<T & { requiredLanguage?: LanguageSignal }>> {
+): Promise<{ rows: Array<T & { requiredLanguage?: LanguageSignal }>; withoutLanguage: number }> {
   try {
     const requirement = requiredLanguage(role);
-    const judge = requirement ? await judgeSettings?.resolve() : undefined;
-    if (!requirement || !judge) return [...rows];
+    if (!requirement) return { rows: [...rows], withoutLanguage: 0 };
+    const judge =
+      (await judgeSettings?.resolve().catch(() => undefined)) ?? textLanguageJudge(requirement);
     const people = rows.map((row) => ({
       candidateKey: String(row.candidateKey),
       name: typeof row.name === "string" ? row.name : undefined,
     }));
-    const signals = await languageSignals(judge, requirement, people, profileTexts(result));
-    return signals.size ? withLanguageSignals(rows, signals) : [...rows];
+    const texts = profileTexts(result);
+    let signals = await languageSignals(judge, requirement, people, texts);
+    // A judge that answered for nobody (down or timed out) falls back to the profile text.
+    if (!signals.size)
+      signals = await languageSignals(textLanguageJudge(requirement), requirement, people, texts);
+    if (!signals.size) return { rows: [...rows], withoutLanguage: 0 };
+    const ordered = withLanguageSignals(rows, signals);
+    const kept = ordered.filter((row) => row.requiredLanguage !== "no sign");
+    return { rows: kept, withoutLanguage: ordered.length - kept.length };
   } catch {
-    return [...rows];
+    return { rows: [...rows], withoutLanguage: 0 };
   }
 }

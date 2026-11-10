@@ -1,5 +1,6 @@
 import type { MessageBlock, ReplyPreview, RunStatus } from "@rakazo/contracts";
 import { RUN_TRIGGERS } from "@rakazo/contracts";
+import { isOpenAskBlock } from "./answerable-ask.js";
 import {
   appendToolCallSegment,
   completeToolStep,
@@ -59,7 +60,7 @@ export type LiveThread = {
   /** User messages a working reply has not read yet; they stay editable until it does. */
   queuedMessageIds?: readonly string[];
   /** Guessed next user message after a run's reply; shown only while that reply is the latest. */
-  suggestion?: { runId: string; text: string };
+  suggestion?: { runId: string; text: string; card?: true };
 };
 
 export type LiveThreadEvent = {
@@ -140,7 +141,8 @@ export function eventNeedsSnapshotRead(event: { type: string }): boolean {
 
 /**
  * The suggestion to show, when the thread's newest message is still the reply it follows and no
- * reply is being written. Background work (a running search) and its live progress don't hide it.
+ * reply is being written. Background work (a running search), its live progress and a card waiting
+ * for the answer don't hide it.
  */
 export function currentSuggestion(
   thread: Pick<LiveThread, "messages" | "suggestion">,
@@ -150,7 +152,11 @@ export function currentSuggestion(
   if (!suggestion) return null;
   if (
     activeRuns.some(
-      (run) => isActive(run.status as RunStatus) && !isAutomationRunTrigger(run.trigger),
+      (run) =>
+        isActive(run.status as RunStatus) &&
+        // A card waiting on the person keeps its suggested answer.
+        run.status !== "waiting_input" &&
+        !isAutomationRunTrigger(run.trigger),
     )
   )
     return null;
@@ -160,7 +166,11 @@ export function currentSuggestion(
       (message.role === "user" || message.role === "bot") &&
       !message.id.startsWith("progress:"),
   );
-  return last?.role === "bot" && last.runId === suggestion.runId ? suggestion.text : null;
+  if (last?.role !== "bot" || last.runId !== suggestion.runId) return null;
+  // A card's suggested answer lasts only while that card still waits: the run's later replies
+  // are not answered by it.
+  if (suggestion.card && !last.blocks.some(isOpenAskBlock)) return null;
+  return suggestion.text;
 }
 
 /** Run ends and input pauses: the points where clients used to re-read the whole thread. */
@@ -354,7 +364,11 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
   if (event.type === "thread.suggestion") {
     const text = typeof payload.text === "string" ? payload.text : "";
     if (event.threadId !== prev.threadId || !event.runId || !text) return prev;
-    return { ...prev, cursor, suggestion: { runId: event.runId, text } };
+    return {
+      ...prev,
+      cursor,
+      suggestion: { runId: event.runId, text, ...(payload.card === true ? { card: true } : {}) },
+    };
   }
   if (event.type === "thread.cleared") {
     return {

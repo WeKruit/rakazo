@@ -648,3 +648,30 @@ it("shows a card's extra inputs in place of the typed answer while it waits", ()
     act(() => root.unmount());
   }
 });
+
+it("shows the suggested answer gray in the empty answer box and fills it with Tab", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "Remote or onsite?",
+    status: "pending",
+    actions: [{ id: "remote", label: "Remote is fine" }],
+  };
+  try {
+    act(() =>
+      root.render(
+        <AskCard block={block} canAnswer onAnswer={vi.fn()} suggestion="Hybrid in NYC" />,
+      ),
+    );
+    const box = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
+    expect(box.placeholder).toBe("Hybrid in NYC");
+    act(() => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(box.value).toBe("Hybrid in NYC");
+  } finally {
+    act(() => root.unmount());
+  }
+});

@@ -1351,6 +1351,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Finished results waited behind the next search.",
   },
   {
+    rule: "saved exclusions shape every new role",
+    in: EVERY_BOT,
+    phrase: "a company or profile type they said to avoid is an exclusion",
+    why: "A saved 'no agency recruiters' preference was ignored by the next new role's searches.",
+  },
+  {
+    rule: "one role's requirement stays on that role",
+    in: EVERY_BOT,
+    phrase: "one role's requirement goes on that role",
+    why: "A recruiter's answer about one role was saved to the preferences every role reads.",
+  },
+  {
     rule: "retractable preferences",
     in: EVERY_BOT,
     phrase: "withdraws or contradicts a preference, update or forget it",

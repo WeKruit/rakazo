@@ -591,7 +591,11 @@ import {
   gradingTools,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
-import { languageFilters, withRequiredLanguage } from "./recruiting-language.js";
+import {
+  plannedLanguageFilters,
+  statedLanguageRequirement,
+  withRequiredLanguage,
+} from "./recruiting-language.js";
 import {
   COMMUTE_MILES,
   isRegionOnlyLocation,
@@ -948,6 +952,30 @@ function feedbackInputError(result: unknown): boolean {
  * What the agent is told when a feedback save is refused. A check that says what to change
  * (the exact quote, a source reference) is passed on, so the next call can fix it.
  */
+/** The recruiter's own recent words in a conversation, newest first; empty when unreadable. */
+async function recruiterWords(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<string[]> {
+  try {
+    const messages = await prisma.message.findMany({
+      where: { threadId, role: "user", botId: null },
+      orderBy: { seq: "desc" },
+      take: 20,
+      select: { blocks: true },
+    });
+    return messages.flatMap((message) =>
+      Array.isArray(message.blocks)
+        ? (message.blocks as { kind?: unknown; text?: unknown }[]).flatMap((block) =>
+            block.kind === "text" && typeof block.text === "string" ? [block.text] : [],
+          )
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function feedbackSaveRefused(error: Error): string {
   const named =
     error instanceof RecruitingIntentQuoteError || error instanceof RecruitingSourceCheckError;
@@ -1259,7 +1287,7 @@ const WAITING_CARDS_NEW_MESSAGE_NOTE =
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. Each query carries the role's location and must-haves; a required language goes into every query the way profiles list it (for example \"Mandarin\"). They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
@@ -10255,14 +10283,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : rows;
                   // A required language is checked on each person's full profile text, which
                   // the short passage rarely holds; those who show it come first.
-                  const people = Array.isArray(shown)
+                  const checked = Array.isArray(shown)
                     ? await withRequiredLanguage(
                         deps.judge,
-                        { revision: role.currentRevision, query: connectorCall.args?.query },
+                        {
+                          revision: role.currentRevision,
+                          query: connectorCall.args?.query,
+                          stated: statedLanguageRequirement(
+                            await recruiterWords(deps.prisma, thread.id),
+                          ),
+                        },
                         shown,
                         returned,
                       )
-                    : shown;
+                    : { rows: shown, withoutLanguage: 0 };
+                  const people = checked.rows;
                   // People new to the role get the research service's grade once the turn settles.
                   if ((saved as { newPeople?: unknown }).newPeople)
                     await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
@@ -10291,6 +10326,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                       : {}),
                     people,
+                    // People whose profile shows no sign of a required language are in Results
+                    // but never offered for the pick.
+                    ...(checked.withoutLanguage
+                      ? {
+                          leftOutNoLanguage: `${checked.withoutLanguage} more people's profiles show no sign of the required language; they are in Results but not listed here and never make the ten.`,
+                        }
+                      : {}),
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
                       ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
                       : {}),
@@ -13206,6 +13248,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const credits = createCreditGuard();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
+          // Work after a handoff (a search, a save, a question) means this turn still owns the
+          // request, so it reports and asks as usual instead of ending silently.
+          if (handedOff && name !== "handoff_to_bot") handedOff = false;
           const outOfCredits = credits.refusal(name);
           const applied = (
             outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)
@@ -13657,14 +13702,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!role || role.title === NEW_ROLE_TITLE) return undefined;
           const startedAt = Date.now();
-          // A language most of the searches ask for is required on the profile in two of them:
-          // worded into a query alone, it still returned people with no sign of it.
-          const languages = languageFilters(planned.data.queries);
+          // A required language is required on the profile in two of the searches: worded into a
+          // query alone, it still returned people with no sign of it. When the planned queries
+          // left it out, the recruiter's own words name it and the other two queries carry it.
+          const { filters: languages, queriesNameIt } = plannedLanguageFilters(
+            planned.data.queries,
+            await recruiterWords(deps.prisma, thread.id),
+          );
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
               {
-                query,
+                query:
+                  languages.length && !queriesNameIt && index >= 2
+                    ? `${query}. Languages: ${languages.join(", ")}`
+                    : query,
                 category: "people",
                 numResults: 25,
                 enableHighlights: true,
@@ -13766,7 +13818,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rows = rowsOf(result);
             return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
               ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
@@ -14310,6 +14362,90 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     Boolean(recruitingBotKey(bot))),
               });
         let runModel = configuredRunModel;
+        /**
+         * One small call for the gray next-message text the composer shows (Tab accepts it). A
+         * follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last word
+         * too, so it gets a suggestion based on what the user last wrote. Null when not offered.
+         */
+        const startReplySuggestion = (replyText: string): Promise<string | null> | null => {
+          const suggestionTurns = historyMessages.filter(
+            (message) =>
+              message.id !== currentTurnMessage?.id &&
+              ((message.role === "user" && !message.internal) || message.role === "bot") &&
+              blocksText(message.blocks).trim(),
+          );
+          const lastUserIndex =
+            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
+          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
+          if (
+            !deps.replySuggestions ||
+            scripted ||
+            !(run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) ||
+            messagingChannelRun ||
+            handedOff
+          )
+            return null;
+          return suggestNextMessage({
+            runtime: deps.runtime,
+            model: turnModel.routed === "fast" ? runModel : configuredRunModel,
+            earlier: (lastUserTurn ? suggestionTurns.slice(0, lastUserIndex) : suggestionTurns).map(
+              (message) => ({
+                role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+                text: blocksText(message.blocks),
+              }),
+            ),
+            userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
+            // Replies already sent in this turn come before this one.
+            replyText: [
+              ...(lastUserTurn
+                ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
+                : []),
+              replyText,
+            ]
+              .filter((part) => part.trim())
+              .join("\n\n"),
+            runId,
+            spaceId: run.spaceId,
+            userId: run.userId,
+            botId: bot.id,
+            threadId: thread.id,
+            onUsage: (event) =>
+              recordUsage(
+                deps.prisma,
+                event,
+                {
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  botId: bot.id,
+                  parentRunId: runId,
+                  runId,
+                  operationId: `suggestion:${runId}`,
+                  operationKind: "setup",
+                },
+                estimateCatalogTokenCostUsd,
+              ),
+          }).catch((error) => {
+            getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
+            return null;
+          });
+        };
+        const saveReplySuggestion = (pending: Promise<string | null>, card = false) =>
+          void pending
+            .then((suggestion) =>
+              suggestion
+                ? deps.events.append({
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    type: "thread.suggestion",
+                    runId,
+                    payload: { text: suggestion, ...(card ? { card: true } : {}) },
+                  })
+                : undefined,
+            )
+            .catch((error) =>
+              getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
+            );
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
           provider,
           id: modelId,
@@ -14998,6 +15134,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
+              // The recruiter's likely answer, typed for them in the composer and the card (Tab).
+              const cardSuggestion = event.requestedSchema
+                ? null
+                : startReplySuggestion(
+                    [
+                      ...midTurnUserTexts,
+                      safeText,
+                      ...(safeActions?.length
+                        ? [`Choices: ${safeActions.map((action) => action.label).join(" / ")}`]
+                        : []),
+                    ].join("\n\n"),
+                  );
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
@@ -15046,6 +15194,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .catch((error) => getLogger().error("steering answer enqueue", error));
                 return;
               }
+              if (cardSuggestion) saveReplySuggestion(cardSuggestion, true);
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,
@@ -15544,69 +15693,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.
-          // A follow-up (auto-continue, a teammate's report, a reply check) can be the turn's last
-          // word too, so it gets a suggestion based on what the user last wrote.
-          const suggestionTurns = historyMessages.filter(
-            (message) =>
-              message.id !== currentTurnMessage?.id &&
-              ((message.role === "user" && !message.internal) || message.role === "bot") &&
-              blocksText(message.blocks).trim(),
-          );
-          const lastUserIndex =
-            run.trigger === "user" ? -1 : suggestionTurns.findLastIndex((m) => m.role === "user");
-          const lastUserTurn = lastUserIndex >= 0 ? suggestionTurns[lastUserIndex] : undefined;
           const suggestionPending =
-            deps.replySuggestions &&
-            !scripted &&
-            (run.trigger === "user" || (run.trigger === "follow_up" && lastUserTurn)) &&
-            !messagingChannelRun &&
-            !handedOff &&
-            text.trim() &&
-            !blocks.some((block) => block.kind === "ask")
-              ? suggestNextMessage({
-                  runtime: deps.runtime,
-                  model: turnModel.routed === "fast" ? runModel : configuredRunModel,
-                  earlier: (lastUserTurn
-                    ? suggestionTurns.slice(0, lastUserIndex)
-                    : suggestionTurns
-                  ).map((message) => ({
-                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                    text: blocksText(message.blocks),
-                  })),
-                  userText: lastUserTurn ? blocksText(lastUserTurn.blocks) : turnUserText,
-                  // Replies already sent in this turn come before this one.
-                  replyText: [
-                    ...(lastUserTurn
-                      ? suggestionTurns.slice(lastUserIndex + 1).map((m) => blocksText(m.blocks))
-                      : []),
-                    text,
-                  ]
-                    .filter((part) => part.trim())
-                    .join("\n\n"),
-                  runId,
-                  spaceId: run.spaceId,
-                  userId: run.userId,
-                  botId: bot.id,
-                  threadId: thread.id,
-                  onUsage: (event) =>
-                    recordUsage(
-                      deps.prisma,
-                      event,
-                      {
-                        spaceId: run.spaceId,
-                        userId: run.userId,
-                        botId: bot.id,
-                        parentRunId: runId,
-                        runId,
-                        operationId: `suggestion:${runId}`,
-                        operationKind: "setup",
-                      },
-                      estimateCatalogTokenCostUsd,
-                    ),
-                }).catch((error) => {
-                  getLogger().warn("reply suggestion failed", { runId, reason: String(error) });
-                  return null;
-                })
+            text.trim() && !blocks.some((block) => block.kind === "ask")
+              ? startReplySuggestion(text)
               : null;
           const markUnread = completionMarksUnread(
             run.trigger,
@@ -15655,24 +15744,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           logRunTiming("completed");
           // Saved as soon as it is ready, without waiting for the checks below. The composer shows it
           // only while this reply is the newest message and nothing is running.
-          if (suggestionPending && !completed.continuationRunId) {
-            void suggestionPending
-              .then((suggestion) =>
-                suggestion
-                  ? deps.events.append({
-                      spaceId: run.spaceId,
-                      threadId: thread.id,
-                      botId: bot.id,
-                      type: "thread.suggestion",
-                      runId,
-                      payload: { text: suggestion },
-                    })
-                  : undefined,
-              )
-              .catch((error) =>
-                getLogger().warn("reply suggestion save failed", { runId, reason: String(error) }),
-              );
-          }
+          if (suggestionPending && !completed.continuationRunId)
+            saveReplySuggestion(suggestionPending);
           // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
           if (lastThinking)
             await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>

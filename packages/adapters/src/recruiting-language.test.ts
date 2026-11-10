@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { TextJudge } from "./judge.js";
 import {
   languageFilters,
+  plannedLanguageFilters,
   profileTexts,
   requiredLanguage,
+  statedLanguageRequirement,
   withoutName,
   withRequiredLanguage,
 } from "./recruiting-language.js";
@@ -70,35 +72,47 @@ describe("required language", () => {
     );
   });
 
-  it("puts people whose profile shows the language first and never shows the judge a name", async () => {
+  it("lists people who show the language first, leaves out those with no sign, and never shows the judge a name", async () => {
     const seen: string[] = [];
-    const ordered = await withRequiredLanguage(
+    const checked = await withRequiredLanguage(
       { resolve: async () => fakeJudge(seen) },
       brief,
       rows,
       result,
     );
-    expect(ordered.map((row) => [row.name, row.requiredLanguage])).toEqual([
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
       ["Wei Test", "shown"],
       ["Ana Example", "unclear"],
-      ["Joe Sample", "no sign"],
     ]);
+    expect(checked.withoutLanguage).toBe(1);
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
-  it("leaves rows unchanged without a requirement, a judge, or when the judge fails", async () => {
+  it("checks the profile text itself when there is no judge", async () => {
+    const checked = await withRequiredLanguage(
+      { resolve: async () => undefined },
+      brief,
+      rows,
+      result,
+    );
+    expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test"]);
+    expect(checked.withoutLanguage).toBe(2);
+  });
+
+  it("leaves rows unchanged without a requirement, and reads the text when the judge is silent", async () => {
     const seen: string[] = [];
     expect(
       await withRequiredLanguage({ resolve: async () => fakeJudge(seen) }, {}, rows, result),
-    ).toEqual(rows);
-    expect(
-      await withRequiredLanguage({ resolve: async () => undefined }, brief, rows, result),
-    ).toEqual(rows);
-    const silent: TextJudge = { yes: async () => undefined };
-    expect(
-      await withRequiredLanguage({ resolve: async () => silent }, brief, rows, result),
-    ).toEqual(rows);
+    ).toEqual({ rows, withoutLanguage: 0 });
     expect(seen).toEqual([]);
+    const silent: TextJudge = { yes: async () => undefined };
+    const checked = await withRequiredLanguage(
+      { resolve: async () => silent },
+      brief,
+      rows,
+      result,
+    );
+    expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test"]);
   });
 
   it("requires the language on the profile when most planned searches ask for it", () => {
@@ -113,5 +127,19 @@ describe("required language", () => {
     expect(languageFilters(["Bilingual Japanese technicians", "日语 engineers"])).toEqual([
       "Japanese",
     ]);
+  });
+
+  it("falls back to the recruiter's own words when the planned queries leave the language out", () => {
+    const jd =
+      "Location: on-site near Linden, NJ.\nMust speak both Mandarin Chinese and English.\nPLC troubleshooting.";
+    expect(statedLanguageRequirement([jd])).toBe("Must speak both Mandarin Chinese and English.");
+    expect(statedLanguageRequirement(["Spanish speakers welcome to apply"])).toBe(undefined);
+    expect(
+      plannedLanguageFilters(["Maintenance engineers near Linden", "PLC technicians in NJ"], [jd]),
+    ).toEqual({ filters: ["Mandarin", "Chinese"], queriesNameIt: false });
+    expect(plannedLanguageFilters(["PLC technicians in NJ"], ["No language needs"])).toEqual({
+      filters: [],
+      queriesNameIt: false,
+    });
   });
 });

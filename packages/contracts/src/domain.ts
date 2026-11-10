@@ -1214,7 +1214,9 @@ export const ThreadSnapshotSchema = z.object({
   activeRuns: z.array(RunSchema).optional(),
   computer: ComputerStatusSchema.optional(),
   /** Guessed next user message after the newest reply, while that reply is still the newest. */
-  suggestion: z.object({ runId: Id, text: z.string() }).optional(),
+  suggestion: z
+    .object({ runId: Id, text: z.string(), card: z.literal(true).optional() })
+    .optional(),
   /** This chat's effort mode; present only for accounts that may change it. */
   effortMode: EffortModeSchema.optional(),
 });

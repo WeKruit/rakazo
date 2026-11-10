@@ -561,7 +561,7 @@ export async function threadHead(prisma: PrismaClient, target: ThreadTarget) {
 export async function latestReplySuggestion(
   prisma: PrismaClient,
   messages: ReadonlyArray<{ id: string; role: string; runId?: string | null; internal?: boolean }>,
-): Promise<{ runId: string; text: string } | null> {
+): Promise<{ runId: string; text: string; card?: true } | null> {
   const last = messages.findLast(
     (message) =>
       !message.internal &&
@@ -580,8 +580,11 @@ export async function latestReplySuggestion(
       }),
     )
     .catch(() => null);
-  const text = (event?.payload as { text?: unknown } | undefined)?.text;
-  return typeof text === "string" && text ? { runId, text } : null;
+  const payload = event?.payload as { text?: unknown; card?: unknown } | undefined;
+  const text = payload?.text;
+  return typeof text === "string" && text
+    ? { runId, text, ...(payload?.card === true ? { card: true as const } : {}) }
+    : null;
 }
 
 export async function threadSnapshot(

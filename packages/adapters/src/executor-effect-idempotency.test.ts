@@ -51,6 +51,7 @@ import {
 } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
+  ASK_AFTER_HANDOFF,
   continuedCandidateKey,
   createRunExecutor,
   INTAKE_ASK_FIRST,
@@ -69,6 +70,8 @@ import {
   shortQuestion,
   toolArgsSummary,
 } from "./executor.js";
+import type * as GroupHandoffModule from "./group-handoff.js";
+import { handoffToGroupBot } from "./group-handoff.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -95,6 +98,10 @@ import {
   saveNativeRecruitingCandidateResults,
 } from "./recruiting-tools.js";
 
+vi.mock("./group-handoff.js", async (importOriginal) => {
+  const original = await importOriginal<typeof GroupHandoffModule>();
+  return { ...original, handoffToGroupBot: vi.fn(original.handoffToGroupBot) };
+});
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   loadRecruitingRunContext: vi.fn(),
@@ -5675,6 +5682,34 @@ describe("native recruiting assessment effect delivery", () => {
     });
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role in this turn");
   });
+
+  // Staging 11-10: Main handed two people to Reviewer, then ran the next round's searches itself;
+  // its question and final reply were dropped as if the teammate owned the work, so it went silent.
+  it.each([
+    ["only hands off", [], true],
+    [
+      "keeps working after the handoff",
+      [{ name: "write_file", args: { path: "n.txt", content: "x" }, executionId: "w" }],
+      false,
+    ],
+  ] as const)(
+    "a turn that %s asks the recruiter only when it still owns the work",
+    async (_label, after, blocked) => {
+      vi.mocked(handoffToGroupBot).mockResolvedValueOnce({ ok: true } as never);
+      const f = await roleTeamFirstTurn(`handoff-then-${blocked}`, "你好", [
+        {
+          name: "handoff_to_bot",
+          args: { confirm_name: "Reviewer", message: "Check these two people" },
+          executionId: "handoff-1",
+        },
+        ...after,
+      ]);
+      const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+      const answer = await request.beforeAsk?.("要放宽中文要求吗？", undefined);
+      if (blocked) expect(answer).toEqual({ instead: ASK_AFTER_HANDOFF });
+      else expect(answer).not.toEqual({ instead: ASK_AFTER_HANDOFF });
+    },
+  );
 
   async function firstMessageRole(groupId: string, groupName: string | null) {
     const f = fixture(`first-message-${groupId}`);

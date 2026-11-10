@@ -28,7 +28,7 @@ import type { ComponentProps, CSSProperties } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { MessageSkeleton } from "../../components/ai/primitives";
 import type { AskPanel } from "../../components/ask-panel";
-import { AskPanelContext } from "../../components/ask-panel";
+import { AskPanelContext, AskSuggestionContext } from "../../components/ask-panel";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { startCall } from "../../lib/call-session";
@@ -288,6 +288,23 @@ export function ShellConversation({
         <CalibrationRoundView round={calibrationRound} onSendFeedback={answer} />
       ) : null,
     [calibrationRound, latestAskId],
+  );
+  // The same gray suggestion fills the newest card's answer box with Tab.
+  const composerSuggestion =
+    emptyCrmChat || !activeSnapshot ? null : currentSuggestion(activeSnapshot, currentRuns);
+  const suggestedCard = composerSuggestion
+    ? transcriptMessages.find(
+        (message) =>
+          message.id === transcriptAskIds.at(-1) &&
+          message.runId === activeSnapshot?.suggestion?.runId,
+      )
+    : undefined;
+  const askSuggestion = useMemo(
+    () =>
+      suggestedCard && composerSuggestion
+        ? { messageId: suggestedCard.id, text: composerSuggestion }
+        : null,
+    [suggestedCard, composerSuggestion],
   );
   // While another role opens, its predecessor's pages and chat are not shown under its name.
   const switchingRole = Boolean(openingCrmRole && !openingCrmRole.error);
@@ -906,61 +923,63 @@ export function ShellConversation({
                 />
               ) : (
                 <AskPanelContext.Provider value={askPanel}>
-                  <Transcript
-                    key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
-                    narrow={roleChatWorkspace || !showToolActivity}
-                    visible={!roleChatHidden}
-                    scrollRef={messageScroll}
-                    scrollRequest={scrollRequest}
-                    onScrollRequestHandled={clearScrollRequest}
-                    artifactTarget={transcriptArtifactTarget}
-                    messages={emptyCrmChat ? NO_ITEMS : transcriptMessages}
-                    showToolActivity={showToolActivity}
-                    olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
-                    loadingOlder={loadingOlder}
-                    answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : transcriptAskIds}
-                    waitingRuns={
-                      emptyCrmChat
-                        ? NO_ITEMS
-                        : (activeSnapshot?.activeRuns ??
-                          (activeSnapshot?.run ? [activeSnapshot.run] : []))
-                    }
-                    running={!emptyCrmChat && transcriptRunning}
-                    tailPhase={
-                      emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
-                    }
-                    workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
-                    workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
-                    backgroundWork={emptyCrmChat ? NO_ITEMS : activeSnapshot?.backgroundWork}
-                    onLoadOlder={loadOlder}
-                    onOpenBot={openBot}
-                    onAnswer={answerMessage}
-                    onReply={replyTo}
-                    onQuote={quoteFrom}
-                    onReact={reactToMessage}
-                    onJumpToMessage={jumpToReplyMessage}
-                    onOpenPeerMessages={setPeerConversation}
-                    memberName={resolveTranscriptMemberName}
-                    peerBot={resolveTranscriptBot}
-                    onRefresh={refreshActiveThread}
-                    onBotChanged={refreshBots}
-                    onAddRoutine={addSkillRoutine}
-                    onContinue={() =>
-                      void sendFromComposer(
-                        continueMessageText(writesChinese(transcriptMessages)),
-                        [],
-                        crypto.randomUUID(),
-                        true,
-                      )
-                    }
-                    voiceReady={Boolean(voiceStatus?.ready)}
-                    speakingMessageId={speakingMessageId}
-                    onSpeak={speakMessage}
-                    onOpenComputer={onOpenComputer}
-                    onStopRun={stopRun}
-                    liveDetail={liveDetail}
-                    workEstimate={workEstimate}
-                  />
+                  <AskSuggestionContext.Provider value={askSuggestion}>
+                    <Transcript
+                      key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
+                      narrow={roleChatWorkspace || !showToolActivity}
+                      visible={!roleChatHidden}
+                      scrollRef={messageScroll}
+                      scrollRequest={scrollRequest}
+                      onScrollRequestHandled={clearScrollRequest}
+                      artifactTarget={transcriptArtifactTarget}
+                      messages={emptyCrmChat ? NO_ITEMS : transcriptMessages}
+                      showToolActivity={showToolActivity}
+                      olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
+                      loadingOlder={loadingOlder}
+                      answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : transcriptAskIds}
+                      waitingRuns={
+                        emptyCrmChat
+                          ? NO_ITEMS
+                          : (activeSnapshot?.activeRuns ??
+                            (activeSnapshot?.run ? [activeSnapshot.run] : []))
+                      }
+                      running={!emptyCrmChat && transcriptRunning}
+                      tailPhase={
+                        emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
+                      }
+                      workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
+                      workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
+                      backgroundWork={emptyCrmChat ? NO_ITEMS : activeSnapshot?.backgroundWork}
+                      onLoadOlder={loadOlder}
+                      onOpenBot={openBot}
+                      onAnswer={answerMessage}
+                      onReply={replyTo}
+                      onQuote={quoteFrom}
+                      onReact={reactToMessage}
+                      onJumpToMessage={jumpToReplyMessage}
+                      onOpenPeerMessages={setPeerConversation}
+                      memberName={resolveTranscriptMemberName}
+                      peerBot={resolveTranscriptBot}
+                      onRefresh={refreshActiveThread}
+                      onBotChanged={refreshBots}
+                      onAddRoutine={addSkillRoutine}
+                      onContinue={() =>
+                        void sendFromComposer(
+                          continueMessageText(writesChinese(transcriptMessages)),
+                          [],
+                          crypto.randomUUID(),
+                          true,
+                        )
+                      }
+                      voiceReady={Boolean(voiceStatus?.ready)}
+                      speakingMessageId={speakingMessageId}
+                      onSpeak={speakMessage}
+                      onOpenComputer={onOpenComputer}
+                      onStopRun={stopRun}
+                      liveDetail={liveDetail}
+                      workEstimate={workEstimate}
+                    />
+                  </AskSuggestionContext.Provider>
                 </AskPanelContext.Provider>
               )}
               {showToolActivity && inGroup && composerRunning ? (
@@ -1119,11 +1138,7 @@ export function ShellConversation({
                   replyQuote={emptyCrmChat ? null : activeReplyQuote}
                   replyTargetName={emptyCrmChat ? undefined : replyTargetName}
                   onClearReply={clearReply}
-                  suggestion={
-                    emptyCrmChat || !activeSnapshot
-                      ? null
-                      : currentSuggestion(activeSnapshot, currentRuns)
-                  }
+                  suggestion={composerSuggestion}
                   toolbar={
                     !emptyCrmChat && activeSnapshot?.effortMode ? (
                       <EffortPicker

@@ -64,5 +64,48 @@ describe("thread suggestion", () => {
       "Find more",
     );
     expect(currentSuggestion(next, [{ status: "running", trigger: "user" }])).toBeNull();
+    // A card waiting on the person keeps its suggested answer.
+    expect(currentSuggestion(next, [{ status: "waiting_input", trigger: "user" }])).toBe(
+      "Find more",
+    );
+  });
+
+  it("keeps a card's suggested answer only while that card waits", () => {
+    const reduced = reduceThreadEvent(thread, {
+      type: "thread.suggestion",
+      threadId: "t1",
+      runId: "r1",
+      seq: 0,
+      payload: { text: "Remote is fine", card: true },
+    });
+    expect(reduced.suggestion).toEqual({ runId: "r1", text: "Remote is fine", card: true });
+    const card = {
+      ...thread,
+      messages: [
+        {
+          id: "m-card",
+          role: "bot" as const,
+          runId: "run-1",
+          blocks: [{ kind: "ask" as const, text: "Remote or onsite?", status: "pending" as const }],
+        },
+      ],
+      suggestion: { runId: "run-1", text: "Remote is fine", card: true as const },
+    };
+    expect(currentSuggestion(card, [{ status: "waiting_input", trigger: "user" }])).toBe(
+      "Remote is fine",
+    );
+    const later = {
+      ...card,
+      messages: [
+        ...card.messages,
+        {
+          id: "m-reply",
+          role: "bot" as const,
+          runId: "run-1",
+          blocks: [{ kind: "text" as const, text: "Searching remote people." }],
+        },
+      ],
+    };
+    expect(currentSuggestion(later)).toBeNull();
   });
 });

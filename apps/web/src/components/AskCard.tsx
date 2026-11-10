@@ -116,6 +116,7 @@ export function AskCard({
   expiresAt,
   onAnswer,
   panel,
+  suggestion,
 }: {
   block: AskBlock;
   canAnswer: boolean;
@@ -123,6 +124,8 @@ export function AskCard({
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
   /** Inputs the question needs beyond its choices (such as votes on people); they answer the card. */
   panel?: ReactNode;
+  /** The likely answer, shown gray in the empty answer box; Tab fills it in. */
+  suggestion?: string;
 }) {
   if (block.connection) {
     return (
@@ -142,6 +145,7 @@ export function AskCard({
       expiresAt={expiresAt}
       onAnswer={onAnswer}
       panel={canAnswer && block.status !== "answered" ? panel : undefined}
+      suggestion={suggestion}
     />
   );
 }
@@ -268,12 +272,14 @@ function QuestionAskCard({
   expiresAt,
   onAnswer,
   panel,
+  suggestion,
 }: {
   block: AskBlock;
   canAnswer: boolean;
   expiresAt?: string | null;
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
   panel?: ReactNode;
+  suggestion?: string;
 }) {
   const { t } = useLingui();
   const [answer, setAnswer] = useState("");
@@ -669,7 +675,22 @@ function QuestionAskCard({
                 value={answer}
                 disabled={submitting}
                 onChange={(event) => setAnswer(event.target.value)}
-                placeholder={t`Type your answer`}
+                onKeyDown={(event) => {
+                  if (
+                    suggestion &&
+                    !answer &&
+                    event.key === "Tab" &&
+                    !event.shiftKey &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.altKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    setAnswer(suggestion);
+                  }
+                }}
+                placeholder={suggestion ?? t`Type your answer`}
               />
               <Button
                 type="submit"
