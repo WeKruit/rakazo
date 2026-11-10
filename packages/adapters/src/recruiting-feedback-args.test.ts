@@ -1,11 +1,7 @@
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
 import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import {
-  feedbackSaveRefused,
-  filledRecruitingFeedbackArgs,
-  unsavedRoundFeedback,
-} from "./executor.js";
+import { feedbackSaveRefused, filledRecruitingFeedbackArgs } from "./executor.js";
 import { recruitingFeedbackInputError } from "./recruiting-feedback.js";
 
 const people = [
@@ -131,47 +127,6 @@ describe("recruiting_feedback arguments", () => {
   });
 });
 
-describe("next round after feedback", () => {
-  function gate(options: {
-    round?: boolean;
-    approved?: boolean;
-    wrote?: boolean;
-    saved?: boolean;
-  }) {
-    return {
-      recruitingCalibrationRound: {
-        findFirst: vi.fn(async () =>
-          options.round === false
-            ? null
-            : {
-                round: 1,
-                createdAt: new Date(0),
-                approvedAt: options.approved ? new Date(1) : null,
-              },
-        ),
-      },
-      message: { findFirst: vi.fn(async () => (options.wrote ? { id: "m-1" } : null)) },
-      externalEffect: { findFirst: vi.fn(async () => (options.saved ? { id: "e-1" } : null)) },
-    } as unknown as Parameters<typeof unsavedRoundFeedback>[0];
-  }
-  const input = { roleId: "role-1", threadId: "thread-1", spaceId: "ws-1" };
-
-  it("waits for the recruiter's feedback on the last round to be saved", async () => {
-    await expect(unsavedRoundFeedback(gate({ wrote: true }), input)).resolves.toMatch(
-      /^Not recorded: the recruiter's feedback on round 1 is not saved yet/,
-    );
-  });
-
-  it.each([
-    [{ round: false }],
-    [{ approved: true, wrote: true }],
-    [{ wrote: false }],
-    [{ wrote: true, saved: true }],
-  ])("records the round when there is nothing to save first (%o)", async (options) => {
-    await expect(unsavedRoundFeedback(gate(options), input)).resolves.toBeUndefined();
-  });
-});
-
 describe("feedbackSaveRefused", () => {
   it("passes on which words to quote, so a refused save can be fixed instead of retried blindly", () => {
     const text = feedbackSaveRefused(
@@ -179,7 +134,8 @@ describe("feedbackSaveRefused", () => {
     );
     expect(text).toMatch(/^Not recorded/);
     expect(text).toContain("Jane Doe 很好。Sam Lee 不合适。");
-    expect(text).toContain("Never run people searches again");
+    expect(text).toContain("carry on with the rest of the recruiter's request");
+    expect(text).not.toContain("Never run people searches");
   });
 
   it("names every field to check when the refusal gives no reason", () => {

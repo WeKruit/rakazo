@@ -1366,3 +1366,200 @@ describe("native recruiting feedback records", () => {
     );
   });
 });
+
+function reportFixture() {
+  const f = fixture();
+  const asked = {
+    ...f.source,
+    id: "asked",
+    seq: 2,
+    role: "bot",
+    botId: "bot",
+    runId: "main-run",
+    clientNonce: "group-handoff:main-run",
+    blocks: [
+      {
+        kind: "handoff",
+        fromBotId: "bot",
+        toBotId: "reviewer-bot",
+        text: "Record the recruiter's verdict on these three people",
+        hop: 1,
+        reportBack: true,
+      },
+    ],
+  };
+  const report = {
+    ...f.source,
+    id: "report",
+    seq: 3,
+    role: "bot",
+    botId: "reviewer-bot",
+    runId: "reviewer-run",
+    clientNonce: "group-report:reviewer-run",
+    blocks: [
+      {
+        kind: "handoff",
+        fromBotId: "reviewer-bot",
+        toBotId: "bot",
+        text: "Finished the stage you handed me.",
+        hop: 2,
+        report: "completed",
+      },
+    ],
+  };
+  const run = {
+    ...actor,
+    id: "run",
+    botId: "bot",
+    bot: actor,
+    threadId: "thread",
+    sourceMessageId: report.id,
+    trigger: "follow_up",
+    status: "running",
+  };
+  const reviewer = {
+    ...run,
+    id: "reviewer-run",
+    botId: "reviewer-bot",
+    sourceMessageId: asked.id,
+    status: "completed",
+  };
+  const delegator = {
+    ...run,
+    id: "main-run",
+    sourceMessageId: f.source.id,
+    trigger: "user",
+    status: "completed",
+  };
+  const runs = new Map<string, unknown>([
+    [run.id, run],
+    [reviewer.id, reviewer],
+    [delegator.id, delegator],
+  ]);
+  f.tx.run.findFirst.mockImplementation(
+    async (query) => (runs.get((query as { where: { id: string } }).where.id) ?? null) as never,
+  );
+  const messages = new Map<string, unknown>([
+    [f.source.id, f.source],
+    [asked.id, asked],
+    [report.id, report],
+  ]);
+  f.tx.message.findFirst.mockImplementation(
+    async ({ where }) => (messages.get(where.id ?? "") ?? null) as never,
+  );
+  return { ...f, asked, report, run, input: { ...f.input, sourceMessageId: report.id } };
+}
+
+describe("a teammate's report back to the bot that handed it the stage", () => {
+  it("acts for the recruiter's message behind the handoff", async () => {
+    const f = reportFixture();
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
+    expect(result.source).toMatchObject({
+      id: "human-message:human",
+      anchor: { messageId: f.source.id },
+    });
+  });
+  it.each(["addressee", "asker", "reportBack", "nonce"] as const)(
+    "rejects a report whose %s does not match",
+    async (boundary) => {
+      const f = reportFixture();
+      if (boundary === "addressee")
+        f.report.blocks = [{ ...f.report.blocks[0]!, toBotId: "other-bot" }];
+      if (boundary === "asker") f.asked.botId = "other-bot";
+      if (boundary === "reportBack")
+        f.asked.blocks = [{ ...f.asked.blocks[0]!, reportBack: false }];
+      if (boundary === "nonce") f.asked.clientNonce = "something-else";
+      await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+        IsolationError,
+      );
+    },
+  );
+});
+
+describe("a turn-end nudge that reaches a run already working", () => {
+  function steeredFixture() {
+    const f = fixture();
+    const later = {
+      ...f.source,
+      id: "later",
+      seq: 2,
+      blocks: [{ kind: "text", text: "Candidates must speak Mandarin" }] as unknown[],
+    };
+    const nudge = {
+      ...f.source,
+      id: "nudge",
+      seq: 3,
+      role: "system",
+      clientNonce: "autocontinue:previous-run:1",
+      blocks: [{ kind: "text", text: "Continue with the next step." }] as unknown[],
+    };
+    const messages = new Map<string, unknown>([
+      [f.source.id, f.source],
+      [later.id, later],
+      [nudge.id, nudge],
+    ]);
+    let previous: unknown = later;
+    f.tx.message.findFirst.mockImplementation(
+      async ({ where }) => (where.id ? (messages.get(where.id) ?? null) : previous) as never,
+    );
+    Object.assign(f.tx.message, {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => messages.get(where.id)),
+    });
+    const steered = [later, nudge].map((message) => ({ messageId: message.id, message }));
+    f.tx.steeringMessage.findMany.mockImplementation(async () => steered);
+    return {
+      ...f,
+      steered,
+      setPrevious: (message: unknown) => {
+        previous = message;
+      },
+      input: {
+        ...f.input,
+        sourceMessageId: nudge.id,
+        intent: { basis: "direct" as const, quote: "must speak Mandarin" },
+      },
+    };
+  }
+
+  it("acts for the recruiter's latest message before it", async () => {
+    const f = steeredFixture();
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
+    expect(result.source).toMatchObject({
+      id: "human-message:later",
+      anchor: { messageId: "later" },
+    });
+  });
+
+  it("rejects it when that message is not one the run acts for", async () => {
+    const f = steeredFixture();
+    f.steered.splice(0, 1);
+    f.setPrevious({ ...f.source, id: "elsewhere", seq: 2 });
+    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+      IsolationError,
+    );
+  });
+});
+
+describe("record keeping is never refused over which recruiter message it cites", () => {
+  it("cites the recruiter's latest message when the run's own message can't be traced", async () => {
+    const f = reportFixture();
+    f.asked.clientNonce = "something-else";
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, {
+      ...f.input,
+      recordKeeping: true,
+    });
+    expect(result.source).toMatchObject({
+      id: "human-message:human",
+      anchor: { messageId: f.source.id },
+      quote,
+    });
+  });
+
+  it("still refuses another account's run", async () => {
+    const f = reportFixture();
+    f.tx.run.findFirst.mockImplementation(async () => null as never);
+    await expect(
+      readRecruitingFeedbackContext(f.prisma, actor, { ...f.input, recordKeeping: true }),
+    ).rejects.toThrow(IsolationError);
+  });
+});
