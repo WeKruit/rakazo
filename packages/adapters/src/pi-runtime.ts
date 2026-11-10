@@ -658,6 +658,7 @@ export class PiAgentRuntime implements AgentRuntime {
 
         let streamed = "";
         let currentMessageStreamed = "";
+        let currentTextPart: number | undefined;
         let toolCalls = 0;
         let toolActivityShowing = false;
         let silentToolContinuations = 0;
@@ -693,6 +694,7 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_start" && event.message.role === "assistant") {
             currentMessageStreamed = "";
+            currentTextPart = undefined;
             thinkingText = "";
             thinkingSince = undefined;
             modelStreaming = true;
@@ -758,9 +760,16 @@ export class PiAgentRuntime implements AgentRuntime {
               }
               // A new model message starts a new paragraph: two replies in one turn once
               // rendered as "…for this role.Absolutely."
-              const text = currentMessageStreamed ? delta : paragraphBreak(streamed) + delta;
+              // A new text part of the same message is a new paragraph too, as assistantText joins it.
+              const part = event.assistantMessageEvent.contentIndex;
+              const newPart = currentTextPart !== undefined && part !== currentTextPart;
+              currentTextPart = part;
+              const partBreak = newPart ? paragraphBreak(currentMessageStreamed) : "";
+              const text = currentMessageStreamed
+                ? partBreak + delta
+                : paragraphBreak(streamed) + delta;
               streamed += text;
-              currentMessageStreamed += delta;
+              currentMessageStreamed += partBreak + delta;
               queue.push({ type: "text", text });
             }
           }
@@ -3073,13 +3082,13 @@ function assistantText(message: unknown): string {
   const content = (message as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content
-    .map((part) =>
-      part && typeof part === "object" && "type" in part && part.type === "text" && "text" in part
-        ? String(part.text)
-        : "",
-    )
-    .join("");
+  // Text parts are separate paragraphs: joined bare, two of them read "…candidates.I can help…".
+  return content.reduce<string>((joined, part) => {
+    if (!part || typeof part !== "object" || !("type" in part) || part.type !== "text")
+      return joined;
+    const text = "text" in part ? String(part.text) : "";
+    return text ? joined + paragraphBreak(joined) + text : joined;
+  }, "");
 }
 
 function messageHasToolCall(message: unknown): boolean {
