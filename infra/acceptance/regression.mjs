@@ -1482,6 +1482,19 @@ try {
     for (const end = Date.now() + 90_000; !saved && Date.now() < end; await sleep(5_000))
       saved = (await memoryDocs()).find((doc) => doc.content.includes(team));
     if (!saved) failures.push(`the preference "${team}" was not saved to memory within 90 s`);
+    // Said again, the preference stays one line instead of piling up copies.
+    if (saved) {
+      await say(kruit.id, `再说一次这个长期偏好：把我的团队叫做「${team}」组。`, {
+        fixture: true,
+        limitMs: 3 * 60_000,
+        until: answered,
+      });
+      await sleep(15_000);
+      const copies = (await memoryDocs())
+        .flatMap((doc) => doc.content.split("\n"))
+        .filter((line) => line.includes(team)).length;
+      if (copies > 1) failures.push(`the repeated preference was saved ${copies} times`);
+    }
     // The role agent may post a quick acknowledgement first; wait for the name, not any reply.
     const recall = await say(fixture, "我让你怎么称呼我的团队？只回答名字。", {
       fixture: true,
