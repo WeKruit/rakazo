@@ -517,7 +517,12 @@ describe("group handoff report back", () => {
     const text = (
       messageCreate.mock.calls[0] as unknown as [{ data: { blocks: [{ text: string }] } }]
     )[0].data.blocks[0].text;
-    expect(text.includes(`Your question "${question}" is still unanswered`)).toBe(reminds);
+    expect(text.includes(`Your question "${question}" was closed when the recruiter typed`)).toBe(
+      reminds,
+    );
+    // Staging 11-10: "继续深搜，保留全部硬性要求" answered the card, yet the old wording made the
+    // agent ask the same question again. A typed answer is acted on, never asked again.
+    if (reminds) expect(text).toContain("act on that answer and never ask it again");
   });
 
   it("lets the sender hand a correction back after a report", async () => {

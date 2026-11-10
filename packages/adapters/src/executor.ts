@@ -1330,6 +1330,10 @@ export const REPORT_IN_FINAL_REPLY =
   "Not sent: another turn is answering the person's newer message. Give this report once, as this turn's final reply.";
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
+/** Model-facing: a message this turn took before it paused, shown again when it resumes. */
+export const EARLIER_STEERING =
+  "The recruiter sent this earlier in this turn and you already acknowledged it and folded it into the work. Keep following it; do not acknowledge, repeat or restate it.";
+
 export const STEERING_ACK =
   'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
@@ -14845,12 +14849,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           leaseFence: fence,
                           seenIds,
                         });
-                        const humanSteering = steering.findLast(
-                          (item) =>
-                            item.blocks.length > 0 &&
-                            item.blocks.every((block) =>
-                              ["text", "file", "image"].includes(block.kind),
-                            ),
+                        const isHuman = (item: (typeof steering)[number]) =>
+                          item.blocks.length > 0 &&
+                          item.blocks.every((block) =>
+                            ["text", "file", "image"].includes(block.kind),
+                          );
+                        const humanSteering = steering.findLast(isHuman);
+                        // A message an earlier attempt already took is context, not a new message
+                        // to acknowledge again after the turn resumes.
+                        const freshHumanSteering = steering.findLast(
+                          (item) => isHuman(item) && !item.earlier,
                         );
                         if (humanSteering) {
                           recruitingSourceMessageId = humanSteering.messageId;
@@ -14910,7 +14918,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                 )
                                   ? nativeMessageSourceInstruction(item.messageId, item.blocks)
                                   : undefined,
-                                item === humanSteering ? STEERING_ACK : undefined,
+                                item.earlier
+                                  ? EARLIER_STEERING
+                                  : item === freshHumanSteering
+                                    ? STEERING_ACK
+                                    : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
