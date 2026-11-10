@@ -2461,7 +2461,7 @@ describe("sendThreadMessage", () => {
     );
   });
 
-  it.each(["recruiting_grade", "tool_background", "routine", "webhook", "bot_message"])(
+  it.each(["recruiting_grade", "tool_background", "tickets"])(
     "starts the recruiter's own turn beside %s instead of waiting for it",
     async (trigger) => {
       const tx = {
@@ -2543,6 +2543,88 @@ describe("sendThreadMessage", () => {
         data: expect.objectContaining({ trigger: "user", sourceMessageId: "msg-1" }),
       });
       expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
+    },
+  );
+
+  // Staging 11-10: the recruiter's feedback during a teammate-woken round started a second turn
+  // that couldn't use the round's work; it now lands in the running work.
+  it.each(["bot_message", "recruiting_checkin", "routine", "webhook"])(
+    "steers the recruiter's message into a running %s turn instead of starting a second one",
+    async (trigger) => {
+      const tx = {
+        thread: {
+          update: vi
+            .fn()
+            .mockResolvedValueOnce({ nextMessageSeq: 2 })
+            .mockResolvedValue({ nextEventSeq: 3 }),
+        },
+        message: {
+          create: vi.fn().mockResolvedValue({
+            id: "msg-1",
+            threadId: "thread-1",
+            seq: 1,
+            role: "user",
+            blocks: [{ kind: "text", text: "find contacts" }],
+            botId: null,
+            replyToMessageId: null,
+            runId: null,
+            createdAt: new Date(),
+          }),
+          update: vi.fn(),
+        },
+        run: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "run-grade",
+              taskId: "task-grade",
+              status: "running",
+              trigger,
+              clientNonce: "recruiting-grade:thread-1:1",
+            },
+          ]),
+          updateMany: vi.fn(),
+          findUnique: vi.fn(async () => ({
+            status: "queued",
+            startedAt: null,
+          })),
+          create: vi
+            .fn()
+            .mockResolvedValue({ id: "run-user", taskId: "task-user", status: "queued" }),
+        },
+        attempt: { updateMany: vi.fn() },
+        steeringMessage: { create: vi.fn() },
+        event: { create: vi.fn().mockResolvedValue({ seq: 2 }) },
+        task: { create: vi.fn().mockResolvedValue({ id: "task-user" }), updateMany: vi.fn() },
+      };
+      const prisma = {
+        message: { findUnique: vi.fn().mockResolvedValue(null) },
+        $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      } as unknown as PrismaClient;
+      const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
+      const target = {
+        kind: "bot",
+        botId: "bot-1",
+        threadId: "thread-1",
+        bot: { computer: null },
+      } as ThreadTarget;
+      const enqueue = vi.fn().mockResolvedValue(undefined);
+
+      await expect(
+        sendThreadMessage(
+          {
+            prisma,
+            events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+            jobs: { enqueue } as never,
+          },
+          actor,
+          target,
+          { text: "find contacts", clientNonce: "nonce-beside" },
+        ),
+      ).resolves.toMatchObject({ runId: "run-grade" });
+      expect(tx.steeringMessage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ messageId: "msg-1", runId: "run-grade" }),
+      });
+      expect(tx.run.create).not.toHaveBeenCalled();
     },
   );
 
@@ -2764,7 +2846,7 @@ describe("sendThreadMessage", () => {
     });
   });
 
-  it("starts the person's own turn beside an active routine run", async () => {
+  it("steers the person's message into an active routine run", async () => {
     let messageSeq = 0;
     let eventSeq = 0;
     const tx = {
@@ -2829,16 +2911,14 @@ describe("sendThreadMessage", () => {
         target,
         { text: "what are the alternatives?", clientNonce: "nonce-routine" },
       ),
-    ).resolves.toMatchObject({ runId: "run-user", taskId: "task-user" });
-    // No work makes the person wait: the routine keeps running and the message starts its own
-    // turn at once instead of waiting as steering until the routine ends.
-    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
-    expect(tx.run.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ trigger: "user", sourceMessageId: "msg-1" }),
+    ).resolves.toMatchObject({ runId: "run-routine" });
+    // The message goes into the running work at its next step instead of a second turn.
+    expect(tx.steeringMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ messageId: "msg-1", runId: "run-routine" }),
     });
-    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
+    expect(tx.run.create).not.toHaveBeenCalled();
   });
-  it("starts a group member's own turn beside its webhook run", async () => {
+  it("steers a group member's message into its running webhook run", async () => {
     let messageSeq = 0;
     let eventSeq = 0;
     const tx = {
@@ -2921,11 +3001,11 @@ describe("sendThreadMessage", () => {
       { text: "and the Dallas ones?", clientNonce: "nonce-group-webhook" },
     );
 
-    expect(result).toMatchObject({ runId: "run-a", taskId: "task-a" });
-    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
-    expect(tx.run.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ botId: "bot-a", trigger: "user" }),
+    expect(result).toMatchObject({ runId: "run-webhook" });
+    expect(tx.steeringMessage.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ messageId: "msg-1", runId: "run-webhook" }),
     });
+    expect(tx.run.create).not.toHaveBeenCalled();
   });
   it("answers a progress question from a working teammate without interrupting it", async () => {
     let messageSeq = 0;
