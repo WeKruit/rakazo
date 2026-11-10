@@ -43,6 +43,7 @@ import {
   takesPersonMessages,
   typicalDurationMs,
   workActivityForTool,
+  writesChinese,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
 import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
@@ -1759,8 +1760,10 @@ export async function cancelThreadBackgroundTask(
   });
 }
 
-export function stoppedNotice(name: string | null | undefined): string {
+/** The stop line, in the language the recruiter last wrote in, like the rest of the chat. */
+export function stoppedNotice(name: string | null | undefined, chinese = false): string {
   const who = name?.trim();
+  if (chinese) return who ? `${who} 停下了助手` : "助手已停止";
   return who ? `${who} stopped the assistant` : "The assistant was stopped";
 }
 
@@ -1898,8 +1901,24 @@ export async function stopThreadRuns(
         where: { id: actor.userId },
         select: { name: true },
       });
+      const latest = await tx.message.findFirst({
+        where: { threadId: target.threadId, role: "user" },
+        orderBy: { seq: "desc" },
+        select: { blocks: true },
+      });
       const blocks: MessageBlock[] = [
-        { kind: "meta", text: stoppedNotice(user?.name), resume: true },
+        {
+          kind: "meta",
+          text: stoppedNotice(
+            user?.name,
+            writesChinese(
+              latest && Array.isArray(latest.blocks)
+                ? [{ role: "user", blocks: latest.blocks as MessageBlock[] }]
+                : [],
+            ),
+          ),
+          resume: true,
+        },
       ];
       const message = await createThreadMessageInTransaction(tx, {
         threadId: target.threadId,

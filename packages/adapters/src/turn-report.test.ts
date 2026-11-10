@@ -130,6 +130,13 @@ describe("turnReportText", () => {
     );
     expect(turnReportText(["draft"])).toBe("Done: saved the email draft.");
   });
+
+  it("reports in Chinese to a recruiter writing Chinese", () => {
+    expect(turnReportText(["feedback", "people_search"], 12, true)).toBe(
+      "已完成：记下了你的反馈、搜索了候选人。这个岗位现在存了 12 人。",
+    );
+    expect(turnReportText(["feedback"], 12, true)).not.toMatch(/[A-Za-z]/);
+  });
 });
 
 it("questionStatesWork", () => {

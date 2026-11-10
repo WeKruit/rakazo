@@ -2,10 +2,12 @@ import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import type { WorkSession } from "./live-work.js";
 import {
+  continueMessageText,
   EMPTY_WORK_TRACKER,
   formatWorkClock,
   formatWorkDuration,
   observeWorkSession,
+  retryMessageText,
   runWorkSteps,
   specialistWorkLabel,
   trackWork,
@@ -911,6 +913,10 @@ it("follows the language of the recruiter's own latest message", () => {
   });
   expect(writesChinese([user("Find SWE"), user("在专属岗位对话里继续")])).toBe(true);
   expect(writesChinese([user("在专属岗位对话里继续"), user("ok, go ahead")])).toBe(false);
+  // Try again and Continue keep the chat's language, so the next reply does not turn English.
+  expect(writesChinese([user("必须会中文"), user(continueMessageText(true))])).toBe(true);
+  expect(writesChinese([user("必须会中文"), user(retryMessageText(true))])).toBe(true);
+  expect(writesChinese([user("Find SWE"), user(continueMessageText(false))])).toBe(false);
   expect(writesChinese([user("找人"), user("internal wake", true)])).toBe(true);
   expect(writesChinese([])).toBe(false);
 });

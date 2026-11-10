@@ -4,11 +4,14 @@ import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import type { ThreadMessage } from "@rakazo/contracts";
 import {
   attachmentsForThread,
+  continueMessageText,
   currentSuggestion,
   isActive,
   isApprovalAskBlock,
+  retryMessageText,
   threadTailPhase,
   timedOutAskMessageId,
+  writesChinese,
 } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
 import {
@@ -85,10 +88,6 @@ import type { ReactNode } from "react";
 
 /** One empty list, so an empty chat passes the same value on every render. */
 const NO_ITEMS: never[] = [];
-
-/** What the Try again button sends after a failed run; the bot picks up from the history. */
-const RETRY_TEXT = "Try again";
-const CONTINUE_TEXT = "Continue where you left off.";
 
 export function ShellConversation({
   model,
@@ -947,7 +946,12 @@ export function ShellConversation({
                     onBotChanged={refreshBots}
                     onAddRoutine={addSkillRoutine}
                     onContinue={() =>
-                      void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), true)
+                      void sendFromComposer(
+                        continueMessageText(writesChinese(transcriptMessages)),
+                        [],
+                        crypto.randomUUID(),
+                        true,
+                      )
                     }
                     voiceReady={Boolean(voiceStatus?.ready)}
                     speakingMessageId={speakingMessageId}
@@ -1048,13 +1052,25 @@ export function ShellConversation({
                     if (runErrorComputerBotId) {
                       void rpc.computer
                         .reset({ botId: runErrorComputerBotId })
-                        .then(() => sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), true))
+                        .then(() =>
+                          sendFromComposer(
+                            retryMessageText(writesChinese(transcriptMessages)),
+                            [],
+                            crypto.randomUUID(),
+                            true,
+                          ),
+                        )
                         .catch((error: unknown) =>
                           setSendError(errorText(error, t`Could not reset the computer.`)),
                         );
                       return;
                     }
-                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), true);
+                    void sendFromComposer(
+                      retryMessageText(writesChinese(transcriptMessages)),
+                      [],
+                      crypto.randomUUID(),
+                      true,
+                    );
                   }}
                   retryLabel={
                     runErrorNeedsReconnect

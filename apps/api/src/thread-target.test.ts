@@ -5008,6 +5008,7 @@ describe("stopThreadRuns", () => {
           messages.push(data);
           return { id: "message-1", ...data };
         }),
+        findFirst: vi.fn().mockResolvedValue({ blocks: [{ kind: "text", text: "Find SWE" }] }),
       },
       steeringMessage: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -5058,6 +5059,8 @@ describe("stopThreadRuns", () => {
     await stopThreadRuns(deps, actor, target, "run-a");
     expect(messages).toEqual([]);
     expect(stoppedNotice("  ")).toBe("The assistant was stopped");
+    expect(stoppedNotice("Dana", true)).toBe("Dana 停下了助手");
+    expect(stoppedNotice(null, true)).toBe("助手已停止");
   });
 
   it("ends research and reminders only for Stop everything", async () => {

@@ -202,6 +202,7 @@ import {
   withoutHiddenTools,
   workActivityForTool,
   workStepDetail,
+  writesChinese,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -5362,8 +5363,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!failed.continuationRunId) {
             await notifyRun(deps, run, {
               kind: "failure",
-              title: `${bot.name} failed`,
-              body: failureNotificationBody(message),
+              ...(await failureNotice(deps.prisma, thread.id, bot.name, message)),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -6400,7 +6400,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
           if (!(await roundRecordedThisRun())) return undefined;
-          return recruitingNextStepCard();
+          return recruitingNextStepCard(isChineseText(lastRecruiterText));
         };
         // The next-step card stands in for the agent's own question only right after the round
         // (a brief save after it aside): the round's list is then the report, and the recruiter
@@ -6424,7 +6424,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? (await readRecruitingPlaybookStep(deps.prisma, roleId).catch(() => null))
                 ?.savedCandidates
             : undefined;
-          return turnReportText(work, saved);
+          return turnReportText(work, saved, isChineseText(lastRecruiterText));
         };
         /** Text of the last message this run already put in the conversation. */
         const lastRunMessageText = async () => {
@@ -14637,6 +14637,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // Older rounds asked this card in Chinese; its answer is not an intake answer either.
                     const nextStep = [
                       recruitingNextStepCard().text,
+                      recruitingNextStepCard(true).text,
                       "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
                     ];
                     const known = answeredAsk(
@@ -15926,8 +15927,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {
               kind: "failure",
-              title: `${bot.name} failed`,
-              body: failureNotificationBody(message),
+              ...(await failureNotice(deps.prisma, thread.id, bot.name, message)),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -16013,8 +16013,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 await notifyRun(deps, run, {
                   kind: "failure",
-                  title: `${owner?.name ?? "Your assistant"} failed`,
-                  body: failureNotificationBody(COMPUTER_START_FAILED),
+                  ...(await failureNotice(
+                    deps.prisma,
+                    run.threadId,
+                    owner?.name ?? "Your assistant",
+                    COMPUTER_START_FAILED,
+                  )),
                   botId: run.botId,
                   threadId: run.threadId,
                 });
@@ -17064,16 +17068,66 @@ export function runIdentityInstruction(
 }
 
 /** What stopped, in the recruiter's terms, and the one thing to do next; never raw error text. */
-export function failureNotificationBody(error: string): string {
-  const reason =
+export function failureNotificationBody(error: string, chinese = false): string {
+  const kind =
     /rate.?limit|too many requests|overload|capacity|unavailable|timed? out|timeout/i.test(error)
-      ? "The model service was busy."
+      ? "busy"
       : /budget|spend|\$\d/i.test(error)
-        ? "It reached this task's spending limit."
+        ? "budget"
         : /\bminutes?\b|time limit/i.test(error)
-          ? "It reached this task's time limit."
-          : "It stopped on an error.";
-  return `${reason} Send a message in the chat to pick up where it stopped.`;
+          ? "time"
+          : "error";
+  if (chinese) return `${FAILURE_REASON_ZH[kind]}在对话里发一条消息，就从停下的地方接着做。`;
+  return `${FAILURE_REASON[kind]} Send a message in the chat to pick up where it stopped.`;
+}
+
+const FAILURE_REASON = {
+  busy: "The model service was busy.",
+  budget: "It reached this task's spending limit.",
+  time: "It reached this task's time limit.",
+  error: "It stopped on an error.",
+};
+
+const FAILURE_REASON_ZH: Record<keyof typeof FAILURE_REASON, string> = {
+  busy: "模型服务繁忙。",
+  budget: "这个任务的费用到上限了。",
+  time: "这个任务的时间到上限了。",
+  error: "出错停下了。",
+};
+
+/**
+ * A failure notification names the role when the work is a role's, in the language the
+ * recruiter last wrote in, like the chat it opens.
+ */
+export async function failureNotice(
+  prisma: Pick<PrismaClient, "thread">,
+  threadId: string,
+  botName: string,
+  error: string,
+): Promise<{ title: string; body: string }> {
+  const thread = await prisma.thread
+    .findUnique({
+      where: { id: threadId },
+      select: {
+        group: { select: { name: true } },
+        messages: {
+          where: { role: "user" },
+          orderBy: { seq: "desc" },
+          take: 1,
+          select: { blocks: true },
+        },
+      },
+    })
+    .catch(() => null);
+  const blocks = thread?.messages[0]?.blocks;
+  const chinese = writesChinese(
+    Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
+  );
+  const name = thread?.group?.name?.trim() || botName;
+  return {
+    title: chinese ? `${name} 失败` : `${name} failed`,
+    body: failureNotificationBody(error, chinese),
+  };
 }
 
 export function runSendsFinishNotification(trigger: string, continuationPending = false): boolean {

@@ -1074,3 +1074,16 @@ export function writesChinese(
     .trim();
   return !!text && isChineseText(text);
 }
+
+/**
+ * What Try again and Continue send for the recruiter after a failed or stopped run; the bot picks
+ * up from the history. They read as the recruiter's own message, so they follow the language the
+ * recruiter writes in: an English line in a Chinese chat also turns the next reply English.
+ */
+export function retryMessageText(chinese: boolean): string {
+  return chinese ? "重试" : "Try again";
+}
+
+export function continueMessageText(chinese: boolean): string {
+  return chinese ? "从停下的地方继续。" : "Continue where you left off.";
+}
