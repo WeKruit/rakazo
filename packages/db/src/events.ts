@@ -168,6 +168,11 @@ export interface ClaimedSteeringMessage {
   blocks: MessageBlock[];
   /** Interject: the sender asked to interrupt the live reply rather than wait for it. */
   interrupt?: true;
+  /**
+   * Claimed by an earlier attempt of this run (before a pause or a restart): already part of the
+   * work, shown again only because the resumed turn rebuilds its context.
+   */
+  earlier?: true;
 }
 
 /** ISO timestamps of the current attempt, carried on run progress and run.completed. */
@@ -261,7 +266,7 @@ function resumeChoiceLabel(
  */
 /** A message typed in the chat box while a card was open: the agent decides whether it answers. */
 export function chatReplyToAsk(text: string): string {
-  return `${text}\n(Typed in the chat while this question was open, not picked on the card. If it does not answer the question, treat it as a new request: handle it, and once it is handled (including a teammate's reply) ask the same question again with ask_user; the open card is gone, so never end without asking it again.)`;
+  return `${text}\n(Typed in the chat while this question was open, not picked on the card. Take it as the recruiter's answer and act on it; never ask the same thing again. Only when it is plainly about something else, handle that as a new request, then ask the question again with ask_user, since the open card is gone.)`;
 }
 
 /**
@@ -919,6 +924,7 @@ export async function claimSteering(
       text: blocksToAgentHistoryText(item.message.blocks as MessageBlock[]),
       blocks: item.message.blocks as MessageBlock[],
       ...(item.originTrigger === INTERRUPT_ORIGIN ? { interrupt: true as const } : {}),
+      ...(item.claimedAt ? { earlier: true as const } : {}),
     }));
   });
 }

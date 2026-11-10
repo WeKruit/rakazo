@@ -327,7 +327,7 @@ export async function reportGroupHandoffOutcome(
           ? undefined
           : await questionClosedByChat(tx, { threadId: run.threadId, botId: asked.fromBotId });
       const text = reask
-        ? `${report}\n\nYour question "${reask.question}" is still unanswered: the recruiter typed "${reask.reply.slice(0, 300)}" in the chat instead of answering it. Unless that message answered it, do not reply ${NO_RESPONSE} or start other work: ask it again with ask_user now.`
+        ? `${report}\n\nYour question "${reask.question}" was closed when the recruiter typed "${reask.reply.slice(0, 300)}" in the chat. When that message answers it, act on that answer and never ask it again. Only when it is plainly about something else is the question still open: then ask it again with ask_user now instead of replying ${NO_RESPONSE}.`
         : report;
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
