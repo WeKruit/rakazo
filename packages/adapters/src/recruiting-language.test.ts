@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TextJudge } from "./judge.js";
 import {
+  languageFilters,
   profileTexts,
   requiredLanguage,
   withoutName,
@@ -41,10 +42,17 @@ function fakeJudge(seen: string[]): TextJudge {
 
 describe("required language", () => {
   it("reads the language requirement from the brief", () => {
-    expect(requiredLanguage(brief)).toBe("Must speak Mandarin and English");
+    expect(requiredLanguage({ brief })).toBe("Must speak Mandarin and English");
+    // Before the brief is saved, the role's criteria hold the JD's requirements.
+    expect(
+      requiredLanguage({
+        brief: null,
+        criteria: [{ text: "3+ years of PLC work. Must speak Mandarin Chinese and English." }],
+      }),
+    ).toBe("Must speak Mandarin Chinese and English.");
     expect(
       requiredLanguage({ searchFilters: [], fields: [{ key: "语言", value: "会说中文" }] }),
-    ).toBe("语言: 会说中文");
+    ).toBe("会说中文");
     expect(requiredLanguage({ searchFilters: [], fields: [{ key: "title", value: "PLC" }] })).toBe(
       undefined,
     );
@@ -91,5 +99,19 @@ describe("required language", () => {
       await withRequiredLanguage({ resolve: async () => silent }, brief, rows, result),
     ).toEqual(rows);
     expect(seen).toEqual([]);
+  });
+
+  it("requires the language on the profile when most planned searches ask for it", () => {
+    expect(
+      languageFilters([
+        "Maintenance engineers near Linden, NJ, Mandarin-English bilingual",
+        "PLC technicians in New Jersey who speak Mandarin",
+        "Conveyor maintenance engineers near Newark",
+      ]),
+    ).toEqual(["Mandarin", "Chinese"]);
+    expect(languageFilters(["Maintenance engineers near Linden", "PLC technicians"])).toEqual([]);
+    expect(languageFilters(["Bilingual Japanese technicians", "日语 engineers"])).toEqual([
+      "Japanese",
+    ]);
   });
 });
