@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  beyondCommute,
   isRegionOnlyLocation,
+  localRolePlace,
   locate,
   locationOutliers,
+  namedPlace,
   outsideSearchArea,
 } from "./recruiting-location.js";
 
@@ -92,5 +95,48 @@ describe("outsideSearchArea", () => {
       ["us", "United States"],
     ]);
     expect(outsideSearchArea(rows).size).toBe(0);
+  });
+});
+
+describe("namedPlace", () => {
+  const queries = [
+    "Maintenance engineers within 30 miles of Linden, NJ 07036 with 3+ years",
+    "Bilingual Mandarin-English engineers near Linden, New Jersey with PLC work",
+    "Automation technicians in the Linden NJ area",
+    "PLC technicians in New Jersey",
+  ];
+
+  it("finds the city the searches name, not a capitalised word before it", () => {
+    expect(namedPlace(queries)?.label).toBe("Linden, NJ");
+    expect(namedPlace(["Engineers in New York, NY", "New York, NY"])?.label).toBe("New York, NY");
+    expect(namedPlace(["PLC technicians in New Jersey", "Remote engineers"])).toBe(undefined);
+  });
+
+  it("holds the area to the named place even when most rows are far from it", () => {
+    const place = namedPlace(queries);
+    const rows = new Map([
+      ["a", "Dallas, Texas, United States"],
+      ["b", "Edison, New Jersey, United States"],
+      ["c", "Philadelphia, Pennsylvania, United States"],
+      ["d", "Providence, Rhode Island, United States"],
+      ["e", "Newark, New Jersey, United States"],
+    ]);
+    expect([...outsideSearchArea(rows, place)].sort()).toEqual(["a", "c", "d"]);
+    // Without a named place, rows this spread out read as a nationwide search.
+    expect(outsideSearchArea(rows).size).toBe(0);
+    expect(beyondCommute("Staten Island, New York, United States", place!)).toBe(false);
+    expect(beyondCommute("Greater Boston", place!)).toBe(true);
+  });
+});
+
+describe("localRolePlace", () => {
+  it("holds an on-site or commuting role to its city, never a remote or relocation one", () => {
+    expect(localRolePlace(["On-site within 30 miles of Linden, NJ 07036"])?.label).toBe(
+      "Linden, NJ",
+    );
+    expect(localRolePlace(["Engineers in Austin, TX"])).toBe(undefined);
+    expect(localRolePlace(["On-site, not remote, near Austin, TX"])?.label).toBe("Austin, TX");
+    expect(localRolePlace(["Hybrid near Austin, TX", "Relocation offered"])).toBe(undefined);
+    expect(localRolePlace(["Remote; team based near Austin, TX"])).toBe(undefined);
   });
 });
