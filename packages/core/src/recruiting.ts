@@ -107,6 +107,14 @@ export async function readRecruitingResearchReadArtifact(
   return snapshot;
 }
 
+/** A preference document without runs of blank lines or trailing whitespace. */
+export function tidyPreferenceDocument(content: string): string {
+  return content
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
+
 export function applyRecruitingPreferenceEdit(
   content: string,
   preference: RecruitingPreferenceFeedbackInput,
@@ -116,7 +124,15 @@ export function applyRecruitingPreferenceEdit(
   anchor: { start: number; end: number; quote: string } | null;
 } {
   if (preference.operation === "add") {
-    const prefix = content ? `${content}\n\n` : "";
+    // A preference saved again keeps its one line, and blank lines left by earlier removals collapse.
+    const base = tidyPreferenceDocument(content);
+    const existing = base.indexOf(preference.content.trim());
+    if (preference.content.trim() && existing >= 0) {
+      const quote = preference.content.trim();
+      const anchor = { start: existing, end: existing + quote.length, quote };
+      return { content: base, previousAnchor: anchor, anchor };
+    }
+    const prefix = base ? `${base}\n\n` : "";
     return {
       content: prefix + preference.content,
       previousAnchor: null,
