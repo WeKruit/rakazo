@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import { answerableAskMessageIds, selectedAskActionLabel } from "@rakazo/core";
+import {
+  answerableAskMessageIds,
+  selectedAskActionLabel,
+  timedOutAskMessageId,
+} from "@rakazo/core";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -582,3 +586,65 @@ it.each(["Create address", "Use this address"])(
     }
   },
 );
+
+it("keeps the newest timed-out question answerable and says the work waits on it", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onAnswer = vi.fn().mockResolvedValue(undefined);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "Remote or onsite?",
+    status: "expired",
+    actions: [{ id: "remote", label: "Remote is fine" }],
+  };
+  // The transcript's rule for the newest timed-out card.
+  const canAnswer =
+    timedOutAskMessageId({ messages: [{ id: "ask-1", role: "bot", blocks: [block] }] }) === "ask-1";
+  try {
+    act(() => root.render(<AskCard block={block} canAnswer={canAnswer} onAnswer={onAnswer} />));
+    expect(container.textContent).toContain("We can't continue without your answer.");
+    expect(container.textContent).not.toContain("No longer active");
+    const remote = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Remote is fine",
+    );
+    await act(async () => remote!.click());
+    expect(onAnswer).toHaveBeenCalledWith("remote", undefined);
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it("shows a card's extra inputs in place of the typed answer while it waits", () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const block: AskBlock = {
+    kind: "ask",
+    text: "What's next?",
+    status: "pending",
+    actions: [{ id: "choice-1", label: "Find 150 similar people" }],
+  };
+  try {
+    act(() =>
+      root.render(<AskCard block={block} canAnswer onAnswer={vi.fn()} panel={<p>votes</p>} />),
+    );
+    expect(container.textContent).toContain("votes");
+    expect(container.textContent).toContain("Find 150 similar people");
+    expect(container.querySelector('textarea[aria-label="Answer"]')).toBeNull();
+
+    act(() =>
+      root.render(
+        <AskCard
+          block={{ ...block, status: "answered", answer: "choice-1" }}
+          canAnswer={false}
+          onAnswer={vi.fn()}
+          panel={<p>votes</p>}
+        />,
+      ),
+    );
+    expect(container.textContent).not.toContain("votes");
+  } finally {
+    act(() => root.unmount());
+  }
+});

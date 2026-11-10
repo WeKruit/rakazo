@@ -2,6 +2,7 @@ import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   answeredAsk,
+  answerSearchFilters,
   autoContinueMax,
   countTrailingAutoContinues,
   guardRecruitingRoleCreate,
@@ -1233,6 +1234,24 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("keeps the blanks in a template the recruiter asked for (2026-11-08 staging)", async () => {
+    const reply =
+      "Here is the template.\n\n### Email 1\n**Subject:** Thanks\n\nHi {{firstName}},\n\nThanks.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    expect(
+      await planDeclineRetry(human, { ...input, reply, request: "帮我写一封面试后跟进邮件的模板" }),
+    ).toBeUndefined();
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply,
+        request: "Draft a follow-up for the team",
+        handedIn: true,
+        personRequest: "write me a follow-up email template",
+      }),
+    ).toBeUndefined();
+  });
+
   it("puts a question the retry still typed into its reply on a card", async () => {
     const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
     const reply =
@@ -1312,4 +1331,38 @@ describe("unprovenReplyCardRetry", () => {
       unprovenReplyCardRetry("这张回复卡已被丢弃，邮件未发送。", "那封邮件发出去了吗？"),
     ).toBeUndefined();
   });
+});
+
+describe("answerSearchFilters", () => {
+  it("turns a stated must-have into a filter every search applies", () => {
+    expect(
+      answerSearchFilters([
+        {
+          key: "Should Mandarin and English both be required?",
+          value: "Require Mandarin and English",
+        },
+        { key: "Where?", value: "On-site within 30 miles of 07036" },
+      ]),
+    ).toEqual([
+      {
+        id: "recruiter-answer-1",
+        mode: "include",
+        origin: "user_instruction",
+        statement: "Require Mandarin and English",
+      },
+      {
+        id: "recruiter-answer-2",
+        mode: "include",
+        origin: "user_instruction",
+        statement: "On-site within 30 miles of 07036",
+      },
+    ]);
+  });
+
+  it.each(["Prefer bilingual; consider either-language candidates", "不限地点", "No requirement"])(
+    "leaves a preference or a lifted limit out (%s)",
+    (value) => {
+      expect(answerSearchFilters([{ key: "q", value }])).toEqual([]);
+    },
+  );
 });

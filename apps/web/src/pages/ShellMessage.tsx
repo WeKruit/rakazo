@@ -10,7 +10,8 @@ import {
 } from "@rakazo/core";
 import { BotAvatar, Button, buttonVariants, cn, resolvePersonaColorDef } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useContext, useMemo, useState } from "react";
+import { AskPanelContext } from "../components/ask-panel";
 import { DeferredMenu, DeferredPopover } from "../components/DeferredPopover";
 import { lazyPanel } from "../components/ErrorBoundary";
 import { withFeatureMessages } from "../lib/i18n";
@@ -245,6 +246,7 @@ export const MessageView = memo(function MessageView({
 }) {
   const { t } = useLingui();
   const handoffSource = useHandoffSource();
+  const askPanel = useContext(AskPanelContext);
   const isNarration =
     message.role === "bot" &&
     message.blocks.length > 0 &&
@@ -743,6 +745,18 @@ export const MessageView = memo(function MessageView({
               canAnswer={canAnswer}
               expiresAt={askExpiresAt}
               onAnswer={(text, username) => onAnswer(message, text, username)}
+              panel={
+                canAnswer && askPanel
+                  ? askPanel(message, block, async (text) => {
+                      try {
+                        await onAnswer(message, text);
+                        return true;
+                      } catch {
+                        return false;
+                      }
+                    })
+                  : undefined
+              }
             />
           );
         }

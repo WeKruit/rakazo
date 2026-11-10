@@ -7035,6 +7035,10 @@ msgstr "等待简历"
 msgid "Waiting…"
 msgstr "等待中…"
 
+#: src/components/AskCard.tsx
+msgid "We can't continue without your answer."
+msgstr "没有你的答案我们不能继续。"
+
 #: src/pages/Paywall.tsx
 msgid "Web, desktop and mobile apps"
 msgstr "网页、桌面和移动应用"

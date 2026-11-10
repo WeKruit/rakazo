@@ -7032,6 +7032,10 @@ msgstr ""
 msgid "Waiting…"
 msgstr "En attente…"
 
+#: src/components/AskCard.tsx
+msgid "We can't continue without your answer."
+msgstr ""
+
 #: src/pages/Paywall.tsx
 msgid "Web, desktop and mobile apps"
 msgstr ""

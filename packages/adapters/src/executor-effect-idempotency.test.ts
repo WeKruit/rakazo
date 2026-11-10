@@ -2575,8 +2575,8 @@ describe("native recruiting role effect delivery", () => {
       const result = {
         error:
           kind === "quote"
-            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).`
-            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).",
+            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.`
+            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2687,7 +2687,7 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
-        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).",
+        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable. If it is refused again, carry on with the recruiter's request without it (the search, the round, the reply): a failed save never holds up the work. Never repeat a search that already returned; its people stay saved.",
     });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
@@ -6140,6 +6140,8 @@ describe("native recruiting assessment effect delivery", () => {
     expect(pastedJobTitle(`Job title:\n**Field Engineer**\n${body}`)).toBe("Field Engineer");
     expect(pastedJobTitle(`# Senior Analyst\n${body}`)).toBe("Senior Analyst");
     expect(pastedJobTitle(`职位：仓储经理\n${body}`)).toBe("仓储经理");
+    expect(pastedJobTitle(`招一名奥斯汀的高级后端工程师\n${body}`)).toBe("奥斯汀的高级后端工程师");
+    expect(pastedJobTitle(`招聘经理\n${body}`)).toBe("招聘经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
     expect(
       pastedJobTitle(

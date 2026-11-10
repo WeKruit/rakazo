@@ -20,6 +20,7 @@ import {
   removePendingUserMessage,
   resolveComposerSendPlan,
   retrySend,
+  timedOutAskMessageId,
 } from "@rakazo/core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
@@ -196,7 +197,8 @@ export function useShellMessages({
         !current ||
         current.threadId !== message.threadId ||
         (groupId ? current.groupId !== groupId : current.botId !== botId) ||
-        !answerableAskMessageIds(current).includes(message.id) ||
+        (!answerableAskMessageIds(current).includes(message.id) &&
+          timedOutAskMessageId(current) !== message.id) ||
         !current.messages.some((item) => item.id === message.id && item.runId === message.runId)
       )
         return;

@@ -23,7 +23,8 @@ export function CalibrationRoundView({
 }: {
   round: RecruitingCalibrationRound;
   onSendFeedback: (text: string) => Promise<boolean>;
-  onApprove: (approvalText: string) => Promise<boolean>;
+  /** Left out where the surrounding card already offers the next step. */
+  onApprove?: (approvalText: string) => Promise<boolean>;
 }) {
   const { t } = useLingui();
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -171,22 +172,24 @@ export function CalibrationRoundView({
             }
           />
           <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending !== null}
-              onClick={() =>
-                void run("approve", () =>
-                  onApprove(t`Round ${round.round} looks good. Start finding more people.`),
-                )
-              }
-            >
-              {pending === "approve" ? (
-                <Trans>Sending…</Trans>
-              ) : (
-                <Trans>Looks good, find more</Trans>
-              )}
-            </Button>
+            {onApprove ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pending !== null}
+                onClick={() =>
+                  void run("approve", () =>
+                    onApprove(t`Round ${round.round} looks good. Start finding more people.`),
+                  )
+                }
+              >
+                {pending === "approve" ? (
+                  <Trans>Sending…</Trans>
+                ) : (
+                  <Trans>Looks good, find more</Trans>
+                )}
+              </Button>
+            ) : null}
             <Button type="submit" disabled={!canSend}>
               {pending === "feedback" ? <Trans>Sending…</Trans> : <Trans>Send feedback</Trans>}
             </Button>

@@ -1,5 +1,6 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
+import { isChineseText } from "@rakazo/core";
 
 const TIMEOUT_MS = 4_000;
 const MAX_USER_CHARS = 1_200;
@@ -73,6 +74,10 @@ export async function suggestNextMessage(input: {
     "",
     "Assistant:",
     clip(input.replyText, MAX_REPLY_CHARS),
+    "",
+    isChineseText(input.userText)
+      ? "Write it in Chinese."
+      : "Write it in the language of the user's latest message, not Chinese, even if earlier messages were.",
   ].join("\n");
   let text = "";
   for await (const event of input.runtime.run(

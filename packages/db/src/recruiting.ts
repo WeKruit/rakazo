@@ -2002,15 +2002,20 @@ function compareHumanMessages(
 
 /**
  * A turn-end auto-continue acts for the recruiter's last message: the system nudge carries no
- * authority of its own, so resolve the newest native human message before it in the thread.
+ * authority of its own, so resolve the newest native human message before it in the thread. The
+ * nudge may start the run or reach a run already working as steering; then the message it
+ * resolves to must be one this run already acts for.
  */
 async function autoContinuedHumanMessage(
   tx: Tx,
   run: { threadId: string; sourceMessageId: string | null },
   message: SourceMessage,
+  steering: readonly { messageId: string }[] = [],
 ): Promise<SourceMessage | null> {
+  const steered =
+    message.id !== run.sourceMessageId && steering.some((item) => item.messageId === message.id);
   if (
-    message.id !== run.sourceMessageId ||
+    (message.id !== run.sourceMessageId && !steered) ||
     message.threadId !== run.threadId ||
     !message.clientNonce?.startsWith("autocontinue:")
   )
@@ -2026,7 +2031,14 @@ async function autoContinuedHumanMessage(
     orderBy: { seq: "desc" },
     include: humanMessageInclude,
   });
-  return previous && isNativeHumanMessage(previous) ? previous : null;
+  if (!previous || !isNativeHumanMessage(previous)) return null;
+  if (
+    steered &&
+    previous.id !== run.sourceMessageId &&
+    !steering.some((item) => item.messageId === previous.id)
+  )
+    return null;
+  return previous;
 }
 
 async function requireCurrentHumanSource(
@@ -2045,10 +2057,11 @@ async function requireCurrentHumanSource(
   if (ancestors.has(run.id)) throw new IsolationError();
   ancestors.add(run.id);
   const {
-    source: hint,
+    source: given,
     steering,
     answers,
   } = await requireRunSource(tx, actor, run, sourceMessageId);
+  const hint = (await autoContinuedHumanMessage(tx, run, given, steering)) ?? given;
   if (hint.id !== run.sourceMessageId && !isNativeHumanMessage(hint)) throw new IsolationError();
   const newest = answers.reduce(
     (current, answer) => (answer.seq > current.seq ? answer : current),
@@ -2079,7 +2092,12 @@ async function requireCurrentHumanSource(
         throw new IsolationError();
       return human;
     }
-    const { sender } = await requireResearchHandoff(tx, actor, run, latest, true);
+    // A teammate's report wakes this bot for the request it handed over; anything else here is a
+    // teammate's handoff to this bot. Either way the save acts for the recruiter's message behind
+    // the run that asked.
+    const sender =
+      (await requireReportedDelegation(tx, actor, run, latest)) ??
+      (await requireResearchHandoff(tx, actor, run, latest, true)).sender;
     const inherited = await loadRunHumanSources(tx, actor, sender);
     const inheritedLatest = [
       ...inherited.answers,
@@ -2174,6 +2192,42 @@ async function requireCurrentHumanSource(
     quote,
   };
   return { source: humanSource, message: source };
+}
+
+/**
+ * The recruiter's latest message in a conversation as the source of record keeping, quoting the
+ * cited words when that message holds them and otherwise its first text.
+ */
+async function latestHumanSource(
+  tx: Tx,
+  threadId: string,
+  quote: string,
+): Promise<{ source: RecruitingSourceRef; message: SourceMessage } | null> {
+  const recent = await tx.message.findMany({
+    where: { threadId, role: "user", botId: null },
+    orderBy: { seq: "desc" },
+    take: 20,
+    include: humanMessageInclude,
+  });
+  const message = recent.find(isNativeHumanMessage);
+  if (!message) return null;
+  const blocks = message.blocks as { kind: string; text?: string }[];
+  const texts = blocks.flatMap((block, index) =>
+    block.kind === "text" && block.text ? [{ index, text: block.text }] : [],
+  );
+  const cited = texts.find((block) => block.text.includes(quote)) ?? texts[0];
+  if (!cited) return null;
+  return {
+    source: {
+      id: `human-message:${message.id}`,
+      kind: "original_material",
+      anchor: { kind: "message", messageId: message.id, locator: `blocks[${cited.index}].text` },
+      readState: "read",
+      readAt: new Date().toISOString(),
+      quote: cited.text.includes(quote) ? quote : cited.text,
+    },
+    message,
+  };
 }
 
 function verifiedFeedbackChoice(
@@ -2388,6 +2442,12 @@ export async function readRecruitingFeedbackContext(
     candidateKeys?: readonly string[];
     /** A round acceptance may cite the recruiter's earlier message from this run. */
     acceptEarlierQuote?: boolean;
+    /**
+     * Record keeping (a round's direction, reviews of people) is never refused over which
+     * recruiter message it cites: when the run's own message can't be traced, it cites the
+     * recruiter's latest message in the conversation. Account, run and role checks still apply.
+     */
+    recordKeeping?: boolean;
   },
 ): Promise<{
   source: RecruitingSourceRef;
@@ -2420,7 +2480,16 @@ async function feedbackContextInTransaction(
     false,
     new Set(),
     input.acceptEarlierQuote,
-  );
+  ).catch(async (error: unknown) => {
+    if (
+      !input.recordKeeping ||
+      !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
+    )
+      throw error;
+    const latest = await latestHumanSource(tx, run.threadId, intent.quote);
+    if (!latest) throw error;
+    return latest;
+  });
   const workspace = thread.activeRecruitingRoleId
     ? await roleSnapshot(
         tx,
@@ -5919,6 +5988,84 @@ async function requireRoleDelegation(
   if (!origin.groupId?.startsWith("recruiting-global-") || !target.groupId)
     throw new IsolationError();
   return sender;
+}
+
+/**
+ * A teammate's report on a stage this bot handed it (report_back) wakes this bot for the same
+ * recruiter request. Returns this bot's run that handed the stage over, so a save cites the
+ * recruiter's message behind that handoff; any other source returns null.
+ */
+async function requireReportedDelegation(
+  tx: Tx,
+  actor: Actor,
+  run: {
+    id: string;
+    botId: string;
+    threadId: string;
+    sourceMessageId: string | null;
+    trigger: string;
+  },
+  source: SourceMessage,
+) {
+  if (
+    source.role !== "bot" ||
+    !source.runId ||
+    (source.clientNonce !== `group-report:${source.runId}` &&
+      !source.clientNonce?.startsWith(`group-checkin:${source.runId}`))
+  )
+    return null;
+  const parsed = MessageBlockSchema.array().safeParse(source.blocks);
+  const block = parsed.success && parsed.data.length === 1 ? parsed.data[0] : null;
+  if (
+    source.id !== run.sourceMessageId ||
+    run.trigger !== "follow_up" ||
+    source.threadId !== run.threadId ||
+    source.externalTranscriptFor ||
+    block?.kind !== "handoff" ||
+    !block.report ||
+    block.fromBotId !== source.botId ||
+    block.toBotId !== run.botId ||
+    block.fromBotId === block.toBotId
+  )
+    throw new IsolationError();
+  const reporter = await tx.run.findFirst({
+    where: {
+      id: source.runId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId: block.fromBotId,
+      threadId: run.threadId,
+    },
+  });
+  if (!reporter?.sourceMessageId) throw new IsolationError();
+  const asked = await tx.message.findFirst({
+    where: { id: reporter.sourceMessageId, threadId: run.threadId },
+  });
+  const askedBlocks = MessageBlockSchema.array().safeParse(asked?.blocks);
+  const handoff = askedBlocks.success && askedBlocks.data.length === 1 ? askedBlocks.data[0] : null;
+  if (
+    !asked?.runId ||
+    asked.role !== "bot" ||
+    asked.botId !== run.botId ||
+    !isGroupHandoffNonce(asked.clientNonce, asked.runId) ||
+    handoff?.kind !== "handoff" ||
+    handoff.fromBotId !== run.botId ||
+    handoff.toBotId !== reporter.botId ||
+    handoff.reportBack !== true
+  )
+    throw new IsolationError();
+  const delegator = await tx.run.findFirst({
+    where: {
+      id: asked.runId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId: run.botId,
+      threadId: run.threadId,
+    },
+  });
+  if (!delegator) throw new IsolationError();
+  await requireRun(tx, actor, delegator.id);
+  return delegator;
 }
 
 async function requireResearchHandoff(

@@ -1,6 +1,6 @@
 import type { AgentRunRequest, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
-import { cleanQuickReply, firstSentence, quickReply } from "./quick-reply.js";
+import { cleanQuickReply, firstSentence, quickReply, replyLanguage } from "./quick-reply.js";
 
 function runtimeReplying(text: string, seen: AgentRunRequest[] = []): AgentRuntime {
   return {
@@ -43,6 +43,7 @@ describe("quick reply", () => {
     expect(seen[0]?.prompt).toContain("帮我写一封面试后的跟进邮件");
     expect(seen[0]?.prompt).toContain("turn 3");
     expect(seen[0]?.prompt).not.toContain("too old");
+    expect(seen[0]?.prompt).toContain("Write the sentence in Chinese.");
   });
 
   it("skips empty turns without a model call", async () => {
@@ -98,5 +99,14 @@ describe("quick reply", () => {
     expect(usage).toHaveLength(0);
     release();
     await vi.waitFor(() => expect(usage).toHaveLength(1));
+  });
+});
+
+describe("replyLanguage", () => {
+  it("follows the latest message, not a Chinese history", () => {
+    expect(
+      replyLanguage("New role from our client Northwind Pay. Please start sourcing"),
+    ).toContain("not Chinese");
+    expect(replyLanguage("帮我找 USC 的 AI engineer")).toBe("Write the sentence in Chinese.");
   });
 });

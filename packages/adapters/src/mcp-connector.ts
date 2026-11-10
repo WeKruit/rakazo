@@ -631,11 +631,16 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
     const key = process.env.INSTANTLY_API_KEY?.trim();
     return key ? { key, label: "Outreach email", replacesSecret: true } : undefined;
   }
+  // Contact enrichment ships with the product the same way. A key saved before (or copied with an
+  // account from another deployment, where it cannot be decrypted) must not shadow it.
+  if (server.endpoint === FULLENRICH_MCP) {
+    const key = process.env.FULLENRICH_API_KEY?.trim();
+    if (key) return { key, label: "Contact enrichment", replacesSecret: true };
+    return server.secretId ? undefined : { key, label: "Contact enrichment" };
+  }
   if (server.secretId) return undefined;
   if (server.endpoint === "https://api.autumn.ai/mcp")
     return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
-  if (server.endpoint === "https://mcp.fullenrich.com/mcp")
-    return { key: process.env.FULLENRICH_API_KEY?.trim(), label: "Contact enrichment" };
   // People search also works keyless at a lower rate limit, so a missing key is not a setup gap.
   if (server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
     return { key: process.env.EXA_API_KEY?.trim(), label: "People search", keyless: true };
@@ -1936,7 +1941,7 @@ export class McpConnector implements ConnectorProvider {
       const { server } = assignment;
       if (server.endpoint !== FULLENRICH_MCP || server.transport !== "streamable_http")
         throw new IsolationError();
-      // The assigned connection's own key, or the platform key when it has none.
+      // The platform key, or the connection's own key on a deployment without one.
       const { plaintext } = await loadMcpCredentialRecord(
         this.prisma,
         this.secrets,

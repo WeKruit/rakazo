@@ -114,6 +114,29 @@ export function intakeAnswers(messages: readonly { role: string; blocks: unknown
   }
   return [...answers].map(([key, value]) => ({ key, value }));
 }
+/** An intake answer that only states a preference or lifts a limit, which narrows no search. */
+const PREFERENCE_ANSWER =
+  /^(prefer|preferred|nice to have|optional|either|any\b|no\b|not required|open to|偏好|优先|最好|可选|不限|都可以|无所谓|不需要)/i;
+
+/**
+ * The recruiter's answers that set a requirement, as search filters every search must apply: a
+ * stated must-have such as a language narrows who is searched for instead of staying a note. An
+ * answer worded as a preference or as lifting a limit stays in the brief only.
+ */
+export function answerSearchFilters(answers: readonly { key: string; value: string }[]) {
+  return answers.flatMap(({ value }, index) =>
+    value && !PREFERENCE_ANSWER.test(value.trim())
+      ? [
+          {
+            id: `recruiter-answer-${index + 1}`,
+            mode: "include" as const,
+            origin: "user_instruction" as const,
+            statement: value,
+          },
+        ]
+      : [],
+  );
+}
 /** A question's topic: its first sentence without spaces or punctuation. */
 function askTopic(text: string) {
   return (text.trim().split(/[？?。\n]/)[0] ?? "").replace(/[\s\p{P}]/gu, "").toLowerCase();
@@ -771,7 +794,9 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
-  const variables = draftVariables(input.reply);
+  // A template the recruiter asked for is meant to keep its blanks.
+  const askedTemplate = /template|模板|模版/i.test(input.personRequest ?? input.request);
+  const variables = askedTemplate ? undefined : draftVariables(input.reply);
   const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
     : undefined;
