@@ -67,6 +67,7 @@ import {
   STEERING_ACK,
   savedCandidateKeyForm,
   selectBuiltinToolsForRun,
+  setupRetryNoticeText,
   shortQuestion,
   toolArgsSummary,
 } from "./executor.js";
@@ -1281,6 +1282,31 @@ describe("computer that will not start", () => {
       "Run setup failed; retrying",
     );
     expect(f.finalizeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("setup retries the recruiter can see", () => {
+  it("tells the chat once, after a few failed starts, that it is still retrying", async () => {
+    for (const failures of [1, 3, 4]) {
+      const f = fixture(`setup-retry-notice-${failures}`);
+      f.setCalls([
+        { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+      ]);
+      // The computer-start check reads the count first (below its limit), then the notice.
+      Object.assign(f.prisma.attempt, {
+        count: vi.fn().mockResolvedValueOnce(0).mockResolvedValue(failures),
+      });
+      vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
+      await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+        "Run setup failed; retrying",
+      );
+      expect(f.published).toEqual(
+        failures === 3
+          ? [{ role: "system", blocks: [{ kind: "meta", text: setupRetryNoticeText(false) }] }]
+          : [],
+      );
+    }
+    expect(setupRetryNoticeText(true)).toBe("启动遇到问题，正在自动重试，不用重发。");
   });
 });
 

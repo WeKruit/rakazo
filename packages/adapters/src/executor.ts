@@ -16144,6 +16144,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
             return;
           }
+          // Retries back off for hours; after a few the recruiter hears that the work is still
+          // coming, once, instead of a silent chat.
+          if (!isBackgroundRunTrigger(run.trigger))
+            await announceSetupRetry(deps, run).catch((error) =>
+              getLogger().error("setup retry notice", error),
+            );
           throw new Error("Run setup failed; retrying");
         }
       } finally {
@@ -17195,7 +17201,19 @@ export async function failureNotice(
   botName: string,
   error: string,
 ): Promise<{ title: string; body: string }> {
-  // A notice is best-effort: an unreadable thread falls back to the bot's name in English.
+  const { chinese, roleName } = await recruiterThreadVoice(prisma, threadId);
+  const name = roleName || botName;
+  return {
+    title: chinese ? `${name} 失败` : `${name} failed`,
+    body: failureNotificationBody(error, chinese),
+  };
+}
+
+/** The role a thread belongs to and whether its recruiter last wrote Chinese; best-effort. */
+async function recruiterThreadVoice(
+  prisma: Pick<PrismaClient, "thread">,
+  threadId: string,
+): Promise<{ chinese: boolean; roleName?: string }> {
   const thread = await Promise.resolve()
     .then(() =>
       prisma.thread.findUnique({
@@ -17213,14 +17231,37 @@ export async function failureNotice(
     )
     .catch(() => null);
   const blocks = thread?.messages?.[0]?.blocks;
-  const chinese = writesChinese(
-    Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
-  );
-  const name = thread?.group?.name?.trim() || botName;
   return {
-    title: chinese ? `${name} 失败` : `${name} failed`,
-    body: failureNotificationBody(error, chinese),
+    chinese: writesChinese(
+      Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
+    ),
+    roleName: thread?.group?.name?.trim() || undefined,
   };
+}
+
+async function announceSetupRetry(
+  deps: ExecutorDeps,
+  run: { id: string; spaceId: string; threadId: string; botId: string; trigger: string },
+) {
+  if ((await setupFailures(deps.prisma, run.id)) !== SETUP_RETRY_NOTICE_AFTER) return;
+  const { chinese } = await recruiterThreadVoice(deps.prisma, run.threadId);
+  await publishMessage(
+    deps,
+    run,
+    "system",
+    [{ kind: "meta", text: setupRetryNoticeText(chinese) }],
+    undefined,
+    `setup-retry:${run.id}`,
+  );
+}
+
+/** Setup failures before the recruiter is told the work is still retrying. */
+export const SETUP_RETRY_NOTICE_AFTER = 3;
+
+export function setupRetryNoticeText(chinese: boolean): string {
+  return chinese
+    ? "启动遇到问题，正在自动重试，不用重发。"
+    : "Starting is taking longer than usual. It keeps retrying on its own, so there is no need to send again.";
 }
 
 export function runSendsFinishNotification(trigger: string, continuationPending = false): boolean {
