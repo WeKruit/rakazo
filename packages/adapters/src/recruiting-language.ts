@@ -60,6 +60,35 @@ export function languageFilters(queries: readonly string[]): string[] {
   return [];
 }
 
+const REQUIRES =
+  /\b(must|required?|requires|needs?|needed|fluent|fluency|bilingual|mandatory)\b|必须|要求|需要|会说|流利|精通|双语/i;
+
+/**
+ * The recruiter's own sentences that require a language (from their messages or pasted JD), so a
+ * search that left the language out still filters on it.
+ */
+export function statedLanguageRequirement(texts: readonly string[]): string | undefined {
+  const found = texts
+    .flatMap((text) => text.split(/(?<=[.;!?。；！？\n])\s*/))
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => LANGUAGE_WORDS.test(sentence) && REQUIRES.test(sentence));
+  return found.length ? [...new Set(found)].join("; ").slice(0, 400) : undefined;
+}
+
+/**
+ * Profile filters for planned people searches: the language most queries name, else the one the
+ * recruiter's own words require.
+ */
+export function plannedLanguageFilters(
+  queries: readonly string[],
+  recruiterTexts: readonly string[],
+): { filters: string[]; queriesNameIt: boolean } {
+  const named = languageFilters(queries);
+  if (named.length) return { filters: named, queriesNameIt: true };
+  const stated = statedLanguageRequirement(recruiterTexts);
+  return { filters: stated ? languageFilters([stated]) : [], queriesNameIt: false };
+}
+
 const PROFILE_TEXT_LIMIT = 4_000;
 
 /**
