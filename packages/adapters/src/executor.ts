@@ -596,8 +596,10 @@ import {
   withRequiredLanguage,
 } from "./recruiting-language.js";
 import {
+  beyondCommute,
   COMMUTE_MILES,
   isRegionOnlyLocation,
+  localRolePlace,
   locationOutliers,
   outsideSearchArea,
 } from "./recruiting-location.js";
@@ -6164,7 +6166,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const outliers = new Map(
             locationOutliers(located).map((key) => [key, labels.get(key) as string]),
           );
-          return { regionOnly, outliers };
+          // A local role's own city: people beyond commuting distance of it are always outside.
+          const role = await deps.prisma.recruitingRole.findUnique({
+            where: { id: roleId },
+            select: { currentRevision: { select: { brief: true, criteria: true } } },
+          });
+          const place = localRolePlace([
+            JSON.stringify(role?.currentRevision ?? {}),
+            ...(await recruiterWords(deps.prisma, run.threadId)),
+          ]);
+          const beyond = new Map(
+            place
+              ? [...located]
+                  .filter(([, location]) => beyondCommute(location, place))
+                  .map(([key]) => [key, labels.get(key) as string])
+              : [],
+          );
+          return { regionOnly, outliers, beyond, place };
         };
         /** Picked people whose profile passage shows every current role started under six months ago. */
         const newInCurrentRole = async (roleId: string, keys: readonly string[]) => {
@@ -7085,19 +7103,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             // Someone whose profile shows only a country or a state, or under six months in the
             // current role, is left out of the first picks rather than costing a step.
-            const [{ regionOnly }, recent] = await Promise.all([
+            const [{ regionOnly, beyond, place }, recent] = await Promise.all([
               locationSlips(roleId, picked),
               newInCurrentRole(roleId, picked),
             ]);
             const left = [
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
+              beyond.size &&
+                place &&
+                `${[...beyond.values()].join(", ")}: over ${COMMUTE_MILES} miles from ${place.label}.`,
               recent.size &&
                 `${[...recent.values()].join(", ")}: under ${MIN_CURRENT_ROLE_MONTHS} months in the current role.`,
             ]
               .filter(Boolean)
               .join(" ");
-            const keys = picked.filter((key) => !regionOnly.has(key) && !recent.has(key));
+            const keys = picked.filter(
+              (key) => !regionOnly.has(key) && !beyond.has(key) && !recent.has(key),
+            );
             if (!keys.length)
               return {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
@@ -7136,10 +7159,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId
           ) {
-            const { regionOnly, outliers } = await locationSlips(
+            const { regionOnly, outliers, beyond, place } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
             );
+            // Beyond commuting distance of a local role's own city is never a fit, however often
+            // the same people come back.
+            if (beyond.size && place)
+              return {
+                error: `Not recorded. ${[...beyond.values()].join(", ")} ${beyond.size > 1 ? "live" : "lives"} over ${COMMUTE_MILES} miles from ${place.label}, outside the role's location. Replace them with people from the rows who fit. If fewer than ten fit, show the ones who do with show_picks and ask the recruiter how to go on, as the round instructions say.`,
+              };
             // Asked once per person: when the same people come back the model has decided they fit
             // (a role open to a whole country or state, or a real commute), and they are recorded.
             const unasked = (people: Map<string, string>) =>
@@ -10274,21 +10303,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : rows;
                   // A required language is checked on each person's full profile text, which
                   // the short passage rarely holds; those who show it come first.
+                  const words = await recruiterWords(deps.prisma, thread.id);
                   const checked = Array.isArray(shown)
                     ? await withRequiredLanguage(
                         deps.judge,
                         {
                           revision: role.currentRevision,
                           query: connectorCall.args?.query,
-                          stated: statedLanguageRequirement(
-                            await recruiterWords(deps.prisma, thread.id),
-                          ),
+                          stated: statedLanguageRequirement(words),
                         },
                         shown,
                         returned,
                       )
                     : { rows: shown, withoutLanguage: 0 };
-                  const people = checked.rows;
+                  // A local role's people beyond commuting distance of its city never make the
+                  // ten; a search filtered on a language returns them from across the country.
+                  const place = localRolePlace([
+                    String(connectorCall.args?.query ?? ""),
+                    JSON.stringify(role.currentRevision ?? {}),
+                    ...words,
+                  ]);
+                  const people = Array.isArray(checked.rows)
+                    ? checked.rows.filter(
+                        (row: Record<string, unknown>) =>
+                          !place ||
+                          typeof row.location !== "string" ||
+                          !beyondCommute(row.location, place),
+                      )
+                    : checked.rows;
+                  const farAway = Array.isArray(checked.rows)
+                    ? checked.rows.length - (people as unknown[]).length
+                    : 0;
                   // People new to the role get the research service's grade once the turn settles.
                   if ((saved as { newPeople?: unknown }).newPeople)
                     await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
@@ -10322,6 +10367,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ...(checked.withoutLanguage
                       ? {
                           leftOutNoLanguage: `${checked.withoutLanguage} more people's profiles show no sign of the required language; they are in Results but not listed here and never make the ten.`,
+                        }
+                      : {}),
+                    ...(farAway && place
+                      ? {
+                          leftOutFarAway: `${farAway} more people live over ${COMMUTE_MILES} miles from ${place.label}; they are in Results but not listed here and never make the ten.`,
                         }
                       : {}),
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
@@ -13696,10 +13746,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A required language is required on the profile in two of the searches: worded into a
           // query alone, it still returned people with no sign of it. When the planned queries
           // left it out, the recruiter's own words name it and the other two queries carry it.
+          const words = await recruiterWords(deps.prisma, thread.id);
           const { filters: languages, queriesNameIt } = plannedLanguageFilters(
             planned.data.queries,
-            await recruiterWords(deps.prisma, thread.id),
+            words,
           );
+          const place = localRolePlace([...planned.data.queries, ...words]);
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -13733,8 +13785,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const keyOf = (row: PlannedRow) =>
             typeof row.candidateKey === "string" ? row.candidateKey : undefined;
-          // The searches name the role's metro, so rows away from where most of them are, or
-          // showing only a country or a state, never make the ten: they are left out of the pick.
+          // The searches name the role's metro, so rows beyond commuting distance of it (or, with
+          // no city named, of where most rows are), or showing only a country or a state, never
+          // make the ten: they are left out of the pick. A required language spreads the rows
+          // across the country, so the named city holds the area rather than the rows' centre.
           const outsideOf = (rows: PlannedRow[]) =>
             outsideSearchArea(
               new Map(
@@ -13745,6 +13799,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : [];
                 }),
               ),
+              place,
             );
           const inArea = (rows: PlannedRow[], outside: Set<string>) =>
             rows.filter((row) => !outside.has(keyOf(row) ?? ""));
