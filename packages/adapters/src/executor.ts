@@ -1323,10 +1323,10 @@ const YEARS_OPEN_NOTE =
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
 const ASK_WITHOUT_ROLE =
-  "Not asked: no role is saved in this chat yet, so there is no question card to show. Answer the recruiter in plain text in one or two lines. If their message describes a role they are hiring for, save it with recruiting_role create first, then ask.";
+  'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
 const ROLE_NOT_SAVED_NOTE =
-  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
+  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
 const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";

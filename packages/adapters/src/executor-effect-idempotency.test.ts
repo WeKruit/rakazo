@@ -5677,8 +5677,24 @@ describe("native recruiting assessment effect delivery", () => {
     const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     expect(await request.beforeAsk?.("你想先处理哪项？", undefined)).toEqual({
-      instead: expect.stringContaining("Not asked: no role is saved in this chat yet"),
+      instead: expect.stringContaining("Not asked yet: no role is saved in this chat"),
     });
+  });
+
+  // Staging 11-10: "We need a backend engineer… can you help me find people?" never saved a role,
+  // so its question came out as plain text with no buttons. A vague hiring request is a role.
+  it("turns a vague hiring request's bounced question into a saved role and a card", async () => {
+    const f = await roleTeamFirstTurn(
+      "vague-request-card",
+      "We need a backend engineer for our team, can you help me find people?",
+    );
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    const bounced = await request.beforeAsk?.("Which city?", undefined);
+    expect(bounced).toEqual({
+      instead: expect.stringContaining("save it now with recruiting_role create"),
+    });
+    expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
+    expect(request.prompt).toContain("a request to find people for a named role counts");
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
