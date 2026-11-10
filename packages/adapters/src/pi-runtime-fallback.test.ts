@@ -2487,6 +2487,39 @@ describe("Pi runtime ordered model fallback", () => {
     expect(input.executeTool).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps two text parts of one message apart", async () => {
+    const parts = [
+      { type: "text" as const, text: "I'm on it." },
+      { type: "text" as const, text: "I can help with that." },
+    ];
+    const done = message(primary, parts, "stop");
+    providerState.stream.mockImplementation(() => {
+      const result = new AssistantMessageEventStream();
+      const partial = { ...done, content: [] };
+      result.push({ type: "start", partial });
+      parts.forEach((part, index) => {
+        result.push({ type: "text_start", contentIndex: index, partial });
+        result.push({
+          type: "text_delta",
+          contentIndex: index,
+          delta: part.text,
+          partial: { ...done, content: parts.slice(0, index + 1) },
+        });
+      });
+      result.push({ type: "done", reason: "stop", message: done });
+      result.end(done);
+      return result;
+    });
+    const events: AgentRuntimeEvent[] = [];
+    await run(request(), events);
+    const text = events
+      .filter((event) => event.type === "text")
+      .map((event) => event.text)
+      .join("");
+    expect(text).toBe("I'm on it.\n\nI can help with that.");
+    expect(events.find((event) => event.type === "done")).toEqual({ type: "done", text });
+  });
+
   it("preserves terminal partial text while refusing unsafe failover", async () => {
     const failure = message(
       primary,
