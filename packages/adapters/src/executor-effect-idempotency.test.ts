@@ -897,7 +897,7 @@ describe("model outage on a recruiting turn", () => {
     "terminated",
     "fetch failed",
     "timeout exceeded when trying to connect",
-  ])("runs the turn once more after %s", async (outage) => {
+  ])("resumes the turn a few times after %s before reporting it failed", async (outage) => {
     const f = fixture("run-outage");
     const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
@@ -920,7 +920,15 @@ describe("model outage on a recruiting turn", () => {
     );
     expect(f.executorDeps.jobs.enqueue).toHaveBeenCalled();
 
-    retried = 1;
+    // Two more spaced tries still resume the turn instead of failing it.
+    for (retried = 1; retried < 3; retried++) {
+      f.runData.status = "queued";
+      await f.executor.continueRun(f.runData.id, "worker-1");
+      expect(f.finalizeRun).not.toHaveBeenCalled();
+    }
+
+    f.runData.status = "queued";
+    retried = 3;
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "failed", error: outage }),

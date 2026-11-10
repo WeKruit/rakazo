@@ -3,6 +3,7 @@ import {
   failureNotice,
   failureNotificationBody,
   firstUnseenMessageId,
+  modelOutageRetryDelayMs,
   teammateLabel,
 } from "./executor.js";
 
@@ -71,5 +72,21 @@ describe("failure notification", () => {
       title: "后端工程师 失败",
       body: "模型服务繁忙。在对话里发一条消息，就从停下的地方接着做。",
     });
+  });
+});
+
+describe("model outage retries", () => {
+  it("resumes a dropped turn a few times, spaced out, before the recruiter sees a failure", () => {
+    expect([0, 1, 2, 3].map((tries) => modelOutageRetryDelayMs(tries, false))).toEqual([
+      2_000,
+      10_000,
+      30_000,
+      undefined,
+    ]);
+  });
+
+  it("resumes a turn that went silent for the whole limit once", () => {
+    expect(modelOutageRetryDelayMs(0, true)).toBe(0);
+    expect(modelOutageRetryDelayMs(1, true)).toBeUndefined();
   });
 });

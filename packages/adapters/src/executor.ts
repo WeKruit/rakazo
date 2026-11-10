@@ -1270,7 +1270,20 @@ const nextStepAlreadyGiven = (reply: string) =>
  */
 const MODEL_OUTAGE =
   /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|^terminated$|^fetch failed/i;
-const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
+const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn";
+
+/**
+ * How long to wait before resuming a turn the model dropped, or undefined when it has been resumed
+ * enough. A brief outage gets a few spaced tries before the recruiter sees a failure; a turn that
+ * went silent for the whole silence limit is resumed once, since each try already took that long.
+ */
+export function modelOutageRetryDelayMs(
+  previousRetries: number,
+  silent: boolean,
+): number | undefined {
+  const delays = silent ? [0] : [2_000, 10_000, 30_000];
+  return delays[previousRetries];
+}
 
 /** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
 export function jobStatesYears(text: string): boolean {
@@ -15843,9 +15856,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             runSecrets,
           );
           const retryable = hideVendors && (silenceWatch.fired || MODEL_OUTAGE.test(reported));
-          const retried =
-            retryable &&
-            (await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } })) > 0;
+          const retryDelay = retryable
+            ? modelOutageRetryDelayMs(
+                await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } }),
+                silenceWatch.fired,
+              )
+            : undefined;
+          const retried = retryable && retryDelay === undefined;
           const message = silenceWatch.fired
             ? retried
               ? SILENT_RUN_RETRIED_TEXT
@@ -15853,9 +15870,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : reported;
           // A recruiter's request must not vanish because the model went silent, the run made no
           // progress for the silence limit, or the model was briefly unavailable after its own
-          // retries: resume the turn once (the resume brief says what was done and cut off)
-          // before reporting failure.
-          if (retryable && !retried) {
+          // retries: resume the turn (the resume brief says what was done and cut off) before
+          // reporting failure.
+          if (retryDelay !== undefined) {
             const released = await writeComputerRunRequeue(
               deps,
               run,
@@ -15876,7 +15893,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               await deps.jobs.enqueue({
                 ...runContinueJob(runId),
-                availableAt: new Date(Date.now() + computerRetryDelay(fence)),
+                availableAt: new Date(Date.now() + Math.max(retryDelay, computerRetryDelay(fence))),
               });
               return;
             }
@@ -17105,21 +17122,24 @@ export async function failureNotice(
   botName: string,
   error: string,
 ): Promise<{ title: string; body: string }> {
-  const thread = await prisma.thread
-    .findUnique({
-      where: { id: threadId },
-      select: {
-        group: { select: { name: true } },
-        messages: {
-          where: { role: "user" },
-          orderBy: { seq: "desc" },
-          take: 1,
-          select: { blocks: true },
+  // A notice is best-effort: an unreadable thread falls back to the bot's name in English.
+  const thread = await Promise.resolve()
+    .then(() =>
+      prisma.thread.findUnique({
+        where: { id: threadId },
+        select: {
+          group: { select: { name: true } },
+          messages: {
+            where: { role: "user" },
+            orderBy: { seq: "desc" },
+            take: 1,
+            select: { blocks: true },
+          },
         },
-      },
-    })
+      }),
+    )
     .catch(() => null);
-  const blocks = thread?.messages[0]?.blocks;
+  const blocks = thread?.messages?.[0]?.blocks;
   const chinese = writesChinese(
     Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
   );

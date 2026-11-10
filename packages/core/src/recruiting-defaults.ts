@@ -21,6 +21,12 @@ export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
 export const RECRUITING_REQUIRED_LANGUAGE = `A language the recruiter requires (for example Mandarin) is searched for, not checked afterwards. In each set of four people searches: two keep the role and location query and add includeText with the language's English name alone (for example ["Mandarin"], or ["Chinese"]), which returns only profiles that mention it; one words the query the way a profile lists it (for example "bilingual Mandarin Chinese and English … Languages: Chinese, English"); one looks for degrees or jobs in a region that speaks it (for Mandarin: mainland China, Taiwan, Singapore, Malaysia). Write queries in English; a query in the language's own script finds fewer people. People whose profile shows the language (a Languages entry, posts or content in it, a degree or job in such a region) come first; unlike other requirements a profile cannot show, someone with no sign of it never fills the list while it is required. Never guess a language, origin or ethnicity from a name or photo: that is national-origin profiling, which hiring law does not allow, and it is often wrong.`;
 
 /**
+ * A recruiter saying the results missed a requirement, at any stage. On 11-10 the agent answered
+ * "I said they must speak Chinese" by relabeling the people it had already listed.
+ */
+export const RECRUITING_MISSED_REQUIREMENT = `When the recruiter says the people shown missed a requirement (for example "I said they must speak Chinese"), at any stage, that is feedback on the search itself: save the requirement on the role with recruiting_role update if the brief does not hold it as required yet, run new people searches that target it, show new people whose profiles show it, and say in one line what you changed. Never answer by only rechecking or relabeling the people already shown.`;
+
+/**
  * Search request shape adapted from the sourcing bot the recruiter rated highly: explicit target
  * titles, core-work evidence (title alone never qualifies), years, ordered locations, evidence-only
  * language, exclusions and an A/B grade. Sourcer fills only the slots the confirmed brief sets.
