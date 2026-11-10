@@ -2777,8 +2777,10 @@ export async function listRecruitingFeedback(
       take: input.limit + 1,
     });
     const feedback: RecruitingFeedbackRecord[] = [];
+    // Feedback history is context for the next step: a record that can't be verified is left out,
+    // never a reason to fail the read (and with it every later run on the role).
     for (const message of native) {
-      if (!isNativeHumanMessage(message)) throw new IsolationError();
+      if (!isNativeHumanMessage(message)) continue;
       const blocks = MessageBlockSchema.array().parse(message.blocks);
       const index = blocks.findIndex(
         (item) => item.kind === "text" && item.recruitingFeedback?.roleId === role.id,
@@ -2786,8 +2788,7 @@ export async function listRecruitingFeedback(
       const block = blocks[index];
       if (block?.kind !== "text" || !block.recruitingFeedback) continue;
       const selected = block.recruitingFeedback;
-      if (input.candidateKey && !selected.candidateKeys.includes(input.candidateKey))
-        throw new IsolationError();
+      if (input.candidateKey && !selected.candidateKeys.includes(input.candidateKey)) continue;
       feedback.push(
         RecruitingFeedbackRecordSchema.parse({
           id: message.id,
@@ -2828,7 +2829,7 @@ export async function listRecruitingFeedback(
         workspace?: { revision?: { id?: unknown } };
         choice?: unknown;
       } | null;
-      const record = RecruitingFeedbackRecordSchema.parse({
+      const parsed = RecruitingFeedbackRecordSchema.safeParse({
         id: row.id,
         createdAt: row.createdAt.toISOString(),
         roleRevisionId: result?.workspace?.revision?.id,
@@ -2836,16 +2837,19 @@ export async function listRecruitingFeedback(
         source: result?.source,
         ...(result?.choice ? { choice: result.choice } : {}),
       });
+      const request = RecruitingFeedbackInputSchema.safeParse(row.request);
+      if (!parsed.success || !request.success) continue;
+      const record = parsed.data;
+      // The source quote is checked against the recruiter's message below. It may differ from the
+      // agent's own summary in intent.quote when the save cited their latest message.
       if (
         (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.feedback.roleId !== input.roleId ||
-        stableJsonValue(record.feedback) !==
-          stableJsonValue(RecruitingFeedbackInputSchema.parse(row.request)) ||
+        stableJsonValue(record.feedback) !== stableJsonValue(request.data) ||
         record.feedback.intent.basis !== "direct" ||
-        record.source.quote !== record.feedback.intent.quote ||
         record.source.anchor.kind !== "message"
       )
-        throw new IsolationError();
+        continue;
       if (nativeIds.has(record.source.anchor.messageId)) continue;
       feedback.push(record);
     }
@@ -2877,30 +2881,29 @@ export async function listRecruitingFeedback(
           ? byId.get(record.source.anchor.messageId)
           : undefined;
       // Chat deletion removes navigable proof, not the independent candidate consideration.
-      if (!human) continue;
-      if (!isNativeHumanMessage(human)) throw new IsolationError();
+      if (!human || !isNativeHumanMessage(human)) continue;
       if (!authorizedThreads.has(human.threadId)) {
-        await requireThread(tx, actor, human.threadId);
+        const visible = await requireThread(tx, actor, human.threadId).then(
+          () => true,
+          () => false,
+        );
+        if (!visible) continue;
         authorizedThreads.add(human.threadId);
       }
       if (
         !(human.blocks as { kind: string; text?: string }[]).some(
           (block) => block.kind === "text" && block.text?.includes(record.source.quote!),
-        )
-      )
-        throw new IsolationError();
-      if (record.feedback.target !== "candidate" && record.feedback.target !== "round")
-        throw new IsolationError();
-      if (
+        ) ||
+        (record.feedback.target !== "candidate" && record.feedback.target !== "round") ||
         record.choice !==
-        verifiedFeedbackChoice(
-          human,
-          record.feedback.roleId,
-          record.feedback.expectedRoleRevision,
-          record.feedback.target === "candidate" ? record.feedback.candidateKeys : undefined,
-        )
+          verifiedFeedbackChoice(
+            human,
+            record.feedback.roleId,
+            record.feedback.expectedRoleRevision,
+            record.feedback.target === "candidate" ? record.feedback.candidateKeys : undefined,
+          )
       )
-        throw new IsolationError();
+        continue;
       verified.add(record.id);
     }
     feedback.sort(
@@ -3196,6 +3199,8 @@ export async function executeRecruitingRoleMutation(
     if (!definitionInput && !archiveInput) throw new RecruitingConflictError();
     // A role stays the recruiter's request when they add a detail while it is being written
     // ("recent graduates preferred"): the create may cite their earlier message from this run.
+    // An update to a saved role's brief is record keeping too: when the run's own recruiter
+    // message can't be traced, it cites their latest message. Create, bind and archive still need it.
     const { source: humanSource, message: source } = await requireCurrentHumanSource(
       tx,
       actor,
@@ -3205,7 +3210,16 @@ export async function executeRecruitingRoleMutation(
       input.operation === "create",
       undefined,
       input.operation === "create",
-    );
+    ).catch(async (error: unknown) => {
+      if (
+        input.operation !== "update" ||
+        !(error instanceof IsolationError || error instanceof RecruitingIntentQuoteError)
+      )
+        throw error;
+      const latest = await latestHumanSource(tx, run.threadId, input.intent.quote);
+      if (!latest) throw error;
+      return latest;
+    });
     const currentRole = thread.activeRecruitingRoleId
       ? await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread)
       : null;

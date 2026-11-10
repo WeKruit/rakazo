@@ -1361,9 +1361,59 @@ describe("native recruiting feedback records", () => {
     expect(f.tx.message.findMany).toHaveBeenCalledTimes(2);
     expect(f.tx.thread.findFirst).toHaveBeenCalledTimes(1);
     f.source.blocks = [{ kind: "text", text: "Changed text" }];
-    await expect(listRecruitingFeedback(f.prisma, actor, { roleId: "role" })).rejects.toThrow(
-      IsolationError,
-    );
+    await expect(listRecruitingFeedback(f.prisma, actor, { roleId: "role" })).resolves.toEqual({
+      feedback: [],
+      nextCursor: null,
+    });
+  });
+
+  // Staging 11-10: one record that cited the recruiter's latest message (its quote is their words,
+  // not the agent's summary) made every later run on the role fail to start.
+  it("lists a save that cited the recruiter's latest message and leaves out records it can't verify", async () => {
+    const f = fixture();
+    const feedback = {
+      target: "round",
+      operation: "scope",
+      roleId: "role",
+      expectedRoleRevision: 1,
+      summary: "Mandarin is required",
+      intent: { basis: "direct", quote: "must speak Mandarin" },
+      sourceRefs: [],
+    };
+    const cited = {
+      status: "recorded",
+      feedback,
+      workspace: { revision: { id: "revision" } },
+      source: {
+        id: "human-message:human",
+        kind: "original_material",
+        anchor: { kind: "message", messageId: "human", locator: "blocks[0].text" },
+        readState: "read",
+        readAt: "2026-10-18T00:00:00.000Z",
+        quote,
+      },
+    };
+    f.tx.externalEffect.findMany.mockResolvedValue([
+      {
+        id: "cited",
+        createdAt: new Date("2026-10-18T00:00:02Z"),
+        request: feedback,
+        result: cited,
+      },
+      { id: "broken", createdAt: new Date("2026-10-18T00:00:01Z"), request: {}, result: null },
+      {
+        id: "edited",
+        createdAt: new Date("2026-10-18T00:00:00Z"),
+        request: { ...feedback, summary: "Something else" },
+        result: cited,
+      },
+    ] as never);
+    await expect(listRecruitingFeedback(f.prisma, actor, { roleId: "role" })).resolves.toEqual({
+      feedback: [
+        expect.objectContaining({ id: "cited", source: expect.objectContaining({ quote }) }),
+      ],
+      nextCursor: null,
+    });
   });
 });
 
