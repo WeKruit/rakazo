@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { TextJudge } from "./judge.js";
 import {
   languageFilters,
+  plannedLanguageFilters,
   profileTexts,
   requiredLanguage,
+  statedLanguageRequirement,
   withoutName,
   withRequiredLanguage,
 } from "./recruiting-language.js";
@@ -113,5 +115,19 @@ describe("required language", () => {
     expect(languageFilters(["Bilingual Japanese technicians", "日语 engineers"])).toEqual([
       "Japanese",
     ]);
+  });
+
+  it("falls back to the recruiter's own words when the planned queries leave the language out", () => {
+    const jd =
+      "Location: on-site near Linden, NJ.\nMust speak both Mandarin Chinese and English.\nPLC troubleshooting.";
+    expect(statedLanguageRequirement([jd])).toBe("Must speak both Mandarin Chinese and English.");
+    expect(statedLanguageRequirement(["Spanish speakers welcome to apply"])).toBe(undefined);
+    expect(
+      plannedLanguageFilters(["Maintenance engineers near Linden", "PLC technicians in NJ"], [jd]),
+    ).toEqual({ filters: ["Mandarin", "Chinese"], queriesNameIt: false });
+    expect(plannedLanguageFilters(["PLC technicians in NJ"], ["No language needs"])).toEqual({
+      filters: [],
+      queriesNameIt: false,
+    });
   });
 });
