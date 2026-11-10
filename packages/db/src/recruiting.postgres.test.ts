@@ -366,6 +366,37 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     await prisma.steeringMessage.deleteMany({ where: { runId: f.run.id } });
   });
 
+  // Staging 11-10: the recruiter wrote "must speak Mandarin" while the round was still running; the
+  // brief update citing it was refused three times because that message belonged to the next run.
+  it("updates a saved role from the recruiter's latest message when the run's own can't be traced", async () => {
+    const f = await roleMutationFixture("revise");
+    const quote = "Must speak Mandarin";
+    await recruiting.createThreadMessage(prisma, {
+      threadId: f.thread.id,
+      role: "user",
+      blocks: [{ kind: "text", text: `${quote}. The first two are not a fit.` }],
+    });
+    const input = {
+      operation: "update",
+      roleId: f.role.role.id,
+      expectedRevision: 1,
+      intent: { basis: "direct", quote },
+      preferences: [quote],
+    } as recruiting.RecruitingRoleMutationInput;
+    await prisma.externalEffect.update({
+      where: { id: f.context.effectId },
+      data: { request: input as Prisma.InputJsonValue },
+    });
+    const result = await recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      { ...f.context, effectRequest: input },
+      input,
+      f.reader,
+    );
+    expect(result).toMatchObject({ status: "saved", source: { quote } });
+  });
+
   it("admits group notes only for the run's own group conversation", async () => {
     const f = await assessmentFixture("Group notes fixture");
     await prisma.thread.update({
