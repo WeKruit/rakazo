@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TextJudge } from "./judge.js";
 import {
+  languageFilters,
   profileTexts,
   requiredLanguage,
   withoutName,
@@ -98,5 +99,19 @@ describe("required language", () => {
       await withRequiredLanguage({ resolve: async () => silent }, brief, rows, result),
     ).toEqual(rows);
     expect(seen).toEqual([]);
+  });
+
+  it("requires the language on the profile when most planned searches ask for it", () => {
+    expect(
+      languageFilters([
+        "Maintenance engineers near Linden, NJ, Mandarin-English bilingual",
+        "PLC technicians in New Jersey who speak Mandarin",
+        "Conveyor maintenance engineers near Newark",
+      ]),
+    ).toEqual(["Mandarin", "Chinese"]);
+    expect(languageFilters(["Maintenance engineers near Linden", "PLC technicians"])).toEqual([]);
+    expect(languageFilters(["Bilingual Japanese technicians", "日语 engineers"])).toEqual([
+      "Japanese",
+    ]);
   });
 });

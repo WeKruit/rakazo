@@ -34,6 +34,32 @@ export function requiredLanguage(role: unknown): string | undefined {
   return unique.length ? unique.join("; ").slice(0, 400) : undefined;
 }
 
+/** Words for a language, mapped to the English names profiles list it under. */
+const LANGUAGE_NAMES: ReadonlyArray<[RegExp, string[]]> = [
+  [/mandarin|普通话|國語|国语/i, ["Mandarin", "Chinese"]],
+  [/chinese|中文/i, ["Mandarin", "Chinese"]],
+  [/cantonese|粤语|廣東話|广东话/i, ["Cantonese"]],
+  [/japanese|日语/i, ["Japanese"]],
+  [/korean|韩语/i, ["Korean"]],
+  [/spanish|西班牙语/i, ["Spanish"]],
+  [/\b(vietnamese|french|german|portuguese|arabic|hindi|russian|italian|thai|tagalog)\b/i, []],
+];
+
+/**
+ * The words a people search can require on the profile (its includeText) for the language that
+ * most of these queries name, or none when they name no language.
+ */
+export function languageFilters(queries: readonly string[]): string[] {
+  for (const [pattern, names] of LANGUAGE_NAMES) {
+    const naming = queries.filter((query) => pattern.test(query));
+    if (naming.length * 2 < queries.length || !naming.length) continue;
+    if (names.length) return names;
+    const word = naming[0]!.match(pattern)?.[0] ?? "";
+    return word ? [word[0]!.toUpperCase() + word.slice(1).toLowerCase()] : [];
+  }
+  return [];
+}
+
 const PROFILE_TEXT_LIMIT = 4_000;
 
 /**
