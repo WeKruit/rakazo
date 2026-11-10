@@ -32,7 +32,6 @@ import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isActive,
-  isConversationalRun,
   isStatusQuestion,
   isWorkActivity,
   ONCE_ROUTINE_CRON,
@@ -41,6 +40,7 @@ import {
   runFailureError,
   runsBesidePerson,
   statusAnswer,
+  takesPersonMessages,
   typicalDurationMs,
   workActivityForTool,
 } from "@rakazo/core";
@@ -113,14 +113,12 @@ const RUNS_NEEDING_CONTINUE = new Set(["queued", "waiting_takeover"]);
 
 const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running", "waiting_takeover"]);
 /**
- * A routine's, webhook's, or creation intro's turn is its own prompt, not the conversation.
- * A user message that lands while one is busy (not `waiting_input`) is stored as pending
- * steering (no run): that run never claims it, and the continuation started when it finishes
- * answers with the full thread. Starting a second run beside the intro overlaps it on a
- * dedicated computer, where there is no per-bot execution lease, and both can reply.
- * Composer text answers a waiting ask, including a routine or webhook ask, only when no
- * steerable conversational run is active. When one is, the text steers that run and the
- * ask stays on its card.
+ * The creation intro's turn is its own prompt, not the conversation. A user message that lands
+ * while it is busy (not `waiting_input`) is stored as pending steering (no run): the intro never
+ * claims it, and the continuation started when it finishes answers with the full thread.
+ * Starting a second run beside the intro overlaps it on a dedicated computer, where there is no
+ * per-bot execution lease, and both can reply. Composer text answers a waiting ask only when no
+ * steerable run is active. When one is, the text steers that run and the ask stays on its card.
  */
 /**
  * A side question about progress ("how's it going?") sent while a conversational run works is
@@ -253,8 +251,8 @@ type YieldedWake = { threadId: string; botId: string; agentRunId: string };
  * The recruiter's message comes first, as an interject does: a background follow-up on a
  * still-running people search in this conversation stops at once and never takes the
  * message. The search keeps running at the provider; its follow-up is scheduled again.
- * Other non-conversation work (grading, check-ins, teammates' reports, routines) keeps going
- * beside the recruiter's own turn instead of holding the message until it ends.
+ * Internal grading and background waits keep going beside the recruiter's own turn; any other
+ * work (a teammate's report, a check-in, a routine) takes the message as steering.
  */
 async function yieldBackgroundWakes<
   Run extends {
@@ -297,8 +295,9 @@ async function yieldBackgroundWakes<
   return live.filter((run) => !wakes.includes(run) && !beside(run));
 }
 
+/** A person's message goes into the work already running for them, not a second turn. */
 function steersUserMessage(run: { status: string; trigger?: string | null }) {
-  return STEERABLE_RUN_STATUSES.has(run.status) && isConversationalRun(run.trigger);
+  return STEERABLE_RUN_STATUSES.has(run.status) && takesPersonMessages(run.trigger);
 }
 
 type MentionTargetInput = string | { kind: "bot" | "group" | "routine" | "connector"; id: string };
