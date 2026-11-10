@@ -33,6 +33,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   10: "b4ce00c4e4734c0d4d4cc573a955abaa826b86e0525a570391ab03ef7e8f108b",
   // 11: optional question flag on progress blocks (a question shown while it is written).
   11: "35e16c8b9433b4281e05b4bc11349c3453f5057fe109fa0281e63a1dcdcd21b0",
+  // 12: optional card flag on thread.suggestion (a suggested answer to the waiting card).
+  12: "66a18eb346137eef4e42ede4c285d884685f41eab8857b9aaa55807cdc2b70ba",
 };
 
 const OLD_ROWS: unknown[] = [

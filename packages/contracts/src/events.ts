@@ -113,7 +113,11 @@ export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
 });
 export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
 
-export const ThreadSuggestionPayloadSchema = z.object({ text: z.string().min(1).max(200) });
+export const ThreadSuggestionPayloadSchema = z.object({
+  text: z.string().min(1).max(200),
+  /** A suggested answer to the card the run is waiting on, not a next message after a reply. */
+  card: z.literal(true).optional(),
+});
 
 export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
@@ -921,7 +925,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 11;
+export const EVENT_FORMAT_VERSION = 12;
 
 export const ProductEventSchema = z
   .object({

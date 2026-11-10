@@ -92,12 +92,12 @@ export function isTerminal(status: RunStatus): boolean {
 }
 
 /**
- * Internal work that has no conversation to take a person's message into: grading, tickets, background
- * tool waits and polls run beside the person's own turn. Every other run, including a teammate's
- * report, a check-in or a routine working on the recruiter's request, takes the message as
- * steering, so it lands in the work already running instead of starting a second turn.
+ * Internal work that has no conversation to take a person's message into: grading, tickets and
+ * polls run beside the person's own turn. Every other run, including a search's results turn, a
+ * teammate's report, a check-in or a routine working on the recruiter's request, takes the message
+ * as steering, so it lands in the work already running instead of starting a second turn.
  */
-const RUNS_BESIDE_PERSON = new Set(["recruiting_grade", "tickets", "tool_background", "poll"]);
+const RUNS_BESIDE_PERSON = new Set(["recruiting_grade", "tickets", "poll"]);
 export function runsBesidePerson(trigger: string | null | undefined): boolean {
   return RUNS_BESIDE_PERSON.has(trigger ?? "");
 }
