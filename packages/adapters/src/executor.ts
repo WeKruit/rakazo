@@ -13227,6 +13227,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const credits = createCreditGuard();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
+          // Work after a handoff (a search, a save, a question) means this turn still owns the
+          // request, so it reports and asks as usual instead of ending silently.
+          if (handedOff && name !== "handoff_to_bot") handedOff = false;
           const outOfCredits = credits.refusal(name);
           const applied = (
             outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)

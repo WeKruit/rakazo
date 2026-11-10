@@ -2461,7 +2461,7 @@ describe("sendThreadMessage", () => {
     );
   });
 
-  it.each(["recruiting_grade", "tool_background", "tickets"])(
+  it.each(["recruiting_grade", "tickets"])(
     "starts the recruiter's own turn beside %s instead of waiting for it",
     async (trigger) => {
       const tx = {
@@ -2548,7 +2548,7 @@ describe("sendThreadMessage", () => {
 
   // Staging 11-10: the recruiter's feedback during a teammate-woken round started a second turn
   // that couldn't use the round's work; it now lands in the running work.
-  it.each(["bot_message", "recruiting_checkin", "routine", "webhook"])(
+  it.each(["bot_message", "tool_background", "recruiting_checkin", "routine", "webhook"])(
     "steers the recruiter's message into a running %s turn instead of starting a second one",
     async (trigger) => {
       const tx = {
