@@ -138,3 +138,17 @@ export function withoutAgentBrief(
   const kept = blocks.filter((block) => block.kind !== "text" || !isAgentBrief(block.text));
   return { assembled: isAgentBrief(assembled) ? joinedText(kept) : assembled, blocks: kept };
 }
+
+/**
+ * Text written just before a question card, up to its first question: the card asks it, so the
+ * chat would show the same question twice ("What role should I find people for?" in text, then
+ * on the card).
+ */
+export function beforeCardQuestion(text: string): string {
+  const question = text.search(/[?？]/);
+  if (question < 0) return text;
+  const sentenceStart = Math.max(
+    ...[".", "。", "!", "！", "\n", "?", "？"].map((mark) => text.lastIndexOf(mark, question - 1)),
+  );
+  return text.slice(0, sentenceStart + 1).trim();
+}

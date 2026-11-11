@@ -182,6 +182,6 @@ export async function lastingPreferenceNote(
     AbortSignal.timeout(LASTING_PREFERENCE_TIMEOUT_MS),
   );
   return p !== undefined && p >= LASTING_PREFERENCE_AT
-    ? "The recruiter's latest message reads as a lasting preference or rule. If memory does not already hold it, save their exact words in this turn (recruiting_feedback target \"preference\" for a recruiting preference that applies to every role, otherwise remember), then do what they asked. A requirement for one role goes on that role with recruiting_role update, and a new role's job description opens the role; neither is a preference."
+    ? "The recruiter's latest message reads as a lasting preference or rule. If memory does not already hold it, save their exact words in this turn (recruiting_feedback target \"preference\" for a recruiting preference that applies to every role, otherwise remember) and, in the same reply, do what they asked (for example rewrite what they asked to change); the save is never the whole answer, so do not just say you saved it. A requirement for one role goes on that role with recruiting_role update, and a new role's job description opens the role; neither is a preference."
     : undefined;
 }

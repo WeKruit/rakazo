@@ -696,6 +696,7 @@ import {
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
 import {
+  beforeCardQuestion,
   isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
@@ -1333,6 +1334,10 @@ const YEARS_OPEN_NOTE =
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
 const ASK_WITHOUT_ROLE =
   'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
+
+/** Kruit asks nothing for a role it has not opened: the role's team asks its questions there. */
+export const GLOBAL_ASK_BEFORE_ROLE =
+  "Not asked yet. When the recruiter's latest message describes a role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. Otherwise ask this same question again with ask_user.";
 
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
@@ -6003,12 +6008,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
-        const publishMidTurnNarration = async () => {
+        const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const narration = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          const written = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          // The question card that follows asks the question; the text keeps only what leads up to it.
+          const narration =
+            hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
-          if (!narration) return;
+          if (!narration) {
+            if (written) {
+              assembled = "";
+              hasStreamedText = false;
+              pendingProgress = "";
+              discardedMidTurnNarration = true;
+            }
+            return;
+          }
           // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
           if (hideVendors && isAgentBrief(narration)) {
             assembled = "";
@@ -6128,6 +6144,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let senderRead = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
+        // Kruit's first question in a turn is checked once against opening a role instead.
+        let globalAskChecked = false;
+        let roleStartedInTurn = false;
+        const globalAskNeedsRoleCheck = () =>
+          Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
+          Boolean(recruitingBotKey(bot)) &&
+          !globalAskChecked &&
+          !roleStartedInTurn;
         const noRoleYet = () =>
           Boolean(thread.groupId) &&
           !thread.groupId?.startsWith("recruiting-global-") &&
@@ -12803,6 +12827,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               if (!sent.ok) return finish({ error: sent.error });
             }
+            roleStartedInTurn = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
@@ -14843,6 +14868,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
+                    if (globalAskNeedsRoleCheck()) {
+                      globalAskChecked = true;
+                      return { instead: GLOBAL_ASK_BEFORE_ROLE };
+                    }
                     if (!senderRead && asksSenderCompanyName(question))
                       return { instead: SENDER_READ_FIRST };
                     // Workloop: work running behind the conversation never asks the person after
@@ -15420,7 +15449,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Promote streamed narration into a durable, replyable chat message before
               // tools continue, so long turns do not look stalled and stay replyable.
               if (event.name !== "message_user") {
-                await publishMidTurnNarration();
+                await publishMidTurnNarration(event.name);
               }
               const toolStartedAt = new Date().toISOString();
               const toolActivity = workActivityForTool(event.name, event.args);

@@ -217,4 +217,12 @@ describe("lastingPreferenceNote", () => {
     expect(sure.yes.mock.calls[0]?.[0]).toContain("a new role's job description");
     expect(note).toContain("a new role's job description opens the role; neither is a preference");
   });
+
+  // Staging eval 11-11 (language-switch): "talk to me in English from now on. Make it shorter"
+  // was saved and acknowledged, and the template was never shortened.
+  it("asks for the requested change in the same reply as the save", async () => {
+    const note = await lastingPreferenceNote(judge(0.9), "Talk to me in English. Make it shorter.");
+    expect(note).toContain("in the same reply, do what they asked");
+    expect(note).toContain("the save is never the whole answer");
+  });
 });
