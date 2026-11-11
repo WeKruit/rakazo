@@ -1378,6 +1378,14 @@ export const STEERING_ACK =
 /** How often a running turn looks for messages it has not read yet, to answer them at once. */
 export const STEERING_PEEK_MS = 2_500;
 /** Model-facing: the short reply already sent for a message that arrived mid-run. */
+/** Whether a bot message shows the person words or a card, not only the run's steps. */
+export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
+  (blocks ?? []).some((block) =>
+    block.kind === "text"
+      ? block.text.trim().length > 0
+      : !["steps", "progress", "meta", "computer"].includes(block.kind),
+  );
+
 /** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
 export const STEERING_QUICK_REPLY_SENDING =
   "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again; say only what it changes.";
@@ -5547,16 +5555,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void writeQuickReply(quickReplyText)
             .then(async (text) => {
               if (!text) return;
-              // The card this run asked before the answer is not a reply to it.
-              const replied = await deps.prisma.message.count({
+              // The card this run asked before the answer is not a reply to it, and a row that
+              // only shows the run's steps says nothing to the person yet.
+              const written = await deps.prisma.message.findMany({
                 where: {
                   threadId: thread.id,
                   runId,
                   role: "bot",
                   createdAt: { gte: turnStartedAt },
                 },
+                select: { blocks: true },
               });
-              if (replied > 0) {
+              if (written.some((message) => saysSomething(message.blocks as MessageBlock[]))) {
                 getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
                 return;
               }

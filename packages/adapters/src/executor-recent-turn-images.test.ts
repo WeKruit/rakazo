@@ -4,7 +4,12 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import { createRunExecutor, STEERING_PEEK_MS, STEERING_QUICK_REPLY_SENDING } from "./executor.js";
+import {
+  createRunExecutor,
+  STEERING_PEEK_MS,
+  STEERING_QUICK_REPLY_SENDING,
+  saysSomething,
+} from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -217,8 +222,9 @@ async function runWithModel(
       update: vi.fn(async () => ({ nextMessageSeq: 4, nextEventSeq: 4 })),
     },
     message: {
-      findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
-        args.where?.threadId
+      // The run's own replies so far: none until the model writes one.
+      findMany: vi.fn(async (args: { where?: { threadId?: string; runId?: string } }) =>
+        args.where?.threadId && !args.where.runId
           ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
           : [],
       ),
@@ -443,6 +449,13 @@ describe("reply suggestion", () => {
 });
 
 describe("quick reply", () => {
+  it("counts only words or cards as a reply, not a row of the run's steps", () => {
+    expect(saysSomething([{ kind: "steps", steps: [] } as never])).toBe(false);
+    expect(saysSomething([{ kind: "text", text: "  " }])).toBe(false);
+    expect(saysSomething([{ kind: "text", text: "On it." }])).toBe(true);
+    expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
+  });
+
   it("posts a short first reply beside setup and tells the run what it said", async () => {
     const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       finalText: "On it.",
