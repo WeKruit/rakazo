@@ -458,6 +458,7 @@ import {
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js";
+import { awayRecapNote } from "./away-recap.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -14404,6 +14405,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !(await ownMailboxSendingAllowed(deps.prisma, run).catch(() => true))
             ? OUTREACH_MAILBOX_ONLY_NOTE
             : undefined;
+        // Back after a day or more with news waiting: the reply opens with what changed.
+        const awayNote =
+          hideVendors && run.trigger === "user" && currentTurnMessage?.role === "user"
+            ? await awayRecapNote(deps.prisma, {
+                threadId: thread.id,
+                messageId: currentTurnMessage.id,
+              }).catch(() => undefined)
+            : undefined;
         const languageNote = !hideVendors
           ? undefined
           : isChineseText(lastRecruiterText)
@@ -14438,6 +14447,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           linkRole?.note,
           fileNote,
           dispatchNote,
+          awayNote,
           languageNote,
           creditsNote,
           mailboxNote,
