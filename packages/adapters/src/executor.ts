@@ -15941,8 +15941,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
           flushPendingTools();
           // The server's no-model completion uses the same silent token as quiet model replies.
+          // A recruiting agent that answers only NO_RESPONSE (a report-back with nothing to add)
+          // stays silent: the recruiter never sees the token.
+          const recruitingSilent = hideVendors && isExactNoResponse(assembled);
           let silentReply =
-            quietRun || probeFoundNothing
+            quietRun || probeFoundNothing || recruitingSilent
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
           if (hideVendors)
@@ -15967,7 +15970,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // NO_RESPONSE finals are treated as empty before this fallback runs.
             completionBlocks = completionMessageSegments(completionBlocks, {
               allowSilentEmpty:
-                allowSilentEmptyRun || probeFoundNothing || publishedMidTurnUserMessage,
+                allowSilentEmptyRun ||
+                probeFoundNothing ||
+                publishedMidTurnUserMessage ||
+                recruitingSilent,
               emptyResponseText,
               suppressOutput: handedOff || isBackgroundRunTrigger(run.trigger),
               skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
