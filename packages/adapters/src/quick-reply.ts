@@ -1,6 +1,7 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import { isChineseText } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
+import { withoutNudge } from "./silent-reply.js";
 
 // A busy model can take several seconds to start; a late first line still beats silence.
 const TIMEOUT_MS = 8_000;
@@ -51,7 +52,7 @@ export function cleanQuickReply(raw: string): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_REPLY_CHARS) return null;
-  if (/[?？]$/.test(line)) return null;
+  if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
   return line;
 }
 

@@ -714,6 +714,7 @@ import {
   stripNoResponseReply,
   waitsOnCard,
   withoutAgentBrief,
+  withoutNudge,
 } from "./silent-reply.js";
 import {
   listAgentSkillRecords,
@@ -3971,6 +3972,19 @@ export async function appendUsageTimingAudit(
 }
 
 /** The chat a run belongs to was deleted or archived, so no retry can find it again. */
+/** The run ended (stopped or cancelled) while its setup was still loading. */
+export async function stoppedDuringSetup(
+  prisma: Pick<PrismaClient, "run">,
+  runId: string,
+  setupError: unknown,
+): Promise<boolean> {
+  if (!(setupError instanceof IsolationError)) return false;
+  const run = await prisma.run
+    .findUnique({ where: { id: runId }, select: { status: true } })
+    .catch(() => null);
+  return run !== null && isTerminal(run.status as RunStatus);
+}
+
 async function chatGone(prisma: Pick<PrismaClient, "thread">, threadId: string): Promise<boolean> {
   const thread = await prisma.thread
     .findFirst({ where: { id: threadId }, select: { group: { select: { archivedAt: true } } } })
@@ -6146,7 +6160,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const written = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          // The server's continuation nudge echoed back is never for the recruiter.
+          const written = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           // The question card that follows asks the question; the text keeps only what leads up to it.
           const narration =
             hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
@@ -12907,8 +12922,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "message_user") {
             if (movedElsewhere) return finish({ error: REPORT_IN_FINAL_REPLY });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
-            const text = clampUserProgressMessage(rawMessage);
-            if (!text) return finish({ error: "message is required" });
+            const text = clampUserProgressMessage(withoutNudge(rawMessage));
+            if (!rawMessage.trim()) return finish({ error: "message is required" });
+            if (!text)
+              return finish({
+                ok: true,
+                note: "Not shown: the automatic continuation is for you, never the recruiter.",
+              });
             // A handoff brief is for the teammate it is handed to, never the recruiter.
             if (hideVendors && isAgentBrief(text))
               return finish({
@@ -16554,7 +16574,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } catch (setupError) {
         const computerBusy = setupError instanceof ComputerBusyError;
         const retryForever = computerBusy || isTooManyDatabaseConnections(setupError);
-        if (!computerBusy) {
+        // A run stopped while it was setting up (the person pressed Stop, or the chat was archived)
+        // fails its live-run checks by design; that is not a setup error.
+        if (!computerBusy && !(await stoppedDuringSetup(deps.prisma, runId, setupError))) {
           // undici collapses every network failure to "fetch failed"; the cause names the
           // host and errno, which is the only part worth paging over.
           const causeMessage =

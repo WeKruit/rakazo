@@ -13,6 +13,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import { AUTOMATIC_CONTINUATION, NEXT_STEP_LEAD, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
 import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
@@ -297,8 +298,7 @@ export function roundPassage(snippet: string | null | undefined): string | undef
 }
 
 const PROMISE_LABEL = "Finish what the last message said it would do";
-const AUTO_NOTE =
-  " (This is an automatic continuation, not the recruiter's words. When quoting, use the recruiter's own messages.)";
+const AUTO_NOTE = ` (${AUTOMATIC_CONTINUATION} When quoting, use the recruiter's own messages.)`;
 
 /**
  * The internal follow-up a pushed turn starts from. A turn that ended on a promise is told so,
@@ -312,9 +312,9 @@ export function continuationText(input: {
 }) {
   const parts = [
     input.promise
-      ? `Your last message ended with "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
+      ? `${UNDONE_PROMISE_LEAD} "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
       : "",
-    input.step ? `Continue with the next step: ${input.step.label}. ${input.step.prompt}` : "",
+    input.step ? `${NEXT_STEP_LEAD} ${input.step.label}. ${input.step.prompt}` : "",
     input.last
       ? " This is the last automatic continuation: this turn must deliver a result. If you truly cannot (a tool failed or information is missing), try another way once; if that still fails, use one question card (ask_user) to ask the recruiter for one concrete decision, saying where it is stuck and offering options. Do not just report status, and do not say you will do it later."
       : "",
