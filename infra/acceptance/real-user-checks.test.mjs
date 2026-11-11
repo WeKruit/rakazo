@@ -201,3 +201,41 @@ test("one question, a draft with its own question and a quoted line count as one
     ["要现在发吗？"],
   );
 });
+test("a Chinese question with an English role title is still Chinese", () => {
+  const failures = conversationChecks([
+    user("继续吧"),
+    bot("这份 Senior Data Engineer 职位主要面向哪个地点和工作方式？"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
+test("a blocker that says what to send next is not a dead end", () => {
+  assert.equal(
+    deadEnd(
+      bot(
+        "我现在没法直接发出：这封邮件是首次联系，缺少可关联的岗位信息。请发我该岗位的职位描述或链接；有了岗位信息，我就能继续准备邮件。",
+      ),
+    ),
+    false,
+  );
+});
+
+test("a second round of people may repeat the round header and next-step card, and S3 in evidence is AWS", () => {
+  const round = (name) =>
+    bot(
+      `10 people this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
+    );
+  const card = bot(
+    "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
+    true,
+  );
+  const failures = conversationChecks([
+    user("Go with the JD as written and start the search."),
+    round("Ann"),
+    card,
+    user("#2 and #5 are not a fit. Find more people who run Kafka in production."),
+    round("Bob"),
+    card,
+  ]);
+  assert.deepEqual(failures, []);
+});

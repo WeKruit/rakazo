@@ -1,10 +1,12 @@
 // Conversation scenarios for real-user.mjs, each from a complaint or bug in this product's history.
 // The wording is how recruiters actually wrote; every JD, name and address is invented.
 //
-// Turns: { say } sends to Kruit, { sayRole } to the newest role chat, { answerCard } types into the
-// newest open question card, { wait } pauses (ms), { stop } presses Stop.
+// Turns: { say } sends to Kruit (with { file } it attaches a PDF of those lines), { sayRole } to the
+// newest role chat, { answerCard } types into the newest open question card, { results } waits for
+// a round of people after the last message (and fails if it repeats people already shown),
+// { wait } pauses (ms), { stop } presses Stop.
 // Expectations: noRole (no role may be opened), role (a role must be opened, not titled "New
-// role"), requirement (regex that must be saved as required in the role brief), last / lastNot
+// role"), roleTitle (regex the new role's name must match), requirement (regex that must be saved as required in the role brief), last / lastNot
 // (regex the last reply must / must not match). account: "onboarded" plays on the fixture account
 // we set up by hand (no credit limit, no mailbox) instead of a fresh self-signup account. Every conversation also passes the common checks
 // in real-user-checks.mjs. paid: answering a role's first question starts the paid first-ten search.
@@ -21,6 +23,16 @@ const JD_ZH_MUST =
 const JD_ZH_OPTIONAL =
   "帮我开个新岗位：高级技术产品经理，湾区（Sunnyvale），半导体或芯片背景，5年以上产品经验，和晶圆厂、封测厂合作过。会说中文更好，不强求。";
 const CHINESE = /中文|普通话|汉语|mandarin|chinese/;
+// Plain ASCII, as a recruiter's exported JD; the PDF holds no other clue about the role.
+const JD_FILE = {
+  name: "JD - Staff ML Engineer.pdf",
+  lines: [
+    "Staff Machine Learning Engineer - Austin, TX (on site)",
+    "Fintech company, 400 people. You will lead our fraud-detection models.",
+    "Requirements: 8+ years in ML engineering; PyTorch; models in production at scale.",
+    "Nice to have: payments or fraud domain. Salary $210k-$250k. No visa sponsorship.",
+  ],
+};
 
 export const SCENARIOS = [
   // First message: the account is brand new and the recruiter has not said what they want yet.
@@ -84,6 +96,14 @@ export const SCENARIOS = [
     turns: [{ say: JD_ZH_MUST }],
     role: true,
     requirement: CHINESE,
+  },
+  {
+    name: "jd-upload-pdf",
+    area: "new role",
+    source: "recruiters attach the JD file instead of pasting it",
+    turns: [{ say: "这是一个新的岗位，我们来找一下候选人", file: JD_FILE }],
+    role: true,
+    roleTitle: /machine learning|\bML\b|机器学习/i,
   },
   {
     name: "mixed-language-ask",
@@ -226,6 +246,24 @@ export const SCENARIOS = [
     ],
   },
   // Paid: answering a role's first question starts the first-ten search.
+  {
+    name: "feedback-round",
+    area: "feedback",
+    source: "feedback on a few people must continue the same search with new people",
+    paid: true,
+    turns: [
+      { say: JD_EN },
+      { answerCard: "Go with the JD as written and start the search." },
+      { results: {} },
+      {
+        sayRole:
+          "#2 and #5 are not a fit: no streaming pipelines in production. Find more people who run Kafka in production.",
+      },
+      { results: {} },
+    ],
+    role: true,
+    lastNot: /\b(?:rate|score) (?:all|each|every)\b|每一位都|逐一评价/i,
+  },
   {
     name: "must-have-on-card",
     area: "requirements",

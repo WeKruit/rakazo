@@ -15,6 +15,8 @@ export interface TurnModelInput {
   pendingToolLoop: boolean;
   /** A recruiting role before its first round: clarifying questions and the people searches. */
   recruitingIntake?: boolean;
+  /** The bot's settings name its own model or thinking level, which then applies as chosen. */
+  botChosen?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -34,6 +36,7 @@ export interface TurnModelChoice {
 export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   const env = input.env ?? process.env;
   const configured = { model: input.configured, routed: "configured" as const };
+  if (input.botChosen) return { ...configured, reason: "bot_setting" };
   const fastId =
     env.RAKAZO_FAST_MODEL === undefined ? DEFAULT_FAST_MODEL : env.RAKAZO_FAST_MODEL.trim();
   if (!fastId) return { ...configured, reason: "fast_model_disabled" };
@@ -78,11 +81,16 @@ export function effortThinkingLevel(
   return level === "off" || level === "minimal" || level === "low" ? level : "low";
 }
 
-/** The stored mode when the account may choose one; fast otherwise. */
+/**
+ * The stored mode when the account may choose one; fast otherwise. A bot whose settings name its
+ * model or thinking level keeps that level (balanced) unless the chat asks for deep.
+ */
 export function resolveEffortMode(
   stored: string | null | undefined,
   mayChoose: boolean,
+  botChosen = false,
 ): EffortMode {
+  if (botChosen && !(mayChoose && stored === "deep")) return "balanced";
   if (!mayChoose) return "fast";
   return stored === "balanced" || stored === "deep" ? stored : "fast";
 }
