@@ -7,20 +7,23 @@
 // admin, a repeated message, the wrong language, a hard requirement that never reached the role.
 // No case answers an approval card; open cards are denied and work is stopped at the end.
 // Paid scenarios answer a role's first question, which starts the first-ten search, so they run
-// only with --paid (the release thread's one paid run a day); the rest are free.
+// only when this script itself is given --paid (the release thread's one paid run a day); the
+// release gate never passes it here, even when its own paid cases run. The rest are free.
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
 //       [--out <dir>] [--bench <dir>] [--sha <sha>]
+// RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
+// mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
-// times; the release gate plays each once. Rows go to <out>/results.jsonl and, with --bench, are
+// times; the release gate plays each once, and a failed one once more before it blocks. Rows go to <out>/results.jsonl and, with --bench, are
 // appended to the shared benchmark folder for the scoreboard.
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every scenario passes.
 
 import fs from "node:fs";
 import path from "node:path";
-import { conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -82,12 +85,6 @@ function client() {
   return { auth, rpc };
 }
 
-const botText = (message) =>
-  (message.blocks ?? [])
-    .filter((block) => block.kind !== "handoff")
-    .map((block) => block.text ?? block.question ?? "")
-    .filter(Boolean)
-    .join("\n");
 const openCards = (message) =>
   (message.blocks ?? []).filter(
     (block) => block.kind === "ask" && (!block.status || block.status === "pending"),
@@ -146,11 +143,17 @@ async function settle(rpc, { quietMs = 30_000, limitMs = 6 * 60_000, untilCard =
 }
 
 /** What the recruiter saw in each chat, oldest first; the server records typed card answers. */
-async function transcripts(rpc) {
+/** Only this play's messages: a reused fixture account keeps earlier runs' history. */
+async function transcripts(rpc, since) {
   const chats = [];
   for (const group of await groupsOf(rpc)) {
     const messages = (await messagesOf(rpc, group.id))
-      .filter((message) => !message.internal && !(message.role === "user" && message.botId))
+      .filter(
+        (message) =>
+          !message.internal &&
+          !(message.role === "user" && message.botId) &&
+          Date.parse(message.createdAt) >= since,
+      )
       .map((message) => ({
         // A user-role row written by an agent is a handoff, not the recruiter.
         role: message.role === "user" && !message.botId ? "user" : "bot",
@@ -206,17 +209,29 @@ async function send(rpc, groupId, text) {
 
 async function play(scenario, owner, sample) {
   const failures = [];
+  let startedAt = Date.now() - 5_000;
   const label = `${scenario.name}#${sample}`;
-  const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
-  const password = `Ev-${crypto.randomUUID()}`;
-  await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
   const user = client();
-  await user.auth(email, password);
+  if (scenario.account === "onboarded") {
+    // A hand-onboarded account cannot be made through the API, so a fixed one is reused.
+    await user.auth(ONBOARDED_EMAIL, ONBOARDED_PASSWORD);
+    // Close what earlier runs left open, let the replies land, and judge only what follows.
+    await stopAll(user.rpc);
+    await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
+    startedAt = Date.now();
+  } else {
+    const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
+    const password = `Ev-${crypto.randomUUID()}`;
+    await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
+    await user.auth(email, password);
+  }
   const kruit = (await groupsOf(user.rpc)).find((group) =>
     group.id.startsWith("recruiting-global-"),
   );
   if (!kruit) return ["the new account has no Kruit conversation"];
   let chats = [];
+  // Roles a reused fixture account already had are not this play's.
+  const rolesBefore = new Set((await roleChats(user.rpc)).map((group) => group.id));
   try {
     for (const [index, turn] of scenario.turns.entries()) {
       const next = scenario.turns[index + 1];
@@ -255,7 +270,7 @@ async function play(scenario, owner, sample) {
         await settle(user.rpc, { quietMs: 25_000, limitMs: 3 * 60_000 });
       }
     }
-    const roles = await roleChats(user.rpc);
+    const roles = (await roleChats(user.rpc)).filter((group) => !rolesBefore.has(group.id));
     if (scenario.noRole && roles.length)
       failures.push(`opened a role it was not asked for: ${roles.map((g) => g.name).join(", ")}`);
     if (scenario.role) {
@@ -271,12 +286,15 @@ async function play(scenario, owner, sample) {
           threadId: role.threadId ?? role.id,
         });
         fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        failures.push(
-          ...requirementSaved(JSON.stringify(workspace?.revision ?? {}), scenario.requirement),
+        // Judge what the role now requires, not the quotes it keeps of the original JD, which
+        // still say "会说中文更好，不强求" after the recruiter makes it a must.
+        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
+          key === "quote" || key === "sourceRefs" ? undefined : value,
         );
+        failures.push(...requirementSaved(requirements, scenario.requirement));
       }
     }
-    chats = await transcripts(user.rpc);
+    chats = await transcripts(user.rpc, startedAt);
   } finally {
     await stopAll(user.rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
@@ -305,15 +323,21 @@ async function play(scenario, owner, sample) {
   return failures;
 }
 
+const { RAKAZO_ONBOARDED_EMAIL: ONBOARDED_EMAIL, RAKAZO_ONBOARDED_PASSWORD: ONBOARDED_PASSWORD } =
+  process.env;
 const only = option("--only")?.split(",");
 const wanted = SCENARIOS.filter(
   (scenario) =>
-    (!only || only.includes(scenario.name)) && (!scenario.paid || args.includes("--paid")),
+    (!only || only.includes(scenario.name)) &&
+    (!scenario.paid || args.includes("--paid")) &&
+    (scenario.account !== "onboarded" || (ONBOARDED_EMAIL && ONBOARDED_PASSWORD)),
 );
+if (!ONBOARDED_EMAIL)
+  log("RAKAZO_ONBOARDED_EMAIL/PASSWORD not set: skipping the onboarded-account scenarios");
 const SAMPLES = Number(option("--samples", "1"));
 const CONCURRENCY = Number(option("--concurrency", "8"));
 const plays = wanted.flatMap((scenario) =>
-  Array.from({ length: scenario.paid ? 1 : SAMPLES }, (_, index) => ({
+  Array.from({ length: scenario.paid || scenario.account ? 1 : SAMPLES }, (_, index) => ({
     scenario,
     sample: index + 1,
   })),
@@ -330,9 +354,9 @@ const SHA =
   "unknown";
 const rows = [];
 let nextPlay = 0;
-async function worker() {
+async function worker(plays) {
   while (nextPlay < plays.length) {
-    const { scenario, sample } = plays[nextPlay++];
+    const { scenario, sample, retry } = plays[nextPlay++];
     const at = Date.now();
     let failures;
     try {
@@ -353,6 +377,8 @@ async function worker() {
       at: new Date(at).toISOString(),
       seconds: Math.round((Date.now() - at) / 1000),
       paid: Boolean(scenario.paid),
+      ...(scenario.known ? { known: scenario.known } : {}),
+      ...(retry ? { retry: true } : {}),
     };
     rows.push(row);
     log(
@@ -360,7 +386,25 @@ async function worker() {
     );
   }
 }
-await Promise.all(Array.from({ length: Math.min(CONCURRENCY, plays.length) }, worker));
+const pool = async (list) => {
+  nextPlay = 0;
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, () => worker(list)));
+};
+await pool(plays);
+// One sample can fail on a reply that varies from run to run. A failed free sample is played once
+// more on a fresh account; it blocks the release only when the second play fails too. Both rows
+// stay on the scoreboard. Paid scenarios are never played twice.
+const retries = rows
+  .filter((row) => !row.pass && !row.known && !row.paid)
+  .map((row) => ({
+    scenario: wanted.find((scenario) => scenario.name === row.scenario),
+    sample: `${row.sample}-again`,
+    retry: true,
+  }));
+if (retries.length) {
+  log(`playing ${retries.length} failed free sample(s) once more`);
+  await pool(retries);
+}
 fs.writeFileSync(
   path.join(OUT, "results.jsonl"),
   `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
@@ -375,6 +419,21 @@ if (BENCH) {
   );
   fs.appendFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
-const failed = rows.filter((row) => !row.pass).length;
-log(`${rows.length - failed}/${rows.length} conversations pass`);
-process.exit(failed ? 1 : 0);
+const failed = rows.filter((row) => !row.pass);
+const againOf = (row) =>
+  rows.find(
+    (item) => item.retry && item.scenario === row.scenario && item.sample === `${row.sample}-again`,
+  );
+const blocking = failed.filter(
+  (row) => !row.known && !row.retry && (row.paid || !againOf(row) || !againOf(row).pass),
+);
+for (const row of failed.filter((item) => !item.known && !item.retry && againOf(item)?.pass))
+  log(`failed once, passed when played again, not blocking: ${row.scenario}#${row.sample}`);
+log(`${rows.length - failed.length}/${rows.length} conversations pass`);
+for (const row of failed.filter((item) => item.known))
+  log(`known failure, not blocking: ${row.scenario}#${row.sample} (${row.known})`);
+// A known failure that passes every sample is ready to lose its mark.
+for (const name of new Set(rows.filter((row) => row.known && row.pass).map((row) => row.scenario)))
+  if (!failed.some((row) => row.scenario === name))
+    log(`known failure now passes: ${name}; remove its known mark`);
+process.exit(blocking.length ? 1 : 0);

@@ -696,6 +696,7 @@ import {
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
 import {
+  beforeCardQuestion,
   isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
@@ -1334,6 +1335,10 @@ const YEARS_OPEN_NOTE =
 const ASK_WITHOUT_ROLE =
   'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
+/** Kruit asks nothing for a role it has not opened: the role's team asks its questions there. */
+export const GLOBAL_ASK_BEFORE_ROLE =
+  "Not asked yet. When the recruiter's latest message describes a role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. Otherwise ask this same question again with ask_user.";
+
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
@@ -1375,6 +1380,8 @@ const PLANNED_SEARCHES_MISSING =
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** With this many new people from the planned searches, the first ten come from them. */
+/** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
+const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -6001,12 +6008,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
-        const publishMidTurnNarration = async () => {
+        const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const narration = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          const written = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          // The question card that follows asks the question; the text keeps only what leads up to it.
+          const narration =
+            hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
-          if (!narration) return;
+          if (!narration) {
+            if (written) {
+              assembled = "";
+              hasStreamedText = false;
+              pendingProgress = "";
+              discardedMidTurnNarration = true;
+            }
+            return;
+          }
           // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
           if (hideVendors && isAgentBrief(narration)) {
             assembled = "";
@@ -6126,6 +6144,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let senderRead = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
+        // Kruit's first question in a turn is checked once against opening a role instead.
+        let globalAskChecked = false;
+        let roleStartedInTurn = false;
+        const globalAskNeedsRoleCheck = () =>
+          Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
+          Boolean(recruitingBotKey(bot)) &&
+          !globalAskChecked &&
+          !roleStartedInTurn;
         const noRoleYet = () =>
           Boolean(thread.groupId) &&
           !thread.groupId?.startsWith("recruiting-global-") &&
@@ -6147,6 +6173,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // New people-search agent runs this turn started before its round was recorded.
+        let agentRunsBeforeRound = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -6271,6 +6299,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? ` · 1–${shown.length} / ${total}`
                 : "";
           const text = await recruitingRoundListText(deps.prisma, {
+            chinese: isChineseText(lastRecruiterText),
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
@@ -6342,6 +6371,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.posting = stream.posting
             .then(async () => {
               const text = await recruitingRoundListText(deps.prisma, {
+                chinese: isChineseText(lastRecruiterText),
                 threadId: run.threadId,
                 spaceId: run.spaceId,
                 roleId,
@@ -6864,6 +6894,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
+          // Each agent run takes most of a minute: after two that still leave the ten short, the
+          // recruiter decides whether to relax a requirement or search deeper, instead of the turn
+          // running one after another while they wait. Reading a started run's result is free.
+          if (
+            name.endsWith("agent_run") &&
+            !rawArgs.runId &&
+            firstPicksShown &&
+            run.trigger !== "recruiting_grade" &&
+            !(await roundRecordedThisRun())
+          ) {
+            if (agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND)
+              return {
+                error: `Not run: ${agentRunsBeforeRound} people-search agent runs already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+              };
+            agentRunsBeforeRound++;
+          }
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
@@ -7154,6 +7200,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
               };
             const text = await recruitingRoundListText(deps.prisma, {
+              chinese: isChineseText(lastRecruiterText),
               threadId: run.threadId,
               spaceId: run.spaceId,
               roleId,
@@ -11163,6 +11210,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
+                    chinese: isChineseText(lastRecruiterText),
                     threadId: run.threadId,
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
@@ -12779,6 +12827,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               if (!sent.ok) return finish({ error: sent.error });
             }
+            roleStartedInTurn = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
@@ -14028,7 +14077,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .join(" ")
               : "",
           );
-        const lastRecruiterText = recruiterLanguageText(recruiterTexts);
+        // A message steered into the running turn moves it on to the language that message is in.
+        let lastRecruiterText = recruiterLanguageText(recruiterTexts);
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
@@ -14818,6 +14868,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
+                    if (globalAskNeedsRoleCheck()) {
+                      globalAskChecked = true;
+                      return { instead: GLOBAL_ASK_BEFORE_ROLE };
+                    }
                     if (!senderRead && asksSenderCompanyName(question))
                       return { instead: SENDER_READ_FIRST };
                     // Workloop: work running behind the conversation never asks the person after
@@ -14951,6 +15005,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           recruitingSourceMessageId = humanSteering.messageId;
                           replyDiscardActive = false;
                         }
+                        // Replies follow the language of the recruiter's newest message, also when
+                        // it arrives while the turn runs (an English JD, then 「远程也可以」).
+                        const steeringLanguageNote = (text: string) => {
+                          if (!hideVendors) return undefined;
+                          if (isChineseText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_CHINESE_NOTE;
+                          }
+                          if (isEnglishText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_ENGLISH_NOTE;
+                          }
+                          return undefined;
+                        };
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -15010,6 +15078,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
+                                item === freshHumanSteering
+                                  ? steeringLanguageNote(item.text)
+                                  : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
@@ -15378,7 +15449,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Promote streamed narration into a durable, replyable chat message before
               // tools continue, so long turns do not look stalled and stay replyable.
               if (event.name !== "message_user") {
-                await publishMidTurnNarration();
+                await publishMidTurnNarration(event.name);
               }
               const toolStartedAt = new Date().toISOString();
               const toolActivity = workActivityForTool(event.name, event.args);

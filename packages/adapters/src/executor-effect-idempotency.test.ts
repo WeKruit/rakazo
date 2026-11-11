@@ -17,6 +17,7 @@ import type { ActionApprovalRule } from "@rakazo/core";
 import {
   boundDirectApprovalRequest,
   COMPUTER_START_FAILED,
+  REPLY_IN_CHINESE_NOTE,
   RecruitingAssessmentValidationError,
 } from "@rakazo/core";
 import {
@@ -54,6 +55,7 @@ import {
   ASK_AFTER_HANDOFF,
   continuedCandidateKey,
   createRunExecutor,
+  GLOBAL_ASK_BEFORE_ROLE,
   INTAKE_ASK_FIRST,
   jobLinkIn,
   namedCandidateKey,
@@ -1282,6 +1284,34 @@ describe("computer that will not start", () => {
       "Run setup failed; retrying",
     );
     expect(f.finalizeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("steered message language", () => {
+  // Staging eval 11-11: an English JD, then 「对了，远程也可以」 4 s later, got English replies.
+  it("tells the turn to switch to the language of a message steered into it", async () => {
+    const f = fixture("steered-language");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-zh",
+        messageId: "message-zh",
+        text: "对了，远程也可以，不一定要在西雅图",
+        blocks: [{ kind: "text", text: "对了，远程也可以，不一定要在西雅图" }],
+      },
+    ]);
+    let steered = "";
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const [steering] = await request.claimSteering!([]);
+      steered = steering!.text;
+      yield { type: "done" as const, text: "好的。" };
+    });
+    await f.run();
+    expect(steered).toContain(REPLY_IN_CHINESE_NOTE);
   });
 });
 
@@ -5636,7 +5666,12 @@ describe("native recruiting assessment effect delivery", () => {
     );
   });
 
-  async function roleTeamFirstTurn(id: string, text: string, calls: unknown[] = []) {
+  async function roleTeamFirstTurn(
+    id: string,
+    text: string,
+    calls: unknown[] = [],
+    groupId = "group-1",
+  ) {
     const f = fixture(id);
     vi.mocked(executeRecruitingRoleTool).mockClear();
     const bot = await f.prisma.bot.findUniqueOrThrow();
@@ -5644,7 +5679,7 @@ describe("native recruiting assessment effect delivery", () => {
       ...bot,
       spawnKey: "recruiting:user-1:main",
     } as typeof bot);
-    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.thread, { groupId });
     Object.assign(f.prisma, {
       chatGroup: { findUnique: vi.fn(async () => null) },
       chatGroupMember: { findMany: vi.fn(async () => []) },
@@ -5695,6 +5730,21 @@ describe("native recruiting assessment effect delivery", () => {
     });
     expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
     expect(request.prompt).toContain("a request to find people for a named role counts");
+  });
+
+  // Staging eval 11-11: Kruit asked a pasted English JD's intake question itself and opened no role.
+  it("checks Kruit's first question once against opening the role instead", async () => {
+    const f = await roleTeamFirstTurn(
+      "global-ask-before-role",
+      "Senior Data Engineer, Seattle. Requirements: 6+ years, Spark, Python.",
+      [],
+      "recruiting-global-abc",
+    );
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toEqual({
+      instead: GLOBAL_ASK_BEFORE_ROLE,
+    });
+    expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toBeUndefined();
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {

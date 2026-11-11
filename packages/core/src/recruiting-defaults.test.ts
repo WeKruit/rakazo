@@ -89,6 +89,17 @@ describe("maintained recruiting defaults", () => {
 });
 
 describe("isChineseText", () => {
+  // Staging eval 11-11: 「发给 alex.chen.test@example.com」 got English replies.
+  it("ignores email addresses and links when reading the language", () => {
+    expect(isChineseText("发给 alex.chen.test@example.com")).toBe(true);
+    expect(isEnglishText("发给 alex.chen.test@example.com")).toBe(false);
+    expect(isChineseText("看看这个 https://www.linkedin.com/in/some-person-name")).toBe(true);
+    expect(recruiterLanguageText(["发给 alex.chen.test@example.com", "Write a template"])).toBe(
+      "发给 alex.chen.test@example.com",
+    );
+    expect(isEnglishText("Send it to alex.chen.test@example.com please")).toBe(true);
+  });
+
   it("reads mostly-Han text as Chinese", () => {
     expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
     expect(isChineseText("以后都用中文回复我")).toBe(true);
@@ -158,5 +169,9 @@ describe("global recruiting overview", () => {
     )?.body;
     expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
     expect(body).toContain("never open a role for it");
+    // Staging eval 11-11: after that line a pasted JD opened no role.
+    expect(body).toContain("a new role, a JD or hiring requirements still go to start_role");
+    // Staging eval 11-11: "write me a cold outreach email…" was answered with "who should I address it to?"
+    expect(body).toContain("never ask who it is addressed to first");
   });
 });

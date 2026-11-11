@@ -667,6 +667,13 @@ describe("a missed requirement is searched for again", () => {
       "never reply that you follow the current role record",
     );
     expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
+    // Staging eval 11-11: typed into the first intake card, the must-have stayed "preferred" in the
+    // saved role until the first ten, and the open location question came back word for word.
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
+      "including while intake questions are still open",
+    );
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("criteria upsert at priority hard");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("never repeating its sentence");
   });
 
   it("every scale query carries a required language", () => {
