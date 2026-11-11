@@ -168,7 +168,10 @@ async function settle(rpc, { quietMs = 30_000, limitMs = 6 * 60_000, untilCard =
 // A user-role row an agent wrote is a handoff, not the recruiter: it carries a bot id, or it is
 // the brief one agent writes for another ("Goal: … Done when: …").
 const handoff = (message) =>
-  message.role === "user" && (Boolean(message.botId) || AGENT_BRIEF.test(botText(message)));
+  message.role === "user" &&
+  (Boolean(message.botId) ||
+    (message.blocks ?? []).some((block) => block.kind === "bot_message_received") ||
+    AGENT_BRIEF.test(botText(message)));
 // Card titles the product writes in English are translated by the web app into the reader's UI
 // language ("Confirm sending email" → "确认发送邮件"). A recruiter who writes Chinese is read as
 // one with a Chinese UI, so the language check sees the title they see.

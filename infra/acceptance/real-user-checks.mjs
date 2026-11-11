@@ -87,9 +87,11 @@ export const questionsIn = (text) =>
 /** Every check that applies to any conversation. */
 // What the recruiter reads in a bot message. A connect card's title is app chrome the web
 // translates ("连接 Gmail"); its stored text is the English fallback, so the agent's reason counts.
+// The chat shows agent-to-agent messages only as a "Messaged …" marker, never their brief.
+const HIDDEN = new Set(["handoff", "bot_message_sent", "bot_message_received"]);
 export const botText = (message) =>
   (message.blocks ?? [])
-    .filter((block) => block.kind !== "handoff")
+    .filter((block) => !HIDDEN.has(block.kind))
     .map((block) => block.connection?.reason ?? block.text ?? block.question ?? "")
     .filter(Boolean)
     .join("\n");
