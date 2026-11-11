@@ -4,7 +4,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import { createRunExecutor } from "./executor.js";
+import { createRunExecutor, STEERING_PEEK_MS } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -28,6 +28,9 @@ beforeEach(() => {
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
+/** Run ids the runtime was called with, in the current test. */
+let runtimeRunIds: string[] = [];
+const lastQuickReplyCalls = () => runtimeRunIds;
 let lastExecutorEvents:
   | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
   | undefined;
@@ -102,8 +105,15 @@ async function runWithModel(
     finalText?: string;
     replySuggestions?: boolean;
     quickReplies?: boolean;
+    /** A compacted thread whose semantic memory recalls this text for the new message. */
+    recalledMemory?: string;
+    /** The main model call waits for this, as a long step does. */
+    holdMain?: Promise<void>;
+    /** Messages sent while the run works that it has not read yet. */
+    unreadSteering?: Array<{ id: string; messageId: string; blocks: MessageBlock[] }>;
   } = {},
 ) {
+  runtimeRunIds = [];
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -122,6 +132,8 @@ async function runWithModel(
   let request: AgentRunRequest | undefined;
   const runtimeRun = vi.fn(async function* (next: AgentRunRequest) {
     request = next;
+    runtimeRunIds.push(next.runId);
+    if (next.runId === "run-1") await options.holdMain;
     if (switchModel) {
       const onModelChange = (
         next as AgentRunRequest & {
@@ -148,7 +160,12 @@ async function runWithModel(
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
       count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () => null),
+      // The running run, as the unread-message check reads it.
+      findFirst: vi.fn(async () =>
+        options.unreadSteering
+          ? { trigger: run.trigger, clientNonce: null, sourceMessage: null }
+          : null,
+      ),
       findMany: vi.fn(async () =>
         options.priorRoutineRun
           ? [{ id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }]
@@ -184,8 +201,9 @@ async function runWithModel(
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.threadId,
         groupId: null,
-        historyCompactionSummary: null,
-        historyCompactedUpToSeq: null,
+        historyCompactionSummary: options.recalledMemory ? "Earlier talk about the role." : null,
+        historyCompactedUpToSeq: options.recalledMemory ? 0 : null,
+        historyCompactionGeneration: 0,
         nextMessageSeq: 3,
         activeRecruitingRoleId: options.recruitingRoleId ?? null,
         runs: options.previousRun ? [options.previousRun] : [],
@@ -256,6 +274,16 @@ async function runWithModel(
     agentSkill: { findMany: vi.fn(async () => []) },
     scratchpadItem: { findMany: vi.fn(async () => options.loadScratchpad?.() ?? []) },
     externalEffect: { findMany: vi.fn(async () => []) },
+    steeringMessage: {
+      findMany: vi.fn(async () =>
+        (options.unreadSteering ?? []).map((row) => ({
+          id: row.id,
+          messageId: row.messageId,
+          message: { blocks: row.blocks },
+        })),
+      ),
+      count: vi.fn(async () => (options.unreadSteering?.length ? 1 : 0)),
+    },
     artifact: {
       findMany: vi.fn(async () => [
         { id: "art-1", storageKey: "shot.png", size: 4, mimeType: "image/png", name: "shot.png" },
@@ -283,7 +311,19 @@ async function runWithModel(
     },
     home: { commit: vi.fn(async () => "fixture-revision") },
     memory: { read: async () => ({ documents: [] }) },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: {
+      resolve: async () =>
+        options.recalledMemory
+          ? {
+              defaultScope: "isolated",
+              provider: {
+                describe: () => ({ capabilities: { recall: true, save: true } }),
+                recall: async () => ({ ok: true, value: [{ memory: options.recalledMemory }] }),
+                save: async () => ({ ok: true, value: undefined }),
+              },
+            }
+          : null,
+    },
     artifacts: { get },
     events,
     jobs: { enqueue: vi.fn(async () => undefined) },
@@ -303,6 +343,23 @@ async function runWithModel(
   if (!request) throw new Error("runtime was not called");
   return { request, get, prisma, run, finalizeRun, runtimeRun, events };
 }
+
+describe("prompt cache order", () => {
+  it("keeps per-turn recall after the history so the history stays a cached prefix", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      recalledMemory: "Prefers Mandarin speakers",
+    });
+    const contents = request.history.map((message) => message.content);
+    const summary = contents.findIndex((text) => text.includes("Earlier talk about the role."));
+    const earlier = request.history.findIndex((message) => message.id === "earlier");
+    const recall = contents.findIndex((text) => text.includes("Prefers Mandarin speakers"));
+    const turnContext = contents.findIndex((text) => text.startsWith("Current run context"));
+    expect(summary).toBe(0);
+    expect(earlier).toBeGreaterThan(summary);
+    expect(recall).toBeGreaterThan(earlier);
+    if (turnContext >= 0) expect(turnContext).toBeGreaterThan(recall);
+  });
+});
 
 describe("reply suggestion", () => {
   it("asks the model for the user's next message beside finalize and saves it", async () => {
@@ -390,6 +447,41 @@ describe("quick reply", () => {
     expect(runtimeRun.mock.calls[main]![0].prompt).toContain(
       'You already sent the person this first line while you work: "On it."',
     );
+  });
+
+  it("answers a message sent during a long step at once, without waiting for the step", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Got it, remote works too.",
+      quickReplies: true,
+      holdMain,
+      unreadSteering: [
+        {
+          id: "steer-1",
+          messageId: "message-9",
+          blocks: [{ kind: "text", text: "对了，远程也可以" }],
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(lastQuickReplyCalls()).toContain("run-1:quick-reply:steer-1"), {
+      timeout: STEERING_PEEK_MS + 3_000,
+    });
+    release();
+    const { prisma, runtimeRun } = await pending;
+    const steered = runtimeRun.mock.calls.find(
+      ([call]) => call.runId === "run-1:quick-reply:steer-1",
+    )?.[0];
+    expect(steered?.prompt).toContain("对了，远程也可以");
+    expect(
+      prisma.message.create.mock.calls.filter(
+        ([args]) =>
+          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) ===
+          JSON.stringify([{ kind: "text", text: "Got it, remote works too." }]),
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("skips runs that a person did not start", async () => {

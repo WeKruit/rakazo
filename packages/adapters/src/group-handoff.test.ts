@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { chatReplyToAsk } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  GLOBAL_HANDOFF_ROLE_WORK,
   handoffToGroupBot,
   isQuietStageReport,
   NO_ROLE_HANDOFF,
@@ -348,6 +349,38 @@ describe("coordinator search handoff", () => {
     await expect(
       handoffToGroupBot(deps as never, run, "group-1", { bot_id: "bot-b", message: "Draft" }),
     ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
+  });
+});
+
+describe("account-wide conversation handoff", () => {
+  const spawnKeys = {
+    "bot-a": "recruiting:user-1:main",
+    "bot-b": "recruiting:user-1:outreach",
+    "bot-c": "recruiting:user-1:sourcer",
+  };
+  const global = "recruiting-global-abc";
+
+  // 11-11 staging: "email alex@… about a backend role" from a fresh account hit a dead end
+  // because Main could not reach Outreach in the account-wide conversation.
+  it("hands a one-off email to Outreach without a role", async () => {
+    const { deps } = harness([{ kind: "text", text: "email alex" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: null,
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, global, { bot_id: "bot-b", message: "Email Alex" }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
+  });
+
+  it("keeps role work with the role's team", async () => {
+    const { deps, runCreate } = harness([{ kind: "text", text: "find people" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: null,
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, global, { bot_id: "bot-c", message: "Find" }),
+    ).resolves.toEqual({ error: GLOBAL_HANDOFF_ROLE_WORK });
+    expect(runCreate).not.toHaveBeenCalled();
   });
 });
 

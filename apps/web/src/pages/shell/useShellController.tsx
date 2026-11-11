@@ -72,7 +72,11 @@ import { revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../../lib/performance";
 import { setPreloadRecoveryActiveWork } from "../../lib/preload-recovery";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { clearRecruitingReads, createRecruitingReadCache } from "../../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  createRecruitingReadCache,
+  keepRecruitingReads,
+} from "../../lib/recruiting-read-cache";
 import {
   getResponseStreamingEnabled,
   subscribeResponseStreaming,
@@ -393,7 +397,12 @@ export function useShellController() {
     const cache = recruitingReadCache.current;
     // Saved reads belong to one account and Space; drop them on unmount or when either changes.
     const prefetched = threadPrefetch.current;
+    const stopKeeping =
+      userId && bootstrapMe?.spaceId
+        ? keepRecruitingReads(cache, JSON.stringify([userId, bootstrapMe.spaceId]))
+        : undefined;
     return () => {
+      stopKeeping?.();
       clearRecruitingReads(cache);
       prefetched.clear();
     };

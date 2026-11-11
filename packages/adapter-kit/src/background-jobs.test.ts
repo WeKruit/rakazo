@@ -185,6 +185,7 @@ describe("historyCompactJob", () => {
       name: "history.compact",
       payload: { threadId: "thread-1" },
       replaceKey: historyCompactJobKey("thread-1"),
+      serialKey: historyCompactJobKey("thread-1"),
       maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS,
     });
   });

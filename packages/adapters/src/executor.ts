@@ -295,6 +295,7 @@ import {
   seesOperatorSpend,
   skipRateLimitedRun,
   unitVector,
+  unreadSteering,
   votePoll,
   waitingCardBlocks,
   withTransactionRetry,
@@ -1373,6 +1374,12 @@ export const EARLIER_STEERING =
 export const STEERING_ACK =
   'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
+/** How often a running turn looks for messages it has not read yet, to answer them at once. */
+export const STEERING_PEEK_MS = 2_500;
+/** Model-facing: the short reply already sent for a message that arrived mid-run. */
+export const steeringQuickReplySent = (line: string) =>
+  `You already sent the recruiter this short reply to it: "${line}". Do not repeat it or acknowledge the message again; say only what it changes.`;
+
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
@@ -1390,6 +1397,8 @@ const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** With this many new people from the planned searches, the first ten come from them. */
 /** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
 const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
+/** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
+const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -4625,6 +4634,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
       }, 60_000);
       heartbeat.unref?.();
+      let steeringWatch: ReturnType<typeof setInterval> | undefined;
+      // The short reply already sent for a message that arrived mid-run, by message id.
+      const steeringQuickReplies = new Map<string, string>();
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
       const silenceWatch = createSilenceWatch({
@@ -5469,57 +5481,71 @@ export function createRunExecutor(deps: ExecutorDeps) {
         );
         // A short first reply while the full answer is worked out. It starts beside the rest of
         // setup and is posted only if the run has not replied yet; the run is told what it said.
+        // A typed card answer resumes the run that asked, so it gets one too.
         const quickReplyText = turnBlocks ? blocksText(turnBlocks) : "";
         let quickReplySaid: string | undefined;
-        if (
+        const quickRepliesOn =
           deps.quickReplies &&
-          run.trigger === "user" &&
           !messagingChannelRun &&
-          !deps.runtime.describe().capabilities.scripted &&
+          !deps.runtime.describe().capabilities.scripted;
+        const quickReplyEarlier = () =>
+          historyMessages
+            .filter(
+              (message) =>
+                message.id !== currentTurnMessage?.id &&
+                ((message.role === "user" && !message.internal) || message.role === "bot"),
+            )
+            .map((message) => ({
+              role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+              text: blocksText(message.blocks),
+            }));
+        const writeQuickReply = (userText: string, key?: string) =>
+          resolvedPending().then((resolved) =>
+            quickReply({
+              runtime: deps.runtime,
+              model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
+              earlier: quickReplyEarlier(),
+              userText,
+              runId,
+              ...(key ? { key } : {}),
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            }),
+          );
+        const turnStartedAt = new Date();
+        if (
+          quickRepliesOn &&
+          (run.trigger === "user" || nativeSources?.currentAnswer) &&
           quickReplyText.trim()
         )
-          void resolvedPending()
-            .then((resolved) =>
-              quickReply({
-                runtime: deps.runtime,
-                model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
-                earlier: historyMessages
-                  .filter(
-                    (message) =>
-                      message.id !== currentTurnMessage?.id &&
-                      ((message.role === "user" && !message.internal) || message.role === "bot"),
-                  )
-                  .map((message) => ({
-                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                    text: blocksText(message.blocks),
-                  })),
-                userText: quickReplyText,
-                runId,
-                spaceId: run.spaceId,
-                userId: run.userId,
-                botId: bot.id,
-                threadId: thread.id,
-                onUsage: (event) =>
-                  recordUsage(
-                    deps.prisma,
-                    event,
-                    {
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      botId: bot.id,
-                      parentRunId: runId,
-                      runId,
-                      operationId: `quick-reply:${runId}`,
-                      operationKind: "setup",
-                    },
-                    estimateCatalogTokenCostUsd,
-                  ),
-              }),
-            )
+          void writeQuickReply(quickReplyText)
             .then(async (text) => {
               if (!text) return;
+              // The card this run asked before the answer is not a reply to it.
               const replied = await deps.prisma.message.count({
-                where: { threadId: thread.id, runId, role: "bot" },
+                where: {
+                  threadId: thread.id,
+                  runId,
+                  role: "bot",
+                  createdAt: { gte: turnStartedAt },
+                },
               });
               if (replied > 0) {
                 getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
@@ -5537,6 +5563,53 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .catch((error) => {
               getLogger().warn("quick reply failed", { runId, reason: String(error) });
             });
+        // A message sent while the run works waits for the current step to end, which can be a
+        // long search. It gets its own short reply now; the run is told what that reply said.
+        if (quickRepliesOn) {
+          const looked = new Set<string>();
+          let peeking = false;
+          steeringWatch = setInterval(() => {
+            if (peeking) return;
+            peeking = true;
+            void unreadSteering(deps.prisma, { threadId: thread.id, botId: bot.id, runId })
+              .then((rows) => {
+                for (const row of rows) {
+                  if (looked.has(row.id)) continue;
+                  looked.add(row.id);
+                  const human =
+                    row.blocks.length > 0 &&
+                    row.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
+                  const text = human ? blocksText(row.blocks) : "";
+                  if (!text.trim()) continue;
+                  void writeQuickReply(text, row.id)
+                    .then(async (line) => {
+                      if (!line) return;
+                      // Already read by the run, which answers it itself.
+                      const unread = await deps.prisma.steeringMessage.count({
+                        where: { id: row.id, claimedAt: null },
+                      });
+                      if (!unread) return;
+                      await publishMessage(deps, run, "bot", [
+                        { kind: "text", text: redactSecrets(line, runSecrets) },
+                      ]);
+                      steeringQuickReplies.set(row.messageId, line);
+                      getLogger().info("run.steering_quick_reply", { runId });
+                    })
+                    .catch((error) => {
+                      getLogger().warn("steering quick reply failed", {
+                        runId,
+                        reason: String(error),
+                      });
+                    });
+                }
+              })
+              .catch(() => undefined)
+              .finally(() => {
+                peeking = false;
+              });
+          }, STEERING_PEEK_MS);
+          steeringWatch.unref?.();
+        }
         const initialRecruitingContext = await initialRecruitingContextPending();
         currentRecruitingContext = initialRecruitingContext;
         setupMark("recruitingContext");
@@ -6186,6 +6259,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // New people-search agent runs this turn started before its round was recorded.
         let agentRunsBeforeRound = 0;
+        // Quick people searches this turn ran itself (not the planned ones) before its round.
+        let quickSearchesBeforeRound = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -6942,18 +7017,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Each agent run takes most of a minute: after two that still leave the ten short, the
           // recruiter decides whether to relax a requirement or search deeper, instead of the turn
           // running one after another while they wait. Reading a started run's result is free.
+          // Quick searches are capped the same way. The first round counts from the start, before
+          // any picks are on screen: a role whose people are hard to find otherwise searches on
+          // for many minutes and shows nobody.
+          const newAgentRun = name.endsWith("agent_run") && !rawArgs.runId;
+          const ownQuickSearch =
+            name.endsWith("web_search_advanced_exa") &&
+            !executionId.startsWith(`${runId}:planned-search:`);
           if (
-            name.endsWith("agent_run") &&
-            !rawArgs.runId &&
-            firstPicksShown &&
+            (newAgentRun || ownQuickSearch) &&
+            (firstPicksShown || firstRoundPending) &&
             run.trigger !== "recruiting_grade" &&
             !(await roundRecordedThisRun())
           ) {
-            if (agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND)
+            const searched = newAgentRun
+              ? agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND &&
+                `${agentRunsBeforeRound} people-search agent runs`
+              : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
+                `${quickSearchesBeforeRound} people searches`;
+            if (searched)
               return {
-                error: `Not run: ${agentRunsBeforeRound} people-search agent runs already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
               };
-            agentRunsBeforeRound++;
+            if (newAgentRun) agentRunsBeforeRound++;
+            else quickSearchesBeforeRound++;
           }
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
@@ -12792,7 +12879,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
@@ -14300,10 +14387,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ];
         let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
+        // Parts that change on every turn go after the history, so the history stays a prefix the
+        // provider's prompt cache can reuse from the previous turn.
+        const turnHistory: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
         if (nativeSources?.currentAnswer)
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: `Platform task state (data):\n${basePrompt}`,
             requiredForRun: true,
@@ -14317,8 +14407,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           });
         }
+        // Recall follows each new message, so it changes on most turns.
         if (recalledMemory) {
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: redactSecrets(recalledMemory, runSecrets),
           });
@@ -14376,6 +14467,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...(routinePriorRun ? [routinePriorRun] : []),
           ...historicalContext,
           ...historyWithImages,
+          ...turnHistory,
           ...(turnContext
             ? [{ role: "user" as const, content: turnContext, requiredForRun: true as const }]
             : []),
@@ -15216,6 +15308,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
+                                !item.earlier && steeringQuickReplies.has(item.messageId)
+                                  ? steeringQuickReplySent(
+                                      steeringQuickReplies.get(item.messageId)!,
+                                    )
+                                  : undefined,
                                 item === freshHumanSteering
                                   ? steeringLanguageNote(item.text)
                                   : undefined,
@@ -16451,6 +16548,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } finally {
         detachShutdown?.();
         clearInterval(heartbeat);
+        clearInterval(steeringWatch);
         silenceWatch.stop();
         if (!retainComputerLease) {
           if (screenRelease) {

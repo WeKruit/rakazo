@@ -816,6 +816,8 @@ export type BackgroundJob = {
     keepExisting?: boolean;
     /** Cap retried executions; omit to use the job queue's default. */
     maxAttempts?: number;
+    /** Jobs with the same serial key run one at a time, never side by side. */
+    serialKey?: string;
   };
 }[BackgroundJobName];
 
