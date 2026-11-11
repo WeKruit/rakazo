@@ -6271,6 +6271,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? ` · 1–${shown.length} / ${total}`
                 : "";
           const text = await recruitingRoundListText(deps.prisma, {
+            chinese: isChineseText(lastRecruiterText),
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
@@ -6342,6 +6343,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.posting = stream.posting
             .then(async () => {
               const text = await recruitingRoundListText(deps.prisma, {
+                chinese: isChineseText(lastRecruiterText),
                 threadId: run.threadId,
                 spaceId: run.spaceId,
                 roleId,
@@ -7154,6 +7156,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
               };
             const text = await recruitingRoundListText(deps.prisma, {
+              chinese: isChineseText(lastRecruiterText),
               threadId: run.threadId,
               spaceId: run.spaceId,
               roleId,
@@ -11163,6 +11166,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
+                    chinese: isChineseText(lastRecruiterText),
                     threadId: run.threadId,
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
