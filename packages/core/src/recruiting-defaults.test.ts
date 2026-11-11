@@ -149,3 +149,14 @@ describe("recruitingNextStepCard", () => {
     expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
   });
 });
+
+describe("global recruiting overview", () => {
+  // Staging eval 11-11: "email alex… ask if he's free next week" opened a new role to send it.
+  it("hands a one-off email to Outreach without opening a role", () => {
+    const body = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Global recruiting overview",
+    )?.body;
+    expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
+    expect(body).toContain("never open a role for it");
+  });
+});

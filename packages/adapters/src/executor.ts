@@ -695,7 +695,13 @@ import {
   SILENT_RUN_RETRIED_TEXT,
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
-import { isExactNoResponse, NO_RESPONSE, stripNoResponseReply } from "./silent-reply.js";
+import {
+  isAgentBrief,
+  isExactNoResponse,
+  NO_RESPONSE,
+  stripNoResponseReply,
+  withoutAgentBrief,
+} from "./silent-reply.js";
 import {
   listAgentSkillRecords,
   skillCreateFromTool,
@@ -6001,6 +6007,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) return;
+          // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
+          if (hideVendors && isAgentBrief(narration)) {
+            assembled = "";
+            hasStreamedText = false;
+            pendingProgress = "";
+            discardedMidTurnNarration = true;
+            return;
+          }
           assembled = "";
           hasStreamedText = false;
           pendingProgress = "";
@@ -15604,6 +15618,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             quietRun || probeFoundNothing
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
+          if (hideVendors)
+            silentReply = withoutAgentBrief(silentReply.assembled, silentReply.blocks);
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
