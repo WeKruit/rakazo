@@ -259,3 +259,15 @@ test("recalling a saved preference, or naming the same role again, is not a repe
     [],
   );
 });
+
+test("answering with the recruiter's own words is not a repeat; the same acknowledgement twice is", () => {
+  const failures = conversationChecks([
+    user("记住：以后所有候选人邮件都用英文写，署名 Jules Hou"),
+    bot("我会按这个偏好处理候选人邮件。"),
+    bot("我会按这个偏好处理候选人邮件。"),
+    bot("记住了：以后所有候选人邮件都用英文写，并署名 **Jules Hou**。"),
+    user("我之前说的邮件署名是什么？"),
+    bot("你之前说，**以后所有候选人邮件都用英文写，并署名 Jules Hou**。"),
+  ]).filter((failure) => failure.startsWith("repeats"));
+  assert.deepEqual(failures, ['repeats itself: "我会按这个偏好处理候选人邮件。"']);
+});
