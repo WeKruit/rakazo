@@ -204,6 +204,9 @@ export function historyCompactJob(threadId: string, sourceRunId?: string): Backg
     name: "history.compact",
     payload: { threadId, ...(sourceRunId ? { sourceRunId } : {}) },
     replaceKey: historyCompactJobKey(threadId),
+    // A job enqueued while another compacts the same thread would summarize the same messages
+    // again and lose the cursor race; it waits, then finds that batch already done.
+    serialKey: historyCompactJobKey(threadId),
     maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS,
   };
 }

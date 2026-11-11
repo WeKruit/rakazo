@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authClient } from "../lib/auth";
 import { formatBillingPrice } from "../lib/billing";
+import { forgetSavedRecruitingReads } from "../lib/recruiting-read-cache";
 import { clearSpaceSelection, rpc } from "../lib/rpc";
 import { savedThreads } from "../lib/saved-threads";
 import { AuthFrame, submitClass } from "./Auth";
@@ -100,6 +101,7 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
             void authClient.signOut().then(() => {
               clearSpaceSelection();
               void savedThreads.clear();
+              void forgetSavedRecruitingReads();
               navigate("/");
             })
           }

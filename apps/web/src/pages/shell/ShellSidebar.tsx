@@ -19,6 +19,7 @@ import { authClient } from "../../lib/auth";
 import { desktopBridge } from "../../lib/desktop";
 import { isEmptyHomeTeam } from "../../lib/home-team";
 import { withFeatureMessages } from "../../lib/i18n";
+import { forgetSavedRecruitingReads } from "../../lib/recruiting-read-cache";
 import { clearSpaceSelection, rpc } from "../../lib/rpc";
 import { savedThreads } from "../../lib/saved-threads";
 import { supportMailto, useSupportEmail } from "../../lib/support";
@@ -370,6 +371,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             void authClient.signOut().then(() => {
               clearSpaceSelection();
               void savedThreads.clear();
+              void forgetSavedRecruitingReads();
               navigate("/");
             })
           }
