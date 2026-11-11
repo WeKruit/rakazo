@@ -68,6 +68,20 @@ export const similar = (a, b) => {
   return shared / Math.min(left.size, right.size);
 };
 
+// Every recruiter message gets a visible reply within this long, even while work runs.
+export const FIRST_REPLY_MS = 10_000;
+/** The questions a message asks the recruiter; quoted text and email drafts are not its own. */
+export const questionsIn = (text) =>
+  text
+    .slice(0, DRAFT.test(text) ? text.search(DRAFT) : undefined)
+    .split("\n")
+    .filter((line) => !/^\s*>|linkedin\.com/i.test(line))
+    .join("\n")
+    .replace(EMAIL, "<address>")
+    .split(/(?<=[。！？!?])\s*|\n+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 4 && /[?？]$/.test(part));
+
 /** Every check that applies to any conversation. */
 // What the recruiter reads in a bot message. A connect card's title is app chrome the web
 // translates ("连接 Gmail"); its stored text is the English fallback, so the agent's reason counts.
@@ -123,6 +137,23 @@ export function conversationChecks(messages) {
       if (again) failures.push(`repeats itself: "${sentence.slice(0, 80)}"`);
       said.push(sentence);
     }
+  }
+  // Per recruiter message: a quick first reply, and one question at a time until they answer.
+  for (const [index, message] of messages.entries()) {
+    if (message.role !== "user") continue;
+    const next = messages.findIndex((item, at) => at > index && item.role === "user");
+    const turn = messages.slice(index + 1, next === -1 ? undefined : next);
+    const first = turn.find((item) => item.text.trim());
+    const waited = first && message.at ? Date.parse(first.at) - Date.parse(message.at) : 0;
+    if (waited > FIRST_REPLY_MS)
+      failures.push(
+        `slow first reply: ${Math.round(waited / 1000)} s after "${message.text.slice(0, 40)}"`,
+      );
+    const questions = turn.flatMap((item) => questionsIn(item.text));
+    if (questions.length > 1)
+      failures.push(
+        `asks ${questions.length} questions at once: ${questions.map((q) => `"${q.slice(0, 60)}"`).join(" ")}`,
+      );
   }
   const last = messages.findLast((message) => message.role !== "user" && message.text.trim());
   if (!last) failures.push("no reply");
