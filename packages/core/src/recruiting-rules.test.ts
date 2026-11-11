@@ -108,7 +108,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "no tool work between answers and questions",
     in: "RECRUITING_INTAKE_FLOW",
-    phrase: "Between an answer and the next question make no tool calls, saves or drafts",
+    phrase: "Between an answer and the next question make no tool calls, reads or drafts",
     why: "Intake stalled on saves and drafts between clarifying questions.",
   },
   {

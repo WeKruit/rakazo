@@ -1968,7 +1968,11 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               };
             }
             // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
-            if ((question.match(/\?/g)?.length ?? 0) > 1 || /(^|\n)\s*2[.)]\s/.test(question))
+            // Chinese question marks and "2、" count too: a Chinese card asked two questions at once.
+            if (
+              (question.match(/[?？]/g)?.length ?? 0) > 1 ||
+              /(^|\n)\s*2(?:[.)]\s|、)/.test(question)
+            )
               throw new Error(
                 "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
               );

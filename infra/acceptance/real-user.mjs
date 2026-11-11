@@ -378,7 +378,13 @@ async function play(scenario, owner, sample) {
       const role = roles[0];
       if (!role) failures.push("no role was created");
       else {
-        // Saves run in the background, so the brief gets a minute to catch up.
+        // Saves run in the background, so the role gets a minute to catch up. Judge what the role
+        // now requires (its criteria at their priority, the brief and the search filters), not the
+        // quotes it keeps of the original JD, which still say "会说中文更好，不强求" after the
+        // recruiter makes it a must. A hard criterion on the same requirement replaces the
+        // preferred one it supersedes.
+        const statement = (criterion) => JSON.stringify(criterion?.expression ?? "");
+        const mentions = new RegExp(scenario.requirement.source, "i");
         let missing = [];
         for (let attempt = 0; attempt < 7; attempt += 1) {
           if (attempt) await sleep(10_000);
@@ -389,11 +395,22 @@ async function play(scenario, owner, sample) {
             path.join(OUT, `${label}.role.json`),
             JSON.stringify(workspace, null, 1),
           );
-          // Judge what the role now requires, not the quotes it keeps of the original JD, which
-          // still say "会说中文更好，不强求" after the recruiter makes it a must.
-          const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
-            key === "quote" || key === "sourceRefs" ? undefined : value,
-          );
+          const revision = workspace?.revision ?? {};
+          const lines = [
+            ...(revision.criteria ?? []).map(
+              (criterion) =>
+                `${criterion.priority === "hard" ? "required" : "preferred"}: ${statement(criterion)}`,
+            ),
+            ...(revision.brief?.fields ?? []).map((field) => `${field.key}: ${field.value}`),
+            ...(revision.brief?.searchFilters ?? []).map(
+              (filter) =>
+                `${filter.mode === "include" ? "required" : filter.mode}: ${filter.statement}`,
+            ),
+          ];
+          const hard = lines.some((line) => line.startsWith("required: ") && mentions.test(line));
+          const requirements = lines
+            .filter((line) => !hard || line.startsWith("required: ") || !mentions.test(line))
+            .join("\n");
           missing = requirementSaved(requirements, scenario.requirement);
           if (!missing.length) break;
         }
