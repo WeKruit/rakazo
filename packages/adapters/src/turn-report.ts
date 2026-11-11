@@ -147,14 +147,37 @@ const WORK_DONE: Record<TurnWork, string> = {
   connected: "made changes in a connected app",
 };
 
-/** The short report the server posts when the model ended without one. */
-export function turnReportText(work: readonly TurnWork[], savedPeople?: number): string {
-  const done = [...new Set(work)].map((item) => WORK_DONE[item]);
-  const saved =
-    savedPeople && work.some((item) => item === "people_search" || item === "people_saved")
-      ? ` ${savedPeople} ${savedPeople === 1 ? "person is" : "people are"} saved for this role.`
-      : "";
-  return `Done: ${done.join(", ")}.${saved}`;
+const WORK_DONE_ZH: Record<TurnWork, string> = {
+  people_search: "搜索了候选人",
+  people_saved: "把候选人存进了岗位",
+  round: "记下了这一轮",
+  role: "更新了岗位",
+  feedback: "记下了你的反馈",
+  candidates: "更新了候选人决定",
+  crm: "更新了候选人记录",
+  contacts: "查了联系方式",
+  draft: "存好了邮件草稿",
+  scheduling: "更新了日程",
+  connected: "在已连接的应用里做了修改",
+};
+
+/** The short report the server posts when the model ended without one, in the recruiter's language. */
+export function turnReportText(
+  work: readonly TurnWork[],
+  savedPeople?: number,
+  chinese = false,
+): string {
+  const items = [...new Set(work)];
+  const counted =
+    savedPeople && work.some((item) => item === "people_search" || item === "people_saved");
+  if (chinese)
+    return `已完成：${items.map((item) => WORK_DONE_ZH[item]).join("、")}。${
+      counted ? `这个岗位现在存了 ${savedPeople} 人。` : ""
+    }`;
+  const saved = counted
+    ? ` ${savedPeople} ${savedPeople === 1 ? "person is" : "people are"} saved for this role.`
+    : "";
+  return `Done: ${items.map((item) => WORK_DONE[item]).join(", ")}.${saved}`;
 }
 
 /** A question that also states something ("The pool is now 139. Keep going?") reports it. */

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { failureNotificationBody, firstUnseenMessageId, teammateLabel } from "./executor.js";
+import {
+  failureNotice,
+  failureNotificationBody,
+  firstUnseenMessageId,
+  modelOutageRetryDelayMs,
+  teammateLabel,
+} from "./executor.js";
 
 describe("teammateLabel", () => {
   it("names a teammate in shared history and keeps the id for routing", () => {
@@ -50,5 +56,37 @@ describe("failure notification", () => {
     const body = failureNotificationBody(error);
     expect(body).toBe(`${reason} Send a message in the chat to pick up where it stopped.`);
     expect(body).not.toContain("provider");
+  });
+
+  it("is written in Chinese and names the role for a recruiter writing Chinese", async () => {
+    const prisma = {
+      thread: {
+        findUnique: async () => ({
+          group: { name: "后端工程师" },
+          messages: [{ blocks: [{ kind: "text", text: "这两个人不太行，必须会中文" }] }],
+        }),
+      },
+    };
+    const notice = await failureNotice(prisma as never, "thread-1", "Main", "429 rate limit");
+    expect(notice).toEqual({
+      title: "后端工程师 失败",
+      body: "模型服务繁忙。在对话里发一条消息，就从停下的地方接着做。",
+    });
+  });
+});
+
+describe("model outage retries", () => {
+  it("resumes a dropped turn a few times, spaced out, before the recruiter sees a failure", () => {
+    expect([0, 1, 2, 3].map((tries) => modelOutageRetryDelayMs(tries, false))).toEqual([
+      2_000,
+      10_000,
+      30_000,
+      undefined,
+    ]);
+  });
+
+  it("resumes a turn that went silent for the whole limit once", () => {
+    expect(modelOutageRetryDelayMs(0, true)).toBe(0);
+    expect(modelOutageRetryDelayMs(1, true)).toBeUndefined();
   });
 });

@@ -283,7 +283,7 @@ msgstr "7 天周期"
 
 #: src/components/background-task-time.ts
 msgid "About {minutes} min left"
-msgstr ""
+msgstr "大约还剩 {minutes} 分钟"
 
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
@@ -1514,7 +1514,7 @@ msgstr "无法重置密码"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Could not reset the computer."
-msgstr ""
+msgstr "无法重置电脑。"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not run routine"
@@ -2382,15 +2382,15 @@ msgstr "把这个文件里的候选人导入到这个岗位。"
 
 #: src/lib/relative-time.ts
 msgid "in {hours}h"
-msgstr ""
+msgstr "{hours} 小时后"
 
 #: src/lib/relative-time.ts
 msgid "in {minutes}m"
-msgstr ""
+msgstr "{minutes} 分钟后"
 
 #: src/lib/relative-time.ts
 msgid "in a minute"
-msgstr ""
+msgstr "一分钟内"
 
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
@@ -2528,7 +2528,7 @@ msgstr "刚刚"
 
 #: src/components/background-task-time.ts
 msgid "Just started"
-msgstr ""
+msgstr "刚开始"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Keep editing"
@@ -3679,7 +3679,7 @@ msgstr "仅供预览 · 变量尚未填入"
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Preview only. The complete message has not loaded."
-msgstr ""
+msgstr "仅为预览，完整邮件还没加载。"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"
@@ -4302,7 +4302,7 @@ msgstr "运行中"
 
 #: src/components/background-task-time.ts
 msgid "Running {minutes} min"
-msgstr ""
+msgstr "已运行 {minutes} 分钟"
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Salary range"

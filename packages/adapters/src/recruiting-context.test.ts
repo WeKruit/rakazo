@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import {
   RECRUITING_CALIBRATION_QUICK_SEARCH,
+  RECRUITING_MISSED_REQUIREMENT,
   RECRUITING_PDF_RENDERING,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SCALE_START,
@@ -529,6 +530,8 @@ describe("recruiting run context", () => {
         RECRUITING_ROUND_NEXT_STEP,
         RECRUITING_SCALE_START,
         RECRUITING_PDF_RENDERING,
+        // A missed requirement is redone at every stage, not only right after the first ten.
+        RECRUITING_MISSED_REQUIREMENT,
       ])
         expect(text).toContain(rule);
       expect(text).not.toContain("research requires G0 on the current brief revision");
