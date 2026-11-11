@@ -158,6 +158,7 @@ export function ShellPage() {
     session,
     userId,
     groups,
+    rosterFromSaved,
     bots,
     botSections,
     setNewRoleSourceId,
@@ -432,6 +433,7 @@ export function ShellPage() {
       {showToolActivity ? null : (
         <KruitDock
           groups={groups}
+          savedCopy={rosterFromSaved}
           groupId={model.groupId}
           chatting={
             model.recruitingWorkspaceView === "conversation" ||
