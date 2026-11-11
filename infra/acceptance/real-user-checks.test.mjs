@@ -102,3 +102,15 @@ test("per-person evidence lines and addresses are not repeats", () => {
     [],
   );
 });
+
+test("an English email draft inside a Chinese reply is not a language switch", () => {
+  assert.deepEqual(
+    conversationChecks([
+      user("帮我给 alex@example.com 写封邮件"),
+      bot(
+        "草稿我先写好了，连接邮箱后我就能发：\n\n**To:** alex@example.com\n**Subject:** Quick chat about a backend role\n\nHi Alex,\n\nWould you be available sometime next week for a brief conversation about a backend role?\n\nBest,\nRecruiting Team",
+      ),
+    ]),
+    [],
+  );
+});
