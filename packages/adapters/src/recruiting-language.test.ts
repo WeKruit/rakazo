@@ -88,6 +88,33 @@ describe("required language", () => {
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
+  it("reads the full profile page of people the search text does not show it for", async () => {
+    const read: string[] = [];
+    const reads = { left: 1 };
+    const checked = await withRequiredLanguage(
+      { resolve: async () => fakeJudge([]) },
+      brief,
+      rows,
+      result,
+      {
+        reads,
+        read: async (url) => {
+          read.push(url);
+          return { url, title: "", text: "Joe Sample\n## Languages\nMandarin - Professional" };
+        },
+      },
+    );
+    // Row order decides who is read while the reads last; Wei already shows it.
+    expect(read).toEqual(["https://www.linkedin.com/in/joe-sample"]);
+    expect(reads.left).toBe(0);
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Joe Sample", "shown"],
+      ["Wei Test", "shown"],
+      ["Ana Example", "unclear"],
+    ]);
+    expect(checked.withoutLanguage).toBe(0);
+  });
+
   it("checks the profile text itself when there is no judge", async () => {
     const checked = await withRequiredLanguage(
       { resolve: async () => undefined },
