@@ -65,6 +65,15 @@ export const similar = (a, b) => {
 };
 
 /** Every check that applies to any conversation. */
+// What the recruiter reads in a bot message. A connect card's title is app chrome the web
+// translates ("连接 Gmail"); its stored text is the English fallback, so the agent's reason counts.
+export const botText = (message) =>
+  (message.blocks ?? [])
+    .filter((block) => block.kind !== "handoff")
+    .map((block) => block.connection?.reason ?? block.text ?? block.question ?? "")
+    .filter(Boolean)
+    .join("\n");
+
 export function conversationChecks(messages) {
   const failures = [];
   const typed = messages
