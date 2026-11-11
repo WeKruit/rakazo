@@ -223,6 +223,8 @@ export async function recruitingRoundListText(
     heading?: string;
     /** Number of the first line, for a later page of a longer list. */
     firstNumber?: number;
+    /** The recruiter writes Chinese: the server's own words follow. */
+    chinese?: boolean;
   },
 ) {
   const people = await recruitingRoundPeople(prisma, input);
@@ -250,11 +252,16 @@ export async function recruitingRoundListText(
       .join(" · ");
     const passage = roundPassage(person?.snippet);
     const unknown = shared ? undefined : input.unverified?.[key]?.trim();
-    return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
+    const unverifiedLabel = input.chinese ? "未核实：" : "Not verified: ";
+    return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   ${unverifiedLabel}${unknown}` : ""}`;
   });
   const heading =
-    input.heading ?? `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:`;
-  return `${heading}${shared ? `\nNot verified for anyone yet: ${shared}` : ""}\n\n${lines.join("\n")}`;
+    input.heading ??
+    (input.chinese
+      ? `本轮 ${lines.length} 人：`
+      : `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:`);
+  const sharedLine = input.chinese ? "所有人都还未核实：" : "Not verified for anyone yet: ";
+  return `${heading}${shared ? `\n${sharedLine}${shared}` : ""}\n\n${lines.join("\n")}`;
 }
 
 const PASSAGE_MAX = 220;
