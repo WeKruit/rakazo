@@ -14028,7 +14028,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .join(" ")
               : "",
           );
-        const lastRecruiterText = recruiterLanguageText(recruiterTexts);
+        // A message steered into the running turn moves it on to the language that message is in.
+        let lastRecruiterText = recruiterLanguageText(recruiterTexts);
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
@@ -14951,6 +14952,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           recruitingSourceMessageId = humanSteering.messageId;
                           replyDiscardActive = false;
                         }
+                        // Replies follow the language of the recruiter's newest message, also when
+                        // it arrives while the turn runs (an English JD, then 「远程也可以」).
+                        const steeringLanguageNote = (text: string) => {
+                          if (!hideVendors) return undefined;
+                          if (isChineseText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_CHINESE_NOTE;
+                          }
+                          if (isEnglishText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_ENGLISH_NOTE;
+                          }
+                          return undefined;
+                        };
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -15010,6 +15025,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
+                                item === freshHumanSteering
+                                  ? steeringLanguageNote(item.text)
+                                  : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),

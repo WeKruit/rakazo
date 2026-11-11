@@ -209,4 +209,12 @@ describe("lastingPreferenceNote", () => {
     expect(await lastingPreferenceNote(undefined, "Never email on weekends")).toBeUndefined();
     expect(await lastingPreferenceNote(sure, "  ")).toBeUndefined();
   });
+
+  // Staging eval 11-11: a pasted Chinese JD was saved as a cross-role preference and no role opened.
+  it("keeps a new role's JD out of memory", async () => {
+    const sure = judge(0.9);
+    const note = await lastingPreferenceNote(sure, "新岗位：华东区销售总监，必须会说普通话和英语");
+    expect(sure.yes.mock.calls[0]?.[0]).toContain("a new role's job description");
+    expect(note).toContain("a new role's job description opens the role; neither is a preference");
+  });
 });
