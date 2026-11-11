@@ -396,6 +396,25 @@ describe("account-wide conversation handoff", () => {
     expect(runCreate).not.toHaveBeenCalled();
   });
 
+  // 11-11 staging: the request was steered into a turn started by another message.
+  it("reads the role from the brief when the turn started from another message", async () => {
+    const { deps, runCreate, tx } = harness([{ kind: "text", text: "Dallas" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: null,
+    });
+    Object.assign(tx, {
+      recruitingRole: {
+        findMany: vi.fn(async () => [{ id: "role-9", title: "测试固定 · Agent 工程师 5" }]),
+      },
+    });
+    const result = await handoffToGroupBot(deps as never, run, global, {
+      bot_id: "bot-b",
+      message: "Goal: 在「测试固定 · Agent 工程师 5」里，回复那封邮件",
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining('role_id "role-9"') });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
   it("keeps role work with the role's team", async () => {
     const { deps, runCreate } = harness([{ kind: "text", text: "find people" }], undefined, {
       spawnKeys,
