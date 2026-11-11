@@ -3874,17 +3874,33 @@ describe("native recruiting feedback effect dispatch", () => {
     });
   });
 
-  it("hands a preference missing its revision back to the agent instead of retrying it", async () => {
+  it("hands a preference missing its revision back to the agent, which resends and saves it", async () => {
     const f = fixture("run-feedback-preference-missing-revision");
+    const saved = {
+      status: "saved",
+      feedback,
+      source,
+      workspace: null,
+      document: { id: "doc-1", scope: "bot", path: "MEMORY.md", revision: 1, anchor: "a" },
+    };
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue(saved as never);
     const { expectedRevision: _, ...withoutRevision } = feedback;
     f.setCalls([
       { name: "recruiting_feedback", args: withoutRevision, executionId: "feedback-no-revision" },
+      // The agent's next call, after reading the refusal: the same preference with its revision.
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-resent" },
     ]);
 
     await f.run();
 
     expect(f.results[0]).toMatchObject({ error: expect.stringContaining("expectedRevision") });
     expect(f.results[0]).not.toHaveProperty("status", "saving");
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]?.[2]).toMatchObject({
+      expectedRevision: 0,
+      content: feedback.content,
+    });
+    expect(f.results[1]).toMatchObject({ status: "saved" });
   });
 
   it("hands a recruiting conflict on a preference back to the agent instead of retrying it", async () => {
