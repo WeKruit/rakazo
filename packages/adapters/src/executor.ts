@@ -597,6 +597,7 @@ import {
   RecruitingFeedbackValidationError,
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
+import { FULL_PROFILE_READS, withRequirementEvidence } from "./recruiting-full-profile.js";
 import {
   GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
@@ -605,7 +606,6 @@ import {
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
-  FULL_PROFILE_READS,
   plannedLanguageFilters,
   statedLanguageRequirement,
   withRequiredLanguage,
@@ -6345,6 +6345,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let quickSearchesBeforeRound = 0;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
+        const profilePages = new Map<string, string>();
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -10663,10 +10664,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         shown,
                         returned,
                         deps.profileReader && firstRoundPending
-                          ? { read: deps.profileReader, reads: fullProfileReads }
+                          ? {
+                              read: deps.profileReader,
+                              reads: fullProfileReads,
+                              pages: profilePages,
+                            }
                           : undefined,
                       )
                     : { rows: shown, withoutLanguage: 0 };
+                  // Licences, clearances and the like are rarely in the row; before the first
+                  // pick, lines of the full profile that speak to the must-haves come with it.
+                  if (deps.profileReader && firstRoundPending && Array.isArray(checked.rows))
+                    checked.rows = await withRequirementEvidence(
+                      role.currentRevision,
+                      checked.rows,
+                      { read: deps.profileReader, reads: fullProfileReads, pages: profilePages },
+                    );
                   // A local role's people beyond commuting distance of its city never make the
                   // ten; a search filtered on a language returns them from across the country.
                   const place = localRolePlace([
@@ -14307,7 +14320,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rows = rowsOf(result);
             return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
               ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
