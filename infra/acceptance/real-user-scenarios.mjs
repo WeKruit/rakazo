@@ -191,7 +191,6 @@ export const SCENARIOS = [
   },
   {
     name: "cold-email-en",
-    known: "11-11: asks for a recipient instead of drafting (fix thread: feedback/failure UX)",
     area: "email",
     source: "10-27 T1: drafts in Chinese for English candidates",
     turns: [

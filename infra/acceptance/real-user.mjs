@@ -14,6 +14,8 @@
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
 //       [--out <dir>] [--bench <dir>] [--sha <sha>] [--model <provider/id>] [--thinking <level>]
+// To reproduce one failure before and after a fix, play just that scenario a few times:
+//     node infra/acceptance/real-user.mjs --only jd-zh-must-have --samples 3 --out /tmp/repro
 // RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
 // mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3

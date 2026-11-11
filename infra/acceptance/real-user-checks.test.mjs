@@ -239,3 +239,23 @@ test("a second round of people may repeat the round header and next-step card, a
   ]);
   assert.deepEqual(failures, []);
 });
+
+test("recalling a saved preference, or naming the same role again, is not a repeat", () => {
+  const failures = conversationChecks([
+    user("记住：以后所有候选人邮件都用英文写，署名 Jules Hou"),
+    bot("已记住：以后所有候选人邮件都用英文写，并署名 **Jules Hou**。"),
+    user("Senior Data Engineer — Seattle, WA. 6+ years of data engineering."),
+    bot(
+      "I’m drafting an English candidate email for the Senior Data Engineer role, signed Jules Hou.",
+    ),
+    bot(
+      "I opened the Senior Data Engineer role. Its first question is waiting in that conversation.",
+    ),
+    user("我之前说的邮件署名是什么？"),
+    bot("你之前说，所有候选人邮件都用英文写，署名 **Jules Hou**。"),
+  ]);
+  assert.deepEqual(
+    failures.filter((failure) => failure.startsWith("repeats")),
+    [],
+  );
+});

@@ -59,13 +59,15 @@ const bigrams = (text) => {
   for (let index = 0; index < flat.length - 1; index += 1) set.add(flat.slice(index, index + 2));
   return set;
 };
+// Shared character pairs over the longer sentence: two sentences that merely share a role title
+// or quote the same preference the recruiter gave are not the same sentence.
 export const similar = (a, b) => {
   const left = bigrams(a);
   const right = bigrams(b);
   if (!left.size || !right.size) return 0;
   let shared = 0;
   for (const gram of left) if (right.has(gram)) shared += 1;
-  return shared / Math.min(left.size, right.size);
+  return shared / Math.max(left.size, right.size);
 };
 
 // Every recruiter message gets a visible reply within this long, even while work runs.
