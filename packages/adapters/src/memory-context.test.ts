@@ -215,6 +215,6 @@ describe("lastingPreferenceNote", () => {
     const sure = judge(0.9);
     const note = await lastingPreferenceNote(sure, "新岗位：华东区销售总监，必须会说普通话和英语");
     expect(sure.yes.mock.calls[0]?.[0]).toContain("a new role's job description");
-    expect(note).toContain("never a preference: open the role");
+    expect(note).toContain("a new role's job description opens the role; neither is a preference");
   });
 });
