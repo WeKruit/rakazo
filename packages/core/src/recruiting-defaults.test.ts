@@ -169,6 +169,8 @@ describe("global recruiting overview", () => {
     )?.body;
     expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
     expect(body).toContain("never open a role for it");
+    // Staging eval 11-11: after that line a pasted JD opened no role.
+    expect(body).toContain("a new role, a JD or hiring requirements still go to start_role");
     // Staging eval 11-11: "write me a cold outreach email…" was answered with "who should I address it to?"
     expect(body).toContain("never ask who it is addressed to first");
   });
