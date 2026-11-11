@@ -284,3 +284,14 @@ test("answering with the recruiter's own words is not a repeat; the same acknowl
   ]).filter((failure) => failure.startsWith("repeats"));
   assert.deepEqual(failures, ['repeats itself: "我会按这个偏好处理候选人邮件。"']);
 });
+
+test("a lone question mark has no language, so either reply language passes", () => {
+  for (const reply of ["你想问哪个职位？", "Which role do you mean?"])
+    assert(!conversationChecks([user("？"), bot(reply)]).some((f) => f.startsWith("language")));
+});
+
+test("quoting the recruiter's question mark is not a second question", () => {
+  assert.deepEqual(questionsIn("我还不能判断你这个“？”具体指什么。你想问哪个岗位或哪件事？"), [
+    "你想问哪个岗位或哪件事？",
+  ]);
+});
