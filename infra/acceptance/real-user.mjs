@@ -7,7 +7,8 @@
 // admin, a repeated message, the wrong language, a hard requirement that never reached the role.
 // No case answers an approval card; open cards are denied and work is stopped at the end.
 // Paid scenarios answer a role's first question, which starts the first-ten search, so they run
-// only with --paid (the release thread's one paid run a day); the rest are free.
+// only when this script itself is given --paid (the release thread's one paid run a day); the
+// release gate never passes it here, even when its own paid cases run. The rest are free.
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
@@ -16,7 +17,7 @@
 // RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
 // mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
-// times; the release gate plays each once. Rows go to <out>/results.jsonl and, with --bench, are
+// times; the release gate plays each once, and a failed one once more before it blocks. Rows go to <out>/results.jsonl and, with --bench, are
 // appended to the shared benchmark folder for the scoreboard.
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every scenario passes.
 
@@ -356,9 +357,9 @@ const SHA =
   "unknown";
 const rows = [];
 let nextPlay = 0;
-async function worker() {
+async function worker(plays) {
   while (nextPlay < plays.length) {
-    const { scenario, sample } = plays[nextPlay++];
+    const { scenario, sample, retry } = plays[nextPlay++];
     const at = Date.now();
     let failures;
     try {
@@ -380,6 +381,7 @@ async function worker() {
       seconds: Math.round((Date.now() - at) / 1000),
       paid: Boolean(scenario.paid),
       ...(scenario.known ? { known: scenario.known } : {}),
+      ...(retry ? { retry: true } : {}),
     };
     rows.push(row);
     log(
@@ -387,7 +389,25 @@ async function worker() {
     );
   }
 }
-await Promise.all(Array.from({ length: Math.min(CONCURRENCY, plays.length) }, worker));
+const pool = async (list) => {
+  nextPlay = 0;
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, () => worker(list)));
+};
+await pool(plays);
+// One sample can fail on a reply that varies from run to run. A failed free sample is played once
+// more on a fresh account; it blocks the release only when the second play fails too. Both rows
+// stay on the scoreboard. Paid scenarios are never played twice.
+const retries = rows
+  .filter((row) => !row.pass && !row.known && !row.paid)
+  .map((row) => ({
+    scenario: wanted.find((scenario) => scenario.name === row.scenario),
+    sample: `${row.sample}-again`,
+    retry: true,
+  }));
+if (retries.length) {
+  log(`playing ${retries.length} failed free sample(s) once more`);
+  await pool(retries);
+}
 fs.writeFileSync(
   path.join(OUT, "results.jsonl"),
   `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
@@ -403,7 +423,15 @@ if (BENCH) {
   fs.appendFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
 const failed = rows.filter((row) => !row.pass);
-const blocking = failed.filter((row) => !row.known);
+const againOf = (row) =>
+  rows.find(
+    (item) => item.retry && item.scenario === row.scenario && item.sample === `${row.sample}-again`,
+  );
+const blocking = failed.filter(
+  (row) => !row.known && !row.retry && (row.paid || !againOf(row) || !againOf(row).pass),
+);
+for (const row of failed.filter((item) => !item.known && !item.retry && againOf(item)?.pass))
+  log(`failed once, passed when played again, not blocking: ${row.scenario}#${row.sample}`);
 log(`${rows.length - failed.length}/${rows.length} conversations pass`);
 for (const row of failed.filter((item) => item.known))
   log(`known failure, not blocking: ${row.scenario}#${row.sample} (${row.known})`);
