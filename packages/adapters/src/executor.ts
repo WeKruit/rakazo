@@ -14371,10 +14371,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ];
         let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
+        // Parts that change on every turn go after the history, so the history stays a prefix the
+        // provider's prompt cache can reuse from the previous turn.
+        const turnHistory: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
         if (nativeSources?.currentAnswer)
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: `Platform task state (data):\n${basePrompt}`,
             requiredForRun: true,
@@ -14388,8 +14391,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           });
         }
+        // Recall follows each new message, so it changes on most turns.
         if (recalledMemory) {
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: redactSecrets(recalledMemory, runSecrets),
           });
@@ -14447,6 +14451,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...(routinePriorRun ? [routinePriorRun] : []),
           ...historicalContext,
           ...historyWithImages,
+          ...turnHistory,
           ...(turnContext
             ? [{ role: "user" as const, content: turnContext, requiredForRun: true as const }]
             : []),

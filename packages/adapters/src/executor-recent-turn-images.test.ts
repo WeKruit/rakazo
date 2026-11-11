@@ -105,6 +105,8 @@ async function runWithModel(
     finalText?: string;
     replySuggestions?: boolean;
     quickReplies?: boolean;
+    /** A compacted thread whose semantic memory recalls this text for the new message. */
+    recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
     /** Messages sent while the run works that it has not read yet. */
@@ -199,8 +201,9 @@ async function runWithModel(
       findUniqueOrThrow: vi.fn(async () => ({
         id: run.threadId,
         groupId: null,
-        historyCompactionSummary: null,
-        historyCompactedUpToSeq: null,
+        historyCompactionSummary: options.recalledMemory ? "Earlier talk about the role." : null,
+        historyCompactedUpToSeq: options.recalledMemory ? 0 : null,
+        historyCompactionGeneration: 0,
         nextMessageSeq: 3,
         activeRecruitingRoleId: options.recruitingRoleId ?? null,
         runs: options.previousRun ? [options.previousRun] : [],
@@ -308,7 +311,19 @@ async function runWithModel(
     },
     home: { commit: vi.fn(async () => "fixture-revision") },
     memory: { read: async () => ({ documents: [] }) },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: {
+      resolve: async () =>
+        options.recalledMemory
+          ? {
+              defaultScope: "isolated",
+              provider: {
+                describe: () => ({ capabilities: { recall: true, save: true } }),
+                recall: async () => ({ ok: true, value: [{ memory: options.recalledMemory }] }),
+                save: async () => ({ ok: true, value: undefined }),
+              },
+            }
+          : null,
+    },
     artifacts: { get },
     events,
     jobs: { enqueue: vi.fn(async () => undefined) },
@@ -328,6 +343,23 @@ async function runWithModel(
   if (!request) throw new Error("runtime was not called");
   return { request, get, prisma, run, finalizeRun, runtimeRun, events };
 }
+
+describe("prompt cache order", () => {
+  it("keeps per-turn recall after the history so the history stays a cached prefix", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      recalledMemory: "Prefers Mandarin speakers",
+    });
+    const contents = request.history.map((message) => message.content);
+    const summary = contents.findIndex((text) => text.includes("Earlier talk about the role."));
+    const earlier = request.history.findIndex((message) => message.id === "earlier");
+    const recall = contents.findIndex((text) => text.includes("Prefers Mandarin speakers"));
+    const turnContext = contents.findIndex((text) => text.startsWith("Current run context"));
+    expect(summary).toBe(0);
+    expect(earlier).toBeGreaterThan(summary);
+    expect(recall).toBeGreaterThan(earlier);
+    if (turnContext >= 0) expect(turnContext).toBeGreaterThan(recall);
+  });
+});
 
 describe("reply suggestion", () => {
   it("asks the model for the user's next message beside finalize and saves it", async () => {
