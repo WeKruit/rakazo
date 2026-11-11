@@ -237,6 +237,8 @@ import * as ComputerUpdateProgressModule from "../components/ComputerUpdateProgr
 import * as LocalTimezoneModule from "../lib/local-timezone";
 import { clearRecruitingReads } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
+import type { SavedShell } from "../lib/saved-shell";
+import { savedShell } from "../lib/saved-shell";
 import { savedThreads } from "../lib/saved-threads";
 import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
@@ -1970,6 +1972,35 @@ it("shows an archived role's link as archived instead of opening another role", 
   });
   expect(view.getPath()).toBe("/app/g/group-1");
   expect(container!.textContent).toContain("Recruiting crew is archived.");
+});
+
+it("settles a reload's route from the saved sidebar so the server read cannot undo a click", async () => {
+  setToolActivityPreference("off");
+  let resolveSaved!: (shell: SavedShell) => void;
+  vi.spyOn(savedShell, "read").mockReturnValue(
+    new Promise((resolve) => {
+      resolveSaved = resolve;
+    }),
+  );
+  let ready!: () => void;
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app",
+    bootstrapReady: new Promise((resolve) => {
+      ready = resolve;
+    }),
+  });
+  expect(view.getPath()).toBe("/app");
+  const { me, bots, botSections, groups, spaces } = view.bootstrap;
+  await act(async () =>
+    resolveSaved({ me, bots, botSections, groups, spaces } as unknown as SavedShell),
+  );
+  const settled = view.getPath();
+  expect(settled).toBe(`/app/g/${view.group.id}?view=home`);
+  // The server read arrives after the user may already have opened something there.
+  await act(async () => ready());
+  expect(view.getPath()).toBe(settled);
 });
 
 it("uses the authorized role navigation order after the initial bootstrap fails", async () => {

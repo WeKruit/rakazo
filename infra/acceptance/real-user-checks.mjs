@@ -17,6 +17,8 @@ const DECLINE =
 // The work is blocked: the reply must then leave a step the recruiter can take.
 const BLOCKED =
   /无法|不能|没有可用|尚无|还没有|暂时不|没法|\b(?:can['’]t|cannot|unable|isn['’]t (?:ready|set up)|not (?:ready|set up|available)|no (?:sending|sender))\b/i;
+const CAVEAT =
+  /(?:不能|无法)(?:保证|确保|核实|确认|验证)|\b(?:can['’]t|cannot) (?:guarantee|promise)\b/gi;
 // What counts as a next step in words: something to connect or open, a draft, an offer, work
 // that carries on, or what to send so it can.
 const NEXT_STEP =
@@ -114,7 +116,17 @@ export function conversationChecks(messages) {
     if (asked && /[\p{Script=Han}A-Za-z]/u.test(asked.text)) {
       const chinese = mostlyChinese(asked.text);
       const words = prose(text);
-      if (words.trim() && chinese !== mostlyChinese(words))
+      // A reply that only repeats words the recruiter typed (a name, an address) has no language.
+      const typed = new Set(
+        messages
+          .slice(0, index)
+          .filter((item) => item.role === "user")
+          .flatMap((item) => item.text.toLowerCase().match(/[a-z]+/g) ?? []),
+      );
+      const echo =
+        !/\p{Script=Han}/u.test(words) &&
+        (words.toLowerCase().match(/[a-z]+/g) ?? []).every((word) => typed.has(word));
+      if (words.trim() && !echo && chinese !== mostlyChinese(words))
         failures.push(
           `language: recruiter wrote ${chinese ? "Chinese" : "English"}, reply is not: "${words.slice(0, 80)}"`,
         );
@@ -189,7 +201,8 @@ export function conversationChecks(messages) {
 export function deadEnd(message) {
   if (message.card) return false;
   const tail = sentences(message.text).slice(-3).join(" ");
-  if (!BLOCKED.test(tail)) return false;
+  // "不能保证…最新" or "无法核实时会标明" qualifies an answer; it is not a blocker.
+  if (!BLOCKED.test(tail.replace(CAVEAT, ""))) return false;
   if (/[?？]/.test(tail)) return false;
   return !NEXT_STEP.test(tail);
 }

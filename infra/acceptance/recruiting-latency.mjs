@@ -157,17 +157,47 @@ async function auth(path, body) {
   remember(response);
   return { status: response.status, body: await response.json().catch(() => null) };
 }
-// Sign-in is rate limited, so repeated checks can reuse one saved session.
+// Sign-in is rate limited, so repeated checks can reuse one saved session. The browser checks
+// share this file in Playwright's storage-state format, so it is read and written that way.
 const sessionFile = process.env.RAKAZO_SESSION_FILE;
+const cookieFromSession = (saved) => {
+  const text = saved.trim();
+  if (!text.startsWith("{")) return text;
+  return (JSON.parse(text).cookies ?? []).map(({ name, value }) => `${name}=${value}`).join("; ");
+};
+const sessionFromCookie = (header, { hostname, protocol }) => ({
+  cookies: header
+    .split("; ")
+    .filter(Boolean)
+    .map((pair) => {
+      const [name, value] = pair.split(/=(.*)/s, 2);
+      return {
+        name,
+        value,
+        domain: hostname,
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: protocol === "https:",
+        sameSite: "Lax",
+      };
+    }),
+  origins: [],
+});
 async function signIn() {
   if (sessionFile && fs.existsSync(sessionFile)) {
-    cookie = fs.readFileSync(sessionFile, "utf8").trim();
+    cookie = cookieFromSession(fs.readFileSync(sessionFile, "utf8"));
     const me = await fetch(`${BASE}/api/auth/get-session`, { headers: headers() });
     if (me.ok && (await me.json().catch(() => null))?.user) return;
     cookie = "";
   }
   await signInWithPassword();
-  if (sessionFile && cookie) fs.writeFileSync(sessionFile, cookie, { mode: 0o600 });
+  if (sessionFile && cookie)
+    fs.writeFileSync(
+      sessionFile,
+      JSON.stringify(sessionFromCookie(cookie, new URL(BASE)), null, 2),
+      { mode: 0o600 },
+    );
 }
 async function signInWithPassword() {
   if (bearer && !process.env.RAKAZO_EMAIL) return;
