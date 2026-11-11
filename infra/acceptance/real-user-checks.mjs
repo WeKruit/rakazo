@@ -28,7 +28,7 @@ const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 
 // Addresses and links say nothing about the language a message is written in.
 export const mostlyChinese = (raw) => {
-  const text = raw.replace(/\S+@\S+|https?:\/\/\S+|linkedin\.com\/\S+/g, "");
+  const text = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
   return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]/g)?.length ?? 0);
 };
 const quote = (text, match) =>

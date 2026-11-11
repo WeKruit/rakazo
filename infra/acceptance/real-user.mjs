@@ -1,23 +1,27 @@
 #!/usr/bin/env node
-// Real-user conversations on the test environment, for the release gate. Each scenario signs up a
+// Real-user conversations on the test environment: the conversation half of the recruiting
+// benchmark and part of the release gate. Scenarios live in real-user-scenarios.mjs. Each signs up a
 // brand-new outside account (no internal domain, no assigned mailbox, starting credits), talks to
 // Kruit the way recruiters actually wrote when things went wrong, and fails on what they saw:
 // a reply that overrides what they just said, a dead end, a pointer to an internal address or an
 // admin, a repeated message, the wrong language, a hard requirement that never reached the role.
 // No case answers an approval card; open cards are denied and work is stopped at the end.
-// must-have-on-card answers the role's first question, which starts the paid first-ten search, so
-// it runs only with --paid (the release thread's one paid run a day); the rest are free.
+// Paid scenarios answer a role's first question, which starts the first-ten search, so they run
+// only with --paid (the release thread's one paid run a day); the rest are free.
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 2] [--out <dir>]
-// Replies vary from run to run, so each scenario plays --samples times side by side (default 2,
-// the paid one once); any failed sample fails it.
+//     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
+//       [--out <dir>] [--bench <dir>] [--sha <sha>]
+// Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
+// times; the release gate plays each once. Rows go to <out>/results.jsonl and, with --bench, are
+// appended to the shared benchmark folder for the scoreboard.
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every scenario passes.
 
 import fs from "node:fs";
 import path from "node:path";
 import { conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -37,37 +41,6 @@ const log = (text) =>
   process.stdout.write(
     `[${String(Math.round((Date.now() - started) / 1000)).padStart(5)}s] ${text}\n`,
   );
-
-// Wording from real recruiter conversations; the JD is invented.
-const JD_OPTIONAL_CHINESE =
-  "帮我开个新岗位：高级技术产品经理，湾区（Sunnyvale），半导体或芯片背景，5年以上产品经验，和晶圆厂、封测厂合作过。会说中文更好，不强求。";
-const SCENARIOS = [
-  {
-    // A self-signup account asks to email someone: it has no product mailbox.
-    name: "email-no-mailbox-zh",
-    // One email is not a new role.
-    noRole: true,
-    turns: [
-      { say: "帮我给 alex.chen.test@example.com 发封邮件，问他下周有没有空聊一个后端岗位" },
-      { say: "其他几位可以根据实际情况发送邮件吗" },
-      { say: "那你就直接发啊" },
-    ],
-  },
-  {
-    name: "email-no-mailbox-en",
-    noRole: true,
-    turns: [{ say: "Can you just email the candidates for me?" }],
-  },
-  { name: "angry-zh", turns: [{ say: "你能听懂我说话吗？" }] },
-  { name: "vague-en", turns: [{ say: "need people. fast" }] },
-  {
-    // The JD says optional; the recruiter then types a must-have into the card, annoyed.
-    name: "must-have-on-card",
-    paid: true,
-    turns: [{ say: JD_OPTIONAL_CHINESE }, { answerCard: "你能听的懂话吗？中文是必须！" }],
-    requirement: /中文|普通话|汉语|mandarin|chinese/,
-  },
-];
 
 function client() {
   let cookie = "";
@@ -211,9 +184,30 @@ async function stopAll(rpc) {
   }
 }
 
-async function play(scenario, owner) {
+// Role chats: every chat but Kruit that has messages (the crew's empty "Recruiting" chat is not a role).
+async function roleChats(rpc) {
+  const chats = [];
+  for (const group of await groupsOf(rpc)) {
+    if (group.id.startsWith("recruiting-global-")) continue;
+    const messages = await messagesOf(rpc, group.id);
+    if (messages.length) chats.push({ ...group, threadId: messages[0].threadId });
+  }
+  return chats;
+}
+async function send(rpc, groupId, text) {
+  const busy = await working(rpc, groupId);
+  await rpc("threads/send", {
+    groupId,
+    addressing: "coordinator",
+    text,
+    ...(busy ? { interrupt: true } : {}),
+  });
+}
+
+async function play(scenario, owner, sample) {
   const failures = [];
-  const email = `kruit-eval-${scenario.name}-${Date.now()}@example.com`;
+  const label = `${scenario.name}#${sample}`;
+  const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
   const password = `Ev-${crypto.randomUUID()}`;
   await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
   const user = client();
@@ -224,24 +218,33 @@ async function play(scenario, owner) {
   if (!kruit) return ["the new account has no Kruit conversation"];
   let chats = [];
   try {
-    for (const turn of scenario.turns) {
-      if (turn.say) {
-        log(`${scenario.name}: says "${turn.say.slice(0, 40)}"`);
-        const busy = await working(user.rpc, kruit.id);
-        await user.rpc("threads/send", {
-          groupId: kruit.id,
-          addressing: "coordinator",
-          text: turn.say,
-          ...(busy ? { interrupt: true } : {}),
-        });
-        await settle(user.rpc);
+    for (const [index, turn] of scenario.turns.entries()) {
+      const next = scenario.turns[index + 1];
+      // A turn followed by a timed step (wait, stop) is sent without waiting for the reply.
+      const settleAfter = !(next?.wait || next?.stop);
+      if (turn.say || turn.sayRole) {
+        const target = turn.say ? kruit : (await roleChats(user.rpc)).at(-1);
+        if (!target) {
+          failures.push("no role chat to write in");
+          break;
+        }
+        log(`${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"`);
+        await send(user.rpc, target.id, turn.say ?? turn.sayRole);
+        if (settleAfter) await settle(user.rpc);
+      } else if (turn.wait) {
+        await sleep(turn.wait);
+      } else if (turn.stop) {
+        log(`${label}: presses Stop`);
+        for (const group of await groupsOf(user.rpc))
+          await user.rpc("threads/stop", { groupId: group.id }).catch(() => {});
+        await sleep(3_000);
       } else if (turn.answerCard) {
         const card = await settle(user.rpc, { untilCard: true, limitMs: 5 * 60_000 });
         if (!card) {
           failures.push("no question card to answer");
           break;
         }
-        log(`${scenario.name}: types "${turn.answerCard}" into "${botText(card).slice(0, 50)}"`);
+        log(`${label}: types "${turn.answerCard}" into "${botText(card).slice(0, 50)}"`);
         await user.rpc("threads/answer", {
           groupId: card.groupId,
           runId: card.runId,
@@ -252,32 +255,30 @@ async function play(scenario, owner) {
         await settle(user.rpc, { quietMs: 25_000, limitMs: 3 * 60_000 });
       }
     }
-    if (scenario.noRole) {
-      const roles = (await groupsOf(user.rpc)).filter(
-        (group) => !group.id.startsWith("recruiting-global-"),
-      );
-      if (roles.length)
-        failures.push(`opened a role for an email: ${roles.map((g) => g.name).join(", ")}`);
+    const roles = await roleChats(user.rpc);
+    if (scenario.noRole && roles.length)
+      failures.push(`opened a role it was not asked for: ${roles.map((g) => g.name).join(", ")}`);
+    if (scenario.role) {
+      if (!roles.length) failures.push("no role was opened");
+      else if (roles.some((group) => /^New role$|^新岗位$/i.test(group.name)))
+        failures.push("the role kept its placeholder title");
     }
     if (scenario.requirement) {
-      const role = (await groupsOf(user.rpc)).find(
-        (group) => !group.id.startsWith("recruiting-global-"),
-      );
+      const role = roles[0];
       if (!role) failures.push("no role was created");
       else {
-        const setup = await user.rpc("recruiting/roleSetup", { groupId: role.id });
-        fs.writeFileSync(
-          path.join(OUT, `${scenario.name}.role.json`),
-          JSON.stringify(setup, null, 1),
+        const workspace = await user.rpc("recruiting/getWorkspace", {
+          threadId: role.threadId ?? role.id,
+        });
+        fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
+        failures.push(
+          ...requirementSaved(JSON.stringify(workspace?.revision ?? {}), scenario.requirement),
         );
-        failures.push(...requirementSaved(JSON.stringify(setup), scenario.requirement));
       }
     }
     chats = await transcripts(user.rpc);
   } finally {
-    await stopAll(user.rpc).catch((error) =>
-      log(`${scenario.name}: stop failed: ${error.message}`),
-    );
+    await stopAll(user.rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
   const lines = [];
   for (const { group, messages } of chats) {
@@ -289,7 +290,18 @@ async function play(scenario, owner) {
       );
     failures.push(...conversationChecks(messages).map((failure) => `${group.name}: ${failure}`));
   }
-  fs.writeFileSync(path.join(OUT, `${scenario.name}.chat.txt`), `${lines.join("\n\n")}\n`);
+  // The last reply in the chat the recruiter last wrote in.
+  const latest = chats
+    .map(({ messages }) => ({
+      sent: messages.findLast((message) => message.role === "user")?.at ?? "",
+      reply: messages.findLast((message) => message.role !== "user" && message.text.trim()),
+    }))
+    .sort((a, b) => Date.parse(b.sent || 0) - Date.parse(a.sent || 0))[0]?.reply;
+  if (scenario.last && !scenario.last.test(latest?.text ?? ""))
+    failures.push(`last reply misses ${scenario.last}: "${(latest?.text ?? "").slice(0, 120)}"`);
+  const wrong = scenario.lastNot && (latest?.text ?? "").match(scenario.lastNot);
+  if (wrong) failures.push(`last reply says "${wrong[0]}"`);
+  fs.writeFileSync(path.join(OUT, `${label}.chat.txt`), `${lines.join("\n\n")}\n`);
   return failures;
 }
 
@@ -298,35 +310,71 @@ const wanted = SCENARIOS.filter(
   (scenario) =>
     (!only || only.includes(scenario.name)) && (!scenario.paid || args.includes("--paid")),
 );
-const SAMPLES = Number(option("--samples", "2"));
+const SAMPLES = Number(option("--samples", "1"));
+const CONCURRENCY = Number(option("--concurrency", "8"));
 const plays = wanted.flatMap((scenario) =>
   Array.from({ length: scenario.paid ? 1 : SAMPLES }, (_, index) => ({
-    ...scenario,
-    name: index ? `${scenario.name}-${index + 1}` : scenario.name,
+    scenario,
+    sample: index + 1,
   })),
 );
 const owner = client();
 await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
-const results = await Promise.all(
-  plays.map(async (scenario) => {
+// The revision the test environment serves, for the scoreboard.
+const SHA =
+  option("--sha") ??
+  process.env.RAKAZO_EXPECT_SHA ??
+  (await fetch(`${BASE}/ready`)
+    .then((response) => response.headers.get("x-rakazo-revision"))
+    .catch(() => null)) ??
+  "unknown";
+const rows = [];
+let nextPlay = 0;
+async function worker() {
+  while (nextPlay < plays.length) {
+    const { scenario, sample } = plays[nextPlay++];
     const at = Date.now();
     let failures;
     try {
-      failures = await play(scenario, owner);
+      failures = await play(scenario, owner, sample);
     } catch (error) {
       failures = [`error: ${error.message}`];
     }
-    const result = {
-      name: scenario.name,
+    const row = {
+      suite: "conversation",
+      scenario: scenario.name,
+      area: scenario.area,
+      source: scenario.source,
+      sample,
       pass: failures.length === 0,
-      seconds: Math.round((Date.now() - at) / 1000),
+      score: failures.length === 0 ? 1 : 0,
       failures,
+      sha: SHA,
+      at: new Date(at).toISOString(),
+      seconds: Math.round((Date.now() - at) / 1000),
+      paid: Boolean(scenario.paid),
     };
-    log(`${scenario.name}: ${result.pass ? "PASS" : `FAIL\n  - ${failures.join("\n  - ")}`}`);
-    return result;
-  }),
+    rows.push(row);
+    log(
+      `${scenario.name}#${sample}: ${row.pass ? "PASS" : `FAIL\n  - ${failures.join("\n  - ")}`}`,
+    );
+  }
+}
+await Promise.all(Array.from({ length: Math.min(CONCURRENCY, plays.length) }, worker));
+fs.writeFileSync(
+  path.join(OUT, "results.jsonl"),
+  `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
 );
-fs.writeFileSync(path.join(OUT, "results.json"), `${JSON.stringify(results, null, 2)}\n`);
-const failed = results.filter((result) => !result.pass).length;
-log(`${results.length - failed}/${results.length} scenarios pass`);
+// The shared benchmark folder, when given, gets the same rows for the scoreboard.
+const BENCH = option("--bench");
+if (BENCH) {
+  fs.mkdirSync(BENCH, { recursive: true });
+  const file = path.join(
+    BENCH,
+    `${new Date().toISOString().slice(0, 10)}-${SHA.slice(0, 8)}-conversation.jsonl`,
+  );
+  fs.appendFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+}
+const failed = rows.filter((row) => !row.pass).length;
+log(`${rows.length - failed}/${rows.length} conversations pass`);
 process.exit(failed ? 1 : 0);

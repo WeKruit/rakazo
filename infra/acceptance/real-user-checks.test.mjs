@@ -123,3 +123,12 @@ test("an agent's brief shown to the recruiter fails", () => {
     ]).some((failure) => failure.startsWith("internal agent brief")),
   );
 });
+
+test("an address inside Chinese text does not hide the Chinese around it", () => {
+  assert(
+    conversationChecks([
+      user("帮我约 Alex Chen（alex@example.com）下周二下午两点面试，30分钟"),
+      bot("Which time zone should 2pm be in?"),
+    ]).some((failure) => failure.startsWith("language: recruiter wrote Chinese")),
+  );
+});
