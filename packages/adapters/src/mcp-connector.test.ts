@@ -16,6 +16,7 @@ import {
   hasPlatformMcpCredential,
   loadMcpCredentialRecord,
   McpConnector,
+  NO_EMAIL_HISTORY_YET,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
   SHARED_MAIL_DISCOVERY_BUDGET_MS,
@@ -541,6 +542,30 @@ describe("local native Instantly thread history", () => {
         { type: "error", message: expect.stringContaining("HTTP 400 (invalid_query).") },
       ]);
       expect(JSON.stringify(failed)).not.toContain("private provider detail");
+    } finally {
+      await f.connector.close();
+    }
+  });
+  // 11-11 staging: a fresh account's first email read came back "failed during authorization",
+  // and the agent told the recruiter it could not send.
+  it("answers a contact lookup on an account that never sent with no history, not a failure", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockRejectedValue(new IsolationError("This account has no outreach campaign yet"));
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      const result = await f.collect({ email: "alex@example.test" }, contactRoute);
+      expect(result).toMatchObject([
+        { type: "result", data: { structuredContent: { note: NO_EMAIL_HISTORY_YET } } },
+      ]);
+      expect(
+        f.rest.mock.calls.some(
+          (call) => new URL(logicalHref(...call)).pathname === "/api/v2/emails",
+        ),
+      ).toBe(false);
     } finally {
       await f.connector.close();
     }
