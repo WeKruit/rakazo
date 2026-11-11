@@ -14,6 +14,7 @@ import {
   turnRequestText,
   unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
+import { askedTemplate } from "./turn-report.js";
 
 const run = {
   id: "run-1",
@@ -1269,6 +1270,53 @@ describe("planDeclineRetry", () => {
         personRequest: "write me a follow-up email template",
       }),
     ).toBeUndefined();
+  });
+
+  it("rewrites a template written as the candidate thanking an interviewer (2026-11-11 staging)", async () => {
+    const reply =
+      "下面是一封通用的面试后跟进邮件模板：\n\n**Subject:** Thank you for the conversation\n\nHi [Interviewer’s Name],\n\nThank you for taking the time to speak with me about the [Role Title] position.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const request = "帮我写一封面试后跟进邮件的模板";
+    const retry = await planDeclineRetry(human, { ...input, reply, request });
+    expect(retry?.note).toContain("The recruiter is the one writing");
+    const recruiter = reply.replace("[Interviewer’s Name]", "[Candidate Name]");
+    expect(await planDeclineRetry(human, { ...input, reply: recruiter, request })).toBeUndefined();
+  });
+
+  it("sends a sequence back when one email was asked for (2026-11-11 staging)", async () => {
+    const email = (n: number) =>
+      `**Email ${n}**\n**Subject:** Senior Data Engineer\n\nHi [Candidate Name],\n\nA role.`;
+    const reply = [1, 2, 3].map(email).join("\n\n");
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
+    const handed = { ...input, request: "Draft it", handedIn: true, personRequest: ask };
+    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain("not a sequence");
+    expect(await planDeclineRetry(human, { ...handed, reply: email(1) })).toBeUndefined();
+    const sequence = "Write a cold email sequence for the data engineer role";
+    expect(
+      await planDeclineRetry(human, { ...handed, reply, personRequest: sequence }),
+    ).toBeUndefined();
+  });
+
+  it("keeps the blanks in an email about a role that names nobody (2026-11-11 staging)", async () => {
+    const reply =
+      "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply,
+        request: "Draft it",
+        handedIn: true,
+        personRequest: ask,
+      }),
+    ).toBeUndefined();
+    expect(askedTemplate(ask)).toBe(true);
+    expect(askedTemplate("Write an email to these people about the data engineer role")).toBe(
+      false,
+    );
+    expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
   });
 
   it("puts a question the retry still typed into its reply on a card", async () => {

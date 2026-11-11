@@ -155,3 +155,18 @@ export function beforeCardQuestion(text: string): string {
   );
   return text.slice(0, sentenceStart + 1).trim();
 }
+
+/** A reply that only says the work waits on a card already shown ("请先回答…卡上的问题"). */
+export function waitsOnCard(text: string): boolean {
+  return /(先|请).{0,12}回答.{0,20}卡|卡在.{0,20}(上|问)|answer the (?:card|question) (?:above|first)/i.test(
+    text,
+  );
+}
+
+/** Whether a user row holds the person's own words, not a teammate's relayed brief. */
+export function personWrote(blocks: unknown): boolean {
+  return (
+    Array.isArray(blocks) &&
+    blocks.some((block) => ["text", "file"].includes((block as { kind?: string }).kind ?? ""))
+  );
+}

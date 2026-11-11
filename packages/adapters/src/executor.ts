@@ -182,7 +182,6 @@ import {
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
-  runsBesidePerson,
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
@@ -710,7 +709,9 @@ import {
   isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
+  personWrote,
   stripNoResponseReply,
+  waitsOnCard,
   withoutAgentBrief,
 } from "./silent-reply.js";
 import {
@@ -6742,7 +6743,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           }
           for (const message of recent ?? []) {
-            if (message.role === "user" && !message.botId) return undefined;
+            // A teammate's relayed brief is saved as a user row too; only the person's own
+            // words answer the card.
+            if (message.role === "user" && !message.botId && personWrote(message.blocks))
+              return undefined;
             if (message.role === "user" || message.runId === runId) continue;
             const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
             const open = blocks.find(
@@ -13769,18 +13773,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return applied;
         };
 
-        // Each intake answer goes into the role's brief as the turn starts, in the background.
-        if (thread.activeRecruitingRoleId && !runsBesidePerson(run.trigger)) {
-          const roleId = thread.activeRecruitingRoleId;
-          briefSaving = withinDeadline(
-            saveBriefFromAnswers(roleId).catch((error) =>
-              getLogger().warn("brief not saved from answers", { error: String(error) }),
-            ),
-            SAVE_WAIT_MS,
-            () => getLogger().warn("brief save from answers still running", { runId }),
-          );
-        }
-
         const pluginLine =
           connectedPlugins.length > 0
             ? `Connected plugins: ${connectedPlugins.map((row) => `${row.displayName} (${row.connectorId}:${row.provider})`).join(", ")}. Prefer those plugin tools over the computer browser or web search when reading app data (repos, releases, mail, calendar, and similar).`
@@ -16198,6 +16190,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // One question at a time: while another card waits in this conversation (a teammate's
+          // question), the reply keeps only what comes before its own question, and a reply that
+          // only says the work waits on that card is not sent.
+          if (
+            hideVendors &&
+            blocks.some((block) => block.kind === "text") &&
+            !blocks.some((block) => block.kind === "ask") &&
+            (/[?？]/.test(text) || waitsOnCard(text)) &&
+            (await openQuestionElsewhere()) !== undefined
+          ) {
+            text = waitsOnCard(text) ? "" : beforeCardQuestion(text);
+            blocks = [
+              ...blocks.filter((block) => block.kind !== "text"),
+              ...(text ? [{ kind: "text" as const, text }] : []),
+            ];
+          }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.
           const suggestionPending =
@@ -16322,12 +16330,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   postAssistant: (text) =>
                     publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
                 })
-              : guardRecruitingRoleCreate(deps, {
-                  run: guarded,
-                  blocks: finalBlocks.length ? finalBlocks : blocks,
-                  handedOff,
-                  pendingApproval: approvalPausePending,
-                })
+              : thread.groupId?.startsWith("recruiting-global-")
+                ? // Kruit's account-wide conversation never holds a role.
+                  Promise.resolve(undefined)
+                : guardRecruitingRoleCreate(deps, {
+                    run: guarded,
+                    blocks: finalBlocks.length ? finalBlocks : blocks,
+                    handedOff,
+                    pendingApproval: approvalPausePending,
+                  })
             ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
           }
