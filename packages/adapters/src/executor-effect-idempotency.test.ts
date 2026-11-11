@@ -1789,6 +1789,27 @@ describe("recruiter-facing provider names", () => {
     );
   });
 
+  // Staging eval 11-11 (memory-after-role): Kruit sent its handoff brief to the recruiter.
+  it("keeps a handoff brief sent with message_user out of the chat", async () => {
+    const f = fixture("brief-message-user");
+    const botRow = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...botRow,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof botRow);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const args = { message: "Goal: Continue intake.\nWhere: This role.\nDone when: ten shown." };
+      yield { type: "tool" as const, name: "message_user", args, executionId: "brief-call" };
+      f.results.push(await request.executeTool!("message_user", args, "brief-call"));
+      yield { type: "done" as const, text: "The role team has it." };
+    });
+
+    await f.run();
+
+    expect(JSON.stringify(f.published)).not.toContain("Continue intake");
+    expect(JSON.stringify(f.results)).toContain("Not shown: a handoff brief");
+  });
+
   it("leaves provider names alone outside recruiting conversations", async () => {
     const f = fixture("keep-vendor-names");
     f.runtimeRun.mockImplementation(async function* () {
