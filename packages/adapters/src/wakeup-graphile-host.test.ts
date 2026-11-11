@@ -3,6 +3,7 @@ import type { BackgroundJobHandlers } from "@rakazo/adapter-kit";
 import {
   HISTORY_COMPACT_MAX_ATTEMPTS,
   historyCompactJob,
+  historyCompactJobKey,
   messagingDeliverJob,
   runContinueJob,
 } from "@rakazo/adapter-kit";
@@ -108,6 +109,18 @@ describe("GraphileJobPublisher.enqueue", () => {
       "history.compact",
       expect.anything(),
       expect.objectContaining({ maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS }),
+    );
+    await publisher.close();
+  });
+
+  it("runs one thread's compactions one at a time", async () => {
+    const addJob = vi.fn(async () => undefined);
+    const publisher = publisherWith(addJob);
+    await publisher.enqueue(historyCompactJob("thread-1"));
+    expect(addJob).toHaveBeenCalledWith(
+      "history.compact",
+      expect.anything(),
+      expect.objectContaining({ queueName: historyCompactJobKey("thread-1") }),
     );
     await publisher.close();
   });

@@ -113,3 +113,45 @@ function withoutStraySentinelsAtEdges(
   });
   return { assembled: cleanedAssembled, blocks: cleanedBlocks };
 }
+
+// A label opens a line or follows the end of a sentence ("…经验”。Done when: …").
+const BRIEF_LINE =
+  /(?:^|[.。;；!！?？]\s*)\s*(?:\*\*)?(Goal|Where|Done when|Deliverable|Context|Don't|Do not)(?:\*\*)?\s*[:：]/gim;
+
+/**
+ * A handoff brief ("Goal: … Done when: … Context: …") written as the reply. It is for the
+ * teammate, never the recruiter; Kruit's reply after a handoff is one line naming the team.
+ */
+export function isAgentBrief(text: string): boolean {
+  const labels = new Set(
+    [...text.matchAll(BRIEF_LINE)].map((match) =>
+      (match[1] ?? "").replace(/\s/g, "").toLowerCase(),
+    ),
+  );
+  return labels.has("goal") && labels.size >= 2;
+}
+
+/** The reply without a handoff brief the model wrote into it; other text stays. */
+export function withoutAgentBrief(
+  assembled: string,
+  blocks: MessageBlock[],
+): { assembled: string; blocks: MessageBlock[] } {
+  if (!isAgentBrief(assembled) && !blocks.some((b) => b.kind === "text" && isAgentBrief(b.text)))
+    return { assembled, blocks };
+  const kept = blocks.filter((block) => block.kind !== "text" || !isAgentBrief(block.text));
+  return { assembled: isAgentBrief(assembled) ? joinedText(kept) : assembled, blocks: kept };
+}
+
+/**
+ * Text written just before a question card, up to its first question: the card asks it, so the
+ * chat would show the same question twice ("What role should I find people for?" in text, then
+ * on the card).
+ */
+export function beforeCardQuestion(text: string): string {
+  const question = text.search(/[?？]/);
+  if (question < 0) return text;
+  const sentenceStart = Math.max(
+    ...[".", "。", "!", "！", "\n", "?", "？"].map((mark) => text.lastIndexOf(mark, question - 1)),
+  );
+  return text.slice(0, sentenceStart + 1).trim();
+}

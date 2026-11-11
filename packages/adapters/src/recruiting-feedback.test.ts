@@ -166,6 +166,30 @@ describe("recruiting feedback", () => {
     expect(f.commit).toHaveBeenCalledOnce();
   });
 
+  it("refuses to save a pasted job description as a preference shared by every role", async () => {
+    // Staging: a new account pasted a Chinese JD in Kruit and the agent saved all of it as a
+    // cross-role preference instead of opening the role.
+    const f = fixture();
+    for (const content of [
+      "新岗位：华东区销售总监，常驻上海，医疗器械行业，10年以上销售经验。必须会说普通话和英语。",
+      "职位：高级前端工程师，北京，5年以上经验",
+      "New role: Senior Account Executive, Austin, 5+ years SaaS sales",
+      "Hiring for our team.\nJob Title: Staff Engineer\nLocation: remote",
+    ])
+      await expect(
+        executeRecruitingFeedback(f.deps, trusted, { ...preference, content }, context),
+      ).rejects.toThrow(/job description or a new role[\s\S]*start_role/);
+    expect(f.commit).not.toHaveBeenCalled();
+    // Preferences that only mention new roles still save.
+    await executeRecruitingFeedback(
+      f.deps,
+      trusted,
+      { ...preference, content: "以后所有新岗位都先问我预算" },
+      context,
+    );
+    expect(f.commit).toHaveBeenCalledOnce();
+  });
+
   it("constructs and commits one reusable preference with runtime provenance and the loaded revision", async () => {
     const f = fixture();
     const result = await executeRecruitingFeedback(f.deps, trusted, preference, context);

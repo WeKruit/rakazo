@@ -15,13 +15,14 @@ export const SAVED_THREAD_REPLAY_EVENTS = 200;
 type SavedRow = { key: string; savedAt: number; snapshot: ThreadSnapshot };
 
 /** The small key-value surface the cache needs; IndexedDB in the browser, a Map in tests. */
-export type SavedThreadStore = {
-  get(key: string): Promise<SavedRow | undefined>;
-  put(row: SavedRow): Promise<void>;
+export type SavedStore<Row extends { key: string }> = {
+  get(key: string): Promise<Row | undefined>;
+  put(row: Row): Promise<void>;
   delete(key: string): Promise<void>;
-  all(): Promise<SavedRow[]>;
+  all(): Promise<Row[]>;
   clear(): Promise<void>;
 };
+export type SavedThreadStore = SavedStore<SavedRow>;
 
 export function savedThreadKey(
   userId: string,
@@ -91,15 +92,17 @@ export function createSavedThreads(store: SavedThreadStore | null, now = () => D
   };
 }
 
-const DB_NAME = "rakazo-saved-threads";
-const STORE = "threads";
-
-function indexedDbStore(): SavedThreadStore | null {
+/** One IndexedDB object store keyed by `key`; null where the browser has no IndexedDB. */
+export function indexedDbStore<Row extends { key: string }>(
+  dbName: string,
+  storeName: string,
+): SavedStore<Row> | null {
   if (typeof indexedDB === "undefined") return null;
+  const STORE = storeName;
   let opened: Promise<IDBDatabase> | undefined;
   const open = () => {
     opened ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
+      const request = indexedDB.open(dbName, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "key" });
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -121,18 +124,20 @@ function indexedDbStore(): SavedThreadStore | null {
     });
   };
   return {
-    get: (key) => run("readonly", (store) => store.get(key) as IDBRequest<SavedRow | undefined>),
+    get: (key) => run("readonly", (store) => store.get(key) as IDBRequest<Row | undefined>),
     put: async (row) => {
       await run("readwrite", (store) => store.put(row));
     },
     delete: async (key) => {
       await run("readwrite", (store) => store.delete(key));
     },
-    all: () => run("readonly", (store) => store.getAll() as IDBRequest<SavedRow[]>),
+    all: () => run("readonly", (store) => store.getAll() as IDBRequest<Row[]>),
     clear: async () => {
       await run("readwrite", (store) => store.clear());
     },
   };
 }
 
-export const savedThreads = createSavedThreads(indexedDbStore());
+export const savedThreads = createSavedThreads(
+  indexedDbStore<SavedRow>("rakazo-saved-threads", "threads"),
+);

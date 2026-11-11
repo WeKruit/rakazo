@@ -43,8 +43,6 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
   return tools.filter(
     (tool) =>
       (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
-      // Above the role teams, role work goes to that role's team, not to a teammate in this room.
-      (!global || tool.name !== "handoff_to_bot") &&
       // In a group the room is the shared surface: hand the stage to a member
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot") &&

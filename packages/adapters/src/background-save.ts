@@ -12,6 +12,8 @@ export const FEEDBACK_SAVING = {
 
 /** How long the agent waits for a quick save before carrying on. */
 export const FEEDBACK_SAVE_WAIT_MS = 1_500;
+/** How long a call naming a role revision waits for this run's own role saves still running. */
+export const ROLE_SAVE_WAIT_MS = 5_000;
 /** Pauses before each background retry of a failed save. */
 export const FEEDBACK_RETRY_DELAYS_MS = [2_000, 6_000] as const;
 
@@ -75,4 +77,46 @@ export function saveInBackground(input: {
       : FEEDBACK_SAVING,
   );
   return { reply, settled };
+}
+
+/**
+ * A role save is record keeping too: an update to the brief or a requirement runs in the
+ * background like feedback. Role creation and reads still return their own result.
+ */
+export function savesRoleInBackground(name: string, args: Record<string, unknown>): boolean {
+  return name === "recruiting_role" && args.operation === "update";
+}
+
+/** A failed save that a retry can fix: a revision race or a passing outage, not bad input. */
+export function transientSaveError(error: unknown): boolean {
+  return /conflict|revision|timed? ?out|temporar|unavailable|deadlock|serializ|ECONN|connection/i.test(
+    typeof error === "string" ? error : JSON.stringify(error ?? ""),
+  );
+}
+
+/**
+ * The role revisions this run saved itself. A background save means the agent may still name the
+ * revision it started from, so a later call naming an older revision this run produced acts on the
+ * newest one it knows; a revision someone else saved still conflicts as before.
+ */
+export function ownRoleRevisions() {
+  const roles = new Map<string, { seen: Set<number>; latest: number }>();
+  return {
+    saved(roleId: string, to: number) {
+      const role = roles.get(roleId) ?? { seen: new Set<number>(), latest: to };
+      role.seen.add(to - 1);
+      role.seen.add(to);
+      role.latest = Math.max(role.latest, to);
+      roles.set(roleId, role);
+    },
+    current(roleId: string | undefined, expected: unknown): unknown {
+      const role = roleId ? roles.get(roleId) : undefined;
+      return role &&
+        typeof expected === "number" &&
+        role.seen.has(expected) &&
+        expected < role.latest
+        ? role.latest
+        : expected;
+    },
+  };
 }

@@ -405,6 +405,25 @@ describe("guardRecruitingTurnEnd", () => {
     expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
   });
 
+  it("writes its own words in Chinese for a recruiter writing Chinese", async () => {
+    // Staging eval 11-11: "10 people this round:" headed the list in a Chinese chat.
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-1", name: "Person 1" }]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "thread-1",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-1"],
+      unverified: { "person-1": "中文能力" },
+      chinese: true,
+    });
+    expect(text).toBe("本轮 1 人：\n\n1. **Person 1**\n   未核实：中文能力");
+  });
+
   it("lists a role's people under a given heading with the same lines as a round", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },

@@ -1,12 +1,74 @@
 import { expect, it, vi } from "vitest";
+import type { SavedReadsRow } from "./recruiting-read-cache";
 import {
   clearRecruitingReads,
   createRecruitingReadCache,
   fetchRecruitingRead,
+  keepRecruitingReads,
   rememberRecruitingRead,
+  restoreSavedRecruitingReads,
   revalidateRecruitingReads,
   savedRecruitingRead,
 } from "./recruiting-read-cache";
+import type { SavedStore } from "./saved-threads";
+import { SAVED_THREAD_IDLE_MS } from "./saved-threads";
+
+function memoryStore() {
+  const rows = new Map<string, SavedReadsRow>();
+  const store: SavedStore<SavedReadsRow> = {
+    get: async (key) => rows.get(key),
+    put: async (row) => void rows.set(row.key, row),
+    delete: async (key) => void rows.delete(key),
+    all: async () => [...rows.values()],
+    clear: async () => rows.clear(),
+  };
+  return { rows, store };
+}
+
+it("paints a reloaded page from the last display reads, then lets fresh reads win", async () => {
+  const { rows, store } = memoryStore();
+  const first = createRecruitingReadCache();
+  const stop = keepRecruitingReads(first, "user:space", store, { delayMs: 0 });
+  rememberRecruitingRead(first, "user:space:thread:tab:candidates", ["Ada", "Lin"]);
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  stop();
+
+  // A reload: a new cache in the same account and Space.
+  const reloaded = createRecruitingReadCache();
+  rememberRecruitingRead(reloaded, "user:space:thread:tab:home", { fresh: true });
+  keepRecruitingReads(reloaded, "user:space", store, { delayMs: 0 });
+  await vi.waitFor(() =>
+    expect(savedRecruitingRead(reloaded, "user:space:thread:tab:candidates")).toEqual([
+      "Ada",
+      "Lin",
+    ]),
+  );
+  expect(savedRecruitingRead(reloaded, "user:space:thread:tab:home")).toEqual({ fresh: true });
+
+  // Another account or Space never reads them, and a cleared cache ignores a late answer.
+  const other = createRecruitingReadCache();
+  keepRecruitingReads(other, "other:space", store, { delayMs: 0 });
+  const cleared = createRecruitingReadCache();
+  keepRecruitingReads(cleared, "user:space", store, { delayMs: 0 });
+  clearRecruitingReads(cleared);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(savedRecruitingRead(other, "user:space:thread:tab:candidates")).toBeUndefined();
+  expect(savedRecruitingRead(cleared, "user:space:thread:tab:candidates")).toBeUndefined();
+});
+
+it("does not paint reads saved longer ago than a saved conversation is kept", async () => {
+  const { rows, store } = memoryStore();
+  let now = 1_000;
+  const first = createRecruitingReadCache();
+  keepRecruitingReads(first, "user:space", store, { delayMs: 0, now: () => now });
+  rememberRecruitingRead(first, "user:space:thread:tab:candidates", ["Ada"]);
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  now += SAVED_THREAD_IDLE_MS + 1;
+  const reloaded = createRecruitingReadCache();
+  keepRecruitingReads(reloaded, "user:space", store, { delayMs: 0, now: () => now });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(savedRecruitingRead(reloaded, "user:space:thread:tab:candidates")).toBeUndefined();
+});
 
 it("removes only the denied scope and rejects late legacy display writes", () => {
   const cache = createRecruitingReadCache();
@@ -189,4 +251,20 @@ it("does not let a slow earlier provider response overwrite a verified pause in 
     campaign: { status: 2 },
   });
   cache.client.clear();
+});
+
+it("restores saved rows synchronously, so a panel that reads once on mount sees them", async () => {
+  const { rows, store } = memoryStore();
+  const first = createRecruitingReadCache();
+  keepRecruitingReads(first, "user:space", store, { delayMs: 0 });
+  rememberRecruitingRead(first, "user:space:thread:workspace", { role: "Engineer" });
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  const reloaded = createRecruitingReadCache();
+  restoreSavedRecruitingReads(reloaded, "user:space", [...rows.values()]);
+  expect(savedRecruitingRead(reloaded, "user:space:thread:workspace")).toEqual({
+    role: "Engineer",
+  });
+  const other = createRecruitingReadCache();
+  restoreSavedRecruitingReads(other, "other:space", [...rows.values()]);
+  expect(savedRecruitingRead(other, "user:space:thread:workspace")).toBeUndefined();
 });

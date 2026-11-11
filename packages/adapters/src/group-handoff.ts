@@ -30,6 +30,10 @@ import { declinedRunId } from "./turn-end-guard.js";
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
 
+/** Above the role teams, only role-free work goes to a teammate in the room itself. */
+export const GLOBAL_HANDOFF_ROLE_WORK =
+  "Not handed off: in this conversation only an email to an address the recruiter gave (Outreach) or an interview booking for a named person (Scheduling) goes to a teammate here. Role work goes to that role's team with delegate_to_role; a new role goes to start_role.";
+
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
   run: {
@@ -127,14 +131,33 @@ export async function handoffToGroupBot(
       if (targetId === run.botId) return { error: "cannot hand off to yourself" } as const;
       const target = group.members.find((member) => member.bot.id === targetId);
       if (!target) return { error: "handoff target is not a group member" } as const;
+      const targetKey = recruitingBotKey(target.bot);
+      if (
+        groupId.startsWith("recruiting-global-") &&
+        targetKey !== "outreach" &&
+        targetKey !== "scheduling"
+      )
+        return { error: GLOBAL_HANDOFF_ROLE_WORK } as const;
+      // Work in a role the recruiter names (such as replying in that role's email thread) needs
+      // that role's campaign and threads, which only its own team holds.
+      if (groupId.startsWith("recruiting-global-")) {
+        const asked = JSON.stringify(activeSource.sourceMessage?.blocks ?? []).toLowerCase();
+        const roles = await tx.recruitingRole.findMany({
+          where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
+          select: { id: true, title: true },
+        });
+        const named = roles.find(
+          (role) => role.title.trim().length > 1 && asked.includes(role.title.trim().toLowerCase()),
+        );
+        if (named)
+          return {
+            error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
+          } as const;
+      }
       // A search stage saves people into the conversation's role; without one the sourcing
       // teammate has nowhere to put them, so the coordinator sets the role up first.
       const source = group.members.find((member) => member.bot.id === run.botId);
-      if (
-        source &&
-        recruitingBotKey(source.bot) === "main" &&
-        recruitingBotKey(target.bot) === "sourcer"
-      ) {
+      if (source && recruitingBotKey(source.bot) === "main" && targetKey === "sourcer") {
         const thread = await tx.thread.findUnique({
           where: { id: run.threadId },
           select: { activeRecruitingRoleId: true },

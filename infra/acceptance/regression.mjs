@@ -30,8 +30,10 @@
 //                  reports at its countdown if one shows and answers a bare "再来点"). Cases in a
 //                  wave run side by side; resume runs alone. approval (--only approval: a new
 //                  message never answers a waiting booking card) needs a calendar connection.
-//   --suite staging-quick  only the free waves (smoke, pages, memory, then ui): the
-//                  deploy gate. ui runs ui-regressions.mjs in a browser.
+//   --suite staging-quick  only the free waves (smoke, pages, memory, then ui and real-user):
+//                  the deploy gate. ui runs ui-regressions.mjs in a browser; real-user runs
+//                  real-user.mjs (brand-new outside accounts talking the way recruiters wrote when
+//                  replies went wrong: dead ends, overrides, internal addresses, repeats).
 //   --staging      allows the cases that touch shared state or restart the test server
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
 //   --paid         required for any case that searches (first10, progress, t1, t3, contacts, cards,
@@ -577,7 +579,12 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 // server, so it runs alone after the others.
 // ui talks to Kruit too, so it waits for memory. approval stays out until staging has its own
 // Cal.com connection: today Scheduling asks to connect one instead of showing the booking card.
-const STAGING_WAVES = [["smoke", "pages", "memory"], ["ui"], ["progress", "midwork"], ["resume"]];
+const STAGING_WAVES = [
+  ["smoke", "pages", "memory"],
+  ["ui", "real-user"],
+  ["progress", "midwork"],
+  ["resume"],
+];
 // The release gate's quick part: free, about six minutes. The full suite searches, so it is the
 // release thread's one paid run a day.
 const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 2) : STAGING_WAVES;
@@ -630,7 +637,9 @@ if (paid.length && !args.includes("--paid"))
 
 // These touch shared state (the account's Kruit memory, a fixture chat's card, the server itself),
 // so they run only on the test environment, whose data the next sync replaces.
-const STAGING_ONLY = ["memory", "approval", "resume", "ui"].filter((name) => wanted.has(name));
+const STAGING_ONLY = ["memory", "approval", "resume", "ui", "real-user"].filter((name) =>
+  wanted.has(name),
+);
 if (STAGING_ONLY.length && !args.includes("--staging"))
   throw new Error(`${STAGING_ONLY.join(", ")} run only on the test environment; pass --staging`);
 
@@ -1463,6 +1472,20 @@ try {
     // people list, new role titles, the corner reminder, raw ID chips and internal names.
     const code = await run("ui", "ui-regressions.mjs", ["--out", path.join(OUT, "ui")]);
     if (code !== 0) failures.push(`browser checks did not pass (exit ${code}); see ui.log`);
+  });
+
+  define("real-user", async (failures) => {
+    // Brand-new outside accounts, real recruiter wording: no dead end, no override of what they
+    // just said, no internal address, no repeat, their language, must-haves saved.
+    // Free scenarios only: the gate's --paid is for its own search cases, and the paid scenario
+    // (a first-ten search) runs only when real-user.mjs is called with --paid directly.
+    const code = await run("real-user", "real-user.mjs", ["--out", path.join(OUT, "real-user")]);
+    if (code === 2)
+      failures.push(
+        "real-user: the test environment failed (server errors or refused sign-ins), not the product; rerun; see real-user.log",
+      );
+    else if (code !== 0)
+      failures.push(`real-user scenarios did not pass (exit ${code}); see real-user.log`);
   });
 
   define("memory", async (failures) => {

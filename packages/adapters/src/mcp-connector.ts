@@ -280,6 +280,9 @@ function instantlyErrorCode(text: string) {
   }
 }
 
+const NO_OUTREACH_CAMPAIGN_YET = "This account has no outreach campaign yet";
+export const NO_EMAIL_HISTORY_YET =
+  "No emails yet: this account has not emailed anyone, so there is no history with this person. Treat it as a first email.";
 const nativeInstantlyReads = [
   {
     name: "get_thread_history",
@@ -2083,7 +2086,7 @@ export class McpConnector implements ConnectorProvider {
       serverId,
       context.userId,
     );
-    if (!campaignIds.length) throw new IsolationError("This account has no outreach campaign yet");
+    if (!campaignIds.length) throw new IsolationError(NO_OUTREACH_CAMPAIGN_YET);
     return { campaignIds, workspaceKey: JSON.stringify(["account", serverId]) };
   }
 
@@ -2262,7 +2265,26 @@ export class McpConnector implements ConnectorProvider {
       const input = historyInput ?? mailboxInput ?? contactInput!;
       const authorize = () => this.authorizeInstantlyRest(call, context, redactions);
       const credential = await authorize();
-      const emailScope = await this.instantlyCampaignScope(context, credential.server.id);
+      let emailScope: Awaited<ReturnType<typeof this.instantlyCampaignScope>>;
+      try {
+        emailScope = await this.instantlyCampaignScope(context, credential.server.id);
+      } catch (error) {
+        // An account that has never sent has no mail to read; that is an answer, not a failure.
+        if (!(error instanceof IsolationError) || error.message !== NO_OUTREACH_CAMPAIGN_YET)
+          throw error;
+        yield {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              page: { items: [] },
+              coverage: { returnedCount: 0, pageExhausted: true },
+              note: NO_EMAIL_HISTORY_YET,
+            },
+          },
+        };
+        return;
+      }
       const assertAuthorized = async () => {
         await this.assertInstantlyScope(context, credential.server.id, emailScope);
         const current = await authorize();

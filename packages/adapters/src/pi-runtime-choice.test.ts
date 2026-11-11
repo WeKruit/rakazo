@@ -183,6 +183,9 @@ describe("Pi choice asks", () => {
   it.each([
     "Which city should I use? And what salary range?",
     "Please answer:\n1. Which city\n2. Which salary range",
+    // A Chinese card counted no question marks, so two questions went out on one card.
+    "这个岗位在哪个城市？薪资范围是多少？",
+    "请回答：\n1、城市\n2、薪资范围",
   ])("refuses more than one question in one ask: %s", async (question) => {
     fakeAgentState.question = question;
     const runtime = new PiAgentRuntime();

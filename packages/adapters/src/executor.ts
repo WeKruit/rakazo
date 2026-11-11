@@ -182,6 +182,7 @@ import {
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
+  runsBesidePerson,
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
@@ -294,6 +295,7 @@ import {
   seesOperatorSpend,
   skipRateLimitedRun,
   unitVector,
+  unreadSteering,
   votePoll,
   waitingCardBlocks,
   withTransactionRetry,
@@ -349,7 +351,14 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
-import { saveInBackground, savesFeedbackInBackground } from "./background-save.js";
+import {
+  ownRoleRevisions,
+  ROLE_SAVE_WAIT_MS,
+  saveInBackground,
+  savesFeedbackInBackground,
+  savesRoleInBackground,
+  transientSaveError,
+} from "./background-save.js";
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
@@ -604,6 +613,7 @@ import {
   locationOutliers,
   outsideSearchArea,
 } from "./recruiting-location.js";
+import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -684,6 +694,7 @@ import {
   updateScratchpadItemFromTool,
 } from "./scratchpad-tools.js";
 import { inferScript } from "./scripted-runtime.js";
+import { needsSenderNotice, notifyMissingSender } from "./sender-missing-notice.js";
 import {
   isRunningShellCommand,
   observeShellCommand,
@@ -694,7 +705,14 @@ import {
   SILENT_RUN_RETRIED_TEXT,
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
-import { isExactNoResponse, NO_RESPONSE, stripNoResponseReply } from "./silent-reply.js";
+import {
+  beforeCardQuestion,
+  isAgentBrief,
+  isExactNoResponse,
+  NO_RESPONSE,
+  stripNoResponseReply,
+  withoutAgentBrief,
+} from "./silent-reply.js";
 import {
   listAgentSkillRecords,
   skillCreateFromTool,
@@ -1327,6 +1345,13 @@ const YEARS_OPEN_NOTE =
 const ASK_WITHOUT_ROLE =
   'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
+/** Kruit asks nothing for a role it has not opened: the role's team asks its questions there. */
+export const questionAlreadyWaiting = (question: string) =>
+  `Not asked: the recruiter has not answered the question already waiting in this conversation ("${question.slice(0, 300)}"). Never ask it or another question again now; carry on with work that does not need the answer, or end the turn with no reply.`;
+
+export const globalAskBeforeRole = (latest: string) =>
+  `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
+
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
@@ -1353,6 +1378,23 @@ export const EARLIER_STEERING =
 export const STEERING_ACK =
   'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
+/** How often a running turn looks for messages it has not read yet, to answer them at once. */
+export const STEERING_PEEK_MS = 2_500;
+/** Model-facing: the short reply already sent for a message that arrived mid-run. */
+/** Whether a bot message shows the person words or a card, not only the run's steps. */
+export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
+  (blocks ?? []).some((block) =>
+    block.kind === "text"
+      ? block.text.trim().length > 0
+      : !["steps", "progress", "meta", "computer"].includes(block.kind),
+  );
+
+/** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
+export const STEERING_QUICK_REPLY_SENDING =
+  "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again; say only what it changes.";
+export const steeringQuickReplySent = (line: string) =>
+  `You already sent the recruiter this short reply to it: "${line}". Do not repeat it or acknowledge the message again; say only what it changes.`;
+
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
 export const ASK_AFTER_HANDOFF =
@@ -1368,6 +1410,10 @@ const PLANNED_SEARCHES_MISSING =
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** With this many new people from the planned searches, the first ten come from them. */
+/** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
+const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
+/** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
+const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -4603,6 +4649,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
       }, 60_000);
       heartbeat.unref?.();
+      let steeringWatch: ReturnType<typeof setInterval> | undefined;
+      // The short reply already sent for a message that arrived mid-run, by message id.
+      const steeringQuickReplies = new Map<string, string>();
+      // Starts the short reply for a message that arrived mid-run, once per message.
+      let replyToSteering:
+        | ((item: {
+            id: string;
+            messageId: string;
+            blocks: MessageBlock[];
+            internal?: true;
+          }) => boolean)
+        | undefined;
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
       const silenceWatch = createSilenceWatch({
@@ -4823,6 +4881,140 @@ export function createRunExecutor(deps: ExecutorDeps) {
           deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
         );
         const nativeSources = await nativeSourcesPending();
+        // The model and its key are settled first, so the quick first line below does not wait
+        // for history, tools and memory to load.
+        const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
+        const runtimeFallback = runtimeFallbackModel(deps.runtime);
+        const pinError = run.modelPinned
+          ? pinnedModelCredentialError(modelChoice, overrideCredential, runDeployment)
+          : undefined;
+        const selected = selectConfiguredModel({
+          override: modelChoice,
+          overrideCredential,
+          defaultCredential,
+          settings,
+          deployment: runDeployment,
+        });
+        const { credential, thinkingLevel } = selected;
+        const runModelProvider = selected.provider ?? runtimeFallback?.provider;
+        const runModelId = selected.id ?? runtimeFallback?.id;
+        const modelKeyStartedAt = performance.now();
+        const resolvedPending = awaitLater(
+          (runModelProvider && runModelId
+            ? resolveModelKey(
+                deps,
+                run.userId,
+                run.spaceId,
+                credential,
+                runModelProvider,
+                runModelId,
+                (values) => runSecrets.push(...values),
+              )
+            : Promise.reject(new Error(MISSING_MODEL_MESSAGE))
+          ).finally(() => {
+            setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
+          }),
+        );
+        // A short first reply while the full answer is worked out. It starts beside the rest of
+        // setup and is posted only if the run has not replied yet; the run is told what it said.
+        // A typed card answer resumes the run that asked, so it gets one too.
+        const quickRepliesOn =
+          deps.quickReplies &&
+          !messagingChannelRun &&
+          !deps.runtime.describe().capabilities.scripted;
+        const earlyTurnBlocks =
+          (nativeSources?.currentAnswer?.blocks as MessageBlock[] | undefined) ??
+          (quickRepliesOn && run.trigger === "user"
+            ? ((
+                await deps.prisma.message
+                  .findFirst({
+                    where: run.sourceMessageId
+                      ? { id: run.sourceMessageId }
+                      : { runId, role: "user" },
+                    select: { blocks: true },
+                  })
+                  .catch(() => null)
+              )?.blocks as MessageBlock[] | undefined)
+            : undefined);
+        const quickReplyText = earlyTurnBlocks ? blocksText(earlyTurnBlocks) : "";
+        let quickReplySaid: string | undefined;
+        // Earlier turns, once history is loaded; the first line starts before that.
+        let quickReplyEarlier: () => Array<{ role: "user" | "assistant"; text: string }> = () => [];
+        const writeQuickReply = (userText: string, key?: string) =>
+          resolvedPending().then((resolved) =>
+            quickReply({
+              runtime: deps.runtime,
+              model: runModelFromResolved(
+                runModelProvider ?? "",
+                runModelId ?? "",
+                resolved,
+                "off",
+              ),
+              earlier: quickReplyEarlier(),
+              userText,
+              runId,
+              ...(key ? { key } : {}),
+              ...(hideVendors ? { recruiting: true } : {}),
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            }),
+          );
+        const turnStartedAt = new Date();
+        if (
+          quickRepliesOn &&
+          !pinError &&
+          runModelProvider &&
+          runModelId &&
+          (run.trigger === "user" || nativeSources?.currentAnswer) &&
+          quickReplyText.trim()
+        )
+          void writeQuickReply(quickReplyText)
+            .then(async (text) => {
+              if (!text) return;
+              // The card this run asked before the answer is not a reply to it, and a row that
+              // only shows the run's steps says nothing to the person yet.
+              const written = await deps.prisma.message.findMany({
+                where: {
+                  threadId: thread.id,
+                  runId,
+                  role: "bot",
+                  createdAt: { gte: turnStartedAt },
+                },
+                select: { blocks: true },
+              });
+              if (written.some((message) => saysSomething(message.blocks as MessageBlock[]))) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
+                return;
+              }
+              await publishMessage(deps, run, "bot", [
+                { kind: "text", text: redactSecrets(text, runSecrets) },
+              ]);
+              getLogger().info("run.quick_reply", {
+                runId,
+                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
+              });
+              quickReplySaid = text;
+            })
+            .catch((error) => {
+              getLogger().warn("quick reply failed", { runId, reason: String(error) });
+            });
         if (
           nativeSources?.answeredAsks.length &&
           (thread.spaceId !== run.spaceId ||
@@ -5003,6 +5195,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
+        quickReplyEarlier = () =>
+          historyMessages
+            .filter(
+              (message) =>
+                message.id !== currentTurnMessage?.id &&
+                ((message.role === "user" && !message.internal) || message.role === "bot"),
+            )
+            .map((message) => ({
+              role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+              text: blocksText(message.blocks),
+            }));
         const allowSilentPeerMessage = botMessageAllowsSilence(
           peerMessage?.intent,
           peerMessage?.repliesToRequest,
@@ -5352,21 +5555,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...history.filter((message) => !message.id || !canonicalMessages.has(message.id)),
             ...canonicalHistory,
           ];
-        const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
-        const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        const pinError = run.modelPinned
-          ? pinnedModelCredentialError(modelChoice, overrideCredential, runDeployment)
-          : undefined;
-        const selected = selectConfiguredModel({
-          override: modelChoice,
-          overrideCredential,
-          defaultCredential,
-          settings,
-          deployment: runDeployment,
-        });
-        const { credential, thinkingLevel } = selected;
-        const runModelProvider = selected.provider ?? runtimeFallback?.provider;
-        const runModelId = selected.id ?? runtimeFallback?.id;
         const failRunBeforeModel = async (message: string) => {
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
@@ -5431,90 +5619,50 @@ export function createRunExecutor(deps: ExecutorDeps) {
           await failRunBeforeModel(MISSING_MODEL_MESSAGE);
           return;
         }
-        const modelKeyStartedAt = performance.now();
-        const resolvedPending = awaitLater(
-          resolveModelKey(
-            deps,
-            run.userId,
-            run.spaceId,
-            credential,
-            runModelProvider,
-            runModelId,
-            (values) => runSecrets.push(...values),
-          ).finally(() => {
-            setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
-          }),
-        );
-        // A short first reply while the full answer is worked out. It starts beside the rest of
-        // setup and is posted only if the run has not replied yet; the run is told what it said.
-        const quickReplyText = turnBlocks ? blocksText(turnBlocks) : "";
-        let quickReplySaid: string | undefined;
-        if (
-          deps.quickReplies &&
-          run.trigger === "user" &&
-          !messagingChannelRun &&
-          !deps.runtime.describe().capabilities.scripted &&
-          quickReplyText.trim()
-        )
-          void resolvedPending()
-            .then((resolved) =>
-              quickReply({
-                runtime: deps.runtime,
-                model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
-                earlier: historyMessages
-                  .filter(
-                    (message) =>
-                      message.id !== currentTurnMessage?.id &&
-                      ((message.role === "user" && !message.internal) || message.role === "bot"),
-                  )
-                  .map((message) => ({
-                    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-                    text: blocksText(message.blocks),
-                  })),
-                userText: quickReplyText,
-                runId,
-                spaceId: run.spaceId,
-                userId: run.userId,
-                botId: bot.id,
-                threadId: thread.id,
-                onUsage: (event) =>
-                  recordUsage(
-                    deps.prisma,
-                    event,
-                    {
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      botId: bot.id,
-                      parentRunId: runId,
-                      runId,
-                      operationId: `quick-reply:${runId}`,
-                      operationKind: "setup",
-                    },
-                    estimateCatalogTokenCostUsd,
-                  ),
-              }),
-            )
-            .then(async (text) => {
-              if (!text) return;
-              const replied = await deps.prisma.message.count({
-                where: { threadId: thread.id, runId, role: "bot" },
+        // A message sent while the run works waits for the current step to end, which can be a
+        // long search. It gets its own short reply now, whether the run reads it first or the
+        // watch below finds it unread; the run is told not to acknowledge it again.
+        if (quickRepliesOn) {
+          const started = new Set<string>();
+          replyToSteering = (item) => {
+            if (started.has(item.messageId)) return true;
+            // A server continuation is not the person writing: it never gets a reply of its own.
+            if (item.internal) return false;
+            const human =
+              item.blocks.length > 0 &&
+              item.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
+            const text = human ? blocksText(item.blocks) : "";
+            if (!text.trim()) return false;
+            started.add(item.messageId);
+            void writeQuickReply(text, item.id)
+              .then(async (line) => {
+                if (!line) return;
+                await publishMessage(deps, run, "bot", [
+                  { kind: "text", text: redactSecrets(line, runSecrets) },
+                ]);
+                steeringQuickReplies.set(item.messageId, line);
+                getLogger().info("run.steering_quick_reply", { runId });
+              })
+              .catch((error) => {
+                getLogger().warn("steering quick reply failed", { runId, reason: String(error) });
               });
-              if (replied > 0) {
-                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
-                return;
-              }
-              await publishMessage(deps, run, "bot", [
-                { kind: "text", text: redactSecrets(text, runSecrets) },
-              ]);
-              getLogger().info("run.quick_reply", {
-                runId,
-                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
+            return true;
+          };
+          let peeking = false;
+          steeringWatch = setInterval(() => {
+            if (peeking) return;
+            peeking = true;
+            void unreadSteering(deps.prisma, { threadId: thread.id, botId: bot.id, runId })
+              .then((rows) => {
+                for (const row of rows) replyToSteering?.(row);
+              })
+              .catch(() => undefined)
+              .finally(() => {
+                peeking = false;
               });
-              quickReplySaid = text;
-            })
-            .catch((error) => {
-              getLogger().warn("quick reply failed", { runId, reason: String(error) });
-            });
+          }, STEERING_PEEK_MS);
+          steeringWatch.unref?.();
+        }
         const initialRecruitingContext = await initialRecruitingContextPending();
         currentRecruitingContext = initialRecruitingContext;
         setupMark("recruitingContext");
@@ -5994,12 +6142,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
-        const publishMidTurnNarration = async () => {
+        const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const narration = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          const written = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          // The question card that follows asks the question; the text keeps only what leads up to it.
+          const narration =
+            hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
-          if (!narration) return;
+          if (!narration) {
+            if (written) {
+              assembled = "";
+              hasStreamedText = false;
+              pendingProgress = "";
+              discardedMidTurnNarration = true;
+            }
+            return;
+          }
+          // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
+          if (hideVendors && isAgentBrief(narration)) {
+            assembled = "";
+            hasStreamedText = false;
+            pendingProgress = "";
+            discardedMidTurnNarration = true;
+            return;
+          }
           assembled = "";
           hasStreamedText = false;
           pendingProgress = "";
@@ -6111,6 +6278,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let senderRead = false;
         // A role team with no role yet has no question to ask: a greeting or an unrelated question
         // gets a plain answer, never a card, until the recruiter's role is saved.
+        // Kruit's first question in a turn is checked once against opening a role instead.
+        let globalAskChecked = false;
+        let roleStartedInTurn = false;
+        const globalAskNeedsRoleCheck = () =>
+          Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
+          Boolean(recruitingBotKey(bot)) &&
+          !globalAskChecked &&
+          !roleStartedInTurn;
         const noRoleYet = () =>
           Boolean(thread.groupId) &&
           !thread.groupId?.startsWith("recruiting-global-") &&
@@ -6123,6 +6298,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // the role always has one; the model's own brief save then replaces it. The next-step card
         // waits for that save, so the pause never cuts it off.
         let briefSaving: Promise<unknown> | undefined;
+        // Role saves run in the background, so later calls may name a revision this run moved past.
+        const roleRevisions = ownRoleRevisions();
+        const roleSavesInFlight = new Set<Promise<unknown>>();
         // That save moves the role on a revision the model has not seen; its own brief save, which
         // replaces the answers-only brief, still names the revision it recorded the round on.
         let briefBump: { from: number; to: number } | undefined;
@@ -6132,6 +6310,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // New people-search agent runs this turn started before its round was recorded.
+        let agentRunsBeforeRound = 0;
+        // Quick people searches this turn ran itself (not the planned ones) before its round.
+        let quickSearchesBeforeRound = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -6256,6 +6438,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? ` · 1–${shown.length} / ${total}`
                 : "";
           const text = await recruitingRoundListText(deps.prisma, {
+            chinese: isChineseText(lastRecruiterText),
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
@@ -6327,6 +6510,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.posting = stream.posting
             .then(async () => {
               const text = await recruitingRoundListText(deps.prisma, {
+                chinese: isChineseText(lastRecruiterText),
                 threadId: run.threadId,
                 spaceId: run.spaceId,
                 roleId,
@@ -6383,7 +6567,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Text written after a bounced question replaces it instead of appending to it.
           hasStreamedText = false;
         };
-        const saveBriefAfterRound = async (roleId: string) => {
+        // The recruiter's answers to the intake cards, saved into the brief as they come: each
+        // answer is in the role at once, in the background, never waiting on the first ten.
+        const saveBriefFromAnswers = async (roleId: string) => {
           const quote = currentTurnMessage?.blocks.flatMap((block) =>
             block.kind === "text" && block.text.trim() ? [block.text] : [],
           )[0];
@@ -6395,7 +6581,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               revisions: { where: { revision: 1 }, select: { createdAt: true } },
             },
           });
-          if (!quote || !role || role.currentRevision?.brief) return;
+          type BriefItem = Record<string, unknown> & {
+            key?: unknown;
+            value?: unknown;
+            id?: unknown;
+          };
+          const existing = (role?.currentRevision?.brief ?? null) as
+            | (Record<string, unknown> & {
+                fields?: BriefItem[];
+                searchFilters?: BriefItem[];
+                confirmation?: unknown;
+              })
+            | null;
+          // A confirmed brief changes only through the agent's own save.
+          if (!quote || !role || existing?.confirmation) return;
           const messages = await deps.prisma.message.findMany({
             where: {
               threadId: thread.id,
@@ -6406,6 +6605,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { role: true, blocks: true },
           });
           const answers = intakeAnswers(messages);
+          const savedFields = existing?.fields ?? [];
+          const fresh = answers.filter(
+            ({ key, value }) =>
+              !savedFields.some((field) => field.key === key && field.value === value),
+          );
+          if (!fresh.length) return;
+          const answerFields = fresh.map(({ key, value }) => ({
+            key,
+            value,
+            origin: "user_instruction",
+            state: "known",
+            consequential: true,
+          }));
+          const { confirmation: _confirmation, ...kept } = existing ?? {};
           const saved = (await applyTool(
             "recruiting_role",
             {
@@ -6414,30 +6627,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               expectedRevision: role.revision,
               intent: { basis: "direct", quote },
               brief: {
-                fields: answers.map(({ key, value }) => ({
-                  key,
-                  value,
-                  origin: "user_instruction",
-                  state: "known",
-                  consequential: true,
-                })),
-                // The playbook's default tenure preference, shown so the recruiter can lift it. An
-                // inferred filter may only prefer, so it is worded as the people it prefers.
+                ...kept,
+                fields: [
+                  ...savedFields.filter((field) => !fresh.some(({ key }) => key === field.key)),
+                  ...answerFields,
+                ],
                 searchFilters: [
+                  ...(existing?.searchFilters ?? []).filter(
+                    (filter) => !String(filter.id ?? "").startsWith("recruiter-answer-"),
+                  ),
                   ...answerSearchFilters(answers),
-                  {
-                    id: "tenure",
-                    mode: "prefer",
-                    origin: "inferred",
-                    statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
-                  },
+                  // The playbook's default tenure preference, shown so the recruiter can lift it. An
+                  // inferred filter may only prefer, so it is worded as the people it prefers.
+                  ...((existing?.searchFilters ?? []).some((filter) => filter.id === "tenure")
+                    ? []
+                    : [
+                        {
+                          id: "tenure",
+                          mode: "prefer",
+                          origin: "inferred",
+                          statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
+                        },
+                      ]),
                 ],
               },
             },
             `${runId}:brief-after-round`,
           )) as { error?: unknown; workspace?: { role?: { revision?: unknown } } | null } | null;
           if (saved?.error)
-            getLogger().warn("brief not saved after the round", { error: saved.error });
+            getLogger().warn("brief not saved from answers", { error: saved.error });
           const to = saved?.workspace?.role?.revision;
           if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
@@ -6505,6 +6723,38 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         };
         /** The person's newest message since this run began that a different run answers. */
+        /** A question another turn already put to the recruiter here, still unanswered. */
+        const openQuestionElsewhere = async (): Promise<string | undefined> => {
+          let recent: Array<{
+            role: string;
+            botId: string | null;
+            runId: string | null;
+            blocks: unknown;
+          }> = [];
+          try {
+            recent = await deps.prisma.message.findMany({
+              where: { threadId: thread.id },
+              orderBy: { seq: "desc" },
+              take: 20,
+              select: { role: true, botId: true, runId: true, blocks: true },
+            });
+          } catch {
+            return undefined;
+          }
+          for (const message of recent ?? []) {
+            if (message.role === "user" && !message.botId) return undefined;
+            if (message.role === "user" || message.runId === runId) continue;
+            const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+            const open = blocks.find(
+              (block) =>
+                block.kind === "ask" &&
+                (!block.status || block.status === "pending") &&
+                !block.approvalEffectId,
+            );
+            if (open && open.kind === "ask") return open.text;
+          }
+          return undefined;
+        };
         const newerMessageAnsweredElsewhere = async () => {
           if (!run.createdAt) return undefined;
           let newer: { blocks: unknown } | null = null;
@@ -6849,6 +7099,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
+          // Each agent run takes most of a minute: after two that still leave the ten short, the
+          // recruiter decides whether to relax a requirement or search deeper, instead of the turn
+          // running one after another while they wait. Reading a started run's result is free.
+          // Quick searches are capped the same way. The first round counts from the start, before
+          // any picks are on screen: a role whose people are hard to find otherwise searches on
+          // for many minutes and shows nobody.
+          const newAgentRun = name.endsWith("agent_run") && !rawArgs.runId;
+          const ownQuickSearch =
+            name.endsWith("web_search_advanced_exa") &&
+            !executionId.startsWith(`${runId}:planned-search:`);
+          if (
+            (newAgentRun || ownQuickSearch) &&
+            (firstPicksShown || firstRoundPending) &&
+            run.trigger !== "recruiting_grade" &&
+            !(await roundRecordedThisRun())
+          ) {
+            const searched = newAgentRun
+              ? agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND &&
+                `${agentRunsBeforeRound} people-search agent runs`
+              : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
+                `${quickSearchesBeforeRound} people searches`;
+            if (searched)
+              return {
+                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+              };
+            if (newAgentRun) agentRunsBeforeRound++;
+            else quickSearchesBeforeRound++;
+          }
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
@@ -6944,6 +7222,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args.expectedRevision === briefBump.from
           )
             args = { ...args, expectedRevision: briefBump.to };
+          // A call naming a role revision waits briefly for this run's own role saves still
+          // running, then acts on the newest revision this run saved.
+          const revisionKey =
+            name === "recruiting_role" && args.operation === "update"
+              ? "expectedRevision"
+              : (name === "recruiting_research" || name === "recruiting_feedback") &&
+                  Object.hasOwn(args, "expectedRoleRevision")
+                ? "expectedRoleRevision"
+                : undefined;
+          if (revisionKey) {
+            // A role update never waits on role saves, which would include itself.
+            if (roleSavesInFlight.size && name !== "recruiting_role")
+              await withinDeadline(
+                Promise.all([...roleSavesInFlight]),
+                ROLE_SAVE_WAIT_MS,
+                () => undefined,
+              );
+            const roleId =
+              typeof args.roleId === "string" ? args.roleId : thread.activeRecruitingRoleId;
+            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey]);
+            if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
+          }
           // A brief save whose intent is missing or not copied from the recruiter's current
           // message acts on that message, so the save never fails on the quote.
           // A message the recruiter sent while this turn ran is the current one, so it is read now.
@@ -7139,6 +7439,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
               };
             const text = await recruitingRoundListText(deps.prisma, {
+              chinese: isChineseText(lastRecruiterText),
               threadId: run.threadId,
               spaceId: run.spaceId,
               roleId,
@@ -11139,7 +11440,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.
                   briefSaving ??= withinDeadline(
-                    saveBriefAfterRound(recorded.roleId).catch((error) =>
+                    saveBriefFromAnswers(recorded.roleId).catch((error) =>
                       getLogger().warn("brief not saved after the round", {
                         error: String(error),
                       }),
@@ -11148,6 +11449,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
+                    chinese: isChineseText(lastRecruiterText),
                     threadId: run.threadId,
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
@@ -11680,12 +11982,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   mode: args.mode === "any" ? "any" : "all",
                   timeoutSeconds,
                   signal: context.signal,
-                  userMessageWaiting: () =>
-                    hasUnclaimedSteering(deps.prisma, {
+                  // A teammate's or Kruit's new request queues its own turn behind this one.
+                  userMessageWaiting: async () =>
+                    (await hasUnclaimedSteering(deps.prisma, {
                       threadId: run.threadId,
                       botId: bot.id,
                       runId: run.id,
-                    }),
+                    })) ||
+                    Boolean(
+                      await deps.prisma.run.findFirst({
+                        where: {
+                          threadId: run.threadId,
+                          botId: bot.id,
+                          status: "queued",
+                          trigger: "bot_message",
+                          id: { not: run.id },
+                        },
+                        select: { id: true },
+                      }),
+                    ),
                 }),
             );
           }
@@ -12589,6 +12904,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const text = clampUserProgressMessage(rawMessage);
             if (!text) return finish({ error: "message is required" });
+            // A handoff brief is for the teammate it is handed to, never the recruiter.
+            if (hideVendors && isAgentBrief(text))
+              return finish({
+                ok: true,
+                note: "Not shown: a handoff brief goes in the handoff's own message, never to the recruiter.",
+              });
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
@@ -12656,7 +12977,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
@@ -12764,6 +13085,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               if (!sent.ok) return finish({ error: sent.error });
             }
+            roleStartedInTurn = true;
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
@@ -13332,7 +13654,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
               }
               const failure = toolResultError(result);
-              if (failure === undefined && isSenderRead(name, rawArgs)) senderRead = true;
+              if (failure === undefined && isSenderRead(name, rawArgs)) {
+                senderRead = true;
+                if (needsSenderNotice(result)) void notifyMissingSender(deps, run);
+              }
               turnReport.settle(executionId, {
                 ok: failure === undefined,
                 result,
@@ -13387,6 +13712,55 @@ export function createRunExecutor(deps: ExecutorDeps) {
             void settled.then(() => savesInFlight.delete(settled));
             return save.reply;
           }
+          if (name === "recruiting_role" && rawArgs.operation !== "read") {
+            const noteRevision = (result: unknown) => {
+              const role = (
+                result as { workspace?: { role?: { id?: unknown; revision?: unknown } } }
+              )?.workspace?.role;
+              if (typeof role?.id === "string" && typeof role.revision === "number")
+                roleRevisions.saved(role.id, role.revision);
+            };
+            void applied.then(noteRevision, () => undefined);
+            if (savesRoleInBackground(name, rawArgs) && !executionId.includes(":role-retry-")) {
+              const save = saveInBackground({
+                first: applied,
+                // A retry acts on the role's current revision: the save only replaces what it names.
+                retry: async (attempt) => {
+                  const roleId =
+                    typeof rawArgs.roleId === "string"
+                      ? rawArgs.roleId
+                      : thread.activeRecruitingRoleId;
+                  const role = roleId
+                    ? await deps.prisma.recruitingRole.findUnique({
+                        where: { id: roleId },
+                        select: { revision: true },
+                      })
+                    : null;
+                  const retried = await applyTool(
+                    name,
+                    role ? { ...rawArgs, expectedRevision: role.revision } : rawArgs,
+                    `${executionId}:role-retry-${attempt}`,
+                  );
+                  return retried;
+                },
+                failed: (result) => toolResultError(result) !== undefined,
+                inputError: (result) => !transientSaveError(toolResultError(result)),
+                onGiveUp: (result) =>
+                  getLogger().warn("recruiting.role.not_saved", {
+                    runId,
+                    error: redactSecrets(String(toolResultError(result)), runSecrets).slice(0, 300),
+                  }),
+              });
+              const settled = save.settled.catch(() => undefined);
+              savesInFlight.add(settled);
+              roleSavesInFlight.add(settled);
+              void settled.then(() => {
+                savesInFlight.delete(settled);
+                roleSavesInFlight.delete(settled);
+              });
+              return save.reply;
+            }
+          }
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
           if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
@@ -13394,6 +13768,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void settled.then(() => savesInFlight.delete(settled));
           return applied;
         };
+
+        // Each intake answer goes into the role's brief as the turn starts, in the background.
+        if (thread.activeRecruitingRoleId && !runsBesidePerson(run.trigger)) {
+          const roleId = thread.activeRecruitingRoleId;
+          briefSaving = withinDeadline(
+            saveBriefFromAnswers(roleId).catch((error) =>
+              getLogger().warn("brief not saved from answers", { error: String(error) }),
+            ),
+            SAVE_WAIT_MS,
+            () => getLogger().warn("brief save from answers still running", { runId }),
+          );
+        }
 
         const pluginLine =
           connectedPlugins.length > 0
@@ -13581,6 +13967,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
+          // Must-haves the recruiter's message states are saved with the role at once, at
+          // priority hard, citing their message.
+          const criteria = statedMustHaveCriteria(currentMessageSourceRef(currentTurnMessage));
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -13589,7 +13978,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title,
                 brief: null,
                 sourceRefs,
-                criteria: [],
+                criteria,
                 preferences: [],
                 definitionQuestions: [],
                 intent: { basis: "direct", quote: quote.trim() },
@@ -14010,7 +14399,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .join(" ")
               : "",
           );
-        const lastRecruiterText = recruiterLanguageText(recruiterTexts);
+        // A message steered into the running turn moves it on to the language that message is in.
+        let lastRecruiterText = recruiterLanguageText(recruiterTexts);
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
@@ -14098,10 +14488,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ];
         let replyOutcome: string | undefined;
         const historicalContext: AgentRunRequest["history"] = [];
+        // Parts that change on every turn go after the history, so the history stays a prefix the
+        // provider's prompt cache can reuse from the previous turn.
+        const turnHistory: AgentRunRequest["history"] = [];
         // ponytail: complete task state preserves private choice values and invoked skills.
         // It duplicates linear Q/A history; use structured private input state if that budget becomes limiting.
         if (nativeSources?.currentAnswer)
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: `Platform task state (data):\n${basePrompt}`,
             requiredForRun: true,
@@ -14115,8 +14508,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           });
         }
+        // Recall follows each new message, so it changes on most turns.
         if (recalledMemory) {
-          historicalContext.push({
+          turnHistory.push({
             role: "user",
             content: redactSecrets(recalledMemory, runSecrets),
           });
@@ -14174,6 +14568,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...(routinePriorRun ? [routinePriorRun] : []),
           ...historicalContext,
           ...historyWithImages,
+          ...turnHistory,
           ...(turnContext
             ? [{ role: "user" as const, content: turnContext, requiredForRun: true as const }]
             : []),
@@ -14378,11 +14773,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : taskPrompt;
         // The chat's effort mode applies to the recruiter's own turns. Only operator
         // accounts can pick one; every other turn runs fast.
+        // A model or thinking level set in the bot's own settings is used as set.
+        const botChosen = Boolean(bot.modelProvider && bot.modelId) || Boolean(bot.thinkingLevel);
         const effortMode = resolveEffortMode(
           thread.effortMode,
           run.trigger === "user" &&
             Boolean(thread.effortMode) &&
             (await seesOperatorSpend(deps.prisma, run.userId).catch(() => false)),
+          botChosen,
         );
         // Light turns run on the fast model; the configured model becomes the first backup.
         let turnModel: ReturnType<typeof chooseTurnModel> = scripted
@@ -14408,6 +14806,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (currentTurnImages?.length ?? 0) > 0,
                 pendingToolLoop:
                   Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+                botChosen,
                 // A role team whose role is not saved yet is still in intake: its questions
                 // are what the recruiter waits on, so they skip reasoning too.
                 recruitingIntake:
@@ -14800,8 +15199,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
+                    if (globalAskNeedsRoleCheck()) {
+                      globalAskChecked = true;
+                      return { instead: globalAskBeforeRole(recruiterTexts[0] ?? "") };
+                    }
                     if (!senderRead && asksSenderCompanyName(question))
                       return { instead: SENDER_READ_FIRST };
+                    // One question at a time: a card already waiting here is answered first.
+                    const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
+                    if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
@@ -14933,6 +15339,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           recruitingSourceMessageId = humanSteering.messageId;
                           replyDiscardActive = false;
                         }
+                        // Replies follow the language of the recruiter's newest message, also when
+                        // it arrives while the turn runs (an English JD, then 「远程也可以」).
+                        const steeringLanguageNote = (text: string) => {
+                          if (!hideVendors) return undefined;
+                          if (isChineseText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_CHINESE_NOTE;
+                          }
+                          if (isEnglishText(text)) {
+                            lastRecruiterText = text;
+                            return REPLY_IN_ENGLISH_NOTE;
+                          }
+                          return undefined;
+                        };
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -14992,6 +15412,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
+                                item.earlier
+                                  ? undefined
+                                  : steeringQuickReplies.has(item.messageId)
+                                    ? steeringQuickReplySent(
+                                        steeringQuickReplies.get(item.messageId)!,
+                                      )
+                                    : item === freshHumanSteering && replyToSteering?.(item)
+                                      ? STEERING_QUICK_REPLY_SENDING
+                                      : undefined,
+                                item === freshHumanSteering && !item.internal
+                                  ? steeringLanguageNote(item.text)
+                                  : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
@@ -15360,7 +15792,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // Promote streamed narration into a durable, replyable chat message before
               // tools continue, so long turns do not look stalled and stay replyable.
               if (event.name !== "message_user") {
-                await publishMidTurnNarration();
+                await publishMidTurnNarration(event.name);
               }
               const toolStartedAt = new Date().toISOString();
               const toolActivity = workActivityForTool(event.name, event.args);
@@ -15596,10 +16028,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
           flushPendingTools();
           // The server's no-model completion uses the same silent token as quiet model replies.
+          // A recruiting agent that answers only NO_RESPONSE (a report-back with nothing to add)
+          // stays silent: the recruiter never sees the token.
+          const recruitingSilent = hideVendors && isExactNoResponse(assembled);
           let silentReply =
-            quietRun || probeFoundNothing
+            quietRun || probeFoundNothing || recruitingSilent
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
+          if (hideVendors)
+            silentReply = withoutAgentBrief(silentReply.assembled, silentReply.blocks);
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -15620,7 +16057,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // NO_RESPONSE finals are treated as empty before this fallback runs.
             completionBlocks = completionMessageSegments(completionBlocks, {
               allowSilentEmpty:
-                allowSilentEmptyRun || probeFoundNothing || publishedMidTurnUserMessage,
+                allowSilentEmptyRun ||
+                probeFoundNothing ||
+                publishedMidTurnUserMessage ||
+                recruitingSilent,
               emptyResponseText,
               suppressOutput: handedOff || isBackgroundRunTrigger(run.trigger),
               skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
@@ -16222,6 +16662,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } finally {
         detachShutdown?.();
         clearInterval(heartbeat);
+        clearInterval(steeringWatch);
         silenceWatch.stop();
         if (!retainComputerLease) {
           if (screenRelease) {
