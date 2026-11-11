@@ -315,7 +315,7 @@ jobs:
           DATABASE_URL: postgres://rakazo:rakazo@127.0.0.1:5433/rakazo
       - run: pnpm --filter @rakazo/web exec playwright install chromium
       - name: Check isolated release regression
-        run: node --test infra/acceptance/global-recruiting.test.mjs
+        run: node --test infra/acceptance/global-recruiting.test.mjs infra/acceptance/real-user-checks.test.mjs
       - name: Capture global and role-filtered pages
         env:
           WEB_PORT: 5199
