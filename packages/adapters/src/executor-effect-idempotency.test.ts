@@ -6776,3 +6776,56 @@ describe("approval cards on a new user message", () => {
     expect(history).not.toContain("Approval card waiting for the user");
   });
 });
+
+describe("people searches before the first round", () => {
+  it.each([
+    ["agent_run", 2, "2 people-search agent runs already returned"],
+    ["web_search_advanced_exa", 12, "12 people searches already returned"],
+  ] as const)(
+    "asks the recruiter after too many %s calls even before any picks are shown",
+    async (toolName, allowed, refusal) => {
+      const f = fixture(`run-first-round-${toolName}`);
+      f.thread.activeRecruitingRoleId = "role-1";
+      Object.assign(f.prisma, {
+        recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+      });
+      Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+      const tool = (name: string) =>
+        ({
+          name: `mcp__people-search__${name}`,
+          description: name,
+          inputSchema: { type: "object", properties: {} },
+          readOnly: true,
+          route: { connectorId: "people-search", toolName: name },
+        }) as never;
+      f.connector.discoverTools.mockResolvedValue([
+        tool("web_search_advanced_exa"),
+        tool("agent_run"),
+      ]);
+      f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+        {
+          effect: "always_allow",
+          matchKind: "tool",
+          matchValue: `mcp__people-search__${toolName}`,
+        },
+      ]);
+      f.connector.execute.mockImplementation(async function* () {
+        yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
+      });
+      f.setCalls(
+        Array.from({ length: allowed + 1 }, (_, n) => ({
+          name: `mcp__people-search__${toolName}`,
+          args: { query: `Korean-speaking quality engineers near Commerce, GA, set ${n}` },
+          executionId: `search-${n}`,
+        })),
+      );
+
+      await f.run();
+
+      expect(f.results.slice(0, allowed)).not.toContainEqual(
+        expect.objectContaining({ error: expect.stringContaining("already returned") }),
+      );
+      expect(f.results[allowed]).toEqual({ error: expect.stringContaining(refusal) });
+    },
+  );
+});
