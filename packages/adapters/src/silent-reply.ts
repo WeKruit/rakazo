@@ -118,6 +118,24 @@ function withoutStraySentinelsAtEdges(
 const BRIEF_LINE =
   /(?:^|[.。;；!！?？]\s*)\s*(?:\*\*)?(Goal|Where|Done when|Deliverable|Context|Don't|Do not)(?:\*\*)?\s*[:：]/gim;
 
+// The server's automatic-continuation nudge (turn-end-guard.ts builds it from these phrases).
+export const NEXT_STEP_LEAD = "Continue with the next step:";
+export const UNDONE_PROMISE_LEAD = "Your last message ended with";
+export const AUTOMATIC_CONTINUATION =
+  "This is an automatic continuation, not the recruiter's words.";
+const NUDGE = new RegExp(
+  [NEXT_STEP_LEAD, `^\\s*${UNDONE_PROMISE_LEAD}`, AUTOMATIC_CONTINUATION]
+    .map((phrase) => phrase.replace(/[.?]/g, "\\$&"))
+    .join("|"),
+  "m",
+);
+
+/** The text up to where it echoes the server's continuation nudge, which is never for the recruiter. */
+export function withoutNudge(text: string): string {
+  const at = text.search(NUDGE);
+  return at < 0 ? text : text.slice(0, at).replace(/[\s(（]+$/, "");
+}
+
 /**
  * A handoff brief ("Goal: … Done when: … Context: …") written as the reply. It is for the
  * teammate, never the recruiter; Kruit's reply after a handoff is one line naming the team.
@@ -131,15 +149,21 @@ export function isAgentBrief(text: string): boolean {
   return labels.has("goal") && labels.size >= 2;
 }
 
-/** The reply without a handoff brief the model wrote into it; other text stays. */
+/** The reply without a handoff brief or echoed nudge the model wrote into it; other text stays. */
 export function withoutAgentBrief(
   assembled: string,
   blocks: MessageBlock[],
 ): { assembled: string; blocks: MessageBlock[] } {
-  if (!isAgentBrief(assembled) && !blocks.some((b) => b.kind === "text" && isAgentBrief(b.text)))
+  const internal = (text: string) => isAgentBrief(text) || withoutNudge(text) !== text;
+  if (!internal(assembled) && !blocks.some((b) => b.kind === "text" && internal(b.text)))
     return { assembled, blocks };
-  const kept = blocks.filter((block) => block.kind !== "text" || !isAgentBrief(block.text));
-  return { assembled: isAgentBrief(assembled) ? joinedText(kept) : assembled, blocks: kept };
+  const kept = blocks.flatMap((block): MessageBlock[] => {
+    if (block.kind !== "text") return [block];
+    const text = withoutNudge(block.text);
+    if (!text.trim() || isAgentBrief(text)) return [];
+    return [text === block.text ? block : { ...block, text }];
+  });
+  return { assembled: internal(assembled) ? joinedText(kept) : assembled, blocks: kept };
 }
 
 /**
