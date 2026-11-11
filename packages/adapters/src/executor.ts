@@ -12652,6 +12652,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const text = clampUserProgressMessage(rawMessage);
             if (!text) return finish({ error: "message is required" });
+            // A handoff brief is for the teammate it is handed to, never the recruiter.
+            if (hideVendors && isAgentBrief(text))
+              return finish({
+                ok: true,
+                note: "Not shown: a handoff brief goes in the handoff's own message, never to the recruiter.",
+              });
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
