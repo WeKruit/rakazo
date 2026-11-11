@@ -160,10 +160,11 @@ async function run(name, script, scriptArgs) {
   return new Promise((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
 }
 
-// Handoff text between agents shows only in the developer view.
+// Handoff text and messages between agents show only in the developer view.
+const AGENT_ONLY = new Set(["handoff", "bot_message_sent", "bot_message_received"]);
 const botText = (message) =>
   (message.blocks ?? [])
-    .filter((block) => block.kind !== "handoff")
+    .filter((block) => !AGENT_ONLY.has(block.kind))
     .map((block) => block.text ?? block.question ?? "")
     .filter(Boolean)
     .join("\n");
@@ -1522,11 +1523,13 @@ try {
     const recall = await say(fixture, "我让你怎么称呼我的团队？只回答名字。", {
       fixture: true,
       limitMs: 3 * 60_000,
-      until: (replies) => replies.some((message) => botText(message).includes(team)),
+      until: (replies) => recruiterSees(replies).some((message) => botText(message).includes(team)),
     });
-    if (!recall.replies.some((message) => botText(message).includes(team)))
+    // The server's own automatic continuation is an internal row the recruiter never sees.
+    const recalled = recruiterSees(recall.replies);
+    if (!recalled.some((message) => botText(message).includes(team)))
       failures.push(
-        `a role chat did not recall the team name: "${recall.replies.map(botText).join(" ").slice(0, 160)}"`,
+        `a role chat did not recall the team name: "${recalled.map(botText).join(" ").slice(0, 160)}"`,
       );
     // The test preference leaves memory again, so later runs and recruiters never see it.
     for (const doc of await memoryDocs())

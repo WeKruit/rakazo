@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { cleanQuickReply } from "./quick-reply.js";
 import {
   beforeCardQuestion,
   isAgentBrief,
   personWrote,
   waitsOnCard,
   withoutAgentBrief,
+  withoutNudge,
 } from "./silent-reply.js";
+import { continuationText } from "./turn-end-guard.js";
 
 // Staging eval 11-11: Kruit posted its handoff brief to the recruiter, twice.
 const BRIEF = `Goal: Draft and send an email to Alex Chen asking whether he is available next week.
@@ -93,5 +96,41 @@ describe("one question at a time beside a teammate's card", () => {
       false,
     );
     expect(personWrote([{ kind: "text", text: "对了，远程也可以" }])).toBe(true);
+  });
+});
+
+describe("the server's continuation nudge in a reply", () => {
+  const nudge = continuationText({
+    step: {
+      label: "Review the first 10 people",
+      prompt: "Read the recruiter's latest message first.",
+    },
+  });
+
+  it("keeps the answer and drops the nudge the model echoed after it", () => {
+    const answer = "Aurora-0t1c";
+    expect(
+      withoutAgentBrief(`${answer} ${nudge}`, [
+        { kind: "text", text: "我正在确认你给团队定的称呼。" },
+        { kind: "text", text: `${answer} ${nudge}` },
+      ]),
+    ).toEqual({
+      assembled: `我正在确认你给团队定的称呼。${answer}`,
+      blocks: [
+        { kind: "text", text: "我正在确认你给团队定的称呼。" },
+        { kind: "text", text: answer },
+      ],
+    });
+  });
+
+  it("drops a reply that is only the nudge, in every form the server writes", () => {
+    for (const text of [nudge, continuationText({ promise: "我马上找人。" }), continuationText({})])
+      expect(withoutAgentBrief(text, [{ kind: "text", text }]).blocks).toEqual([]);
+  });
+
+  it("leaves ordinary words about next steps alone", () => {
+    const line = "Next step: review the first 10 people with you.";
+    expect(withoutNudge(line)).toBe(line);
+    expect(cleanQuickReply(`${nudge}`)).toBeNull();
   });
 });

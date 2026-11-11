@@ -717,6 +717,7 @@ import {
   stripNoResponseReply,
   waitsOnCard,
   withoutAgentBrief,
+  withoutNudge,
 } from "./silent-reply.js";
 import {
   listAgentSkillRecords,
@@ -6149,7 +6150,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const written = visible(redactSecrets(extracted.text, runSecrets)).trim();
+          // The server's continuation nudge echoed back is never for the recruiter.
+          const written = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           // The question card that follows asks the question; the text keeps only what leads up to it.
           const narration =
             hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
@@ -12910,8 +12912,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (name === "message_user") {
             if (movedElsewhere) return finish({ error: REPORT_IN_FINAL_REPLY });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
-            const text = clampUserProgressMessage(rawMessage);
-            if (!text) return finish({ error: "message is required" });
+            const text = clampUserProgressMessage(withoutNudge(rawMessage));
+            if (!rawMessage.trim()) return finish({ error: "message is required" });
+            if (!text)
+              return finish({
+                ok: true,
+                note: "Not shown: the automatic continuation is for you, never the recruiter.",
+              });
             // A handoff brief is for the teammate it is handed to, never the recruiter.
             if (hideVendors && isAgentBrief(text))
               return finish({
