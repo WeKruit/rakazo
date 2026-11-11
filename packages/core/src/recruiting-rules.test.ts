@@ -1357,6 +1357,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "A saved 'no agency recruiters' preference was ignored by the next new role's searches.",
   },
   {
+    rule: "a company left out for later carries to new roles",
+    in: EVERY_BOT,
+    phrase: "not just this role, also goes in user memory",
+    why: "A recruiter said to leave out people now at one company from now on; it was saved on that role only, and the next role's ten included two of them.",
+  },
+  {
     rule: "one role's requirement stays on that role",
     in: EVERY_BOT,
     phrase: "one role's requirement goes on that role",
