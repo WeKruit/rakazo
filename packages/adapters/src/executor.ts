@@ -1378,6 +1378,9 @@ export const STEERING_ACK =
 /** How often a running turn looks for messages it has not read yet, to answer them at once. */
 export const STEERING_PEEK_MS = 2_500;
 /** Model-facing: the short reply already sent for a message that arrived mid-run. */
+/** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
+export const STEERING_QUICK_REPLY_SENDING =
+  "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again; say only what it changes.";
 export const steeringQuickReplySent = (line: string) =>
   `You already sent the recruiter this short reply to it: "${line}". Do not repeat it or acknowledge the message again; say only what it changes.`;
 
@@ -4638,6 +4641,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
       let steeringWatch: ReturnType<typeof setInterval> | undefined;
       // The short reply already sent for a message that arrived mid-run, by message id.
       const steeringQuickReplies = new Map<string, string>();
+      // Starts the short reply for a message that arrived mid-run, once per message.
+      let replyToSteering:
+        | ((item: { id: string; messageId: string; blocks: MessageBlock[] }) => boolean)
+        | undefined;
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
       const silenceWatch = createSilenceWatch({
@@ -5509,6 +5516,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               userText,
               runId,
               ...(key ? { key } : {}),
+              ...(hideVendors ? { recruiting: true } : {}),
               spaceId: run.spaceId,
               userId: run.userId,
               botId: bot.id,
@@ -5565,44 +5573,39 @@ export function createRunExecutor(deps: ExecutorDeps) {
               getLogger().warn("quick reply failed", { runId, reason: String(error) });
             });
         // A message sent while the run works waits for the current step to end, which can be a
-        // long search. It gets its own short reply now; the run is told what that reply said.
+        // long search. It gets its own short reply now, whether the run reads it first or the
+        // watch below finds it unread; the run is told not to acknowledge it again.
         if (quickRepliesOn) {
-          const looked = new Set<string>();
+          const started = new Set<string>();
+          replyToSteering = (item) => {
+            if (started.has(item.messageId)) return true;
+            const human =
+              item.blocks.length > 0 &&
+              item.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
+            const text = human ? blocksText(item.blocks) : "";
+            if (!text.trim()) return false;
+            started.add(item.messageId);
+            void writeQuickReply(text, item.id)
+              .then(async (line) => {
+                if (!line) return;
+                await publishMessage(deps, run, "bot", [
+                  { kind: "text", text: redactSecrets(line, runSecrets) },
+                ]);
+                steeringQuickReplies.set(item.messageId, line);
+                getLogger().info("run.steering_quick_reply", { runId });
+              })
+              .catch((error) => {
+                getLogger().warn("steering quick reply failed", { runId, reason: String(error) });
+              });
+            return true;
+          };
           let peeking = false;
           steeringWatch = setInterval(() => {
             if (peeking) return;
             peeking = true;
             void unreadSteering(deps.prisma, { threadId: thread.id, botId: bot.id, runId })
               .then((rows) => {
-                for (const row of rows) {
-                  if (looked.has(row.id)) continue;
-                  looked.add(row.id);
-                  const human =
-                    row.blocks.length > 0 &&
-                    row.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
-                  const text = human ? blocksText(row.blocks) : "";
-                  if (!text.trim()) continue;
-                  void writeQuickReply(text, row.id)
-                    .then(async (line) => {
-                      if (!line) return;
-                      // Already read by the run, which answers it itself.
-                      const unread = await deps.prisma.steeringMessage.count({
-                        where: { id: row.id, claimedAt: null },
-                      });
-                      if (!unread) return;
-                      await publishMessage(deps, run, "bot", [
-                        { kind: "text", text: redactSecrets(line, runSecrets) },
-                      ]);
-                      steeringQuickReplies.set(row.messageId, line);
-                      getLogger().info("run.steering_quick_reply", { runId });
-                    })
-                    .catch((error) => {
-                      getLogger().warn("steering quick reply failed", {
-                        runId,
-                        reason: String(error),
-                      });
-                    });
-                }
+                for (const row of rows) replyToSteering?.(row);
               })
               .catch(() => undefined)
               .finally(() => {
@@ -15312,11 +15315,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                   : item === freshHumanSteering
                                     ? STEERING_ACK
                                     : undefined,
-                                !item.earlier && steeringQuickReplies.has(item.messageId)
-                                  ? steeringQuickReplySent(
-                                      steeringQuickReplies.get(item.messageId)!,
-                                    )
-                                  : undefined,
+                                item.earlier
+                                  ? undefined
+                                  : steeringQuickReplies.has(item.messageId)
+                                    ? steeringQuickReplySent(
+                                        steeringQuickReplies.get(item.messageId)!,
+                                      )
+                                    : item === freshHumanSteering && replyToSteering?.(item)
+                                      ? STEERING_QUICK_REPLY_SENDING
+                                      : undefined,
                                 item === freshHumanSteering
                                   ? steeringLanguageNote(item.text)
                                   : undefined,
