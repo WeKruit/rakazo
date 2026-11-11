@@ -22,7 +22,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -84,12 +84,6 @@ function client() {
   return { auth, rpc };
 }
 
-const botText = (message) =>
-  (message.blocks ?? [])
-    .filter((block) => block.kind !== "handoff")
-    .map((block) => block.text ?? block.question ?? "")
-    .filter(Boolean)
-    .join("\n");
 const openCards = (message) =>
   (message.blocks ?? []).filter(
     (block) => block.kind === "ask" && (!block.status || block.status === "pending"),
