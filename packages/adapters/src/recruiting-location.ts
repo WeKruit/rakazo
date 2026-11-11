@@ -118,7 +118,12 @@ export function outsideSearchArea(
   if (!place && far.length > points.length * 0.4) return new Set();
   return new Set([
     ...far.map(([key]) => key),
-    ...[...locations].filter(([, location]) => isRegionOnlyLocation(location)).map(([key]) => key),
+    ...[...locations]
+      .filter(
+        ([, location]) =>
+          isRegionOnlyLocation(location) || Boolean(place && location && isAbroad(location)),
+      )
+      .map(([key]) => key),
   ]);
 }
 
@@ -162,7 +167,16 @@ export function namedPlace(texts: readonly string[]): NamedPlace | undefined {
 /** Whether a profile location is beyond commuting distance of the named place. */
 export function beyondCommute(location: string, place: NamedPlace): boolean {
   const point = locate(location);
-  return Boolean(point && miles(point, place.point) > COMMUTE_MILES);
+  return point ? miles(point, place.point) > COMMUTE_MILES : isAbroad(location);
+}
+
+/** Profile locations outside the US, which the US place list cannot place. */
+const ABROAD =
+  /\b(canada|british columbia|ontario|quebec|alberta|toronto|vancouver|burnaby|montreal|ottawa|calgary|edmonton|mississauga|waterloo|kitchener|mexico|singapore|china|hong kong|taiwan|japan|korea|india|vietnam|malaysia|philippines|thailand|australia|united kingdom|england|ireland|germany|france|netherlands|spain|italy|brazil|united arab emirates|dubai)\b/i;
+
+/** Whether a profile location is outside the US. */
+export function isAbroad(location: string): boolean {
+  return ABROAD.test(location) && !/\bunited states\b/i.test(location);
 }
 
 const LOCAL_ROLE =
