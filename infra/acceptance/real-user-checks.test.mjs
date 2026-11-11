@@ -158,3 +158,22 @@ test("a connect card is read by its reason, not the untranslated title", () => {
     ),
   );
 });
+
+test("a Chinese question with an English role title is still Chinese", () => {
+  const failures = conversationChecks([
+    user("继续吧"),
+    bot("这份 Senior Data Engineer 职位主要面向哪个地点和工作方式？"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
+test("a blocker that says what to send next is not a dead end", () => {
+  assert.equal(
+    deadEnd(
+      bot(
+        "我现在没法直接发出：这封邮件是首次联系，缺少可关联的岗位信息。请发我该岗位的职位描述或链接；有了岗位信息，我就能继续准备邮件。",
+      ),
+    ),
+    false,
+  );
+});

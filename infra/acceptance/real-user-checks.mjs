@@ -17,19 +17,21 @@ const DECLINE =
 // The work is blocked: the reply must then leave a step the recruiter can take.
 const BLOCKED =
   /无法|不能|没有可用|尚无|还没有|暂时不|没法|\b(?:can['’]t|cannot|unable|isn['’]t (?:ready|set up)|not (?:ready|set up|available)|no (?:sending|sender))\b/i;
-// What counts as a next step in words: something to connect or open, a draft, an offer, or work
-// that carries on.
+// What counts as a next step in words: something to connect or open, a draft, an offer, work
+// that carries on, or what to send so it can.
 const NEXT_STEP =
-  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I)\b/i;
+  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 // The brief one agent writes for another, shown to the recruiter as if it were a reply.
 const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 
-// Addresses and links say nothing about the language a message is written in.
+// Addresses and links say nothing about the language a message is written in. A Chinese
+// sentence often carries English role titles and names ("这份 Senior Data Engineer 职位"), so
+// Chinese characters are weighed against English words, not letters.
 export const mostlyChinese = (raw) => {
   const text = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
-  return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]/g)?.length ?? 0);
+  return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]+/g)?.length ?? 0);
 };
 const quote = (text, match) =>
   `"…${text.slice(Math.max(0, match.index - 50), match.index + match[0].length + 50).replace(/\s+/g, " ")}…"`;
