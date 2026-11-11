@@ -4656,7 +4656,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const steeringQuickReplies = new Map<string, string>();
       // Starts the short reply for a message that arrived mid-run, once per message.
       let replyToSteering:
-        | ((item: { id: string; messageId: string; blocks: MessageBlock[] }) => boolean)
+        | ((item: {
+            id: string;
+            messageId: string;
+            blocks: MessageBlock[];
+            internal?: true;
+          }) => boolean)
         | undefined;
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
@@ -5623,6 +5628,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const started = new Set<string>();
           replyToSteering = (item) => {
             if (started.has(item.messageId)) return true;
+            // A server continuation is not the person writing: it never gets a reply of its own.
+            if (item.internal) return false;
             const human =
               item.blocks.length > 0 &&
               item.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
@@ -15414,7 +15421,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                     : item === freshHumanSteering && replyToSteering?.(item)
                                       ? STEERING_QUICK_REPLY_SENDING
                                       : undefined,
-                                item === freshHumanSteering
+                                item === freshHumanSteering && !item.internal
                                   ? steeringLanguageNote(item.text)
                                   : undefined,
                               ]
