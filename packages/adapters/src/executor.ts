@@ -1375,6 +1375,8 @@ const PLANNED_SEARCHES_MISSING =
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** With this many new people from the planned searches, the first ten come from them. */
+/** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
+const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -6147,6 +6149,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // New people-search agent runs this turn started before its round was recorded.
+        let agentRunsBeforeRound = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -6864,6 +6868,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
+          // Each agent run takes most of a minute: after two that still leave the ten short, the
+          // recruiter decides whether to relax a requirement or search deeper, instead of the turn
+          // running one after another while they wait. Reading a started run's result is free.
+          if (
+            name.endsWith("agent_run") &&
+            !rawArgs.runId &&
+            firstPicksShown &&
+            run.trigger !== "recruiting_grade" &&
+            !(await roundRecordedThisRun())
+          ) {
+            if (agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND)
+              return {
+                error: `Not run: ${agentRunsBeforeRound} people-search agent runs already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+              };
+            agentRunsBeforeRound++;
+          }
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
           if (
