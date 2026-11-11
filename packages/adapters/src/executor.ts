@@ -11975,12 +11975,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   mode: args.mode === "any" ? "any" : "all",
                   timeoutSeconds,
                   signal: context.signal,
-                  userMessageWaiting: () =>
-                    hasUnclaimedSteering(deps.prisma, {
+                  // A teammate's or Kruit's new request queues its own turn behind this one.
+                  userMessageWaiting: async () =>
+                    (await hasUnclaimedSteering(deps.prisma, {
                       threadId: run.threadId,
                       botId: bot.id,
                       runId: run.id,
-                    }),
+                    })) ||
+                    Boolean(
+                      await deps.prisma.run.findFirst({
+                        where: {
+                          threadId: run.threadId,
+                          botId: bot.id,
+                          status: "queued",
+                          trigger: "bot_message",
+                          id: { not: run.id },
+                        },
+                        select: { id: true },
+                      }),
+                    ),
                 }),
             );
           }
