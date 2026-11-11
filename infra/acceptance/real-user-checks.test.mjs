@@ -295,3 +295,17 @@ test("quoting the recruiter's question mark is not a second question", () => {
     "你想问哪个岗位或哪件事？",
   ]);
 });
+
+test("a reply that is only a name the recruiter typed passes in any language", () => {
+  const chat = [
+    user("记住：以后所有候选人邮件都用英文写，署名 Jules Hou"),
+    bot("记住了。"),
+    user("我的候选人邮件署名是什么？"),
+  ];
+  assert(!conversationChecks([...chat, bot("Jules Hou.")]).some((f) => f.startsWith("language")));
+  assert(
+    conversationChecks([...chat, bot("Your signature is Jules Hou.")]).some((f) =>
+      f.startsWith("language"),
+    ),
+  );
+});
