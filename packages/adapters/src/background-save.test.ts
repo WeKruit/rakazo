@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FEEDBACK_SAVING,
   ownRoleRevisions,
+  preferenceAtCurrentRevision,
+  preferenceInputError,
+  revisionConflict,
   saveInBackground,
   savesFeedbackInBackground,
   savesRoleInBackground,
@@ -18,7 +21,8 @@ describe("savesFeedbackInBackground", () => {
     [{ target: "round", operation: "scope" }, true],
     [{ target: "round", operation: "approve" }, false],
     [{ target: "candidate", operation: "pass" }, false],
-    [{ target: "preference", operation: "add" }, false],
+    [{ target: "preference", operation: "add" }, true],
+    [{ target: "preference", operation: "revoke" }, true],
   ])("%o → %s", (args, expected) => {
     expect(savesFeedbackInBackground("recruiting_feedback", args)).toBe(expected);
   });
@@ -128,6 +132,11 @@ describe("role saves in the background", () => {
     expect(transientSaveError("Role revision conflict")).toBe(true);
     expect(transientSaveError("connection terminated unexpectedly")).toBe(true);
     expect(transientSaveError("brief.fields[0].key: Required")).toBe(false);
+    expect(
+      transientSaveError(
+        '[{"expected":"number","code":"invalid_type","path":["expectedRoleRevision"],"message":"Invalid input: expected number, received undefined"}]',
+      ),
+    ).toBe(false);
   });
 
   it("moves a revision this run saved on to the newest, and leaves others' revisions alone", () => {
@@ -142,5 +151,72 @@ describe("role saves in the background", () => {
     expect(revisions.current("role-1", 1)).toBe(1);
     expect(revisions.current("role-2", 2)).toBe(2);
     expect(revisions.current(undefined, 2)).toBe(2);
+  });
+});
+
+describe("preference retries", () => {
+  const conflict = {
+    error: "Memory changed since it was read. Read the latest version and save again.",
+    code: "CONFLICT",
+    currentRevision: 7,
+  };
+
+  it("retries a preference at the revision the conflict reported", async () => {
+    const args = { target: "preference", operation: "add", expectedRevision: 5, content: "x" };
+    const retry = vi.fn(async (_attempt: number, previous: unknown) =>
+      preferenceAtCurrentRevision(args, previous).expectedRevision === 7
+        ? { status: "saved" }
+        : conflict,
+    );
+    const save = saveInBackground({
+      first: Promise.resolve(conflict),
+      retry,
+      failed,
+      inputError: (result) => !revisionConflict(result) && failed(result),
+      onGiveUp: vi.fn(),
+      sleep: instant,
+    });
+    await expect(save.reply).resolves.toBe(FEEDBACK_SAVING);
+    await expect(save.settled).resolves.toEqual({ status: "saved" });
+    expect(retry).toHaveBeenCalledWith(1, conflict);
+  });
+
+  it("reads a conflict wrapped in details", () => {
+    expect(revisionConflict({ details: conflict })).toBe(true);
+    expect(
+      preferenceAtCurrentRevision(
+        { target: "preference", expectedRevision: 1 },
+        { details: conflict },
+      ).expectedRevision,
+    ).toBe(7);
+  });
+
+  it("leaves other feedback and other failures as they are", () => {
+    const round = { target: "round", operation: "scope" };
+    expect(preferenceAtCurrentRevision(round, conflict)).toBe(round);
+    expect(
+      revisionConflict({ error: "This is a role requirement, not a shared preference." }),
+    ).toBe(false);
+  });
+});
+
+describe("preferenceInputError", () => {
+  it("retries only a revision race or a passing outage", () => {
+    const race = { error: "Memory changed", code: "CONFLICT", currentRevision: 2 };
+    expect(preferenceInputError(race, race.error)).toBe(false);
+    expect(preferenceInputError({ error: "connection reset" }, "connection reset")).toBe(false);
+  });
+
+  it("hands any other conflict or refusal back to the agent", () => {
+    const other = { error: "Recruiting conflict", code: "CONFLICT" };
+    expect(revisionConflict(other)).toBe(false);
+    expect(preferenceInputError(other, other.error)).toBe(true);
+    expect(preferenceInputError({ error: "quote must match" }, "quote must match")).toBe(true);
+  });
+
+  it("hands a preference missing its revision back, though the refusal names the revision", () => {
+    const missing =
+      '[{"expected":"number","code":"invalid_type","path":["expectedRevision"],"message":"Invalid input: expected number, received undefined"}]';
+    expect(preferenceInputError({ error: missing }, missing)).toBe(true);
   });
 });
