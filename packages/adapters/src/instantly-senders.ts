@@ -60,13 +60,10 @@ export function asksSenderCompanyName(question: string): boolean {
 export const SENDER_READ_FIRST =
   "Not asked: call ensure_sender operation read first and do what it returns. Ask a company name only when it returns selfSetup true with no sender.";
 
-function noSelfSetup(supportEmail: string | null | undefined, ownEmail: boolean) {
+function noSelfSetup(ownEmail: boolean) {
   if (ownEmail)
     return "No product sending mailbox: this account sends from the recruiter's own connected email, one send_message per person, each on its own card. When send_message is not among your tools, tell the recruiter in one line, in their language, that connecting their email in Integrations lets them send from it. Never ask for a company name or propose an address; drafts and contact lookups still work.";
-  const contact = supportEmail
-    ? `that emailing ${supportEmail} turns it on`
-    : "that we can turn it on if they contact us";
-  return `No sending email: this account has none, and recruiters cannot set one up themselves. Tell the recruiter in one line, in their language, that this account cannot email candidates yet and ${contact}. Never ask for a company name or propose an address; drafts and contact lookups still work.`;
+  return "No sending email yet: we set this account's mailbox up ourselves and have just been notified that it is needed. Tell the recruiter once, in one line, in their language, that this account cannot email candidates yet and that we have been notified to turn it on; then keep drafting and finding contacts. Never give an email address, never tell them to contact anyone, and do not repeat this in later replies unless they ask. Never ask for a company name or propose an address.";
 }
 
 /** A recruiter asking to send from their own email account. */
@@ -527,7 +524,7 @@ export async function ensureSendingIdentity(
   await context.reauthorize?.();
   const settings = await prisma.deploymentSettings.findUnique({
     where: { id: "default" },
-    select: { sendingMailboxLimit: true, senderSelfSetup: true, supportEmail: true },
+    select: { sendingMailboxLimit: true, senderSelfSetup: true },
   });
   const limit = settings?.sendingMailboxLimit ?? 2;
   // Mailboxes are added for an account by us; a recruiter sets one up only where the deployment allows it.
@@ -586,13 +583,11 @@ export async function ensureSendingIdentity(
             next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.",
           }
         : {}),
+      // missingSender asks the executor to tell support once that this account needs a mailbox.
       ...(!selfSetup && !current.length && !pending.length
-        ? {
-            next: noSelfSetup(
-              settings?.supportEmail,
-              await ownMailboxSendingAllowed(prisma, context),
-            ),
-          }
+        ? (await ownMailboxSendingAllowed(prisma, context))
+          ? { next: noSelfSetup(true) }
+          : { next: noSelfSetup(false), missingSender: true }
         : {}),
     };
   }
@@ -633,9 +628,7 @@ export async function ensureSendingIdentity(
     };
   }
   if (!selfSetup && !(input.operation === "confirm" && input.mode === "attach"))
-    throw new Error(
-      noSelfSetup(settings?.supportEmail, await ownMailboxSendingAllowed(prisma, context)),
-    );
+    throw new Error(noSelfSetup(await ownMailboxSendingAllowed(prisma, context)));
   const accounts =
     input.operation === "confirm" && input.mode === "attach" ? [] : await orderedAccounts(rest);
   if (input.operation === "propose") {

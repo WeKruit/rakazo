@@ -642,8 +642,13 @@ it("never lets a recruiter set up or buy a sender unless the deployment allows s
   ).toMatchObject({
     senders: [],
     selfSetup: false,
+    missingSender: true,
     next: expect.stringContaining("cannot email candidates yet"),
   });
+  const read = (await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  })) as { next: string };
+  expect(read.next).not.toMatch(/@|contact us|emailing/);
   await expect(
     ensureSendingIdentity(f.prisma, f.rest, context, "source", {
       operation: "propose",

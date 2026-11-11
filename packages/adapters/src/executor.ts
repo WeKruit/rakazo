@@ -684,6 +684,7 @@ import {
   updateScratchpadItemFromTool,
 } from "./scratchpad-tools.js";
 import { inferScript } from "./scripted-runtime.js";
+import { needsSenderNotice, notifyMissingSender } from "./sender-missing-notice.js";
 import {
   isRunningShellCommand,
   observeShellCommand,
@@ -13332,7 +13333,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
               }
               const failure = toolResultError(result);
-              if (failure === undefined && isSenderRead(name, rawArgs)) senderRead = true;
+              if (failure === undefined && isSenderRead(name, rawArgs)) {
+                senderRead = true;
+                if (needsSenderNotice(result)) void notifyMissingSender(deps, run);
+              }
               turnReport.settle(executionId, {
                 ok: failure === undefined,
                 result,
