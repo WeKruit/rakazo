@@ -4,7 +4,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
-import { createRunExecutor, STEERING_PEEK_MS } from "./executor.js";
+import { createRunExecutor, STEERING_PEEK_MS, STEERING_QUICK_REPLY_SENDING } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
@@ -30,6 +30,7 @@ const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
 /** Run ids the runtime was called with, in the current test. */
 let runtimeRunIds: string[] = [];
+let claimedSteering: Array<{ text: string }> | undefined;
 const lastQuickReplyCalls = () => runtimeRunIds;
 let lastExecutorEvents:
   | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
@@ -109,6 +110,8 @@ async function runWithModel(
     recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
+    /** A message the run reads mid-turn, before the watch sees it unread. */
+    claimed?: { id: string; messageId: string; text: string };
     /** Messages sent while the run works that it has not read yet. */
     unreadSteering?: Array<{ id: string; messageId: string; blocks: MessageBlock[] }>;
   } = {},
@@ -134,6 +137,7 @@ async function runWithModel(
     request = next;
     runtimeRunIds.push(next.runId);
     if (next.runId === "run-1") await options.holdMain;
+    if (next.runId === "run-1" && options.claimed) claimedSteering = await next.claimSteering?.([]);
     if (switchModel) {
       const onModelChange = (
         next as AgentRunRequest & {
@@ -292,6 +296,18 @@ async function runWithModel(
   };
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
+    claimSteering: vi.fn(async () =>
+      options.claimed
+        ? [
+            {
+              id: options.claimed.id,
+              messageId: options.claimed.messageId,
+              text: options.claimed.text,
+              blocks: [{ kind: "text", text: options.claimed.text }],
+            },
+          ]
+        : [],
+    ),
     append: vi.fn(async () => undefined),
     publishTransient: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
@@ -482,6 +498,21 @@ describe("quick reply", () => {
           JSON.stringify([{ kind: "text", text: "Got it, remote works too." }]),
       ).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {
+    claimedSteering = undefined;
+    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Got it, remote works too.",
+      quickReplies: true,
+      claimed: { id: "steer-2", messageId: "message-10", text: "对了，远程也可以" },
+    });
+    await vi.waitFor(() =>
+      expect(
+        runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2"),
+      ).toBe(true),
+    );
+    expect(claimedSteering?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
   });
 
   it("skips runs that a person did not start", async () => {
