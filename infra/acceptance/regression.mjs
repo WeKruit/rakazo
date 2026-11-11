@@ -1480,7 +1480,11 @@ try {
     // Free scenarios only: the gate's --paid is for its own search cases, and the paid scenario
     // (a first-ten search) runs only when real-user.mjs is called with --paid directly.
     const code = await run("real-user", "real-user.mjs", ["--out", path.join(OUT, "real-user")]);
-    if (code !== 0)
+    if (code === 2)
+      failures.push(
+        "real-user: the test environment failed (server errors or refused sign-ins), not the product; rerun; see real-user.log",
+      );
+    else if (code !== 0)
       failures.push(`real-user scenarios did not pass (exit ${code}); see real-user.log`);
   });
 

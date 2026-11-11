@@ -21,7 +21,8 @@
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
 // times; the release gate plays each once, and a failed one once more before it blocks. Rows go to <out>/results.jsonl and, with --bench, are
 // appended to the shared benchmark folder for the scoreboard.
-// Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every scenario passes.
+// Node 20+, no dependencies. Prints no credentials. Exit code 0 when every scenario passes, 1 on a
+// product failure, 2 when only the test environment failed (server errors, refused sign-ins).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -52,17 +53,25 @@ const log = (text) =>
     `[${String(Math.round((Date.now() - started) / 1000)).padStart(5)}s] ${text}\n`,
   );
 
+// The test environment, not the product, failed: a server error, an overload or a dropped
+// connection. Reported apart from product failures, so it never reads as a bad reply.
+class InfraError extends Error {}
+const INFRA = [429, 500, 502, 503, 504];
+
 function client() {
   let cookie = "";
   const auth = async (email, password) => {
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    // Sign-ins share one limit with every other test on the environment: wait as long as the
+    // server asks, for up to about 15 minutes.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const response = await fetch(`${BASE}/api/auth/sign-in/email`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: ORIGIN },
         body: JSON.stringify({ email, password }),
-      });
-      if (response.status === 429) {
-        await sleep(60_000);
+      }).catch(() => null);
+      if (!response || INFRA.includes(response.status)) {
+        const after = Number(response?.headers.get("retry-after"));
+        await sleep(Math.min(after > 0 ? after * 1000 : 60_000, 180_000));
         continue;
       }
       if (!response.ok) throw new Error(`sign-in ${response.status}`);
@@ -71,21 +80,24 @@ function client() {
         .join("; ");
       return;
     }
-    throw new Error("sign-in rate limited");
+    throw new InfraError("sign-in still refused after about 15 minutes");
   };
   const rpc = async (route, json) => {
     const read = /\/(get|messages|list|page|roleSetup|backgroundTasks)$/.test(route);
     let response;
+    // Reads ride out a restart of the test environment (about two minutes); a write is sent once.
     for (let attempt = 0; ; attempt += 1) {
       response = await fetch(`${BASE}/rpc/${route}`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: ORIGIN, cookie },
         body: JSON.stringify({ json }),
-      });
-      if (!read || attempt >= 5 || ![500, 502, 503, 504].includes(response.status)) break;
-      await sleep(8_000);
+      }).catch(() => null);
+      if (!read || attempt >= 8 || (response && !INFRA.includes(response.status))) break;
+      await sleep(15_000);
     }
+    if (!response) throw new InfraError(`${route}: no response`);
     const body = await response.json().catch(() => ({}));
+    if (INFRA.includes(response.status)) throw new InfraError(`${route} ${response.status}`);
     if (!response.ok) throw new Error(`${route} ${response.status}`);
     return body.json;
   };
@@ -151,19 +163,21 @@ async function settle(rpc, { quietMs = 30_000, limitMs = 6 * 60_000, untilCard =
 
 /** What the recruiter saw in each chat, oldest first; the server records typed card answers. */
 /** Only this play's messages: a reused fixture account keeps earlier runs' history. */
+// A user-role row an agent wrote is a handoff, not the recruiter: it carries a bot id, or it is
+// the brief one agent writes for another ("Goal: … Done when: …").
+const handoff = (message) =>
+  message.role === "user" && (Boolean(message.botId) || AGENT_BRIEF.test(botText(message)));
 async function transcripts(rpc, since) {
   const chats = [];
   for (const group of await groupsOf(rpc)) {
     const messages = (await messagesOf(rpc, group.id))
       .filter(
         (message) =>
-          !message.internal &&
-          !(message.role === "user" && message.botId) &&
-          Date.parse(message.createdAt) >= since,
+          !message.internal && !handoff(message) && Date.parse(message.createdAt) >= since,
       )
       .map((message) => ({
         // A user-role row written by an agent is a handoff, not the recruiter.
-        role: message.role === "user" && !message.botId ? "user" : "bot",
+        role: message.role === "user" ? "user" : "bot",
         text: botText(message),
         card: (message.blocks ?? []).some((block) => block.kind === "ask"),
         at: message.createdAt,
@@ -493,8 +507,13 @@ async function worker(plays) {
     try {
       failures = await play(scenario, owner, sample);
     } catch (error) {
-      failures = [`error: ${error.message}`];
+      failures = [
+        error instanceof InfraError
+          ? `infrastructure: ${error.message}`
+          : `error: ${error.message}`,
+      ];
     }
+    const infra = failures.some((failure) => failure.startsWith("infrastructure:"));
     const row = {
       suite: "conversation",
       scenario: scenario.name,
@@ -516,6 +535,7 @@ async function worker(plays) {
         : {}),
       ...(scenario.known ? { known: scenario.known } : {}),
       ...(retry ? { retry: true } : {}),
+      ...(infra ? { infra: true } : {}),
     };
     rows.push(row);
     log(
@@ -561,9 +581,22 @@ const againOf = (row) =>
   rows.find(
     (item) => item.retry && item.scenario === row.scenario && item.sample === `${row.sample}-again`,
   );
+// A sample the environment broke on both plays says nothing about the product: it is reported
+// as an infrastructure failure (exit code 2), not a product one.
 const blocking = failed.filter(
-  (row) => !row.known && !row.retry && (row.paid || !againOf(row) || !againOf(row).pass),
+  (row) =>
+    !row.known &&
+    !row.retry &&
+    (row.paid || !againOf(row) || !againOf(row).pass) &&
+    !(row.infra && (!againOf(row) || againOf(row).infra)),
 );
+const broken = failed.filter(
+  (row) => !row.retry && row.infra && (!againOf(row) || againOf(row).infra),
+);
+for (const row of broken)
+  log(
+    `infrastructure failure, not a product result: ${row.scenario}#${row.sample} (${row.failures[0]})`,
+  );
 for (const row of failed.filter((item) => !item.known && !item.retry && againOf(item)?.pass))
   log(`failed once, passed when played again, not blocking: ${row.scenario}#${row.sample}`);
 log(`${rows.length - failed.length}/${rows.length} conversations pass`);
@@ -573,4 +606,4 @@ for (const row of failed.filter((item) => item.known))
 for (const name of new Set(rows.filter((row) => row.known && row.pass).map((row) => row.scenario)))
   if (!failed.some((row) => row.scenario === name))
     log(`known failure now passes: ${name}; remove its known mark`);
-process.exit(blocking.length ? 1 : 0);
+process.exit(blocking.length ? 1 : broken.length ? 2 : 0);
