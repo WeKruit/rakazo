@@ -387,7 +387,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "create_poll",
     description:
-      "Put a quick question or vote to the conversation without stopping your work. The card shows the options, a live count and a countdown; you keep working, and when it closes (at the deadline, or as soon as everyone it waits for has voted) you are woken in this conversation with the result. Use it for a preference you can proceed without, or to let the person and the other assistants here vote; use ask_user instead when you cannot continue without the answer. Ask in ordinary business language with two to six short options. To have teammates vote, set includeTeam and tell them about it with message_bot.",
+      "Put a quick question or vote to the conversation without stopping your work. The card shows the options, a live count and a countdown; you keep working, and when it closes (at the deadline, or as soon as everyone it waits for has voted) you are woken in this conversation with the result. Use it for a preference you can proceed without, or to let the person and the other assistants here vote; use ask_user instead when you cannot continue without the answer or the person asks you to ask them a question. Ask in ordinary business language with two to six short options. To have teammates vote, set includeTeam and tell them about it with message_bot.",
     inputSchema: {
       type: "object",
       properties: {
