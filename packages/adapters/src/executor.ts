@@ -3974,6 +3974,19 @@ export async function appendUsageTimingAudit(
 }
 
 /** The chat a run belongs to was deleted or archived, so no retry can find it again. */
+/** The run ended (stopped or cancelled) while its setup was still loading. */
+export async function stoppedDuringSetup(
+  prisma: Pick<PrismaClient, "run">,
+  runId: string,
+  setupError: unknown,
+): Promise<boolean> {
+  if (!(setupError instanceof IsolationError)) return false;
+  const run = await prisma.run
+    .findUnique({ where: { id: runId }, select: { status: true } })
+    .catch(() => null);
+  return run !== null && isTerminal(run.status as RunStatus);
+}
+
 async function chatGone(prisma: Pick<PrismaClient, "thread">, threadId: string): Promise<boolean> {
   const thread = await prisma.thread
     .findFirst({ where: { id: threadId }, select: { group: { select: { archivedAt: true } } } })
@@ -16569,7 +16582,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } catch (setupError) {
         const computerBusy = setupError instanceof ComputerBusyError;
         const retryForever = computerBusy || isTooManyDatabaseConnections(setupError);
-        if (!computerBusy) {
+        // A run stopped while it was setting up (the person pressed Stop, or the chat was archived)
+        // fails its live-run checks by design; that is not a setup error.
+        if (!computerBusy && !(await stoppedDuringSetup(deps.prisma, runId, setupError))) {
           // undici collapses every network failure to "fetch failed"; the cause names the
           // host and errno, which is the only part worth paging over.
           const causeMessage =
