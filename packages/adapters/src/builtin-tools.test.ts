@@ -95,6 +95,9 @@ describe("native recruiting approval tool", () => {
     expect(feedback?.description).toContain("unknown write outcome");
     expect(feedback?.description).toContain("path preferences/recruiting-collaboration.md");
     expect(feedback?.description).toContain("never start another preference file");
+    expect(feedback?.description).toContain(
+      "A pasted job description or a new role is never a preference",
+    );
 
     for (const name of ["remember", "save_shared_memory"]) {
       const tool = builtinAgentTools.find((entry) => entry.name === name)!;
