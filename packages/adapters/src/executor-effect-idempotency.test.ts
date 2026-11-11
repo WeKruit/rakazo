@@ -67,6 +67,7 @@ import {
   STEERING_ACK,
   savedCandidateKeyForm,
   selectBuiltinToolsForRun,
+  setupRetryNoticeText,
   shortQuestion,
   toolArgsSummary,
 } from "./executor.js";
@@ -904,7 +905,7 @@ describe("model outage on a recruiting turn", () => {
     "terminated",
     "fetch failed",
     "timeout exceeded when trying to connect",
-  ])("runs the turn once more after %s", async (outage) => {
+  ])("resumes the turn a few times after %s before reporting it failed", async (outage) => {
     const f = fixture("run-outage");
     const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
@@ -927,7 +928,15 @@ describe("model outage on a recruiting turn", () => {
     );
     expect(f.executorDeps.jobs.enqueue).toHaveBeenCalled();
 
-    retried = 1;
+    // Two more spaced tries still resume the turn instead of failing it.
+    for (retried = 1; retried < 3; retried++) {
+      f.runData.status = "queued";
+      await f.executor.continueRun(f.runData.id, "worker-1");
+      expect(f.finalizeRun).not.toHaveBeenCalled();
+    }
+
+    f.runData.status = "queued";
+    retried = 3;
     await f.executor.continueRun(f.runData.id, "worker-1");
     expect(f.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "failed", error: outage }),
@@ -1273,6 +1282,31 @@ describe("computer that will not start", () => {
       "Run setup failed; retrying",
     );
     expect(f.finalizeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("setup retries the recruiter can see", () => {
+  it("tells the chat once, after a few failed starts, that it is still retrying", async () => {
+    for (const failures of [1, 3, 4]) {
+      const f = fixture(`setup-retry-notice-${failures}`);
+      f.setCalls([
+        { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+      ]);
+      // The computer-start check reads the count first (below its limit), then the notice.
+      Object.assign(f.prisma.attempt, {
+        count: vi.fn().mockResolvedValueOnce(0).mockResolvedValue(failures),
+      });
+      vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
+      await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+        "Run setup failed; retrying",
+      );
+      expect(f.published).toEqual(
+        failures === 3
+          ? [{ role: "system", blocks: [{ kind: "meta", text: setupRetryNoticeText(false) }] }]
+          : [],
+      );
+    }
+    expect(setupRetryNoticeText(true)).toBe("启动遇到问题，正在自动重试，不用重发。");
   });
 });
 
@@ -5643,8 +5677,24 @@ describe("native recruiting assessment effect delivery", () => {
     const f = await roleTeamFirstTurn("greeting-no-card", "你好，你能帮我做什么？");
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
     expect(await request.beforeAsk?.("你想先处理哪项？", undefined)).toEqual({
-      instead: expect.stringContaining("Not asked: no role is saved in this chat yet"),
+      instead: expect.stringContaining("Not asked yet: no role is saved in this chat"),
     });
+  });
+
+  // Staging 11-10: "We need a backend engineer… can you help me find people?" never saved a role,
+  // so its question came out as plain text with no buttons. A vague hiring request is a role.
+  it("turns a vague hiring request's bounced question into a saved role and a card", async () => {
+    const f = await roleTeamFirstTurn(
+      "vague-request-card",
+      "We need a backend engineer for our team, can you help me find people?",
+    );
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    const bounced = await request.beforeAsk?.("Which city?", undefined);
+    expect(bounced).toEqual({
+      instead: expect.stringContaining("save it now with recruiting_role create"),
+    });
+    expect(JSON.stringify(bounced)).toContain("then ask this same question with ask_user");
+    expect(request.prompt).toContain("a request to find people for a named role counts");
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {

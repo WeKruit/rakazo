@@ -5,6 +5,7 @@ import {
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { RECRUITING_MISSED_REQUIREMENT } from "./recruiting-defaults.js";
 import {
   classifyTurnEnd,
   laterPlaybookStage,
@@ -648,13 +649,12 @@ describe("a failed save never stops the work", () => {
 
 describe("a missed requirement is searched for again", () => {
   it("feedback that the list missed a requirement runs new searches instead of relabeling", () => {
-    const step = nextPlaybookStep("feedback", {
-      title: "Engineer",
-      hasBrief: true,
-      savedCandidates: 10,
-    });
-    expect(step?.prompt).toContain("run new searches that target it");
-    expect(step?.prompt).toContain("never answer by only rechecking or relabeling");
+    // The rule sits in the role context, so it holds at every stage, not only after the first ten.
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("at any stage");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
+      "Never answer by only rechecking or relabeling",
+    );
   });
 
   it("every scale query carries a required language", () => {

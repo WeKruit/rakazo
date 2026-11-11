@@ -21,6 +21,12 @@ export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
 export const RECRUITING_REQUIRED_LANGUAGE = `A language the recruiter requires (for example Mandarin) is searched for, not checked afterwards. In each set of four people searches: two keep the role and location query and add includeText with the language's English name alone (for example ["Mandarin"], or ["Chinese"]), which returns only profiles that mention it; one words the query the way a profile lists it (for example "bilingual Mandarin Chinese and English … Languages: Chinese, English"); one looks for degrees or jobs in a region that speaks it (for Mandarin: mainland China, Taiwan, Singapore, Malaysia). Write queries in English; a query in the language's own script finds fewer people. People whose profile shows the language (a Languages entry, posts or content in it, a degree or job in such a region) come first; unlike other requirements a profile cannot show, someone with no sign of it never fills the list while it is required. Never guess a language, origin or ethnicity from a name or photo: that is national-origin profiling, which hiring law does not allow, and it is often wrong.`;
 
 /**
+ * A recruiter saying the results missed a requirement, at any stage. On 11-10 the agent answered
+ * "I said they must speak Chinese" by relabeling the people it had already listed.
+ */
+export const RECRUITING_MISSED_REQUIREMENT = `When the recruiter says the people shown missed a requirement (for example "I said they must speak Chinese"), at any stage, that is feedback on the search itself: save the requirement on the role with recruiting_role update if the brief does not hold it as required yet, run new people searches that target it, show new people whose profiles show it, and say in one line what you changed. Never answer by only rechecking or relabeling the people already shown.`;
+
+/**
  * Search request shape adapted from the sourcing bot the recruiter rated highly: explicit target
  * titles, core-work evidence (title alone never qualifies), years, ordered locations, evidence-only
  * language, exclusions and an A/B grade. Sourcer fills only the slots the confirmed brief sets.
@@ -84,13 +90,18 @@ export const RECRUITING_ROUND_NEXT_STEP = `The ten are already listed in chat, e
 
 /**
  * The only card a turn shows after it records a round: clarifying questions come before the
- * search, so any other question there is replaced by this one.
+ * search, so any other question there is replaced by this one. It follows the recruiter's language.
  */
-export function recruitingNextStepCard() {
-  return {
-    text: "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
-    options: ["Find 150 similar people", "Draft the outreach emails", "Run another round"],
-  };
+export function recruitingNextStepCard(chinese = false) {
+  return chinese
+    ? {
+        text: "下一步怎么做？这十个人方向对的话，我去找 150 个类似的人；不对的话告诉我哪几个不对，我再找一轮。",
+        options: ["找 150 个类似的人", "起草外联邮件", "再找一轮"],
+      }
+    : {
+        text: "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
+        options: ["Find 150 similar people", "Draft the outreach emails", "Run another round"],
+      };
 }
 
 export const RECRUITING_SCALE_START = `The recruiter accepts a calibration round when they press the round panel's accept control, pick the find-more option on the next-step card, or ask in their own words to find more or similar people, to scale up or to go ahead without confirming (for example "find 100", "widen the search", "just search", "no need to confirm"). That request is the acceptance: record it right away with recruiting_feedback target "round" operation "approve" and their exact words, never ask them to confirm the round again, and never request a separate ten-profile approval card for a round recorded with calibration_round. Feedback about individual people alone is not acceptance, and neither is a message that turns down anyone in the round or changes who to look for, even when it also says to find more of a kind (for example "A and B aren't a fit, find more people who have led a team of 50"): that is feedback for the next round of ten. Acceptance carries no correction. A note sent with or right after the scale request that conflicts with a confirmed requirement (for example a preferred area far from an on-site location) never holds the scale: scale with the confirmed brief first, then ask that one question. Once a round is accepted, in the same turn and without a progress message: (1) scale with the people search yourself toward the target (100 unless the recruiter named a number; a number with Results already holding at least that many means that many more, so the target is the current total plus it, unless they say total; a request for more without a number (for example "more", "再来点") when Results already hold 100 or more is a new goal: ask one question on how many more, with options such as 50 more and 100 more plus a custom answer, then search toward the current total plus the answer; state the target, never the calibration size): waves of four differently worded web_search_advanced_exa people searches (category "people", numResults 25, enableHighlights true, highlightsMaxCharacters 300; title variants, core-duty wording, nearby cities, peer companies, folding in every round's feedback) issued as parallel calls in one step (each search saves itself to Results as it returns), never reading or ranking the people between waves, until the role holds the target (each search returns peopleInResults, the role's total, already counting the people saved before this request) or a wave adds fewer than five new people; for a target above 200 use numResults 100; (2) tell the recruiter in two or three lines with message_user: how many people are in Results and whether a deeper search continues toward the target; (3) only when the people search stopped short of the target, end the turn with exactly one handoff, last (your reply after it is not shown): hand the missing number to Sourcer, who continues with people-search agent runs, with the confirmed brief, every round's feedback, the accepted round as positive examples and everyone already returned excluded. When Results already hold the target, there is no deeper search and no handoff. Draft outreach email only when the recruiter asks for it; scaling never starts an email draft or an outreach handoff on its own. A target the search cannot fill is reported honestly with the count found, never a reason to stop early.`;
