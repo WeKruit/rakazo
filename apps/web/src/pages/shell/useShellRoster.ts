@@ -194,6 +194,8 @@ export function useShellRoster({
   }
 
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
+  /** The sidebar on screen is the saved copy a reload painted, not yet a server read. */
+  const [rosterFromSaved, setRosterFromSaved] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
 
   const showToolActivity = useSyncExternalStore(
@@ -303,6 +305,7 @@ export function useShellRoster({
               ]);
               setSpaces(navigation.spaces);
               setInitialBotsLoaded(true);
+              setRosterFromSaved(false);
               botsRefreshApplied.current = request;
               if (showToolActivityRef.current === false && isAccountRoute()) continue;
               if (
@@ -450,6 +453,7 @@ export function useShellRoster({
         setGroups(saved.groups);
         setSpaces(saved.spaces);
         setInitialBotsLoaded(true);
+        setRosterFromSaved(true);
         // Settle a route with no conversation now, as the server read would, so nothing the
         // user opens on the painted page is closed by a later redirect.
         const recruiting = !getToolActivityEnabled(saved.me.isDeploymentOwner === true);
@@ -479,6 +483,7 @@ export function useShellRoster({
           setGroups(groupList);
           setSpaces(bootstrap.spaces);
           setInitialBotsLoaded(true);
+          setRosterFromSaved(false);
         }
         const selectedThread =
           bootstrap.thread &&
@@ -746,6 +751,7 @@ export function useShellRoster({
     searchLoading,
     botsRefreshUser,
     initialBotsLoaded,
+    rosterFromSaved,
     bootstrapMe,
     setBootstrapMe,
     showToolActivity,
