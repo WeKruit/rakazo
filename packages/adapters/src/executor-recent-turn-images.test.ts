@@ -117,6 +117,7 @@ async function runWithModel(
   } = {},
 ) {
   runtimeRunIds = [];
+  claimedSteering.items = undefined;
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -502,7 +503,6 @@ describe("quick reply", () => {
   });
 
   it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {
-    claimedSteering.items = undefined;
     const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       finalText: "Got it, remote works too.",
       quickReplies: true,
