@@ -2,7 +2,8 @@ import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/ada
 import { isChineseText } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 
-const TIMEOUT_MS = 4_000;
+// A busy model can take several seconds to start; a late first line still beats silence.
+const TIMEOUT_MS = 8_000;
 const MAX_USER_CHARS = 1_500;
 const MAX_EARLIER_CHARS = 400;
 const EARLIER_TURNS = 4;
