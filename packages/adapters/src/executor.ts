@@ -182,7 +182,6 @@ import {
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
-  runsBesidePerson,
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
@@ -13773,18 +13772,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void settled.then(() => savesInFlight.delete(settled));
           return applied;
         };
-
-        // Each intake answer goes into the role's brief as the turn starts, in the background.
-        if (thread.activeRecruitingRoleId && !runsBesidePerson(run.trigger)) {
-          const roleId = thread.activeRecruitingRoleId;
-          briefSaving = withinDeadline(
-            saveBriefFromAnswers(roleId).catch((error) =>
-              getLogger().warn("brief not saved from answers", { error: String(error) }),
-            ),
-            SAVE_WAIT_MS,
-            () => getLogger().warn("brief save from answers still running", { runId }),
-          );
-        }
 
         const pluginLine =
           connectedPlugins.length > 0
