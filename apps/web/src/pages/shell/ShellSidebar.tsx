@@ -21,7 +21,6 @@ import { isEmptyHomeTeam } from "../../lib/home-team";
 import { withFeatureMessages } from "../../lib/i18n";
 import { forgetSavedRecruitingReads } from "../../lib/recruiting-read-cache";
 import { clearSpaceSelection, rpc } from "../../lib/rpc";
-import { savedShell } from "../../lib/saved-shell";
 import { savedThreads } from "../../lib/saved-threads";
 import { supportMailto, useSupportEmail } from "../../lib/support";
 import { useKeyedRead } from "../recruiting/shared";
@@ -373,7 +372,6 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
               clearSpaceSelection();
               void savedThreads.clear();
               void forgetSavedRecruitingReads();
-              void savedShell.clear();
               navigate("/");
             })
           }
