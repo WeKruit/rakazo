@@ -30,7 +30,7 @@ const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
 /** Run ids the runtime was called with, in the current test. */
 let runtimeRunIds: string[] = [];
-let claimedSteering: Array<{ text: string }> | undefined;
+const claimedSteering: { items?: Array<{ text: string }> } = {};
 const lastQuickReplyCalls = () => runtimeRunIds;
 let lastExecutorEvents:
   | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
@@ -137,7 +137,8 @@ async function runWithModel(
     request = next;
     runtimeRunIds.push(next.runId);
     if (next.runId === "run-1") await options.holdMain;
-    if (next.runId === "run-1" && options.claimed) claimedSteering = await next.claimSteering?.([]);
+    if (next.runId === "run-1" && options.claimed)
+      claimedSteering.items = await next.claimSteering?.([]);
     if (switchModel) {
       const onModelChange = (
         next as AgentRunRequest & {
@@ -501,7 +502,7 @@ describe("quick reply", () => {
   });
 
   it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {
-    claimedSteering = undefined;
+    claimedSteering.items = undefined;
     const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       finalText: "Got it, remote works too.",
       quickReplies: true,
@@ -512,7 +513,7 @@ describe("quick reply", () => {
         runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2"),
       ).toBe(true),
     );
-    expect(claimedSteering?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
+    expect(claimedSteering.items?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
   });
 
   it("skips runs that a person did not start", async () => {
