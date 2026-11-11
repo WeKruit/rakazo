@@ -126,6 +126,17 @@ describe("namedPlace", () => {
     expect(outsideSearchArea(rows).size).toBe(0);
     expect(beyondCommute("Staten Island, New York, United States", place!)).toBe(false);
     expect(beyondCommute("Greater Boston", place!)).toBe(true);
+    // Places outside the US are outside a US city's area too.
+    for (const abroad of [
+      "Burnaby, British Columbia, Canada",
+      "Canada",
+      "Greater Kitchener-Cambridge-Waterloo Metropolitan Area",
+      "Singapore",
+    ])
+      expect(beyondCommute(abroad, place!)).toBe(true);
+    expect(beyondCommute("Paris, Texas, United States", place!)).toBe(true);
+    expect(beyondCommute("Somewhere unknown", place!)).toBe(false);
+    expect([...outsideSearchArea(new Map([["x", "Singapore"]]), place)]).toEqual(["x"]);
   });
 });
 
