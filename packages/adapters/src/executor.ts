@@ -1346,6 +1346,9 @@ const ASK_WITHOUT_ROLE =
   'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
 /** Kruit asks nothing for a role it has not opened: the role's team asks its questions there. */
+export const questionAlreadyWaiting = (question: string) =>
+  `Not asked: the recruiter has not answered the question already waiting in this conversation ("${question.slice(0, 300)}"). Never ask it or another question again now; carry on with work that does not need the answer, or end the turn with no reply.`;
+
 export const globalAskBeforeRole = (latest: string) =>
   `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
 
@@ -6684,6 +6687,38 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
         };
         /** The person's newest message since this run began that a different run answers. */
+        /** A question another turn already put to the recruiter here, still unanswered. */
+        const openQuestionElsewhere = async (): Promise<string | undefined> => {
+          let recent: Array<{
+            role: string;
+            botId: string | null;
+            runId: string | null;
+            blocks: unknown;
+          }> = [];
+          try {
+            recent = await deps.prisma.message.findMany({
+              where: { threadId: thread.id },
+              orderBy: { seq: "desc" },
+              take: 20,
+              select: { role: true, botId: true, runId: true, blocks: true },
+            });
+          } catch {
+            return undefined;
+          }
+          for (const message of recent ?? []) {
+            if (message.role === "user" && !message.botId) return undefined;
+            if (message.role === "user" || message.runId === runId) continue;
+            const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+            const open = blocks.find(
+              (block) =>
+                block.kind === "ask" &&
+                (!block.status || block.status === "pending") &&
+                !block.approvalEffectId,
+            );
+            if (open && open.kind === "ask") return open.text;
+          }
+          return undefined;
+        };
         const newerMessageAnsweredElsewhere = async () => {
           if (!run.createdAt) return undefined;
           let newer: { blocks: unknown } | null = null;
@@ -15121,6 +15156,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     if (!senderRead && asksSenderCompanyName(question))
                       return { instead: SENDER_READ_FIRST };
+                    // One question at a time: a card already waiting here is answered first.
+                    const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
+                    if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
