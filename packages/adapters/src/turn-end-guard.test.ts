@@ -14,6 +14,7 @@ import {
   turnRequestText,
   unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
+import { askedTemplate } from "./turn-report.js";
 
 const run = {
   id: "run-1",
@@ -1269,6 +1270,27 @@ describe("planDeclineRetry", () => {
         personRequest: "write me a follow-up email template",
       }),
     ).toBeUndefined();
+  });
+
+  it("keeps the blanks in an email about a role that names nobody (2026-11-11 staging)", async () => {
+    const reply =
+      "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply,
+        request: "Draft it",
+        handedIn: true,
+        personRequest: ask,
+      }),
+    ).toBeUndefined();
+    expect(askedTemplate(ask)).toBe(true);
+    expect(askedTemplate("Write an email to these people about the data engineer role")).toBe(
+      false,
+    );
+    expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
   });
 
   it("puts a question the retry still typed into its reply on a card", async () => {
