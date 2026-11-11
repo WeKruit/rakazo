@@ -512,6 +512,7 @@ import {
   senderApprovalDisplay,
 } from "./instantly-senders.js";
 import type { TextJudge } from "./judge.js";
+import type { PageReader } from "./keyless-http-web.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
@@ -604,6 +605,7 @@ import {
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
+  FULL_PROFILE_READS,
   plannedLanguageFilters,
   statedLanguageRequirement,
   withRequiredLanguage,
@@ -1415,6 +1417,8 @@ const PLANNED_SEARCHES_MISSING =
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
+/** After the first planned search returns, the others get at least this long: profile reads make them finish close together. */
+const PLANNED_SEARCH_GRACE_MS = 3_000;
 /** With this many new people from the planned searches, the first ten come from them. */
 /** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
 const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
@@ -1437,7 +1441,10 @@ export async function settlePlannedSearches<T>(
     .then(
       () =>
         new Promise<void>((resolve) =>
-          setTimeout(resolve, PLANNED_SEARCH_WAIT_MS - (Date.now() - startedAt)),
+          setTimeout(
+            resolve,
+            Math.max(PLANNED_SEARCH_WAIT_MS - (Date.now() - startedAt), PLANNED_SEARCH_GRACE_MS),
+          ),
         ),
     )
     .then((): typeof PLANNED_SEARCH_LATE => PLANNED_SEARCH_LATE);
@@ -3811,6 +3818,8 @@ export interface ExecutorDeps {
   embedder?: TextEmbedder | null;
   /** Optional yes/no judge the server asks about replies; absent means the wording rules decide. */
   judge?: { resolve(): Promise<TextJudge | undefined> };
+  /** Reads a person's full profile page before the first pick; absent keeps the search's own text. */
+  profileReader?: PageReader;
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
@@ -6334,6 +6343,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let agentRunsBeforeRound = 0;
         // Quick people searches this turn ran itself (not the planned ones) before its round.
         let quickSearchesBeforeRound = 0;
+        // Full profile pages the first round's searches may still read for a required language.
+        const fullProfileReads = { left: FULL_PROFILE_READS };
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -10651,6 +10662,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         },
                         shown,
                         returned,
+                        deps.profileReader && firstRoundPending
+                          ? { read: deps.profileReader, reads: fullProfileReads }
+                          : undefined,
                       )
                     : { rows: shown, withoutLanguage: 0 };
                   // A local role's people beyond commuting distance of its city never make the

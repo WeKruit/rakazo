@@ -19,7 +19,14 @@ describe("settlePlannedSearches", () => {
   it("waits for the first search even when every search outlasts the wait", async () => {
     vi.useFakeTimers({ now: 0 });
     const settled = settlePlannedSearches([resolveIn(12_000, "a"), resolveIn(60_000, "b")], 0);
-    await vi.advanceTimersByTimeAsync(12_001);
+    await vi.advanceTimersByTimeAsync(15_001);
     await expect(settled).resolves.toEqual(["a", PLANNED_SEARCH_LATE]);
+  });
+
+  it("gives the others a short grace after a slow first search", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const settled = settlePlannedSearches([resolveIn(8_000, "a"), resolveIn(10_000, "b")], 0);
+    await vi.advanceTimersByTimeAsync(11_001);
+    await expect(settled).resolves.toEqual(["a", "b"]);
   });
 });
