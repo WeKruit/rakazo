@@ -291,9 +291,12 @@ async function play(scenario, owner, sample) {
           threadId: role.threadId ?? role.id,
         });
         fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        failures.push(
-          ...requirementSaved(JSON.stringify(workspace?.revision ?? {}), scenario.requirement),
+        // Judge what the role now requires, not the quotes it keeps of the original JD, which
+        // still say "会说中文更好，不强求" after the recruiter makes it a must.
+        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
+          key === "quote" || key === "sourceRefs" ? undefined : value,
         );
+        failures.push(...requirementSaved(requirements, scenario.requirement));
       }
     }
     chats = await transcripts(user.rpc, startedAt);
