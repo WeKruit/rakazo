@@ -182,6 +182,7 @@ import {
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
+  runsBesidePerson,
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
@@ -349,7 +350,14 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
-import { saveInBackground, savesFeedbackInBackground } from "./background-save.js";
+import {
+  ownRoleRevisions,
+  ROLE_SAVE_WAIT_MS,
+  saveInBackground,
+  savesFeedbackInBackground,
+  savesRoleInBackground,
+  transientSaveError,
+} from "./background-save.js";
 import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import {
@@ -6164,6 +6172,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // the role always has one; the model's own brief save then replaces it. The next-step card
         // waits for that save, so the pause never cuts it off.
         let briefSaving: Promise<unknown> | undefined;
+        // Role saves run in the background, so later calls may name a revision this run moved past.
+        const roleRevisions = ownRoleRevisions();
+        const roleSavesInFlight = new Set<Promise<unknown>>();
         // That save moves the role on a revision the model has not seen; its own brief save, which
         // replaces the answers-only brief, still names the revision it recorded the round on.
         let briefBump: { from: number; to: number } | undefined;
@@ -6428,7 +6439,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Text written after a bounced question replaces it instead of appending to it.
           hasStreamedText = false;
         };
-        const saveBriefAfterRound = async (roleId: string) => {
+        // The recruiter's answers to the intake cards, saved into the brief as they come: each
+        // answer is in the role at once, in the background, never waiting on the first ten.
+        const saveBriefFromAnswers = async (roleId: string) => {
           const quote = currentTurnMessage?.blocks.flatMap((block) =>
             block.kind === "text" && block.text.trim() ? [block.text] : [],
           )[0];
@@ -6440,7 +6453,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               revisions: { where: { revision: 1 }, select: { createdAt: true } },
             },
           });
-          if (!quote || !role || role.currentRevision?.brief) return;
+          type BriefItem = Record<string, unknown> & {
+            key?: unknown;
+            value?: unknown;
+            id?: unknown;
+          };
+          const existing = (role?.currentRevision?.brief ?? null) as
+            | (Record<string, unknown> & {
+                fields?: BriefItem[];
+                searchFilters?: BriefItem[];
+                confirmation?: unknown;
+              })
+            | null;
+          // A confirmed brief changes only through the agent's own save.
+          if (!quote || !role || existing?.confirmation) return;
           const messages = await deps.prisma.message.findMany({
             where: {
               threadId: thread.id,
@@ -6451,6 +6477,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { role: true, blocks: true },
           });
           const answers = intakeAnswers(messages);
+          const savedFields = existing?.fields ?? [];
+          const fresh = answers.filter(
+            ({ key, value }) =>
+              !savedFields.some((field) => field.key === key && field.value === value),
+          );
+          if (!fresh.length) return;
+          const answerFields = fresh.map(({ key, value }) => ({
+            key,
+            value,
+            origin: "user_instruction",
+            state: "known",
+            consequential: true,
+          }));
+          const { confirmation: _confirmation, ...kept } = existing ?? {};
           const saved = (await applyTool(
             "recruiting_role",
             {
@@ -6459,30 +6499,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               expectedRevision: role.revision,
               intent: { basis: "direct", quote },
               brief: {
-                fields: answers.map(({ key, value }) => ({
-                  key,
-                  value,
-                  origin: "user_instruction",
-                  state: "known",
-                  consequential: true,
-                })),
-                // The playbook's default tenure preference, shown so the recruiter can lift it. An
-                // inferred filter may only prefer, so it is worded as the people it prefers.
+                ...kept,
+                fields: [
+                  ...savedFields.filter((field) => !fresh.some(({ key }) => key === field.key)),
+                  ...answerFields,
+                ],
                 searchFilters: [
+                  ...(existing?.searchFilters ?? []).filter(
+                    (filter) => !String(filter.id ?? "").startsWith("recruiter-answer-"),
+                  ),
                   ...answerSearchFilters(answers),
-                  {
-                    id: "tenure",
-                    mode: "prefer",
-                    origin: "inferred",
-                    statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
-                  },
+                  // The playbook's default tenure preference, shown so the recruiter can lift it. An
+                  // inferred filter may only prefer, so it is worded as the people it prefers.
+                  ...((existing?.searchFilters ?? []).some((filter) => filter.id === "tenure")
+                    ? []
+                    : [
+                        {
+                          id: "tenure",
+                          mode: "prefer",
+                          origin: "inferred",
+                          statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
+                        },
+                      ]),
                 ],
               },
             },
             `${runId}:brief-after-round`,
           )) as { error?: unknown; workspace?: { role?: { revision?: unknown } } | null } | null;
           if (saved?.error)
-            getLogger().warn("brief not saved after the round", { error: saved.error });
+            getLogger().warn("brief not saved from answers", { error: saved.error });
           const to = saved?.workspace?.role?.revision;
           if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
@@ -7005,6 +7050,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args.expectedRevision === briefBump.from
           )
             args = { ...args, expectedRevision: briefBump.to };
+          // A call naming a role revision waits briefly for this run's own role saves still
+          // running, then acts on the newest revision this run saved.
+          const revisionKey =
+            name === "recruiting_role" && args.operation === "update"
+              ? "expectedRevision"
+              : (name === "recruiting_research" || name === "recruiting_feedback") &&
+                  Object.hasOwn(args, "expectedRoleRevision")
+                ? "expectedRoleRevision"
+                : undefined;
+          if (revisionKey) {
+            // A role update never waits on role saves, which would include itself.
+            if (roleSavesInFlight.size && name !== "recruiting_role")
+              await withinDeadline(
+                Promise.all([...roleSavesInFlight]),
+                ROLE_SAVE_WAIT_MS,
+                () => undefined,
+              );
+            const roleId =
+              typeof args.roleId === "string" ? args.roleId : thread.activeRecruitingRoleId;
+            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey]);
+            if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
+          }
           // A brief save whose intent is missing or not copied from the recruiter's current
           // message acts on that message, so the save never fails on the quote.
           // A message the recruiter sent while this turn ran is the current one, so it is read now.
@@ -11201,7 +11268,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.
                   briefSaving ??= withinDeadline(
-                    saveBriefAfterRound(recorded.roleId).catch((error) =>
+                    saveBriefFromAnswers(recorded.roleId).catch((error) =>
                       getLogger().warn("brief not saved after the round", {
                         error: String(error),
                       }),
@@ -13454,6 +13521,55 @@ export function createRunExecutor(deps: ExecutorDeps) {
             void settled.then(() => savesInFlight.delete(settled));
             return save.reply;
           }
+          if (name === "recruiting_role" && rawArgs.operation !== "read") {
+            const noteRevision = (result: unknown) => {
+              const role = (
+                result as { workspace?: { role?: { id?: unknown; revision?: unknown } } }
+              )?.workspace?.role;
+              if (typeof role?.id === "string" && typeof role.revision === "number")
+                roleRevisions.saved(role.id, role.revision);
+            };
+            void applied.then(noteRevision, () => undefined);
+            if (savesRoleInBackground(name, rawArgs) && !executionId.includes(":role-retry-")) {
+              const save = saveInBackground({
+                first: applied,
+                // A retry acts on the role's current revision: the save only replaces what it names.
+                retry: async (attempt) => {
+                  const roleId =
+                    typeof rawArgs.roleId === "string"
+                      ? rawArgs.roleId
+                      : thread.activeRecruitingRoleId;
+                  const role = roleId
+                    ? await deps.prisma.recruitingRole.findUnique({
+                        where: { id: roleId },
+                        select: { revision: true },
+                      })
+                    : null;
+                  const retried = await applyTool(
+                    name,
+                    role ? { ...rawArgs, expectedRevision: role.revision } : rawArgs,
+                    `${executionId}:role-retry-${attempt}`,
+                  );
+                  return retried;
+                },
+                failed: (result) => toolResultError(result) !== undefined,
+                inputError: (result) => !transientSaveError(toolResultError(result)),
+                onGiveUp: (result) =>
+                  getLogger().warn("recruiting.role.not_saved", {
+                    runId,
+                    error: redactSecrets(String(toolResultError(result)), runSecrets).slice(0, 300),
+                  }),
+              });
+              const settled = save.settled.catch(() => undefined);
+              savesInFlight.add(settled);
+              roleSavesInFlight.add(settled);
+              void settled.then(() => {
+                savesInFlight.delete(settled);
+                roleSavesInFlight.delete(settled);
+              });
+              return save.reply;
+            }
+          }
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
           if (rawArgs.operation === "create") roleCreatedInTurn = true;
           const settled = applied.catch(() => undefined);
@@ -13461,6 +13577,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void settled.then(() => savesInFlight.delete(settled));
           return applied;
         };
+
+        // Each intake answer goes into the role's brief as the turn starts, in the background.
+        if (thread.activeRecruitingRoleId && !runsBesidePerson(run.trigger)) {
+          const roleId = thread.activeRecruitingRoleId;
+          briefSaving = withinDeadline(
+            saveBriefFromAnswers(roleId).catch((error) =>
+              getLogger().warn("brief not saved from answers", { error: String(error) }),
+            ),
+            SAVE_WAIT_MS,
+            () => getLogger().warn("brief save from answers still running", { runId }),
+          );
+        }
 
         const pluginLine =
           connectedPlugins.length > 0

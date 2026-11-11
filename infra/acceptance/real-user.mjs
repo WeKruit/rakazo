@@ -286,11 +286,28 @@ async function play(scenario, owner, sample) {
           threadId: role.threadId ?? role.id,
         });
         fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        // Judge what the role now requires, not the quotes it keeps of the original JD, which
-        // still say "会说中文更好，不强求" after the recruiter makes it a must.
-        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
-          key === "quote" || key === "sourceRefs" ? undefined : value,
-        );
+        // Judge what the role now requires (its criteria at their priority, the brief and the
+        // search filters), not the quotes it keeps of the original JD, which still say
+        // "会说中文更好，不强求" after the recruiter makes it a must. A hard criterion on the same
+        // requirement replaces the preferred one it supersedes.
+        const revision = workspace?.revision ?? {};
+        const statement = (criterion) => JSON.stringify(criterion?.expression ?? "");
+        const lines = [
+          ...(revision.criteria ?? []).map(
+            (criterion) =>
+              `${criterion.priority === "hard" ? "required" : "preferred"}: ${statement(criterion)}`,
+          ),
+          ...(revision.brief?.fields ?? []).map((field) => `${field.key}: ${field.value}`),
+          ...(revision.brief?.searchFilters ?? []).map(
+            (filter) =>
+              `${filter.mode === "include" ? "required" : filter.mode}: ${filter.statement}`,
+          ),
+        ];
+        const mentions = new RegExp(scenario.requirement.source, "i");
+        const hard = lines.some((line) => line.startsWith("required: ") && mentions.test(line));
+        const requirements = lines
+          .filter((line) => !hard || line.startsWith("required: ") || !mentions.test(line))
+          .join("\n");
         failures.push(...requirementSaved(requirements, scenario.requirement));
       }
     }
