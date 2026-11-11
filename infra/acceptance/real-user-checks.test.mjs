@@ -177,3 +177,23 @@ test("a blocker that says what to send next is not a dead end", () => {
     false,
   );
 });
+
+test("a second round of people may repeat the round header and next-step card, and S3 in evidence is AWS", () => {
+  const round = (name) =>
+    bot(
+      `10 people this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
+    );
+  const card = bot(
+    "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
+    true,
+  );
+  const failures = conversationChecks([
+    user("Go with the JD as written and start the search."),
+    round("Ann"),
+    card,
+    user("#2 and #5 are not a fit. Find more people who run Kafka in production."),
+    round("Bob"),
+    card,
+  ]);
+  assert.deepEqual(failures, []);
+});

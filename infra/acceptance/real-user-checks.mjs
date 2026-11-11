@@ -24,6 +24,8 @@ const NEXT_STEP =
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 // The brief one agent writes for another, shown to the recruiter as if it were a reply.
 const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
+// The header of a round of people the search returns.
+export const ROUND = /people this round|本轮|这一轮/i;
 const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 
 // Addresses and links say nothing about the language a message is written in. A Chinese
@@ -97,21 +99,24 @@ export function conversationChecks(messages) {
           `language: recruiter wrote ${chinese ? "Chinese" : "English"}, reply is not: "${words.slice(0, 80)}"`,
         );
     }
-    for (const [name, pattern] of [
+    for (const [name, pattern, where] of [
       ["overrides what the recruiter said", OVERRIDE],
       ["sends the recruiter to someone else", CONTACT_ADMIN],
       ["declines the request", DECLINE],
       ["supplier name", SUPPLIER],
       ["internal tool name", TOOL_NAME],
-      ["internal gate code", GATE_CODE],
+      // People's evidence quotes their profiles, where "S3" is the AWS service.
+      ["internal gate code", GATE_CODE, prose(text)],
       ["internal agent brief", AGENT_BRIEF],
     ]) {
-      const match = text.match(pattern);
-      if (match) failures.push(`${name}: ${quote(text, match)}`);
+      const match = (where ?? text).match(pattern);
+      if (match) failures.push(`${name}: ${quote(where ?? text, match)}`);
     }
     for (const address of text.match(EMAIL) ?? [])
       if (!typed.includes(address.toLowerCase()))
         failures.push(`shows an address the recruiter never gave: ${address}`);
+    // A new round of people starts over: its header and the next-step card come with every round.
+    if (ROUND.test(text)) said.length = 0;
     // The same sentence again, in this reply or an earlier one.
     for (const sentence of sentences(prose(text))) {
       const again = said.find((earlier) => similar(earlier, sentence) >= 0.8);

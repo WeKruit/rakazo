@@ -23,7 +23,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import {
+  botText,
+  conversationChecks,
+  ROUND as RESULTS,
+  requirementSaved,
+} from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -199,8 +204,8 @@ async function roleChats(rpc) {
 }
 // A one-page PDF of plain ASCII lines, the way a recruiter attaches a JD exported from Word.
 function pdf(lines) {
-  const escape = (line) => line.replace(/[\\()]/g, (char) => `\\${char}`);
-  const stream = `BT /F1 11 Tf 50 760 Td 14 TL ${lines.map((line) => `(${escape(line)}) '`).join(" ")} ET`;
+  const literal = (line) => line.replace(/[\\()]/g, (char) => `\\${char}`);
+  const stream = `BT /F1 11 Tf 50 760 Td 14 TL ${lines.map((line) => `(${literal(line)}) '`).join(" ")} ET`;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -261,8 +266,6 @@ async function waitForText(rpc, pattern, since, limitMs) {
   }
   return null;
 }
-// The header of a round of people the search returns.
-const RESULTS = /people this round|本轮|这一轮/i;
 const PROFILE = /linkedin\.com\/in\/[\w%-]+/gi;
 
 async function play(scenario, owner, sample) {
