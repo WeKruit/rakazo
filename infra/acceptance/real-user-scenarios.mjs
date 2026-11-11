@@ -180,7 +180,8 @@ export const SCENARIOS = [
     noRole: true,
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }],
     last: /\[Candidate|候选人|Hi \[|您好/,
-    lastNot: /\[Interviewer|thank you for taking the time to speak with me/i,
+    // A recruiter thanking the candidate for their time is fine; the greeting tells whose voice it is.
+    lastNot: /\[(?:Interviewer|Hiring Manager)/i,
   },
   {
     name: "template-then-send",

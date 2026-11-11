@@ -1272,6 +1272,17 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("rewrites a template written as the candidate thanking an interviewer (2026-11-11 staging)", async () => {
+    const reply =
+      "下面是一封通用的面试后跟进邮件模板：\n\n**Subject:** Thank you for the conversation\n\nHi [Interviewer’s Name],\n\nThank you for taking the time to speak with me about the [Role Title] position.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const request = "帮我写一封面试后跟进邮件的模板";
+    const retry = await planDeclineRetry(human, { ...input, reply, request });
+    expect(retry?.note).toContain("The recruiter is the one writing");
+    const recruiter = reply.replace("[Interviewer’s Name]", "[Candidate Name]");
+    expect(await planDeclineRetry(human, { ...input, reply: recruiter, request })).toBeUndefined();
+  });
+
   it("keeps the blanks in an email about a role that names nobody (2026-11-11 staging)", async () => {
     const reply =
       "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";
