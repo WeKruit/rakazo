@@ -55,8 +55,7 @@ const FEEDBACK_RAW = flag("--feedback") ? option("--feedback", "auto") : null;
 const FEEDBACK = FEEDBACK_RAW?.startsWith("--") ? "auto" : FEEDBACK_RAW;
 const feedbackText = (round) => {
   const [first, second] = round.candidates.map((c) => c.name).filter(Boolean);
-  if (FEEDBACK !== "auto")
-    return FEEDBACK.replaceAll("{first}", first).replaceAll("{second}", second);
+  if (FEEDBACK !== "auto") return FEEDBACK.replaceAll("{first}", first).replaceAll("{second}", second);
   return `${first} 和 ${second} 不太合适，他们没有直接带过现场小时工团队。多找在仓库或配送中心直接管过 50 人以上一线团队的人，其他人的方向可以。`;
 };
 const DEFAULT_JD =
