@@ -4873,6 +4873,140 @@ export function createRunExecutor(deps: ExecutorDeps) {
           deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
         );
         const nativeSources = await nativeSourcesPending();
+        // The model and its key are settled first, so the quick first line below does not wait
+        // for history, tools and memory to load.
+        const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
+        const runtimeFallback = runtimeFallbackModel(deps.runtime);
+        const pinError = run.modelPinned
+          ? pinnedModelCredentialError(modelChoice, overrideCredential, runDeployment)
+          : undefined;
+        const selected = selectConfiguredModel({
+          override: modelChoice,
+          overrideCredential,
+          defaultCredential,
+          settings,
+          deployment: runDeployment,
+        });
+        const { credential, thinkingLevel } = selected;
+        const runModelProvider = selected.provider ?? runtimeFallback?.provider;
+        const runModelId = selected.id ?? runtimeFallback?.id;
+        const modelKeyStartedAt = performance.now();
+        const resolvedPending = awaitLater(
+          (runModelProvider && runModelId
+            ? resolveModelKey(
+                deps,
+                run.userId,
+                run.spaceId,
+                credential,
+                runModelProvider,
+                runModelId,
+                (values) => runSecrets.push(...values),
+              )
+            : Promise.reject(new Error(MISSING_MODEL_MESSAGE))
+          ).finally(() => {
+            setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
+          }),
+        );
+        // A short first reply while the full answer is worked out. It starts beside the rest of
+        // setup and is posted only if the run has not replied yet; the run is told what it said.
+        // A typed card answer resumes the run that asked, so it gets one too.
+        const quickRepliesOn =
+          deps.quickReplies &&
+          !messagingChannelRun &&
+          !deps.runtime.describe().capabilities.scripted;
+        const earlyTurnBlocks =
+          (nativeSources?.currentAnswer?.blocks as MessageBlock[] | undefined) ??
+          (quickRepliesOn && run.trigger === "user"
+            ? ((
+                await deps.prisma.message
+                  .findFirst({
+                    where: run.sourceMessageId
+                      ? { id: run.sourceMessageId }
+                      : { runId, role: "user" },
+                    select: { blocks: true },
+                  })
+                  .catch(() => null)
+              )?.blocks as MessageBlock[] | undefined)
+            : undefined);
+        const quickReplyText = earlyTurnBlocks ? blocksText(earlyTurnBlocks) : "";
+        let quickReplySaid: string | undefined;
+        // Earlier turns, once history is loaded; the first line starts before that.
+        let quickReplyEarlier: () => Array<{ role: "user" | "assistant"; text: string }> = () => [];
+        const writeQuickReply = (userText: string, key?: string) =>
+          resolvedPending().then((resolved) =>
+            quickReply({
+              runtime: deps.runtime,
+              model: runModelFromResolved(
+                runModelProvider ?? "",
+                runModelId ?? "",
+                resolved,
+                "off",
+              ),
+              earlier: quickReplyEarlier(),
+              userText,
+              runId,
+              ...(key ? { key } : {}),
+              ...(hideVendors ? { recruiting: true } : {}),
+              spaceId: run.spaceId,
+              userId: run.userId,
+              botId: bot.id,
+              threadId: thread.id,
+              onUsage: (event) =>
+                recordUsage(
+                  deps.prisma,
+                  event,
+                  {
+                    spaceId: run.spaceId,
+                    userId: run.userId,
+                    botId: bot.id,
+                    parentRunId: runId,
+                    runId,
+                    operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
+                    operationKind: "setup",
+                  },
+                  estimateCatalogTokenCostUsd,
+                ),
+            }),
+          );
+        const turnStartedAt = new Date();
+        if (
+          quickRepliesOn &&
+          !pinError &&
+          runModelProvider &&
+          runModelId &&
+          (run.trigger === "user" || nativeSources?.currentAnswer) &&
+          quickReplyText.trim()
+        )
+          void writeQuickReply(quickReplyText)
+            .then(async (text) => {
+              if (!text) return;
+              // The card this run asked before the answer is not a reply to it, and a row that
+              // only shows the run's steps says nothing to the person yet.
+              const written = await deps.prisma.message.findMany({
+                where: {
+                  threadId: thread.id,
+                  runId,
+                  role: "bot",
+                  createdAt: { gte: turnStartedAt },
+                },
+                select: { blocks: true },
+              });
+              if (written.some((message) => saysSomething(message.blocks as MessageBlock[]))) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
+                return;
+              }
+              await publishMessage(deps, run, "bot", [
+                { kind: "text", text: redactSecrets(text, runSecrets) },
+              ]);
+              getLogger().info("run.quick_reply", {
+                runId,
+                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
+              });
+              quickReplySaid = text;
+            })
+            .catch((error) => {
+              getLogger().warn("quick reply failed", { runId, reason: String(error) });
+            });
         if (
           nativeSources?.answeredAsks.length &&
           (thread.spaceId !== run.spaceId ||
@@ -5053,6 +5187,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
+        quickReplyEarlier = () =>
+          historyMessages
+            .filter(
+              (message) =>
+                message.id !== currentTurnMessage?.id &&
+                ((message.role === "user" && !message.internal) || message.role === "bot"),
+            )
+            .map((message) => ({
+              role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+              text: blocksText(message.blocks),
+            }));
         const allowSilentPeerMessage = botMessageAllowsSilence(
           peerMessage?.intent,
           peerMessage?.repliesToRequest,
@@ -5402,21 +5547,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...history.filter((message) => !message.id || !canonicalMessages.has(message.id)),
             ...canonicalHistory,
           ];
-        const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
-        const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        const pinError = run.modelPinned
-          ? pinnedModelCredentialError(modelChoice, overrideCredential, runDeployment)
-          : undefined;
-        const selected = selectConfiguredModel({
-          override: modelChoice,
-          overrideCredential,
-          defaultCredential,
-          settings,
-          deployment: runDeployment,
-        });
-        const { credential, thinkingLevel } = selected;
-        const runModelProvider = selected.provider ?? runtimeFallback?.provider;
-        const runModelId = selected.id ?? runtimeFallback?.id;
         const failRunBeforeModel = async (message: string) => {
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
@@ -5481,107 +5611,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           await failRunBeforeModel(MISSING_MODEL_MESSAGE);
           return;
         }
-        const modelKeyStartedAt = performance.now();
-        const resolvedPending = awaitLater(
-          resolveModelKey(
-            deps,
-            run.userId,
-            run.spaceId,
-            credential,
-            runModelProvider,
-            runModelId,
-            (values) => runSecrets.push(...values),
-          ).finally(() => {
-            setupMarks.modelKeyOwnMs = Math.round(performance.now() - modelKeyStartedAt);
-          }),
-        );
-        // A short first reply while the full answer is worked out. It starts beside the rest of
-        // setup and is posted only if the run has not replied yet; the run is told what it said.
-        // A typed card answer resumes the run that asked, so it gets one too.
-        const quickReplyText = turnBlocks ? blocksText(turnBlocks) : "";
-        let quickReplySaid: string | undefined;
-        const quickRepliesOn =
-          deps.quickReplies &&
-          !messagingChannelRun &&
-          !deps.runtime.describe().capabilities.scripted;
-        const quickReplyEarlier = () =>
-          historyMessages
-            .filter(
-              (message) =>
-                message.id !== currentTurnMessage?.id &&
-                ((message.role === "user" && !message.internal) || message.role === "bot"),
-            )
-            .map((message) => ({
-              role: message.role === "user" ? ("user" as const) : ("assistant" as const),
-              text: blocksText(message.blocks),
-            }));
-        const writeQuickReply = (userText: string, key?: string) =>
-          resolvedPending().then((resolved) =>
-            quickReply({
-              runtime: deps.runtime,
-              model: runModelFromResolved(runModelProvider, runModelId, resolved, "off"),
-              earlier: quickReplyEarlier(),
-              userText,
-              runId,
-              ...(key ? { key } : {}),
-              ...(hideVendors ? { recruiting: true } : {}),
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
-                ),
-            }),
-          );
-        const turnStartedAt = new Date();
-        if (
-          quickRepliesOn &&
-          (run.trigger === "user" || nativeSources?.currentAnswer) &&
-          quickReplyText.trim()
-        )
-          void writeQuickReply(quickReplyText)
-            .then(async (text) => {
-              if (!text) return;
-              // The card this run asked before the answer is not a reply to it, and a row that
-              // only shows the run's steps says nothing to the person yet.
-              const written = await deps.prisma.message.findMany({
-                where: {
-                  threadId: thread.id,
-                  runId,
-                  role: "bot",
-                  createdAt: { gte: turnStartedAt },
-                },
-                select: { blocks: true },
-              });
-              if (written.some((message) => saysSomething(message.blocks as MessageBlock[]))) {
-                getLogger().info("run.quick_reply.skipped", { runId, reason: "already_replied" });
-                return;
-              }
-              await publishMessage(deps, run, "bot", [
-                { kind: "text", text: redactSecrets(text, runSecrets) },
-              ]);
-              getLogger().info("run.quick_reply", {
-                runId,
-                sinceSetupMs: Math.round(performance.now() - setupStartedAt),
-              });
-              quickReplySaid = text;
-            })
-            .catch((error) => {
-              getLogger().warn("quick reply failed", { runId, reason: String(error) });
-            });
         // A message sent while the run works waits for the current step to end, which can be a
         // long search. It gets its own short reply now, whether the run reads it first or the
         // watch below finds it unread; the run is told not to acknowledge it again.

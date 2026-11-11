@@ -230,10 +230,15 @@ async function runWithModel(
       ),
       findUnique: vi.fn(async () => null),
       count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () =>
-        options.priorRoutineRun
-          ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
-          : null,
+      findFirst: vi.fn(async (args?: { where?: { role?: string; id?: string } }) =>
+        args?.where?.role === "user" || args?.where?.id
+          ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
+              (message: { role: string; id?: string }) =>
+                message.role === "user" && (!args.where?.id || message.id === args.where.id),
+            ) ?? null)
+          : options.priorRoutineRun
+            ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+            : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
