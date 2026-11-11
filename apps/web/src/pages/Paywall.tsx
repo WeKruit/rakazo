@@ -8,6 +8,7 @@ import { authClient } from "../lib/auth";
 import { formatBillingPrice } from "../lib/billing";
 import { forgetSavedRecruitingReads } from "../lib/recruiting-read-cache";
 import { clearSpaceSelection, rpc } from "../lib/rpc";
+import { savedShell } from "../lib/saved-shell";
 import { savedThreads } from "../lib/saved-threads";
 import { AuthFrame, submitClass } from "./Auth";
 
@@ -102,6 +103,7 @@ export function PaywallPage({ status }: { status: BillingStatus }) {
               clearSpaceSelection();
               void savedThreads.clear();
               void forgetSavedRecruitingReads();
+              void savedShell.clear();
               navigate("/");
             })
           }
