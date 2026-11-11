@@ -12796,7 +12796,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!target)
               return finish({
                 error:
-                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary.",
+                  "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
