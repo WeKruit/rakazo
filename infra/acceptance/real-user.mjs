@@ -214,12 +214,16 @@ async function send(rpc, groupId, text) {
 
 async function play(scenario, owner, sample) {
   const failures = [];
-  const startedAt = Date.now() - 5_000;
+  let startedAt = Date.now() - 5_000;
   const label = `${scenario.name}#${sample}`;
   const user = client();
   if (scenario.account === "onboarded") {
     // A hand-onboarded account cannot be made through the API, so a fixed one is reused.
     await user.auth(ONBOARDED_EMAIL, ONBOARDED_PASSWORD);
+    // Close what earlier runs left open, let the replies land, and judge only what follows.
+    await stopAll(user.rpc);
+    await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
+    startedAt = Date.now();
   } else {
     const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
     const password = `Ev-${crypto.randomUUID()}`;
