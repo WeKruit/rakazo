@@ -16,6 +16,7 @@ import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
+  candidateVoiceDraft,
   declineRetry,
   draftVariables,
   questionCard,
@@ -808,8 +809,9 @@ export async function planDeclineRetry(
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
   // A template the recruiter asked for is meant to keep its blanks.
+  // …but it is the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const variables = askedTemplate(input.personRequest ?? input.request)
-    ? undefined
+    ? candidateVoiceDraft(input.reply)
     : draftVariables(input.reply);
   const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
