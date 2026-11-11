@@ -6,6 +6,7 @@ import {
   fetchRecruitingRead,
   keepRecruitingReads,
   rememberRecruitingRead,
+  restoreSavedRecruitingReads,
   revalidateRecruitingReads,
   savedRecruitingRead,
 } from "./recruiting-read-cache";
@@ -250,4 +251,20 @@ it("does not let a slow earlier provider response overwrite a verified pause in 
     campaign: { status: 2 },
   });
   cache.client.clear();
+});
+
+it("restores saved rows synchronously, so a panel that reads once on mount sees them", async () => {
+  const { rows, store } = memoryStore();
+  const first = createRecruitingReadCache();
+  keepRecruitingReads(first, "user:space", store, { delayMs: 0 });
+  rememberRecruitingRead(first, "user:space:thread:workspace", { role: "Engineer" });
+  await vi.waitFor(() => expect(rows.size).toBe(1));
+  const reloaded = createRecruitingReadCache();
+  restoreSavedRecruitingReads(reloaded, "user:space", [...rows.values()]);
+  expect(savedRecruitingRead(reloaded, "user:space:thread:workspace")).toEqual({
+    role: "Engineer",
+  });
+  const other = createRecruitingReadCache();
+  restoreSavedRecruitingReads(other, "other:space", [...rows.values()]);
+  expect(savedRecruitingRead(other, "user:space:thread:workspace")).toBeUndefined();
 });
