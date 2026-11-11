@@ -613,6 +613,7 @@ import {
   locationOutliers,
   outsideSearchArea,
 } from "./recruiting-location.js";
+import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -1345,8 +1346,8 @@ const ASK_WITHOUT_ROLE =
   'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
 /** Kruit asks nothing for a role it has not opened: the role's team asks its questions there. */
-export const GLOBAL_ASK_BEFORE_ROLE =
-  "Not asked yet. When the recruiter's latest message describes a role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. Otherwise ask this same question again with ask_user.";
+export const globalAskBeforeRole = (latest: string) =>
+  `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
 
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
@@ -13872,6 +13873,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
+          // Must-haves the recruiter's message states are saved with the role at once, at
+          // priority hard, citing their message.
+          const criteria = statedMustHaveCriteria(currentMessageSourceRef(currentTurnMessage));
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -13880,7 +13884,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title,
                 brief: null,
                 sourceRefs,
-                criteria: [],
+                criteria,
                 preferences: [],
                 definitionQuestions: [],
                 intent: { basis: "direct", quote: quote.trim() },
@@ -15103,7 +15107,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     if (noRoleYet()) return { instead: ASK_WITHOUT_ROLE };
                     if (globalAskNeedsRoleCheck()) {
                       globalAskChecked = true;
-                      return { instead: GLOBAL_ASK_BEFORE_ROLE };
+                      return { instead: globalAskBeforeRole(recruiterTexts[0] ?? "") };
                     }
                     if (!senderRead && asksSenderCompanyName(question))
                       return { instead: SENDER_READ_FIRST };
