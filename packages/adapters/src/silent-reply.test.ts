@@ -49,3 +49,16 @@ describe("beforeCardQuestion", () => {
     expect(beforeCardQuestion("I opened the role.")).toBe("I opened the role.");
   });
 });
+
+// Staging eval 11-11 (mixed-language-ask): the brief came as one line, labels after each sentence.
+describe("isAgentBrief on one line", () => {
+  it("finds labels that follow a sentence end", () => {
+    expect(
+      isAgentBrief(
+        "Goal: 按招聘者原话“帮我找几个奥斯汀的 backend 工程师”继续招聘流程。Done when: 展示十位新人。Context: 先前保存被拒绝。",
+      ),
+    ).toBe(true);
+    expect(isAgentBrief("The goal: find ten people. Where we stand: two found.")).toBe(false);
+    expect(isAgentBrief("我的目标是找人。Context: none")).toBe(false);
+  });
+});

@@ -62,6 +62,7 @@ import {
   nearCandidateKey,
   newerRequestElsewhere,
   pastedJobTitle,
+  questionAlreadyWaiting,
   REPORT_IN_FINAL_REPLY,
   REVISIONED_RESEARCH_OPERATIONS,
   requestTitle,
@@ -5789,6 +5790,31 @@ describe("native recruiting assessment effect delivery", () => {
     // Staging eval 11-11 (email-no-mailbox-zh): 「那你就直接发啊」 after an email opened a role.
     expect(JSON.stringify(bounced)).toContain("An email, a send, a person");
     expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toBeUndefined();
+  });
+
+  // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
+  // while the first card still waited.
+  it("asks nothing while another turn's question waits unanswered", async () => {
+    const f = await roleTeamFirstTurn(
+      "question-already-waiting",
+      "帮我找几个奥斯汀的 backend 工程师，要会 Go 语言，五年以上经验",
+      [],
+      "recruiting-global-abc",
+    );
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    await request.beforeAsk?.("地点范围？", undefined);
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        role: "bot",
+        botId: "bot-1",
+        runId: "other-run",
+        blocks: [{ kind: "ask", text: "你希望地点限定为奥斯汀本地吗？", status: "pending" }],
+      },
+      { role: "user", botId: null, runId: null, blocks: [{ kind: "text", text: "找人" }] },
+    ]) as never);
+    expect(await request.beforeAsk?.("地点范围是哪一种？", undefined)).toEqual({
+      instead: questionAlreadyWaiting("你希望地点限定为奥斯汀本地吗？"),
+    });
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {
