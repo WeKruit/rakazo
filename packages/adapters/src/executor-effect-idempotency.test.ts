@@ -1810,6 +1810,24 @@ describe("recruiter-facing provider names", () => {
     expect(JSON.stringify(f.results)).toContain("Not shown: a handoff brief");
   });
 
+  // Staging eval 11-11 (cold-email-en): Kruit's report-back reply "NO_RESPONSE" was shown.
+  it("keeps a recruiting agent's NO_RESPONSE reply out of the chat", async () => {
+    const f = fixture("recruiting-no-response");
+    const botRow = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...botRow,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof botRow);
+    f.runtimeRun.mockImplementation(async function* () {
+      yield { type: "text" as const, text: "NO_RESPONSE" };
+      yield { type: "done" as const, text: "NO_RESPONSE" };
+    });
+
+    await f.run();
+
+    expect(JSON.stringify([f.published, f.finalizeRun.mock.calls])).not.toContain("NO_RESPONSE");
+  });
+
   it("leaves provider names alone outside recruiting conversations", async () => {
     const f = fixture("keep-vendor-names");
     f.runtimeRun.mockImplementation(async function* () {
