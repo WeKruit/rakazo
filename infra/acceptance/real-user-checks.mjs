@@ -114,7 +114,17 @@ export function conversationChecks(messages) {
     if (asked && /[\p{Script=Han}A-Za-z]/u.test(asked.text)) {
       const chinese = mostlyChinese(asked.text);
       const words = prose(text);
-      if (words.trim() && chinese !== mostlyChinese(words))
+      // A reply that only repeats words the recruiter typed (a name, an address) has no language.
+      const typed = new Set(
+        messages
+          .slice(0, index)
+          .filter((item) => item.role === "user")
+          .flatMap((item) => item.text.toLowerCase().match(/[a-z]+/g) ?? []),
+      );
+      const echo =
+        !/\p{Script=Han}/u.test(words) &&
+        (words.toLowerCase().match(/[a-z]+/g) ?? []).every((word) => typed.has(word));
+      if (words.trim() && !echo && chinese !== mostlyChinese(words))
         failures.push(
           `language: recruiter wrote ${chinese ? "Chinese" : "English"}, reply is not: "${words.slice(0, 80)}"`,
         );
