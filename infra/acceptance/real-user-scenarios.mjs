@@ -156,7 +156,6 @@ export const SCENARIOS = [
   },
   {
     name: "template-zh",
-    known: "11-11: [Interviewer placeholder about 1 in 3 (fix thread: feedback/failure UX)",
     area: "email",
     source: "11-09/10 template written in the candidate's voice",
     noRole: true,
@@ -166,7 +165,6 @@ export const SCENARIOS = [
   },
   {
     name: "template-then-send",
-    known: "11-11: English replies after Chinese (fix thread: feedback/failure UX)",
     area: "email",
     source: "drafts that dead-ended at sending",
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }, { say: `发给 ${CANDIDATE}` }],
