@@ -353,6 +353,7 @@ async function worker() {
       at: new Date(at).toISOString(),
       seconds: Math.round((Date.now() - at) / 1000),
       paid: Boolean(scenario.paid),
+      ...(scenario.known ? { known: scenario.known } : {}),
     };
     rows.push(row);
     log(
@@ -375,6 +376,13 @@ if (BENCH) {
   );
   fs.appendFileSync(file, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
-const failed = rows.filter((row) => !row.pass).length;
-log(`${rows.length - failed}/${rows.length} conversations pass`);
-process.exit(failed ? 1 : 0);
+const failed = rows.filter((row) => !row.pass);
+const blocking = failed.filter((row) => !row.known);
+log(`${rows.length - failed.length}/${rows.length} conversations pass`);
+for (const row of failed.filter((item) => item.known))
+  log(`known failure, not blocking: ${row.scenario}#${row.sample} (${row.known})`);
+// A known failure that passes every sample is ready to lose its mark.
+for (const name of new Set(rows.filter((row) => row.known && row.pass).map((row) => row.scenario)))
+  if (!failed.some((row) => row.scenario === name))
+    log(`known failure now passes: ${name}; remove its known mark`);
+process.exit(blocking.length ? 1 : 0);
