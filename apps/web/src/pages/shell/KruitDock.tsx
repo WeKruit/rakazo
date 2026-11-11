@@ -26,11 +26,14 @@ const SURFACE =
  */
 export function KruitDock({
   groups,
+  savedCopy = false,
   groupId,
   chatting = false,
   onOpen,
 }: {
   groups: Group[];
+  /** The groups are the saved copy a reload painted: nothing in them is news. */
+  savedCopy?: boolean;
   /** The open conversation: its own card is already in view. */
   groupId?: string;
   /** A chat is on screen: start minimized. */
@@ -52,7 +55,7 @@ export function KruitDock({
   const minimized = minimizedPref ?? (chatting || narrow);
   const showList = expanded && waiting.length > 0;
   const showReminder = !showList && !minimized && waiting.length > 0;
-  useAttentionToasts(groups, groupId, kruit?.id, onOpen);
+  useAttentionToasts(groups, savedCopy, groupId, kruit?.id, onOpen);
   const hidden = chatting ? !waiting.length : !kruit && !waiting.length;
   const dock = useFloatingDock(hidden, `${minimized}:${showList}:${waiting.length}`);
   if (hidden) return <Toaster position="top-right" />;
@@ -298,12 +301,14 @@ function useFloatingDock(hidden: boolean, layout: string) {
  */
 function useAttentionToasts(
   groups: Group[],
+  savedCopy: boolean,
   groupId: string | undefined,
   kruitId: string | undefined,
   onOpen: (groupId: string) => void,
 ) {
   const { t } = useLingui();
   const seen = useRef<Set<string> | undefined>(undefined);
+  const wasSavedCopy = useRef(false);
   const open = useRef(onOpen);
   open.current = onOpen;
   useEffect(() => {
@@ -314,7 +319,10 @@ function useAttentionToasts(
     }
     const before = seen.current;
     seen.current = new Set(now.keys());
-    if (!before) return;
+    // A reload's saved sidebar can be hours old; count from the first server read, not from it.
+    const fromSavedCopy = wasSavedCopy.current;
+    wasSavedCopy.current = savedCopy;
+    if (!before || savedCopy || fromSavedCopy) return;
     for (const [key, group] of now) {
       if (before.has(key) || group.id === groupId) continue;
       toast(group.id === kruitId ? RECRUITING_GLOBAL_AGENT_NAME : group.name, {
@@ -323,5 +331,5 @@ function useAttentionToasts(
         action: { label: t`Open`, onClick: () => open.current(group.id) },
       });
     }
-  }, [groups, groupId, kruitId, t]);
+  }, [groups, savedCopy, groupId, kruitId, t]);
 }
