@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAgentBrief, withoutAgentBrief } from "./silent-reply.js";
+import { beforeCardQuestion, isAgentBrief, withoutAgentBrief } from "./silent-reply.js";
 
 // Staging eval 11-11: Kruit posted its handoff brief to the recruiter, twice.
 const BRIEF = `Goal: Draft and send an email to Alex Chen asking whether he is available next week.
@@ -33,5 +33,19 @@ describe("agent brief in a reply", () => {
       assembled: line,
       blocks: [{ kind: "text", text: line }],
     });
+  });
+});
+
+// Staging eval 11-11 (vague-en): the same question in text and then on its card.
+describe("beforeCardQuestion", () => {
+  it("keeps what leads up to the question the card asks", () => {
+    expect(
+      beforeCardQuestion(
+        "I'm ready to move quickly, but I don't have a role yet. What role should I find people for? A JD is fastest.",
+      ),
+    ).toBe("I'm ready to move quickly, but I don't have a role yet.");
+    expect(beforeCardQuestion("我还没有岗位信息。你要找什么岗位的人？")).toBe("我还没有岗位信息。");
+    expect(beforeCardQuestion("Which city?")).toBe("");
+    expect(beforeCardQuestion("I opened the role.")).toBe("I opened the role.");
   });
 });
