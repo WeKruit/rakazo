@@ -5,7 +5,7 @@ import {
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
-import { RECRUITING_MISSED_REQUIREMENT } from "./recruiting-defaults.js";
+import { RECRUITING_INTAKE_FLOW, RECRUITING_MISSED_REQUIREMENT } from "./recruiting-defaults.js";
 import {
   classifyTurnEnd,
   laterPlaybookStage,
@@ -674,6 +674,10 @@ describe("a missed requirement is searched for again", () => {
     );
     expect(RECRUITING_MISSED_REQUIREMENT).toContain("criteria upsert at priority hard");
     expect(RECRUITING_MISSED_REQUIREMENT).toContain("never repeating its sentence");
+    // Staging eval 11-11: a JD saying 「必须会说普通话和英语」 left the role with no criteria during intake.
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "save them in that same step beside the question with one recruiting_role update",
+    );
   });
 
   it("every scale query carries a required language", () => {

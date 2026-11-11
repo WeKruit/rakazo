@@ -13,7 +13,7 @@
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
-//       [--out <dir>] [--bench <dir>] [--sha <sha>]
+//       [--out <dir>] [--bench <dir>] [--sha <sha>] [--model <provider/id>] [--thinking <level>]
 // RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
 // mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
@@ -23,7 +23,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import {
+  botText,
+  conversationChecks,
+  ROUND as RESULTS,
+  requirementSaved,
+} from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -197,15 +202,71 @@ async function roleChats(rpc) {
   }
   return chats;
 }
-async function send(rpc, groupId, text) {
+// A one-page PDF of plain ASCII lines, the way a recruiter attaches a JD exported from Word.
+function pdf(lines) {
+  const literal = (line) => line.replace(/[\\()]/g, (char) => `\\${char}`);
+  const stream = `BT /F1 11 Tf 50 760 Td 14 TL ${lines.map((line) => `(${literal(line)}) '`).join(" ")} ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = objects.map((object, index) => {
+    const offset = body.length;
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
+}
+
+async function send(rpc, groupId, text, file) {
   const busy = await working(rpc, groupId);
+  // Same calls the web composer makes for an attachment: upload it, then send it with the text.
+  const artifactIds = file
+    ? [
+        (
+          await rpc("artifacts/create", {
+            groupId,
+            name: file.name,
+            mimeType: "application/pdf",
+            contentBase64: pdf(file.lines).toString("base64"),
+          })
+        ).id,
+      ]
+    : undefined;
   await rpc("threads/send", {
     groupId,
     addressing: "coordinator",
     text,
+    ...(artifactIds ? { artifactIds } : {}),
     ...(busy ? { interrupt: true } : {}),
   });
 }
+
+/** Waits for a bot message after `since` that matches `pattern`, and returns it. */
+async function waitForText(rpc, pattern, since, limitMs) {
+  const until = Date.now() + limitMs;
+  while (Date.now() < until) {
+    await sleep(10_000);
+    for (const group of await groupsOf(rpc))
+      for (const message of await messagesOf(rpc, group.id))
+        if (
+          message.role !== "user" &&
+          Date.parse(message.createdAt) > since &&
+          pattern.test(botText(message))
+        )
+          return botText(message);
+  }
+  return null;
+}
+const PROFILE = /linkedin\.com\/in\/[\w%-]+/gi;
 
 async function play(scenario, owner, sample) {
   const failures = [];
@@ -224,12 +285,22 @@ async function play(scenario, owner, sample) {
     const password = `Ev-${crypto.randomUUID()}`;
     await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
     await user.auth(email, password);
+    // A model comparison runs the new account's agents on another model or effort.
+    if (MODEL || THINKING)
+      for (const bot of await user.rpc("bots/list"))
+        await user.rpc("bots/update", {
+          botId: bot.id,
+          ...(MODEL ? { modelProvider: MODEL.provider, modelId: MODEL.id } : {}),
+          ...(THINKING ? { thinkingLevel: THINKING } : {}),
+        });
   }
   const kruit = (await groupsOf(user.rpc)).find((group) =>
     group.id.startsWith("recruiting-global-"),
   );
   if (!kruit) return ["the new account has no Kruit conversation"];
   let chats = [];
+  let lastSent = Date.now();
+  const shown = new Set();
   // Roles a reused fixture account already had are not this play's.
   const rolesBefore = new Set((await roleChats(user.rpc)).map((group) => group.id));
   try {
@@ -243,9 +314,31 @@ async function play(scenario, owner, sample) {
           failures.push("no role chat to write in");
           break;
         }
-        log(`${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"`);
-        await send(user.rpc, target.id, turn.say ?? turn.sayRole);
+        log(
+          `${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"${turn.file ? ` with ${turn.file.name}` : ""}`,
+        );
+        lastSent = Date.now();
+        await send(user.rpc, target.id, turn.say ?? turn.sayRole, turn.file);
         if (settleAfter) await settle(user.rpc);
+      } else if (turn.results) {
+        // A round of people, after the recruiter's last message. Feedback rounds must bring new
+        // people, not the ones already shown.
+        log(`${label}: waits for a round of people`);
+        const round = await waitForText(
+          user.rpc,
+          RESULTS,
+          lastSent,
+          turn.results.limitMs ?? 10 * 60_000,
+        );
+        if (!round) {
+          failures.push("no round of people arrived after the recruiter's message");
+          break;
+        }
+        const people = new Set((round.match(PROFILE) ?? []).map((link) => link.toLowerCase()));
+        const again = [...people].filter((link) => shown.has(link));
+        if (again.length) failures.push(`the next round shows people again: ${again.join(", ")}`);
+        for (const link of people) shown.add(link);
+        await settle(user.rpc, { quietMs: 20_000, limitMs: 3 * 60_000 });
       } else if (turn.wait) {
         await sleep(turn.wait);
       } else if (turn.stop) {
@@ -260,6 +353,7 @@ async function play(scenario, owner, sample) {
           break;
         }
         log(`${label}: types "${turn.answerCard}" into "${botText(card).slice(0, 50)}"`);
+        lastSent = Date.now();
         await user.rpc("threads/answer", {
           groupId: card.groupId,
           runId: card.runId,
@@ -277,21 +371,50 @@ async function play(scenario, owner, sample) {
       if (!roles.length) failures.push("no role was opened");
       else if (roles.some((group) => /^New role$|^新岗位$/i.test(group.name)))
         failures.push("the role kept its placeholder title");
+      else if (scenario.roleTitle && !roles.some((group) => scenario.roleTitle.test(group.name)))
+        failures.push(`the role is not named from the JD: ${roles.map((g) => g.name).join(", ")}`);
     }
     if (scenario.requirement) {
       const role = roles[0];
       if (!role) failures.push("no role was created");
       else {
-        const workspace = await user.rpc("recruiting/getWorkspace", {
-          threadId: role.threadId ?? role.id,
-        });
-        fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        // Judge what the role now requires, not the quotes it keeps of the original JD, which
-        // still say "会说中文更好，不强求" after the recruiter makes it a must.
-        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
-          key === "quote" || key === "sourceRefs" ? undefined : value,
-        );
-        failures.push(...requirementSaved(requirements, scenario.requirement));
+        // Saves run in the background, so the role gets a minute to catch up. Judge what the role
+        // now requires (its criteria at their priority, the brief and the search filters), not the
+        // quotes it keeps of the original JD, which still say "会说中文更好，不强求" after the
+        // recruiter makes it a must. A hard criterion on the same requirement replaces the
+        // preferred one it supersedes.
+        const statement = (criterion) => JSON.stringify(criterion?.expression ?? "");
+        const mentions = new RegExp(scenario.requirement.source, "i");
+        let missing = [];
+        for (let attempt = 0; attempt < 7; attempt += 1) {
+          if (attempt) await sleep(10_000);
+          const workspace = await user.rpc("recruiting/getWorkspace", {
+            threadId: role.threadId ?? role.id,
+          });
+          fs.writeFileSync(
+            path.join(OUT, `${label}.role.json`),
+            JSON.stringify(workspace, null, 1),
+          );
+          const revision = workspace?.revision ?? {};
+          const lines = [
+            ...(revision.criteria ?? []).map(
+              (criterion) =>
+                `${criterion.priority === "hard" ? "required" : "preferred"}: ${statement(criterion)}`,
+            ),
+            ...(revision.brief?.fields ?? []).map((field) => `${field.key}: ${field.value}`),
+            ...(revision.brief?.searchFilters ?? []).map(
+              (filter) =>
+                `${filter.mode === "include" ? "required" : filter.mode}: ${filter.statement}`,
+            ),
+          ];
+          const hard = lines.some((line) => line.startsWith("required: ") && mentions.test(line));
+          const requirements = lines
+            .filter((line) => !hard || line.startsWith("required: ") || !mentions.test(line))
+            .join("\n");
+          missing = requirementSaved(requirements, scenario.requirement);
+          if (!missing.length) break;
+        }
+        failures.push(...missing);
       }
     }
     chats = await transcripts(user.rpc, startedAt);
@@ -335,6 +458,12 @@ const wanted = SCENARIOS.filter(
 if (!ONBOARDED_EMAIL)
   log("RAKAZO_ONBOARDED_EMAIL/PASSWORD not set: skipping the onboarded-account scenarios");
 const SAMPLES = Number(option("--samples", "1"));
+// --model provider/id and --thinking level compare models on the same scenarios; the deployment's
+// own key must serve that provider.
+const [, modelProvider, modelId] = option("--model")?.match(/^([^/]+)\/(.+)$/) ?? [];
+const MODEL = modelProvider ? { provider: modelProvider, id: modelId } : null;
+if (option("--model") && !MODEL) throw new Error("--model takes provider/id");
+const THINKING = option("--thinking");
 const CONCURRENCY = Number(option("--concurrency", "8"));
 const plays = wanted.flatMap((scenario) =>
   Array.from({ length: scenario.paid || scenario.account ? 1 : SAMPLES }, (_, index) => ({
@@ -377,6 +506,12 @@ async function worker(plays) {
       at: new Date(at).toISOString(),
       seconds: Math.round((Date.now() - at) / 1000),
       paid: Boolean(scenario.paid),
+      ...(MODEL || THINKING
+        ? {
+            model: MODEL ? `${MODEL.provider}/${MODEL.id}` : "default",
+            thinking: THINKING ?? "default",
+          }
+        : {}),
       ...(scenario.known ? { known: scenario.known } : {}),
       ...(retry ? { retry: true } : {}),
     };

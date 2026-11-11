@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { botText, conversationChecks, deadEnd, requirementSaved } from "./real-user-checks.mjs";
+import {
+  botText,
+  conversationChecks,
+  deadEnd,
+  questionsIn,
+  requirementSaved,
+} from "./real-user-checks.mjs";
 
 const user = (text) => ({ role: "user", text, card: false });
 const bot = (text, card = false) => ({ role: "bot", text, card });
@@ -157,4 +163,79 @@ test("a connect card is read by its reason, not the untranslated title", () => {
       f.startsWith("language"),
     ),
   );
+});
+
+const at = (seconds) => new Date(Date.UTC(2026, 10, 11, 0, 0, seconds)).toISOString();
+
+test("a message answered only after the long step ends fails as a slow first reply", () => {
+  const failures = conversationChecks([
+    { ...user("对了，远程也可以，不一定要在西雅图"), at: at(0) },
+    { ...bot("好的，远程也可以，我按这个调整搜索。"), at: at(16) },
+  ]);
+  assert(failures.some((failure) => failure.startsWith("slow first reply: 16 s")));
+});
+
+test("a quick line within seconds passes the first-reply check", () => {
+  const failures = conversationChecks([
+    { ...user("对了，远程也可以，不一定要在西雅图"), at: at(0) },
+    { ...bot("好的，我把远程也加进来。"), at: at(3) },
+    { ...bot("已按远程调整，继续找人。"), at: at(40) },
+  ]);
+  assert(!failures.some((failure) => failure.startsWith("slow first reply")));
+});
+
+test("two questions in one turn fail, across the text and the card", () => {
+  const failures = conversationChecks([
+    { ...user("find me engineers"), at: at(0) },
+    { ...bot("I don’t have a role yet. What role should I find people for?"), at: at(2) },
+    { ...bot("Which city should they be in?", true), at: at(5) },
+  ]);
+  assert(failures.some((failure) => failure.startsWith("asks 2 questions at once")));
+});
+
+test("one question, a draft with its own question and a quoted line count as one", () => {
+  assert.deepEqual(
+    questionsIn(
+      "> 你能听的懂话吗？\n草稿写好了。要现在发吗？\nSubject: Quick chat?\nHi Alex, are you open to a call?",
+    ),
+    ["要现在发吗？"],
+  );
+});
+test("a Chinese question with an English role title is still Chinese", () => {
+  const failures = conversationChecks([
+    user("继续吧"),
+    bot("这份 Senior Data Engineer 职位主要面向哪个地点和工作方式？"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
+test("a blocker that says what to send next is not a dead end", () => {
+  assert.equal(
+    deadEnd(
+      bot(
+        "我现在没法直接发出：这封邮件是首次联系，缺少可关联的岗位信息。请发我该岗位的职位描述或链接；有了岗位信息，我就能继续准备邮件。",
+      ),
+    ),
+    false,
+  );
+});
+
+test("a second round of people may repeat the round header and next-step card, and S3 in evidence is AWS", () => {
+  const round = (name) =>
+    bot(
+      `10 people this round:\n1. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Data Engineer\n   > Built Glue ETL pipelines on S3 Parquet tables.`,
+    );
+  const card = bot(
+    "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
+    true,
+  );
+  const failures = conversationChecks([
+    user("Go with the JD as written and start the search."),
+    round("Ann"),
+    card,
+    user("#2 and #5 are not a fit. Find more people who run Kafka in production."),
+    round("Bob"),
+    card,
+  ]);
+  assert.deepEqual(failures, []);
 });

@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { FEEDBACK_SAVING, saveInBackground, savesFeedbackInBackground } from "./background-save.js";
+import {
+  FEEDBACK_SAVING,
+  ownRoleRevisions,
+  saveInBackground,
+  savesFeedbackInBackground,
+  savesRoleInBackground,
+  transientSaveError,
+} from "./background-save.js";
 
 const failed = (result: unknown) => Boolean((result as { error?: unknown } | null)?.error);
 const inputError = (result: unknown) => (result as { code?: unknown } | null)?.code === "INPUT";
@@ -104,5 +111,36 @@ describe("saveInBackground", () => {
     await expect(save.reply).resolves.toBe(wrong);
     await save.settled;
     expect(retry).not.toHaveBeenCalled();
+  });
+});
+
+// 11-11: a must-have typed into an intake card was saved only once the first ten came out, so a
+// stopped search lost it. Role saves now run in the background like feedback.
+describe("role saves in the background", () => {
+  it("runs role updates in the background, never creation or reads", () => {
+    expect(savesRoleInBackground("recruiting_role", { operation: "update" })).toBe(true);
+    expect(savesRoleInBackground("recruiting_role", { operation: "create" })).toBe(false);
+    expect(savesRoleInBackground("recruiting_role", { operation: "read" })).toBe(false);
+    expect(savesRoleInBackground("recruiting_feedback", { operation: "update" })).toBe(false);
+  });
+
+  it("retries a revision race or an outage, and hands bad input back to the agent", () => {
+    expect(transientSaveError("Role revision conflict")).toBe(true);
+    expect(transientSaveError("connection terminated unexpectedly")).toBe(true);
+    expect(transientSaveError("brief.fields[0].key: Required")).toBe(false);
+  });
+
+  it("moves a revision this run saved on to the newest, and leaves others' revisions alone", () => {
+    const revisions = ownRoleRevisions();
+    revisions.saved("role-1", 3);
+    revisions.saved("role-1", 4);
+    // The agent still names the revision it started from while its saves ran in the background.
+    expect(revisions.current("role-1", 2)).toBe(4);
+    expect(revisions.current("role-1", 3)).toBe(4);
+    expect(revisions.current("role-1", 4)).toBe(4);
+    // A revision this run never saw, or another role, conflicts as before.
+    expect(revisions.current("role-1", 1)).toBe(1);
+    expect(revisions.current("role-2", 2)).toBe(2);
+    expect(revisions.current(undefined, 2)).toBe(2);
   });
 });
