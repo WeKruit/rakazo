@@ -352,10 +352,7 @@ import {
 import { createAutoReviewProvider } from "./auto-review-factory.js";
 import {
   ownRoleRevisions,
-  PREFERENCE_SAVE_WAIT_MS,
-  preferenceAtCurrentRevision,
   ROLE_SAVE_WAIT_MS,
-  revisionConflict,
   saveInBackground,
   savesFeedbackInBackground,
   savesRoleInBackground,
@@ -13704,21 +13701,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (savesFeedbackInBackground(name, rawArgs)) {
             const save = saveInBackground({
               first: applied,
-              ...(rawArgs.target === "preference" ? { waitMs: PREFERENCE_SAVE_WAIT_MS } : {}),
-              retry: (attempt, previous) =>
-                applyToolNow(
-                  name,
-                  preferenceAtCurrentRevision(rawArgs, previous),
-                  `${executionId}:retry-${attempt}`,
-                ),
+              retry: (attempt) => applyToolNow(name, rawArgs, `${executionId}:retry-${attempt}`),
               failed: (result) => toolResultError(result) !== undefined,
-              // A refused preference (a role requirement or a pasted JD) is not retried: the role
-              // keeps it and the shared preference is simply not saved.
-              inputError: (result) =>
-                feedbackInputError(result) ||
-                (rawArgs.target === "preference" &&
-                  !revisionConflict(result) &&
-                  !transientSaveError(toolResultError(result))),
+              inputError: (result) => feedbackInputError(result),
               onGiveUp: (result) =>
                 getLogger().warn("recruiting.feedback.not_saved", {
                   runId,

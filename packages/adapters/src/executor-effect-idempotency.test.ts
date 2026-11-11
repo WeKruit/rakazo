@@ -3804,7 +3804,7 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.semanticSave).not.toHaveBeenCalled();
   });
 
-  it("leaves the claimed effect uncertain, without a retry or a stopped task, when a preference commit acknowledgement is lost", async () => {
+  it("leaves the claimed effect uncertain when feedback fails after native commit acknowledgement is lost", async () => {
     const f = fixture("run-feedback-unknown-commit");
     vi.mocked(executeRecruitingFeedback).mockRejectedValue(
       new Error("native commit acknowledgement lost"),
@@ -3813,11 +3813,10 @@ describe("native recruiting feedback effect dispatch", () => {
       { name: "recruiting_feedback", args: feedback, executionId: "feedback-unknown-commit" },
     ]);
 
-    // Saving a preference is record keeping: the recruiter's task carries on.
-    await f.run();
+    await f.run("native commit acknowledgement lost");
 
     expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
-    expect(f.results).toEqual([{ error: "native commit acknowledgement lost" }]);
+    expect(f.results).toEqual([]);
     expect(f.effects).toEqual([
       expect.objectContaining({
         kind: "recruiting_feedback",
@@ -3827,51 +3826,6 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.effects[0]).not.toHaveProperty("result");
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.semanticSave).not.toHaveBeenCalled();
-  });
-
-  it("saves a preference that lost a revision race at the current revision, in the background", async () => {
-    const f = fixture("run-feedback-preference-conflict");
-    f.memoryRead.mockResolvedValue({
-      documents: [{ path: "MEMORY.md", content: "Earlier line", revision: 3 }],
-    } as never);
-    vi.mocked(executeRecruitingFeedback)
-      .mockRejectedValueOnce(
-        new Error("Memory changed since it was read. Read the latest version and save again."),
-      )
-      .mockResolvedValueOnce({
-        status: "saved",
-        feedback,
-        source,
-        workspace: null,
-        document: { id: "doc-1", scope: "bot", path: "MEMORY.md", revision: 4, anchor: "a" },
-      } as never);
-    f.setCalls([{ name: "recruiting_feedback", args: feedback, executionId: "feedback-conflict" }]);
-
-    await f.run();
-
-    expect(executeRecruitingFeedback).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(executeRecruitingFeedback).mock.calls[1]?.[2]).toMatchObject({
-      expectedRevision: 3,
-    });
-  });
-
-  it("hands a slow preference refusal back to the agent so it can fix and resend it", async () => {
-    const f = fixture("run-feedback-preference-slow-refusal");
-    const { RecruitingFeedbackValidationError } = await vi.importActual<
-      typeof RecruitingFeedbackModule
-    >("./recruiting-feedback.js");
-    vi.mocked(executeRecruitingFeedback).mockImplementationOnce(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-      throw new RecruitingFeedbackValidationError("intent.quote must be copied exactly");
-    });
-    f.setCalls([{ name: "recruiting_feedback", args: feedback, executionId: "feedback-slow" }]);
-
-    await f.run();
-
-    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
-    expect(f.results[0]).toMatchObject({
-      error: expect.stringContaining("intent.quote must be copied exactly"),
-    });
   });
 
   it("returns role feedback as a proposal without applying a role or memory mutation", async () => {
