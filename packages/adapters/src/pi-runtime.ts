@@ -650,8 +650,11 @@ export class PiAgentRuntime implements AgentRuntime {
           for (const nested of nestedAgents) nested.abort();
         };
         host.abortTurn = onAbort;
+        // Stopped before the first step (a stop, or a worker shutting down for a deploy): end
+        // as a mid-run stop does, so a shutdown resumes the turn instead of replying "stopped".
         if (signal.aborted) {
-          queue.push({ type: "done", text: "stopped" });
+          if (context?.signal?.aborted) queue.fail(context.signal.reason);
+          else queue.push({ type: "done", text: "stopped" });
           return;
         }
         signal.addEventListener("abort", onAbort);
