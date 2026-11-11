@@ -5508,6 +5508,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               userText,
               runId,
               ...(key ? { key } : {}),
+              ...(hideVendors ? { recruiting: true } : {}),
               spaceId: run.spaceId,
               userId: run.userId,
               botId: bot.id,
