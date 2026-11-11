@@ -5,7 +5,8 @@
 // newest open question card, { wait } pauses (ms), { stop } presses Stop.
 // Expectations: noRole (no role may be opened), role (a role must be opened, not titled "New
 // role"), requirement (regex that must be saved as required in the role brief), last / lastNot
-// (regex the last reply must / must not match). Every conversation also passes the common checks
+// (regex the last reply must / must not match). account: "onboarded" plays on the fixture account
+// we set up by hand (no credit limit, no mailbox) instead of a fresh self-signup account. Every conversation also passes the common checks
 // in real-user-checks.mjs. paid: answering a role's first question starts the paid first-ten search.
 // known: a product failure already handed to a fix thread; it still fails on the scoreboard but
 // does not fail the release gate. Remove it with the fix.
@@ -135,6 +136,16 @@ export const SCENARIOS = [
       { say: "其他几位可以根据实际情况发送邮件吗" },
       { say: "那你就直接发啊" },
     ],
+  },
+  {
+    // The production case: an account we onboarded (no credit limit) before its mailbox was
+    // assigned. One line, no address, said once; no self-serve step is expected.
+    name: "email-onboarded-no-mailbox-zh",
+    area: "email",
+    source: "11-10 onboarded account told three times to contact an internal address",
+    account: "onboarded",
+    noRole: true,
+    turns: [{ say: "其他几位可以根据实际情况发送邮件吗" }, { say: "那你就直接发啊" }],
   },
   {
     name: "email-no-mailbox-en",

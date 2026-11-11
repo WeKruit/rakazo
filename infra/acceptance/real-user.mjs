@@ -13,6 +13,8 @@
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
 //       [--out <dir>] [--bench <dir>] [--sha <sha>]
+// RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
+// mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
 // times; the release gate plays each once. Rows go to <out>/results.jsonl and, with --bench, are
 // appended to the shared benchmark folder for the scoreboard.
@@ -146,11 +148,17 @@ async function settle(rpc, { quietMs = 30_000, limitMs = 6 * 60_000, untilCard =
 }
 
 /** What the recruiter saw in each chat, oldest first; the server records typed card answers. */
-async function transcripts(rpc) {
+/** Only this play's messages: a reused fixture account keeps earlier runs' history. */
+async function transcripts(rpc, since) {
   const chats = [];
   for (const group of await groupsOf(rpc)) {
     const messages = (await messagesOf(rpc, group.id))
-      .filter((message) => !message.internal && !(message.role === "user" && message.botId))
+      .filter(
+        (message) =>
+          !message.internal &&
+          !(message.role === "user" && message.botId) &&
+          Date.parse(message.createdAt) >= since,
+      )
       .map((message) => ({
         // A user-role row written by an agent is a handoff, not the recruiter.
         role: message.role === "user" && !message.botId ? "user" : "bot",
@@ -206,17 +214,25 @@ async function send(rpc, groupId, text) {
 
 async function play(scenario, owner, sample) {
   const failures = [];
+  const startedAt = Date.now() - 5_000;
   const label = `${scenario.name}#${sample}`;
-  const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
-  const password = `Ev-${crypto.randomUUID()}`;
-  await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
   const user = client();
-  await user.auth(email, password);
+  if (scenario.account === "onboarded") {
+    // A hand-onboarded account cannot be made through the API, so a fixed one is reused.
+    await user.auth(ONBOARDED_EMAIL, ONBOARDED_PASSWORD);
+  } else {
+    const email = `kruit-eval-${scenario.name}-${sample}-${Date.now()}@example.com`;
+    const password = `Ev-${crypto.randomUUID()}`;
+    await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
+    await user.auth(email, password);
+  }
   const kruit = (await groupsOf(user.rpc)).find((group) =>
     group.id.startsWith("recruiting-global-"),
   );
   if (!kruit) return ["the new account has no Kruit conversation"];
   let chats = [];
+  // Roles a reused fixture account already had are not this play's.
+  const rolesBefore = new Set((await roleChats(user.rpc)).map((group) => group.id));
   try {
     for (const [index, turn] of scenario.turns.entries()) {
       const next = scenario.turns[index + 1];
@@ -255,7 +271,7 @@ async function play(scenario, owner, sample) {
         await settle(user.rpc, { quietMs: 25_000, limitMs: 3 * 60_000 });
       }
     }
-    const roles = await roleChats(user.rpc);
+    const roles = (await roleChats(user.rpc)).filter((group) => !rolesBefore.has(group.id));
     if (scenario.noRole && roles.length)
       failures.push(`opened a role it was not asked for: ${roles.map((g) => g.name).join(", ")}`);
     if (scenario.role) {
@@ -276,7 +292,7 @@ async function play(scenario, owner, sample) {
         );
       }
     }
-    chats = await transcripts(user.rpc);
+    chats = await transcripts(user.rpc, startedAt);
   } finally {
     await stopAll(user.rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
@@ -305,15 +321,21 @@ async function play(scenario, owner, sample) {
   return failures;
 }
 
+const { RAKAZO_ONBOARDED_EMAIL: ONBOARDED_EMAIL, RAKAZO_ONBOARDED_PASSWORD: ONBOARDED_PASSWORD } =
+  process.env;
 const only = option("--only")?.split(",");
 const wanted = SCENARIOS.filter(
   (scenario) =>
-    (!only || only.includes(scenario.name)) && (!scenario.paid || args.includes("--paid")),
+    (!only || only.includes(scenario.name)) &&
+    (!scenario.paid || args.includes("--paid")) &&
+    (scenario.account !== "onboarded" || (ONBOARDED_EMAIL && ONBOARDED_PASSWORD)),
 );
+if (!ONBOARDED_EMAIL)
+  log("RAKAZO_ONBOARDED_EMAIL/PASSWORD not set: skipping the onboarded-account scenarios");
 const SAMPLES = Number(option("--samples", "1"));
 const CONCURRENCY = Number(option("--concurrency", "8"));
 const plays = wanted.flatMap((scenario) =>
-  Array.from({ length: scenario.paid ? 1 : SAMPLES }, (_, index) => ({
+  Array.from({ length: scenario.paid || scenario.account ? 1 : SAMPLES }, (_, index) => ({
     scenario,
     sample: index + 1,
   })),
