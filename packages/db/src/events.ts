@@ -868,6 +868,32 @@ export async function hasUnclaimedSteering(
   return Boolean(row);
 }
 
+/**
+ * Messages this run would take that it has not read yet, oldest first. Read without claiming them,
+ * so the person can be answered at once while a long step is still running.
+ */
+export async function unreadSteering(
+  prisma: Pick<PrismaClient, "run" | "steeringMessage">,
+  input: { threadId: string; botId: string; runId: string },
+): Promise<Array<{ id: string; messageId: string; blocks: MessageBlock[] }>> {
+  const run = await prisma.run.findFirst({
+    where: { id: input.runId, threadId: input.threadId, status: "running" },
+    select: { trigger: true, clientNonce: true, sourceMessage: { select: { blocks: true } } },
+  });
+  if (!run || run.trigger === "created") return [];
+  const rows = await prisma.steeringMessage.findMany({
+    where: { ...steeringForRunWhere(run, input), claimedAt: null },
+    select: { id: true, messageId: true, message: { select: { blocks: true } } },
+    orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
+    take: 5,
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    messageId: row.messageId,
+    blocks: row.message.blocks as MessageBlock[],
+  }));
+}
+
 export async function claimSteering(
   prisma: PrismaClient,
   input: ClaimSteeringInput,

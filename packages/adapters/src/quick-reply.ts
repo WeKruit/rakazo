@@ -61,6 +61,8 @@ export function quickReply(input: {
   earlier?: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
   userText: string;
   runId: string;
+  /** Tells apart several quick replies in one run, such as one per message sent while it works. */
+  key?: string;
   spaceId: string;
   userId: string;
   botId: string;
@@ -102,7 +104,7 @@ export function quickReply(input: {
         {
           botId: input.botId,
           threadId: input.threadId,
-          runId: `${input.runId}:quick-reply`,
+          runId: `${input.runId}:quick-reply${input.key ? `:${input.key}` : ""}`,
           usageOperationKind: "setup",
           prompt,
           instructions: INSTRUCTIONS,
@@ -117,7 +119,7 @@ export function quickReply(input: {
           },
         },
         {
-          operationId: `quick-reply:${input.runId}`,
+          operationId: `quick-reply:${input.runId}${input.key ? `:${input.key}` : ""}`,
           traceId: `quick-reply:${input.runId}`,
           spaceId: input.spaceId,
           userId: input.userId,
