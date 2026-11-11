@@ -141,7 +141,9 @@ export async function handoffToGroupBot(
       // Work in a role the recruiter names (such as replying in that role's email thread) needs
       // that role's campaign and threads, which only its own team holds.
       if (groupId.startsWith("recruiting-global-")) {
-        const asked = JSON.stringify(activeSource.sourceMessage?.blocks ?? []).toLowerCase();
+        // A request steered into a running turn is not its source message; the brief quotes it.
+        const asked =
+          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`.toLowerCase();
         const roles = await tx.recruitingRole.findMany({
           where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
           select: { id: true, title: true },
