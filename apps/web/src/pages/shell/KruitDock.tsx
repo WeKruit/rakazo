@@ -173,27 +173,25 @@ export function KruitDock({
 function useFloatingDock(hidden: boolean, layout: string) {
   const ref = useRef<HTMLDivElement>(null);
   const [stored, setStored] = useState(readDockOffset);
-  const [auto, setAuto] = useState<DockOffset>({ right: DOCK_MARGIN, bottom: DOCK_MARGIN });
+  // The spot the dock is drawn at. A placed spot is only fitted to the current size and window
+  // here; the user's own spot stays as dropped, so a wider reminder showing first cannot move it.
+  const [shown, setShown] = useState<DockOffset>(
+    () => stored ?? { right: DOCK_MARGIN, bottom: DOCK_MARGIN },
+  );
   const dragging = useRef(false);
   const moved = useRef(false);
-  const placed = useRef(Boolean(stored));
-  placed.current = Boolean(stored);
+  const placed = useRef(stored);
+  placed.current = stored;
   const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
 
   const settle = useCallback(() => {
     const el = ref.current;
     if (!el || dragging.current) return;
     const box = { width: el.offsetWidth, height: el.offsetHeight };
-    if (placed.current) {
-      setStored((was) => {
-        if (!was) return was;
-        const next = clampOffset(was, box, viewport());
-        return next.right === was.right && next.bottom === was.bottom ? was : next;
-      });
-      return;
-    }
-    const next = findFreeOffset(box, viewport(), controlRects(el));
-    setAuto((was) => (was.right === next.right && was.bottom === next.bottom ? was : next));
+    const next = placed.current
+      ? clampOffset(placed.current, box, viewport())
+      : findFreeOffset(box, viewport(), controlRects(el));
+    setShown((was) => (was.right === next.right && was.bottom === next.bottom ? was : next));
   }, []);
 
   useLayoutEffect(() => {
@@ -269,7 +267,10 @@ function useFloatingDock(hidden: boolean, layout: string) {
           saveDockOffset(last);
           // Commit the new right/bottom and drop the transform together, so no frame shows the
           // drag offset twice (new spot plus transform) or the old spot.
-          flushSync(() => setStored(last));
+          flushSync(() => {
+            setStored(last);
+            setShown(last);
+          });
           el.style.transform = "";
           // A drag ends in a click on the same element; swallow that one, then forget it.
           setTimeout(() => {
@@ -288,7 +289,7 @@ function useFloatingDock(hidden: boolean, layout: string) {
     },
   };
 
-  return { ref, offset: stored ?? auto, drag };
+  return { ref, offset: shown, drag };
 }
 
 /**

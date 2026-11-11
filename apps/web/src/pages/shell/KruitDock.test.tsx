@@ -133,6 +133,29 @@ it("floats bottom right and remembers where it was dragged", async () => {
   localStorage.clear();
 });
 
+it("returns to the dragged spot after a wider reminder had to fit the window", async () => {
+  localStorage.setItem("kruit-dock-position", JSON.stringify({ right: 900, bottom: 100 }));
+  Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  // The reminder is wider than the logo, so near the left edge it is pulled in to stay visible.
+  const width = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.querySelector('[role="status"]') ? 200 : 48;
+  });
+  const { host } = await render([group(KRUIT), group("Designer", { attention: "approval" })]);
+  const dock = host.firstElementChild as HTMLElement;
+  expect(dock.style.right).toBe("792px");
+  await act(async () => find(host, "Minimize").click());
+  expect(dock.style.right).toBe("900px");
+  expect(JSON.parse(localStorage.getItem("kruit-dock-position")!)).toEqual({
+    right: 900,
+    bottom: 100,
+  });
+  width.mockRestore();
+  localStorage.clear();
+});
+
 it("in a conversation starts minimized and shows only waits from other conversations", async () => {
   const own = await render([group(KRUIT), group("Designer", { attention: "approval" })], {
     groupId: "Designer",
