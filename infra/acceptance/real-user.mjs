@@ -10,7 +10,9 @@
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--out <dir>]
+//     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 2] [--out <dir>]
+// Replies vary from run to run, so each scenario plays --samples times side by side (default 2,
+// the paid one once); any failed sample fails it.
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every scenario passes.
 
 import fs from "node:fs";
@@ -283,10 +285,17 @@ const wanted = SCENARIOS.filter(
   (scenario) =>
     (!only || only.includes(scenario.name)) && (!scenario.paid || args.includes("--paid")),
 );
+const SAMPLES = Number(option("--samples", "2"));
+const plays = wanted.flatMap((scenario) =>
+  Array.from({ length: scenario.paid ? 1 : SAMPLES }, (_, index) => ({
+    ...scenario,
+    name: index ? `${scenario.name}-${index + 1}` : scenario.name,
+  })),
+);
 const owner = client();
 await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
 const results = await Promise.all(
-  wanted.map(async (scenario) => {
+  plays.map(async (scenario) => {
     const at = Date.now();
     let failures;
     try {
