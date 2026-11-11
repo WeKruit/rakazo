@@ -3804,7 +3804,7 @@ describe("native recruiting feedback effect dispatch", () => {
     expect(f.semanticSave).not.toHaveBeenCalled();
   });
 
-  it("leaves the claimed effect uncertain when feedback fails after native commit acknowledgement is lost", async () => {
+  it("leaves the claimed effect uncertain, without a retry or a stopped task, when a preference commit acknowledgement is lost", async () => {
     const f = fixture("run-feedback-unknown-commit");
     vi.mocked(executeRecruitingFeedback).mockRejectedValue(
       new Error("native commit acknowledgement lost"),
@@ -3813,10 +3813,11 @@ describe("native recruiting feedback effect dispatch", () => {
       { name: "recruiting_feedback", args: feedback, executionId: "feedback-unknown-commit" },
     ]);
 
-    await f.run("native commit acknowledgement lost");
+    // Saving a preference is record keeping: the recruiter's task carries on.
+    await f.run();
 
     expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
-    expect(f.results).toEqual([]);
+    expect(f.results).toEqual([{ error: "native commit acknowledgement lost" }]);
     expect(f.effects).toEqual([
       expect.objectContaining({
         kind: "recruiting_feedback",
