@@ -173,5 +173,8 @@ describe("global recruiting overview", () => {
     expect(body).toContain("a new role, a JD or hiring requirements still go to start_role");
     // Staging eval 11-11: "write me a cold outreach email…" was answered with "who should I address it to?"
     expect(body).toContain("never ask who it is addressed to first");
+    // Staging eval 11-11: the request went to Outreach, which still asked who it was for.
+    const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "outreach")!;
+    expect(outreach.instructions).toContain("else the role's first result; else a template with blanks");
   });
 });
