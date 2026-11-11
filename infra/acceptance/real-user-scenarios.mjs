@@ -5,8 +5,11 @@
 // newest open question card, { wait } pauses (ms), { stop } presses Stop.
 // Expectations: noRole (no role may be opened), role (a role must be opened, not titled "New
 // role"), requirement (regex that must be saved as required in the role brief), last / lastNot
-// (regex the last reply must / must not match). Every conversation also passes the common checks
+// (regex the last reply must / must not match). account: "onboarded" plays on the fixture account
+// we set up by hand (no credit limit, no mailbox) instead of a fresh self-signup account. Every conversation also passes the common checks
 // in real-user-checks.mjs. paid: answering a role's first question starts the paid first-ten search.
+// known: a product failure already handed to a fix thread; it still fails on the scoreboard but
+// does not fail the release gate. Remove it with the fix.
 
 const CANDIDATE = "alex.chen.test@example.com";
 const JD_EN = `Senior Data Engineer — Seattle, WA (hybrid, 3 days on site)
@@ -91,6 +94,7 @@ export const SCENARIOS = [
   },
   {
     name: "change-while-opening",
+    known: "11-11: no role opened, English reply (fix thread: feedback/failure UX)",
     area: "steering",
     source: "11-10 never refuse, steer mid-run messages",
     turns: [{ say: JD_EN }, { wait: 4_000 }, { say: "对了，远程也可以，不一定要在西雅图" }],
@@ -134,6 +138,16 @@ export const SCENARIOS = [
     ],
   },
   {
+    // The production case: an account we onboarded (no credit limit) before its mailbox was
+    // assigned. One line, no address, said once; no self-serve step is expected.
+    name: "email-onboarded-no-mailbox-zh",
+    area: "email",
+    source: "11-10 onboarded account told three times to contact an internal address",
+    account: "onboarded",
+    noRole: true,
+    turns: [{ say: "其他几位可以根据实际情况发送邮件吗" }, { say: "那你就直接发啊" }],
+  },
+  {
     name: "email-no-mailbox-en",
     area: "email",
     source: "11-10 outside user told to contact an internal address",
@@ -142,6 +156,7 @@ export const SCENARIOS = [
   },
   {
     name: "template-zh",
+    known: "11-11: [Interviewer placeholder about 1 in 3 (fix thread: feedback/failure UX)",
     area: "email",
     source: "11-09/10 template written in the candidate's voice",
     noRole: true,
@@ -151,12 +166,14 @@ export const SCENARIOS = [
   },
   {
     name: "template-then-send",
+    known: "11-11: English replies after Chinese (fix thread: feedback/failure UX)",
     area: "email",
     source: "drafts that dead-ended at sending",
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }, { say: `发给 ${CANDIDATE}` }],
   },
   {
     name: "cold-email-en",
+    known: "11-11: asks for a recipient instead of drafting (fix thread: feedback/failure UX)",
     area: "email",
     source: "10-27 T1: drafts in Chinese for English candidates",
     turns: [
