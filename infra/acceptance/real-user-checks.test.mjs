@@ -165,6 +165,19 @@ test("a connect card is read by its reason, not the untranslated title", () => {
   );
 });
 
+test("an agent's brief to a teammate is not read as the reply the recruiter sees", () => {
+  const brief =
+    "Goal: Continue the recruiter's intake. Where: Senior Data Engineer role. Done when: ask in Chinese.";
+  const message = {
+    blocks: [
+      { kind: "bot_message_sent", text: brief },
+      { kind: "text", text: "已交给职位团队继续。" },
+    ],
+  };
+  assert.equal(botText(message), "已交给职位团队继续。");
+  assert.equal(botText({ blocks: [{ kind: "bot_message_received", hop: 1, text: brief }] }), "");
+});
+
 const at = (seconds) => new Date(Date.UTC(2026, 10, 11, 0, 0, seconds)).toISOString();
 
 test("a message answered only after the long step ends fails as a slow first reply", () => {
