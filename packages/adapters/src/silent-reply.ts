@@ -114,8 +114,9 @@ function withoutStraySentinelsAtEdges(
   return { assembled: cleanedAssembled, blocks: cleanedBlocks };
 }
 
+// A label opens a line or follows the end of a sentence ("…经验”。Done when: …").
 const BRIEF_LINE =
-  /^\s*(?:\*\*)?(?:Goal|Where|Done when|Deliverable|Context|Don't|Do not)(?:\*\*)?\s*:/gim;
+  /(?:^|[.。;；!！?？]\s*)\s*(?:\*\*)?(Goal|Where|Done when|Deliverable|Context|Don't|Do not)(?:\*\*)?\s*[:：]/gim;
 
 /**
  * A handoff brief ("Goal: … Done when: … Context: …") written as the reply. It is for the
@@ -123,7 +124,9 @@ const BRIEF_LINE =
  */
 export function isAgentBrief(text: string): boolean {
   const labels = new Set(
-    [...text.matchAll(BRIEF_LINE)].map((match) => match[0].replace(/[*:\s]/g, "").toLowerCase()),
+    [...text.matchAll(BRIEF_LINE)].map((match) =>
+      (match[1] ?? "").replace(/\s/g, "").toLowerCase(),
+    ),
   );
   return labels.has("goal") && labels.size >= 2;
 }

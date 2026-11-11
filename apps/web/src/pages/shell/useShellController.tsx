@@ -76,6 +76,7 @@ import {
   clearRecruitingReads,
   createRecruitingReadCache,
   keepRecruitingReads,
+  restoreSavedRecruitingReads,
 } from "../../lib/recruiting-read-cache";
 import {
   getResponseStreamingEnabled,
@@ -305,6 +306,14 @@ export function useShellController() {
     refreshBots,
     applyRunStatus,
   } = shellRoster;
+  // Before any panel renders: they read their saved rows once, when they mount.
+  const restoredReadScope = useRef<string>(undefined);
+  const readScope =
+    userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined;
+  if (readScope && restoredReadScope.current !== readScope) {
+    restoredReadScope.current = readScope;
+    restoreSavedRecruitingReads(recruitingReadCache.current, readScope);
+  }
 
   const [dismissedRunErrorIds, setDismissedRunErrorIds] =
     useState<ReadonlySet<string>>(readSeenRunErrorIds);
@@ -394,19 +403,19 @@ export function useShellController() {
   const closeSectionMenu = useCallback(() => setSectionMenu(null), []);
   const [loadingOlder, setLoadingOlder] = useState(false);
   useEffect(() => {
+    // Nothing is read before the account and Space are known, and clearing then would drop the
+    // saved rows just restored for them.
+    if (!readScope) return;
     const cache = recruitingReadCache.current;
     // Saved reads belong to one account and Space; drop them on unmount or when either changes.
     const prefetched = threadPrefetch.current;
-    const stopKeeping =
-      userId && bootstrapMe?.spaceId
-        ? keepRecruitingReads(cache, JSON.stringify([userId, bootstrapMe.spaceId]))
-        : undefined;
+    const stopKeeping = keepRecruitingReads(cache, readScope);
     return () => {
-      stopKeeping?.();
+      stopKeeping();
       clearRecruitingReads(cache);
       prefetched.clear();
     };
-  }, [userId, bootstrapMe?.spaceId]);
+  }, [readScope]);
   const call = useCallSession(userId, bootstrapMe?.spaceId);
   const viewportWidth = useViewportWidth();
   const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth(

@@ -46,6 +46,29 @@ describe("quick reply", () => {
     expect(seen[0]?.prompt).toContain("Write the sentence in Chinese.");
   });
 
+  it("reads a JD after a saved email preference as a role to hire for", async () => {
+    const seen: AgentRunRequest[] = [];
+    await quickReply({
+      ...base,
+      recruiting: true,
+      earlier: [
+        { role: "user", text: "记住：以后所有候选人邮件都用英文写，署名 Jules Hou" },
+        { role: "assistant", text: "已记住：以后所有候选人邮件都用英文写，并署名 Jules Hou。" },
+      ],
+      userText: "Senior Data Engineer — Seattle, WA. Requirements: 6+ years of data engineering.",
+      runtime: runtimeReplying("I'm reading the role's requirements.", seen),
+    });
+    expect(seen[0]?.instructions).toContain(
+      "earlier messages and saved preferences are background",
+    );
+    expect(seen[0]?.instructions).toContain(
+      "A job description they send is a role they are hiring for",
+    );
+    // Outside recruiting chats the recruiter sentence stays out.
+    await quickReply({ ...base, runtime: runtimeReplying("On it.", seen) });
+    expect(seen[1]?.instructions).not.toContain("recruiter");
+  });
+
   it("skips empty turns without a model call", async () => {
     const seen: AgentRunRequest[] = [];
     expect(await quickReply({ ...base, userText: "  ", runtime: runtimeReplying("x", seen) })).toBe(

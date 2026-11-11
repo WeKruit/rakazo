@@ -55,13 +55,14 @@ import {
   ASK_AFTER_HANDOFF,
   continuedCandidateKey,
   createRunExecutor,
-  GLOBAL_ASK_BEFORE_ROLE,
+  globalAskBeforeRole,
   INTAKE_ASK_FIRST,
   jobLinkIn,
   namedCandidateKey,
   nearCandidateKey,
   newerRequestElsewhere,
   pastedJobTitle,
+  questionAlreadyWaiting,
   REPORT_IN_FINAL_REPLY,
   REVISIONED_RESEARCH_OPERATIONS,
   requestTitle,
@@ -1808,6 +1809,24 @@ describe("recruiter-facing provider names", () => {
 
     expect(JSON.stringify(f.published)).not.toContain("Continue intake");
     expect(JSON.stringify(f.results)).toContain("Not shown: a handoff brief");
+  });
+
+  // Staging eval 11-11 (cold-email-en): Kruit's report-back reply "NO_RESPONSE" was shown.
+  it("keeps a recruiting agent's NO_RESPONSE reply out of the chat", async () => {
+    const f = fixture("recruiting-no-response");
+    const botRow = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...botRow,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof botRow);
+    f.runtimeRun.mockImplementation(async function* () {
+      yield { type: "text" as const, text: "NO_RESPONSE" };
+      yield { type: "done" as const, text: "NO_RESPONSE" };
+    });
+
+    await f.run();
+
+    expect(JSON.stringify([f.published, f.finalizeRun.mock.calls])).not.toContain("NO_RESPONSE");
   });
 
   it("leaves provider names alone outside recruiting conversations", async () => {
@@ -5762,10 +5781,40 @@ describe("native recruiting assessment effect delivery", () => {
       "recruiting-global-abc",
     );
     const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
-    expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toEqual({
-      instead: GLOBAL_ASK_BEFORE_ROLE,
+    const bounced = await request.beforeAsk?.("Seattle only, or the metro?", undefined);
+    expect(bounced).toEqual({
+      instead: globalAskBeforeRole(
+        "Senior Data Engineer, Seattle. Requirements: 6+ years, Spark, Python.",
+      ),
     });
+    // Staging eval 11-11 (email-no-mailbox-zh): 「那你就直接发啊」 after an email opened a role.
+    expect(JSON.stringify(bounced)).toContain("An email, a send, a person");
     expect(await request.beforeAsk?.("Seattle only, or the metro?", undefined)).toBeUndefined();
+  });
+
+  // Staging eval 11-11 (mixed-language-ask): a second turn asked the same location question
+  // while the first card still waited.
+  it("asks nothing while another turn's question waits unanswered", async () => {
+    const f = await roleTeamFirstTurn(
+      "question-already-waiting",
+      "帮我找几个奥斯汀的 backend 工程师，要会 Go 语言，五年以上经验",
+      [],
+      "recruiting-global-abc",
+    );
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    await request.beforeAsk?.("地点范围？", undefined);
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        role: "bot",
+        botId: "bot-1",
+        runId: "other-run",
+        blocks: [{ kind: "ask", text: "你希望地点限定为奥斯汀本地吗？", status: "pending" }],
+      },
+      { role: "user", botId: null, runId: null, blocks: [{ kind: "text", text: "找人" }] },
+    ]) as never);
+    expect(await request.beforeAsk?.("地点范围是哪一种？", undefined)).toEqual({
+      instead: questionAlreadyWaiting("你希望地点限定为奥斯汀本地吗？"),
+    });
   });
 
   it("leaves a short role request without a title to the model instead of saving a placeholder", async () => {

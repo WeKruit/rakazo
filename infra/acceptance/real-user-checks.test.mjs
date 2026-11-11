@@ -165,6 +165,19 @@ test("a connect card is read by its reason, not the untranslated title", () => {
   );
 });
 
+test("an agent's brief to a teammate is not read as the reply the recruiter sees", () => {
+  const brief =
+    "Goal: Continue the recruiter's intake. Where: Senior Data Engineer role. Done when: ask in Chinese.";
+  const message = {
+    blocks: [
+      { kind: "bot_message_sent", text: brief },
+      { kind: "text", text: "已交给职位团队继续。" },
+    ],
+  };
+  assert.equal(botText(message), "已交给职位团队继续。");
+  assert.equal(botText({ blocks: [{ kind: "bot_message_received", hop: 1, text: brief }] }), "");
+});
+
 const at = (seconds) => new Date(Date.UTC(2026, 10, 11, 0, 0, seconds)).toISOString();
 
 test("a message answered only after the long step ends fails as a slow first reply", () => {
@@ -238,4 +251,47 @@ test("a second round of people may repeat the round header and next-step card, a
     card,
   ]);
   assert.deepEqual(failures, []);
+});
+
+test("recalling a saved preference, or naming the same role again, is not a repeat", () => {
+  const failures = conversationChecks([
+    user("记住：以后所有候选人邮件都用英文写，署名 Jules Hou"),
+    bot("已记住：以后所有候选人邮件都用英文写，并署名 **Jules Hou**。"),
+    user("Senior Data Engineer — Seattle, WA. 6+ years of data engineering."),
+    bot(
+      "I’m drafting an English candidate email for the Senior Data Engineer role, signed Jules Hou.",
+    ),
+    bot(
+      "I opened the Senior Data Engineer role. Its first question is waiting in that conversation.",
+    ),
+    user("我之前说的邮件署名是什么？"),
+    bot("你之前说，所有候选人邮件都用英文写，署名 **Jules Hou**。"),
+  ]);
+  assert.deepEqual(
+    failures.filter((failure) => failure.startsWith("repeats")),
+    [],
+  );
+});
+
+test("answering with the recruiter's own words is not a repeat; the same acknowledgement twice is", () => {
+  const failures = conversationChecks([
+    user("记住：以后所有候选人邮件都用英文写，署名 Jules Hou"),
+    bot("我会按这个偏好处理候选人邮件。"),
+    bot("我会按这个偏好处理候选人邮件。"),
+    bot("记住了：以后所有候选人邮件都用英文写，并署名 **Jules Hou**。"),
+    user("我之前说的邮件署名是什么？"),
+    bot("你之前说，**以后所有候选人邮件都用英文写，并署名 Jules Hou**。"),
+  ]).filter((failure) => failure.startsWith("repeats"));
+  assert.deepEqual(failures, ['repeats itself: "我会按这个偏好处理候选人邮件。"']);
+});
+
+test("a lone question mark has no language, so either reply language passes", () => {
+  for (const reply of ["你想问哪个职位？", "Which role do you mean?"])
+    assert(!conversationChecks([user("？"), bot(reply)]).some((f) => f.startsWith("language")));
+});
+
+test("quoting the recruiter's question mark is not a second question", () => {
+  assert.deepEqual(questionsIn("我还不能判断你这个“？”具体指什么。你想问哪个岗位或哪件事？"), [
+    "你想问哪个岗位或哪件事？",
+  ]);
 });

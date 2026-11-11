@@ -227,23 +227,25 @@ async function declineConnectionAsks(
 }
 
 /**
- * A message written while an approval, secret or form card waits cannot answer it, so it is
- * queued behind the card, as a follow-up is, instead of being refused.
+ * A message written while an approval or secret card waits cannot answer it. It gets its own turn
+ * beside the paused run, which keeps its card open exactly as it is, instead of waiting unread
+ * until someone taps the card.
  */
-async function queueBehindCards(
+async function withoutCardHeldRuns<Run extends { id: string; status: string }>(
   tx: Prisma.TransactionClient,
   threadId: string,
-  runs: Array<{ id: string; status: string }>,
+  runs: Run[],
   requested: "steer" | "follow_up" | undefined,
-): Promise<"steer" | "follow_up" | undefined> {
-  if (requested === "follow_up") return requested;
+): Promise<Run[]> {
+  if (requested === "follow_up") return runs;
+  const open: Run[] = [];
   for (const run of runs)
     if (
-      run.status === "waiting_input" &&
-      !(await waitingAskTakesText(tx, { threadId, runId: run.id }))
+      run.status !== "waiting_input" ||
+      (await waitingAskTakesText(tx, { threadId, runId: run.id }))
     )
-      return "follow_up";
-  return requested;
+      open.push(run);
+  return open;
 }
 
 type YieldedWake = { threadId: string; botId: string; agentRunId: string };
@@ -1093,7 +1095,7 @@ export async function sendThreadMessage(
             },
             select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
           });
-          const activeRuns = await yieldBackgroundWakes(
+          const unheld = await yieldBackgroundWakes(
             tx,
             actor,
             target.threadId,
@@ -1102,13 +1104,14 @@ export async function sendThreadMessage(
             target.botId,
           );
           if (input.queueMode !== "follow_up")
-            await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
-          const queueMode = await queueBehindCards(
+            await declineConnectionAsks(tx, actor, target.threadId, unheld);
+          const activeRuns = await withoutCardHeldRuns(
             tx,
             target.threadId,
-            activeRuns,
+            unheld,
             input.queueMode,
           );
+          const queueMode = input.queueMode;
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (
             queueMode !== "follow_up" &&
@@ -1354,10 +1357,11 @@ export async function sendThreadMessage(
             clientNonce: true,
           },
         });
-        const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
+        const unheld = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
         if (input.queueMode !== "follow_up")
-          await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
-        const queueMode = await queueBehindCards(tx, target.threadId, activeRuns, input.queueMode);
+          await declineConnectionAsks(tx, actor, target.threadId, unheld);
+        const activeRuns = await withoutCardHeldRuns(tx, target.threadId, unheld, input.queueMode);
+        const queueMode = input.queueMode;
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
         const conversationalBotIds = new Set(

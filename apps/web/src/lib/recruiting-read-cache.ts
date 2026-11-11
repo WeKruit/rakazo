@@ -100,6 +100,50 @@ export const SAVED_READS_MAX_BYTES = 2 * 1024 * 1024;
 const isDisplayKey = (key: readonly unknown[]) => key[0] === "recruiting" && key[2] === "display";
 const savedReadsStore = indexedDbStore<SavedReadsRow>("rakazo-saved-reads", "reads");
 
+/** Read once as the app starts, so a reload can paint before the panels mount. */
+let startupRows: SavedReadsRow[] | undefined;
+void savedReadsStore
+  ?.all()
+  .then((rows) => {
+    startupRows = rows;
+  })
+  .catch(() => undefined);
+
+function restore(
+  cache: RecruitingReadCache,
+  scope: string,
+  row: SavedReadsRow | undefined,
+  now: number,
+) {
+  if (row?.key !== scope || now - row.savedAt > SAVED_THREAD_IDLE_MS) return;
+  // A read this page already answered wins over the saved copy.
+  hydrate(cache.client, {
+    mutations: [],
+    queries: row.state.queries.filter(
+      (query) =>
+        isDisplayKey(query.queryKey) && cache.client.getQueryData(query.queryKey) === undefined,
+    ),
+  });
+}
+
+/**
+ * Paints the saved display reads of one account and Space into the cache now, before the panels
+ * that read them once on mount render. Does nothing until the startup read has finished.
+ */
+export function restoreSavedRecruitingReads(
+  cache: RecruitingReadCache,
+  scope: string,
+  rows = startupRows,
+  now = Date.now(),
+) {
+  restore(
+    cache,
+    scope,
+    rows?.find((row) => row.key === scope),
+    now,
+  );
+}
+
 /**
  * Keeps one account and Space's display reads in this browser, so a reload paints the last rows at
  * once while every read still refreshes from the server. Display only, like saved conversations.
@@ -114,19 +158,11 @@ export function keepRecruitingReads(
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const epoch = cache.epoch;
+  // A startup read that finished late still fills panels opened after it.
   void store
     ?.get(scope)
     .then((row) => {
-      if (stopped || cache.epoch !== epoch || row?.key !== scope) return;
-      if (now() - row.savedAt > SAVED_THREAD_IDLE_MS) return;
-      // A read this page already answered wins over the saved copy.
-      hydrate(cache.client, {
-        mutations: [],
-        queries: row.state.queries.filter(
-          (query) =>
-            isDisplayKey(query.queryKey) && cache.client.getQueryData(query.queryKey) === undefined,
-        ),
-      });
+      if (!stopped && cache.epoch === epoch) restore(cache, scope, row, now());
     })
     .catch(() => undefined);
   const save = () => {
@@ -157,5 +193,6 @@ export function keepRecruitingReads(
 
 /** Sign-out forgets every account's saved display reads in this browser. */
 export function forgetSavedRecruitingReads(): Promise<void> {
+  startupRows = undefined;
   return savedReadsStore?.clear().catch(() => undefined) ?? Promise.resolve();
 }

@@ -2180,7 +2180,7 @@ describe("sendThreadMessage", () => {
   });
 
   it.each(["bot", "group"] as const)(
-    "keeps native %s approval cards and queues the typed message behind them",
+    "keeps native %s approval cards open and gives the typed message its own turn",
     async (kind) => {
       const tx = {
         $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
@@ -2235,10 +2235,14 @@ describe("sendThreadMessage", () => {
               { id: "run-waiting", taskId: "task-1", botId: "bot-1", status: "waiting_input" },
             ]),
           findUnique: vi.fn().mockResolvedValue({ status: "waiting_input", startedAt: new Date() }),
+          create: vi
+            .fn()
+            .mockResolvedValue({ id: "run-new", taskId: "task-new", status: "queued" }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
         steeringMessage: { create: vi.fn() },
         event: { create: vi.fn().mockResolvedValue({ seq: 2 }) },
-        task: { create: vi.fn() },
+        task: { create: vi.fn().mockResolvedValue({ id: "task-new" }) },
       };
       const prisma = {
         message: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -2278,11 +2282,14 @@ describe("sendThreadMessage", () => {
           },
         ),
       ).resolves.toBeDefined();
-      // The approval is never answered by typing; the message waits as a follow-up.
-      expect(tx.steeringMessage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ originTrigger: "follow_up", runId: null }),
-      });
-      expect(tx.task.create).not.toHaveBeenCalled();
+      // The approval is never answered by typing, and the message does not wait behind it: it
+      // starts its own turn while the card stays open.
+      expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+      expect(tx.task.create).toHaveBeenCalled();
+      expect(tx.run.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: "queued" }) }),
+      );
+      expect(tx.run.updateMany).not.toHaveBeenCalled();
     },
   );
 

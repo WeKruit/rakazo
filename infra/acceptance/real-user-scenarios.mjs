@@ -114,7 +114,6 @@ export const SCENARIOS = [
   },
   {
     name: "change-while-opening",
-    known: "11-11: no role opened, English reply (fix thread: feedback/failure UX)",
     area: "steering",
     source: "11-10 never refuse, steer mid-run messages",
     turns: [{ say: JD_EN }, { wait: 4_000 }, { say: "对了，远程也可以，不一定要在西雅图" }],
@@ -190,8 +189,18 @@ export const SCENARIOS = [
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }, { say: `发给 ${CANDIDATE}` }],
   },
   {
+    // A message written while a send card waits: it gets its own reply, the card stays open.
+    name: "ask-while-send-card",
+    area: "email",
+    source: "11-11 messages sat unread behind an open send card",
+    turns: [
+      { say: `帮我给 ${CANDIDATE} 写封邮件，问他下周有没有空聊一个后端岗位，写好就发` },
+      { say: "对了，我现在有几个岗位？" },
+    ],
+    last: /岗位|角色|没有|0|个/,
+  },
+  {
     name: "cold-email-en",
-    known: "11-11: asks for a recipient instead of drafting (fix thread: feedback/failure UX)",
     area: "email",
     source: "10-27 T1: drafts in Chinese for English candidates",
     turns: [

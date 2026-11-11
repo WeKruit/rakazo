@@ -2,7 +2,8 @@ import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/ada
 import { isChineseText } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 
-const TIMEOUT_MS = 4_000;
+// A busy model can take several seconds to start; a late first line still beats silence.
+const TIMEOUT_MS = 8_000;
 const MAX_USER_CHARS = 1_500;
 const MAX_EARLIER_CHARS = 400;
 const EARLIER_TURNS = 4;
@@ -15,7 +16,12 @@ const INSTRUCTIONS = [
   "One sentence of at most 20 words (at most 30 characters in Chinese), in the language of the person's latest message, in the assistant's own voice.",
   "You cannot see their data yet: never say what you can or cannot see or find. Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
+  "The sentence is about the latest message alone: earlier messages and saved preferences are background, never the task.",
 ].join(" ");
+
+// For a recruiter: a pasted job description is a role they hire for, not a job to apply to or an
+// email to write because an earlier message mentioned emails.
+const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for.`;
 
 /** Earlier turns in another language must not pull the sentence away from the latest message's. */
 export function replyLanguage(userText: string): string {
@@ -61,6 +67,8 @@ export function quickReply(input: {
   earlier?: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
   userText: string;
   runId: string;
+  /** The person is a recruiter in a recruiting chat. */
+  recruiting?: boolean;
   /** Tells apart several quick replies in one run, such as one per message sent while it works. */
   key?: string;
   spaceId: string;
@@ -107,7 +115,7 @@ export function quickReply(input: {
           runId: `${input.runId}:quick-reply${input.key ? `:${input.key}` : ""}`,
           usageOperationKind: "setup",
           prompt,
-          instructions: INSTRUCTIONS,
+          instructions: input.recruiting ? RECRUITING_INSTRUCTIONS : INSTRUCTIONS,
           history: [],
           tools: [],
           allowSilentEmpty: true,
