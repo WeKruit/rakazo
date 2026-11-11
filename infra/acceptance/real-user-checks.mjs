@@ -80,6 +80,8 @@ export const questionsIn = (text) =>
     .filter((line) => !/^\s*>|linkedin\.com/i.test(line))
     .join("\n")
     .replace(EMAIL, "<address>")
+    // A quoted "？" repeats what the recruiter typed; it is not a question.
+    .replace(/“[^”\n]*”|"[^"\n]*"/g, "“”")
     .split(/(?<=[。！？!?])\s*|\n+/)
     .map((part) => part.trim())
     .filter((part) => part.length >= 4 && /[?？]$/.test(part));
@@ -108,8 +110,8 @@ export function conversationChecks(messages) {
     const text = message.text;
     if (!text.trim()) continue;
     const asked = messages.slice(0, index).findLast((item) => item.role === "user");
-    // The reply follows the language of the recruiter's last message.
-    if (asked) {
+    // The reply follows the language of the recruiter's last message; a lone "？" has none.
+    if (asked && /[\p{Script=Han}A-Za-z]/u.test(asked.text)) {
       const chinese = mostlyChinese(asked.text);
       const words = prose(text);
       if (words.trim() && chinese !== mostlyChinese(words))

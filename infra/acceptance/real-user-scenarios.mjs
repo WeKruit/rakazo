@@ -114,7 +114,6 @@ export const SCENARIOS = [
   },
   {
     name: "change-while-opening",
-    known: "11-11: no role opened, English reply (fix thread: feedback/failure UX)",
     area: "steering",
     source: "11-10 never refuse, steer mid-run messages",
     turns: [{ say: JD_EN }, { wait: 4_000 }, { say: "对了，远程也可以，不一定要在西雅图" }],
