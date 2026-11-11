@@ -19,7 +19,7 @@ export type BackgroundWaitResult = {
 };
 
 const USER_MESSAGE_NOTE =
-  "The user sent a new message while you waited. Read it and answer it now; wait again afterwards if the work still matters.";
+  "A new message for you arrived while you waited. Finish this turn now so it is answered; wait again afterwards if the work still matters.";
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -61,7 +61,7 @@ export async function waitForBackgroundWork(
   const pollMs = input.pollMs ?? WAIT_POLL_MS;
   const startedAt = Date.now();
   const list = async () =>
-    (await listThreadBackgroundWork(prisma, input.threadId)).filter(
+    (await listThreadBackgroundWork(prisma, input.threadId, { busyOnly: true })).filter(
       (work) => !(work.kind === "run" && work.id === input.selfRunId),
     );
   const wanted = input.ids?.length ? new Set(input.ids) : undefined;

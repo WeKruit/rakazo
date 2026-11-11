@@ -269,8 +269,11 @@ export function useShellController() {
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
   const pendingGroupCreations = useRef(new Map<string, Promise<Group>>());
+  // Settles once the first server read has handed over its conversation, if any.
+  const bootstrapThreadSettled = useRef<Promise<void>>(Promise.resolve());
   const shellRoster = useShellRoster({
     pendingGroupCreations,
+    bootstrapThreadSettled,
     userId,
     botId,
     groupId,
@@ -664,6 +667,7 @@ export function useShellController() {
     computerCacheRef,
     setScreenUrl,
     bootstrappedThread,
+    bootstrapThreadSettled,
     pendingGroupCreations,
     recruitingOutage,
     reconnectNeedsRecruitingRead,

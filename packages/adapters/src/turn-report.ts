@@ -486,6 +486,46 @@ export type DeclineRetry = { sentence: string; note: string; keep?: string; card
 export const DRAFT_VARIABLES_NOTE =
   "Your draft shows template variables or placeholders. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
 
+/**
+ * The recruiter asked for a template: named it, or asked for an email about a role without naming
+ * anyone ("write me a short cold outreach email for a senior data engineer role in Seattle").
+ */
+export function askedTemplate(request: string): boolean {
+  if (/template|模板|模版/i.test(request)) return true;
+  return (
+    /\b(?:e-?mail|message|note)\b|邮件/i.test(request) &&
+    /\b(?:role|position|job|opening)\b|职位|岗位/i.test(request) &&
+    !/@|\b(?:these|those|them|him|her|each|everyone|people|candidates?)\b|这些|他们|候选人|这位/i.test(
+      request,
+    )
+  );
+}
+
+/** Model-facing: a template written as the candidate thanking an interviewer is written again. */
+export const CANDIDATE_VOICE_NOTE =
+  'This template is written as a candidate thanking an interviewer. The recruiter is the one writing, to the candidate: write it again from the recruiter, opening "Hi [Candidate Name]", and show the whole template.';
+
+/** A drafted template addressed to the interviewer, as if the candidate were writing. */
+export function candidateVoiceDraft(reply: string): DeclineRetry | undefined {
+  if (!DRAFT_START.test(reply)) return undefined;
+  const greeting = reply.match(
+    /\b(?:Hi|Dear|Hello)\s+\[(?:Interviewer|Hiring Manager)[^\]\n]{0,30}\]/i,
+  )?.[0];
+  return greeting ? { sentence: greeting, note: CANDIDATE_VOICE_NOTE } : undefined;
+}
+
+/** Model-facing: one email was asked for and a sequence came back. */
+export const ONE_EMAIL_NOTE =
+  "They asked for one email, not a sequence: show just that one email, with its subject and full body.";
+
+/** A sequence of drafts shown when the recruiter asked for one email ("a short cold email…", "一封…"). */
+export function sequenceForOneEmail(reply: string, request: string): DeclineRetry | undefined {
+  if (!/\b(?:an?|one|single)\s+(?:\w+\s+){0,3}e-?mail\b|一封/i.test(request)) return undefined;
+  if (/\b(?:sequence|campaign|follow-?ups)\b|序列|跟进序列/i.test(request)) return undefined;
+  const subjects = reply.match(/(?:^|\n)\s*(?:[#*_]+\s*)?Subject:/gi) ?? [];
+  return subjects.length > 1 ? { sentence: "", note: ONE_EMAIL_NOTE } : undefined;
+}
+
 /** A drafted email shown with {{variables}} instead of a real person's details. */
 export function draftVariables(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;

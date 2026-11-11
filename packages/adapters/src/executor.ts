@@ -182,7 +182,6 @@ import {
   resolveActionApprovalDetail,
   runBudgetExceeded,
   runBudgetStopText,
-  runsBesidePerson,
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
@@ -353,9 +352,7 @@ import {
 import { createAutoReviewProvider } from "./auto-review-factory.js";
 import {
   ownRoleRevisions,
-  preferenceAtCurrentRevision,
   ROLE_SAVE_WAIT_MS,
-  revisionConflict,
   saveInBackground,
   savesFeedbackInBackground,
   savesRoleInBackground,
@@ -712,7 +709,9 @@ import {
   isAgentBrief,
   isExactNoResponse,
   NO_RESPONSE,
+  personWrote,
   stripNoResponseReply,
+  waitsOnCard,
   withoutAgentBrief,
 } from "./silent-reply.js";
 import {
@@ -4656,7 +4655,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const steeringQuickReplies = new Map<string, string>();
       // Starts the short reply for a message that arrived mid-run, once per message.
       let replyToSteering:
-        | ((item: { id: string; messageId: string; blocks: MessageBlock[] }) => boolean)
+        | ((item: {
+            id: string;
+            messageId: string;
+            blocks: MessageBlock[];
+            internal?: true;
+          }) => boolean)
         | undefined;
       // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
       // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
@@ -5623,6 +5627,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const started = new Set<string>();
           replyToSteering = (item) => {
             if (started.has(item.messageId)) return true;
+            // A server continuation is not the person writing: it never gets a reply of its own.
+            if (item.internal) return false;
             const human =
               item.blocks.length > 0 &&
               item.blocks.every((block) => ["text", "file", "image"].includes(block.kind));
@@ -6737,7 +6743,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           }
           for (const message of recent ?? []) {
-            if (message.role === "user" && !message.botId) return undefined;
+            // A teammate's relayed brief is saved as a user row too; only the person's own
+            // words answer the card.
+            if (message.role === "user" && !message.botId && personWrote(message.blocks))
+              return undefined;
             if (message.role === "user" || message.runId === runId) continue;
             const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
             const open = blocks.find(
@@ -11977,12 +11986,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   mode: args.mode === "any" ? "any" : "all",
                   timeoutSeconds,
                   signal: context.signal,
-                  userMessageWaiting: () =>
-                    hasUnclaimedSteering(deps.prisma, {
+                  // A teammate's or Kruit's new request queues its own turn behind this one.
+                  userMessageWaiting: async () =>
+                    (await hasUnclaimedSteering(deps.prisma, {
                       threadId: run.threadId,
                       botId: bot.id,
                       runId: run.id,
-                    }),
+                    })) ||
+                    Boolean(
+                      await deps.prisma.run.findFirst({
+                        where: {
+                          threadId: run.threadId,
+                          botId: bot.id,
+                          status: "queued",
+                          trigger: "bot_message",
+                          id: { not: run.id },
+                        },
+                        select: { id: true },
+                      }),
+                    ),
                 }),
             );
           }
@@ -13678,20 +13700,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (savesFeedbackInBackground(name, rawArgs)) {
             const save = saveInBackground({
               first: applied,
-              retry: (attempt, previous) =>
-                applyToolNow(
-                  name,
-                  preferenceAtCurrentRevision(rawArgs, previous),
-                  `${executionId}:retry-${attempt}`,
-                ),
+              retry: (attempt) => applyToolNow(name, rawArgs, `${executionId}:retry-${attempt}`),
               failed: (result) => toolResultError(result) !== undefined,
-              // A refused preference (a role requirement or a pasted JD) is not retried: the role
-              // keeps it and the shared preference is simply not saved.
-              inputError: (result) =>
-                feedbackInputError(result) ||
-                (rawArgs.target === "preference" &&
-                  !revisionConflict(result) &&
-                  !transientSaveError(toolResultError(result))),
+              inputError: (result) => feedbackInputError(result),
               onGiveUp: (result) =>
                 getLogger().warn("recruiting.feedback.not_saved", {
                   runId,
@@ -13761,18 +13772,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           void settled.then(() => savesInFlight.delete(settled));
           return applied;
         };
-
-        // Each intake answer goes into the role's brief as the turn starts, in the background.
-        if (thread.activeRecruitingRoleId && !runsBesidePerson(run.trigger)) {
-          const roleId = thread.activeRecruitingRoleId;
-          briefSaving = withinDeadline(
-            saveBriefFromAnswers(roleId).catch((error) =>
-              getLogger().warn("brief not saved from answers", { error: String(error) }),
-            ),
-            SAVE_WAIT_MS,
-            () => getLogger().warn("brief save from answers still running", { runId }),
-          );
-        }
 
         const pluginLine =
           connectedPlugins.length > 0
@@ -15414,7 +15413,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                     : item === freshHumanSteering && replyToSteering?.(item)
                                       ? STEERING_QUICK_REPLY_SENDING
                                       : undefined,
-                                item === freshHumanSteering
+                                item === freshHumanSteering && !item.internal
                                   ? steeringLanguageNote(item.text)
                                   : undefined,
                               ]
@@ -16191,6 +16190,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             text = "";
             blocks = [];
           }
+          // One question at a time: while another card waits in this conversation (a teammate's
+          // question), the reply keeps only what comes before its own question, and a reply that
+          // only says the work waits on that card is not sent.
+          if (
+            hideVendors &&
+            blocks.some((block) => block.kind === "text") &&
+            !blocks.some((block) => block.kind === "ask") &&
+            (/[?？]/.test(text) || waitsOnCard(text)) &&
+            (await openQuestionElsewhere()) !== undefined
+          ) {
+            text = waitsOnCard(text) ? "" : beforeCardQuestion(text);
+            blocks = [
+              ...blocks.filter((block) => block.kind !== "text"),
+              ...(text ? [{ kind: "text" as const, text }] : []),
+            ];
+          }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.
           const suggestionPending =
@@ -16315,12 +16330,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   postAssistant: (text) =>
                     publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
                 })
-              : guardRecruitingRoleCreate(deps, {
-                  run: guarded,
-                  blocks: finalBlocks.length ? finalBlocks : blocks,
-                  handedOff,
-                  pendingApproval: approvalPausePending,
-                })
+              : thread.groupId?.startsWith("recruiting-global-")
+                ? // Kruit's account-wide conversation never holds a role.
+                  Promise.resolve(undefined)
+                : guardRecruitingRoleCreate(deps, {
+                    run: guarded,
+                    blocks: finalBlocks.length ? finalBlocks : blocks,
+                    handedOff,
+                    pendingApproval: approvalPausePending,
+                  })
             ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
           }

@@ -118,7 +118,12 @@ async function runWithModel(
     /** A message the run reads mid-turn, before the watch sees it unread. */
     claimed?: { id: string; messageId: string; text: string };
     /** Messages sent while the run works that it has not read yet. */
-    unreadSteering?: Array<{ id: string; messageId: string; blocks: MessageBlock[] }>;
+    unreadSteering?: Array<{
+      id: string;
+      messageId: string;
+      blocks: MessageBlock[];
+      role?: string;
+    }>;
   } = {},
 ) {
   runtimeRunIds = [];
@@ -296,7 +301,7 @@ async function runWithModel(
         (options.unreadSteering ?? []).map((row) => ({
           id: row.id,
           messageId: row.messageId,
-          message: { blocks: row.blocks },
+          message: { blocks: row.blocks, role: row.role ?? "user", botId: null },
         })),
       ),
       count: vi.fn(async () => (options.unreadSteering?.length ? 1 : 0)),
@@ -518,6 +523,36 @@ describe("quick reply", () => {
           JSON.stringify([{ kind: "text", text: "Got it, remote works too." }]),
       ).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  // Staging eval 11-11: the server's automatic continuation ("Continue with the next step: …")
+  // got a quick reply of its own, which echoed it to the recruiter.
+  it("never answers the server's own continuation as if the person wrote it", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Done.",
+      quickReplies: true,
+      holdMain,
+      unreadSteering: [
+        {
+          id: "steer-3",
+          messageId: "message-11",
+          role: "system",
+          blocks: [
+            { kind: "text", text: "Continue with the next step: Review the first 10 people." },
+          ],
+        },
+      ],
+    });
+    await new Promise((done) => setTimeout(done, STEERING_PEEK_MS + 500));
+    release();
+    const { runtimeRun } = await pending;
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-3")).toBe(
+      false,
+    );
   });
 
   it("answers a message the run reads mid-stream, and tells the run not to acknowledge it", async () => {

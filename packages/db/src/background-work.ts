@@ -11,7 +11,12 @@ import { Prisma } from "./client.js";
 export async function listThreadBackgroundWork(
   prisma: Pick<PrismaClient, "$queryRaw">,
   threadId: string,
+  /** busyOnly leaves out teammates' turns paused on a person's card: nothing to wait for. */
+  options: { busyOnly?: boolean } = {},
 ): Promise<ThreadBackgroundTask[]> {
+  const runStatuses = options.busyOnly
+    ? ACTIVE_RUN_STATUSES.filter((status) => !status.startsWith("waiting_"))
+    : ACTIVE_RUN_STATUSES;
   const rows = await prisma.$queryRaw<
     (Omit<ThreadBackgroundTask, "startedAt" | "estimateMs"> & {
       startedAt: Date | null;
@@ -40,7 +45,7 @@ export async function listThreadBackgroundWork(
     FROM runs r
     JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
     LEFT JOIN messages m ON m.id = r."sourceMessageId"
-    WHERE r.status IN (${Prisma.join([...ACTIVE_RUN_STATUSES])})
+    WHERE r.status IN (${Prisma.join([...runStatuses])})
       AND (r.trigger IN (${Prisma.join([...AUTOMATION_RUN_TRIGGERS])})
         OR m.blocks @> '[{"kind":"handoff"}]'::jsonb)
     UNION ALL

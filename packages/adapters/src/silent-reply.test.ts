@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { beforeCardQuestion, isAgentBrief, withoutAgentBrief } from "./silent-reply.js";
+import {
+  beforeCardQuestion,
+  isAgentBrief,
+  personWrote,
+  waitsOnCard,
+  withoutAgentBrief,
+} from "./silent-reply.js";
 
 // Staging eval 11-11: Kruit posted its handoff brief to the recruiter, twice.
 const BRIEF = `Goal: Draft and send an email to Alex Chen asking whether he is available next week.
@@ -60,5 +66,32 @@ describe("isAgentBrief on one line", () => {
     ).toBe(true);
     expect(isAgentBrief("The goal: find ten people. Where we stand: two found.")).toBe(false);
     expect(isAgentBrief("我的目标是找人。Context: none")).toBe(false);
+  });
+});
+
+describe("one question at a time beside a teammate's card", () => {
+  it("drops a reply that only points at the card already shown", () => {
+    expect(
+      waitsOnCard(
+        "面试暂时还不能确认：目前缺少“下午两点”对应的时区。请先回答日程协调卡上的时区问题；日期按 2026年11月17日处理。",
+      ),
+    ).toBe(true);
+    expect(waitsOnCard("安排仍卡在上一条所问的日历选择上；收到后才能继续。")).toBe(true);
+    expect(waitsOnCard("已找到 10 位候选人，见上方列表。")).toBe(false);
+  });
+
+  it("keeps only what comes before a second question", () => {
+    expect(
+      beforeCardQuestion(
+        "请告诉我这场面试按哪个时区安排（例如北京时间或美东时间）？目前无法确认可用时段。",
+      ),
+    ).toBe("");
+  });
+
+  it("does not count a teammate's relayed brief as the person's answer", () => {
+    expect(personWrote([{ kind: "bot_message_received", text: "Goal: apply the update" }])).toBe(
+      false,
+    );
+    expect(personWrote([{ kind: "text", text: "对了，远程也可以" }])).toBe(true);
   });
 });

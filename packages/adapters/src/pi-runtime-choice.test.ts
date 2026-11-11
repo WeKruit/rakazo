@@ -254,4 +254,19 @@ describe("Pi choice asks", () => {
       events.push(event);
     expect(events.some((event) => event.type === "ask")).toBe(true);
   });
+
+  it("ends a run stopped before its first step with the stop, not a reply", async () => {
+    const controller = new AbortController();
+    const shutdown = new Error("worker shutting down");
+    controller.abort(shutdown);
+    const events: AgentRuntimeEvent[] = [];
+    await expect(async () => {
+      for await (const event of new PiAgentRuntime().run(runRequest, {
+        ...runContext,
+        signal: controller.signal,
+      }))
+        events.push(event);
+    }).rejects.toBe(shutdown);
+    expect(events.some((event) => event.type === "done")).toBe(false);
+  });
 });

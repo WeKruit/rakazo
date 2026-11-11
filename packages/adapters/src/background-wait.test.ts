@@ -15,6 +15,18 @@ function prisma(...lists: unknown[][]) {
 const base = { threadId: "thread-1", selfRunId: "run-self", pollMs: 1 };
 
 describe("waitForBackgroundWork", () => {
+  // 11-11 staging: a role's coordinator waited 40 min on Outreach paused at a Send card, and a
+  // new request handed to it sat queued the whole time.
+  it("never waits on a teammate's turn paused on a person's card", async () => {
+    const db = prisma([]);
+    await waitForBackgroundWork(db, { ...base, signal: new AbortController().signal });
+    const query = JSON.stringify(
+      (db as { $queryRaw: { mock: { calls: unknown[] } } }).$queryRaw.mock.calls[0],
+    );
+    expect(query).toContain('"running"');
+    expect(query).not.toContain("waiting_input");
+  });
+
   it("returns when all background work is done, never waiting on its own run", async () => {
     const result = await waitForBackgroundWork(
       prisma([research, search, self], [search, self], [self]),
