@@ -100,7 +100,6 @@ export function useShellThreads({
   computerCacheRef,
   setScreenUrl,
   bootstrappedThread,
-  bootstrapThreadSettled,
   pendingGroupCreations,
   recruitingOutage,
   reconnectNeedsRecruitingRead,
@@ -177,8 +176,6 @@ export function useShellThreads({
   >;
   setScreenUrl: Dispatch<SetStateAction<string | null>>;
   bootstrappedThread: RefObject<ThreadSnapshot | null>;
-  /** After a saved sidebar paints, a conversation waits for the first read's copy of itself. */
-  bootstrapThreadSettled: RefObject<Promise<void>>;
   pendingGroupCreations: RefObject<Map<string, Promise<unknown>>>;
   recruitingOutage: RefObject<boolean>;
   reconnectNeedsRecruitingRead: (
@@ -502,7 +499,6 @@ export function useShellThreads({
     void runThreadSubscription({
       signal: abort.signal,
       loadInitial: async () => {
-        await bootstrapThreadSettled.current;
         const primed = bootstrappedThread.current;
         bootstrappedThread.current = null;
         // Pending search jumps load the around-page separately; avoid replacing it with latest.
@@ -663,7 +659,6 @@ export function useShellThreads({
       loadInitial: async () => {
         // A role opened from its proxy is read once the server has created it.
         await pendingGroupCreations.current.get(groupId)?.catch(() => undefined);
-        await bootstrapThreadSettled.current;
         const primed = bootstrappedThread.current;
         bootstrappedThread.current = null;
         if (!pendingJump && primed?.groupId === groupId) {

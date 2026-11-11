@@ -23,7 +23,6 @@ import { markOnce } from "../../lib/performance";
 import { retryTransientRead } from "../../lib/read-retry";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
-import { savedShell } from "../../lib/saved-shell";
 import { getToolActivityEnabled, subscribeToolActivity } from "../../lib/tool-activity-preference";
 import { sidebarGroupsForSpaces } from "../shell/space-sidebar";
 
@@ -117,11 +116,9 @@ export function useShellRoster({
   setMobileSidebarOpen,
   onBootstrapThread,
   pendingGroupCreations,
-  bootstrapThreadSettled,
 }: {
   /** Roles opened before the server created them; a refresh keeps them listed and open. */
   pendingGroupCreations: RefObject<Map<string, Promise<unknown>>>;
-  bootstrapThreadSettled: RefObject<Promise<void>>;
   userId: string | undefined;
   botId: string | undefined;
   groupId: string | undefined;
@@ -423,34 +420,9 @@ export function useShellRoster({
         }
       });
     const appliedAtStart = botsRefreshApplied.current;
-    // A reload paints the last sidebar of this account at once; the read below replaces it.
-    let answered = false;
-    let releaseThread = () => {};
-    bootstrapThreadSettled.current = new Promise<void>((resolve) => {
-      releaseThread = resolve;
-    });
-    if (userId)
-      void savedShell.read(userId, selectedSpaceId()).then((saved) => {
-        if (
-          !saved ||
-          answered ||
-          cancelled ||
-          botsRefreshUser.current !== user ||
-          appliedAtStart !== botsRefreshApplied.current
-        )
-          return;
-        setBootstrapMe(saved.me);
-        setBots(saved.bots);
-        setBotSections(saved.botSections);
-        setGroups(saved.groups);
-        setSpaces(saved.spaces);
-        setInitialBotsLoaded(true);
-      });
     void takeInitialBootstrap(botId, groupId)
       .then((bootstrap) => {
-        answered = true;
-        if (cancelled || botsRefreshUser.current !== user) return releaseThread();
-        if (bootstrap.me.userId === userId) void savedShell.save(bootstrap);
+        if (cancelled || botsRefreshUser.current !== user) return;
         const groupList = bootstrap.groups;
         const recruiting = !getToolActivityEnabled(bootstrap.me.isDeploymentOwner === true);
         showToolActivityRef.current = !recruiting;
@@ -482,7 +454,6 @@ export function useShellRoster({
           markOnce("rk:renderer:bots-response");
           markOnce("rk:renderer:thread-response");
         }
-        releaseThread();
         if (!applyBotLists) return;
         // The archived lists were left out of the first read and fill in behind it.
         const routedArchived =
@@ -533,8 +504,6 @@ export function useShellRoster({
         }
       })
       .catch(() => {
-        answered = true;
-        releaseThread();
         if (cancelled || botsRefreshUser.current !== user) return;
         setBootstrapMe(null);
         showToolActivityRef.current = null;
@@ -565,7 +534,6 @@ export function useShellRoster({
     document.addEventListener("visibilitychange", refreshVisibleBots);
     return () => {
       cancelled = true;
-      releaseThread();
       bootstrapAbort.abort();
       botsRefreshUser.current = { id: undefined };
       pendingBotsRefresh.current = null;
