@@ -613,6 +613,7 @@ import {
   locationOutliers,
   outsideSearchArea,
 } from "./recruiting-location.js";
+import { statedMustHaveCriteria } from "./recruiting-must-haves.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -13869,6 +13870,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim()
               : "";
           if (!block && !file && !request) return undefined;
+          // Must-haves the recruiter's message states are saved with the role at once, at
+          // priority hard, citing their message.
+          const criteria = statedMustHaveCriteria(currentMessageSourceRef(currentTurnMessage));
           const create = (title: string, sourceRefs: unknown[], quote: string) =>
             step(
               "recruiting_role",
@@ -13877,7 +13881,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 title,
                 brief: null,
                 sourceRefs,
-                criteria: [],
+                criteria,
                 preferences: [],
                 definitionQuestions: [],
                 intent: { basis: "direct", quote: quote.trim() },
