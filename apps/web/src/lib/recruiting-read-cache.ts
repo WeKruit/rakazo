@@ -102,12 +102,14 @@ const savedReadsStore = indexedDbStore<SavedReadsRow>("rakazo-saved-reads", "rea
 
 /** Read once as the app starts, so a reload can paint before the panels mount. */
 let startupRows: SavedReadsRow[] | undefined;
-void savedReadsStore
-  ?.all()
-  .then((rows) => {
-    startupRows = rows;
-  })
-  .catch(() => undefined);
+/** Settles once the startup read has finished, so a saved paint can restore panels with it. */
+export const savedRecruitingReadsLoaded: Promise<void> =
+  savedReadsStore
+    ?.all()
+    .then((rows) => {
+      startupRows = rows;
+    })
+    .catch(() => undefined) ?? Promise.resolve();
 
 function restore(
   cache: RecruitingReadCache,

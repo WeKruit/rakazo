@@ -21,6 +21,7 @@ import {
 } from "../../lib/bot-run-status";
 import { markOnce } from "../../lib/performance";
 import { retryTransientRead } from "../../lib/read-retry";
+import { savedRecruitingReadsLoaded } from "../../lib/recruiting-read-cache";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
 import { savedShell } from "../../lib/saved-shell";
@@ -430,7 +431,11 @@ export function useShellRoster({
       releaseThread = resolve;
     });
     if (userId)
-      void savedShell.read(userId, selectedSpaceId()).then((saved) => {
+      // Panels restore their saved rows when the account is first known, so wait for those too.
+      void Promise.all([
+        savedShell.read(userId, selectedSpaceId()),
+        savedRecruitingReadsLoaded,
+      ]).then(([saved]) => {
         if (
           !saved ||
           answered ||
@@ -445,6 +450,16 @@ export function useShellRoster({
         setGroups(saved.groups);
         setSpaces(saved.spaces);
         setInitialBotsLoaded(true);
+        // Settle a route with no conversation now, as the server read would, so nothing the
+        // user opens on the painted page is closed by a later redirect.
+        const recruiting = !getToolActivityEnabled(saved.me.isDeploymentOwner === true);
+        if (
+          !routeGroupId.current &&
+          !saved.bots.some((bot) => bot.id === routeBotId.current) &&
+          !(recruiting && isAccountRoute()) &&
+          (saved.bots.length > 0 || saved.groups.length > 0)
+        )
+          navigate(firstThreadRoute(saved.bots, saved.groups, recruiting), { replace: true });
       });
     void takeInitialBootstrap(botId, groupId)
       .then((bootstrap) => {
