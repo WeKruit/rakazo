@@ -31,7 +31,8 @@ function clip(text: string, max: number): string {
 
 /** The first sentence of the text, with its end mark, or undefined while it is still being written. */
 export function firstSentence(text: string): string | undefined {
-  const match = /^[\s\S]*?(?:[。！？!?]|\.(?=\s)|\n)/.exec(text.trimStart());
+  // A period right before a capitalised word also ends one: "…candidates.I can help…".
+  const match = /^[\s\S]*?(?:[。！？!?]|\.(?=\s|[A-Z][a-z'’]*\s)|\n)/.exec(text.trimStart());
   return match?.[0];
 }
 
