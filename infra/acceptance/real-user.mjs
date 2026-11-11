@@ -23,7 +23,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import {
+  botText,
+  conversationChecks,
+  ROUND as RESULTS,
+  requirementSaved,
+} from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -197,15 +202,71 @@ async function roleChats(rpc) {
   }
   return chats;
 }
-async function send(rpc, groupId, text) {
+// A one-page PDF of plain ASCII lines, the way a recruiter attaches a JD exported from Word.
+function pdf(lines) {
+  const literal = (line) => line.replace(/[\\()]/g, (char) => `\\${char}`);
+  const stream = `BT /F1 11 Tf 50 760 Td 14 TL ${lines.map((line) => `(${literal(line)}) '`).join(" ")} ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = objects.map((object, index) => {
+    const offset = body.length;
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(body, "latin1");
+}
+
+async function send(rpc, groupId, text, file) {
   const busy = await working(rpc, groupId);
+  // Same calls the web composer makes for an attachment: upload it, then send it with the text.
+  const artifactIds = file
+    ? [
+        (
+          await rpc("artifacts/create", {
+            groupId,
+            name: file.name,
+            mimeType: "application/pdf",
+            contentBase64: pdf(file.lines).toString("base64"),
+          })
+        ).id,
+      ]
+    : undefined;
   await rpc("threads/send", {
     groupId,
     addressing: "coordinator",
     text,
+    ...(artifactIds ? { artifactIds } : {}),
     ...(busy ? { interrupt: true } : {}),
   });
 }
+
+/** Waits for a bot message after `since` that matches `pattern`, and returns it. */
+async function waitForText(rpc, pattern, since, limitMs) {
+  const until = Date.now() + limitMs;
+  while (Date.now() < until) {
+    await sleep(10_000);
+    for (const group of await groupsOf(rpc))
+      for (const message of await messagesOf(rpc, group.id))
+        if (
+          message.role !== "user" &&
+          Date.parse(message.createdAt) > since &&
+          pattern.test(botText(message))
+        )
+          return botText(message);
+  }
+  return null;
+}
+const PROFILE = /linkedin\.com\/in\/[\w%-]+/gi;
 
 async function play(scenario, owner, sample) {
   const failures = [];
@@ -230,6 +291,8 @@ async function play(scenario, owner, sample) {
   );
   if (!kruit) return ["the new account has no Kruit conversation"];
   let chats = [];
+  let lastSent = Date.now();
+  const shown = new Set();
   // Roles a reused fixture account already had are not this play's.
   const rolesBefore = new Set((await roleChats(user.rpc)).map((group) => group.id));
   try {
@@ -243,9 +306,31 @@ async function play(scenario, owner, sample) {
           failures.push("no role chat to write in");
           break;
         }
-        log(`${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"`);
-        await send(user.rpc, target.id, turn.say ?? turn.sayRole);
+        log(
+          `${label}: says "${(turn.say ?? turn.sayRole).slice(0, 40)}"${turn.file ? ` with ${turn.file.name}` : ""}`,
+        );
+        lastSent = Date.now();
+        await send(user.rpc, target.id, turn.say ?? turn.sayRole, turn.file);
         if (settleAfter) await settle(user.rpc);
+      } else if (turn.results) {
+        // A round of people, after the recruiter's last message. Feedback rounds must bring new
+        // people, not the ones already shown.
+        log(`${label}: waits for a round of people`);
+        const round = await waitForText(
+          user.rpc,
+          RESULTS,
+          lastSent,
+          turn.results.limitMs ?? 10 * 60_000,
+        );
+        if (!round) {
+          failures.push("no round of people arrived after the recruiter's message");
+          break;
+        }
+        const people = new Set((round.match(PROFILE) ?? []).map((link) => link.toLowerCase()));
+        const again = [...people].filter((link) => shown.has(link));
+        if (again.length) failures.push(`the next round shows people again: ${again.join(", ")}`);
+        for (const link of people) shown.add(link);
+        await settle(user.rpc, { quietMs: 20_000, limitMs: 3 * 60_000 });
       } else if (turn.wait) {
         await sleep(turn.wait);
       } else if (turn.stop) {
@@ -260,6 +345,7 @@ async function play(scenario, owner, sample) {
           break;
         }
         log(`${label}: types "${turn.answerCard}" into "${botText(card).slice(0, 50)}"`);
+        lastSent = Date.now();
         await user.rpc("threads/answer", {
           groupId: card.groupId,
           runId: card.runId,
@@ -277,21 +363,33 @@ async function play(scenario, owner, sample) {
       if (!roles.length) failures.push("no role was opened");
       else if (roles.some((group) => /^New role$|^新岗位$/i.test(group.name)))
         failures.push("the role kept its placeholder title");
+      else if (scenario.roleTitle && !roles.some((group) => scenario.roleTitle.test(group.name)))
+        failures.push(`the role is not named from the JD: ${roles.map((g) => g.name).join(", ")}`);
     }
     if (scenario.requirement) {
       const role = roles[0];
       if (!role) failures.push("no role was created");
       else {
-        const workspace = await user.rpc("recruiting/getWorkspace", {
-          threadId: role.threadId ?? role.id,
-        });
-        fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        // Judge what the role now requires, not the quotes it keeps of the original JD, which
-        // still say "会说中文更好，不强求" after the recruiter makes it a must.
-        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
-          key === "quote" || key === "sourceRefs" ? undefined : value,
-        );
-        failures.push(...requirementSaved(requirements, scenario.requirement));
+        // Saves run in the background, so the brief gets a minute to catch up.
+        let missing = [];
+        for (let attempt = 0; attempt < 7; attempt += 1) {
+          if (attempt) await sleep(10_000);
+          const workspace = await user.rpc("recruiting/getWorkspace", {
+            threadId: role.threadId ?? role.id,
+          });
+          fs.writeFileSync(
+            path.join(OUT, `${label}.role.json`),
+            JSON.stringify(workspace, null, 1),
+          );
+          // Judge what the role now requires, not the quotes it keeps of the original JD, which
+          // still say "会说中文更好，不强求" after the recruiter makes it a must.
+          const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
+            key === "quote" || key === "sourceRefs" ? undefined : value,
+          );
+          missing = requirementSaved(requirements, scenario.requirement);
+          if (!missing.length) break;
+        }
+        failures.push(...missing);
       }
     }
     chats = await transcripts(user.rpc, startedAt);
