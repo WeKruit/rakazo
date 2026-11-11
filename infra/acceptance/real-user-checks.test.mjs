@@ -309,3 +309,13 @@ test("a reply that is only a name the recruiter typed passes in any language", (
     ),
   );
 });
+
+test("a factual answer with a caveat is not a dead end", () => {
+  const answer =
+    "人才资料主要来自公开可查的职业信息。这不是一份固定的人才数据库，也不能保证每个人的信息都最新或完整。搜索结果会保留来源链接，便于核对。";
+  assert(!deadEnd(bot(answer)));
+  assert(
+    !deadEnd(bot("结果会保留来源和证据，资料缺失或无法核实时会标明。覆盖范围取决于公开资料。")),
+  );
+  assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
+});
