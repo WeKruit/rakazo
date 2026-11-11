@@ -14452,11 +14452,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : taskPrompt;
         // The chat's effort mode applies to the recruiter's own turns. Only operator
         // accounts can pick one; every other turn runs fast.
+        // A model or thinking level set in the bot's own settings is used as set.
+        const botChosen = Boolean(bot.modelProvider && bot.modelId) || Boolean(bot.thinkingLevel);
         const effortMode = resolveEffortMode(
           thread.effortMode,
           run.trigger === "user" &&
             Boolean(thread.effortMode) &&
             (await seesOperatorSpend(deps.prisma, run.userId).catch(() => false)),
+          botChosen,
         );
         // Light turns run on the fast model; the configured model becomes the first backup.
         let turnModel: ReturnType<typeof chooseTurnModel> = scripted
@@ -14482,6 +14485,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (currentTurnImages?.length ?? 0) > 0,
                 pendingToolLoop:
                   Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+                botChosen,
                 // A role team whose role is not saved yet is still in intake: its questions
                 // are what the recruiter waits on, so they skip reasoning too.
                 recruitingIntake:

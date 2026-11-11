@@ -62,6 +62,19 @@ describe("chooseTurnModel", () => {
     );
     expect(chooseTurnModel({ ...base, trigger: "routine" }).reason).toBe("trigger:routine");
   });
+  // Staging 11-11: a bot set to a stronger model still answered short messages on the fast one.
+  it("keeps a model or thinking level set in the bot's settings", () => {
+    for (const input of [
+      base,
+      { ...base, recruitingIntake: true },
+      { ...base, answersQuestion: true },
+    ])
+      expect(chooseTurnModel({ ...input, botChosen: true })).toEqual({
+        model: base.configured,
+        routed: "configured",
+        reason: "bot_setting",
+      });
+  });
   it("honours the env off-switch and provider override", () => {
     expect(chooseTurnModel({ ...base, env: { RAKAZO_FAST_MODEL: "" } })).toEqual({
       model: base.configured,
@@ -106,5 +119,11 @@ describe("effort mode", () => {
     expect(resolveEffortMode("deep", true)).toBe("deep");
     expect(resolveEffortMode(null, true)).toBe("fast");
     expect(resolveEffortMode("bogus", true)).toBe("fast");
+  });
+
+  it("keeps a thinking level set in the bot's settings instead of capping it", () => {
+    expect(resolveEffortMode(null, false, true)).toBe("balanced");
+    expect(effortThinkingLevel(resolveEffortMode(null, false, true), "high")).toBe("high");
+    expect(resolveEffortMode("deep", true, true)).toBe("deep");
   });
 });

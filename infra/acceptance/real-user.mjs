@@ -13,7 +13,7 @@
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/real-user.mjs [--only a,b] [--paid] [--samples 1] [--concurrency 8]
-//       [--out <dir>] [--bench <dir>] [--sha <sha>]
+//       [--out <dir>] [--bench <dir>] [--sha <sha>] [--model <provider/id>] [--thinking <level>]
 // RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
 // mailbox) for the onboarded-account scenarios; without them those are skipped.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
@@ -285,6 +285,14 @@ async function play(scenario, owner, sample) {
     const password = `Ev-${crypto.randomUUID()}`;
     await owner.rpc("deployment/createAccount", { email, name: "Eval Recruiter", password });
     await user.auth(email, password);
+    // A model comparison runs the new account's agents on another model or effort.
+    if (MODEL || THINKING)
+      for (const bot of await user.rpc("bots/list"))
+        await user.rpc("bots/update", {
+          botId: bot.id,
+          ...(MODEL ? { modelProvider: MODEL.provider, modelId: MODEL.id } : {}),
+          ...(THINKING ? { thinkingLevel: THINKING } : {}),
+        });
   }
   const kruit = (await groupsOf(user.rpc)).find((group) =>
     group.id.startsWith("recruiting-global-"),
@@ -433,6 +441,12 @@ const wanted = SCENARIOS.filter(
 if (!ONBOARDED_EMAIL)
   log("RAKAZO_ONBOARDED_EMAIL/PASSWORD not set: skipping the onboarded-account scenarios");
 const SAMPLES = Number(option("--samples", "1"));
+// --model provider/id and --thinking level compare models on the same scenarios; the deployment's
+// own key must serve that provider.
+const [, modelProvider, modelId] = option("--model")?.match(/^([^/]+)\/(.+)$/) ?? [];
+const MODEL = modelProvider ? { provider: modelProvider, id: modelId } : null;
+if (option("--model") && !MODEL) throw new Error("--model takes provider/id");
+const THINKING = option("--thinking");
 const CONCURRENCY = Number(option("--concurrency", "8"));
 const plays = wanted.flatMap((scenario) =>
   Array.from({ length: scenario.paid || scenario.account ? 1 : SAMPLES }, (_, index) => ({
@@ -475,6 +489,12 @@ async function worker(plays) {
       at: new Date(at).toISOString(),
       seconds: Math.round((Date.now() - at) / 1000),
       paid: Boolean(scenario.paid),
+      ...(MODEL || THINKING
+        ? {
+            model: MODEL ? `${MODEL.provider}/${MODEL.id}` : "default",
+            thinking: THINKING ?? "default",
+          }
+        : {}),
       ...(scenario.known ? { known: scenario.known } : {}),
       ...(retry ? { retry: true } : {}),
     };
