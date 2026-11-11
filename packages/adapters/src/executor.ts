@@ -202,6 +202,7 @@ import {
   withoutHiddenTools,
   workActivityForTool,
   workStepDetail,
+  writesChinese,
 } from "@rakazo/core";
 import {
   approvalEffectKey,
@@ -596,8 +597,10 @@ import {
   withRequiredLanguage,
 } from "./recruiting-language.js";
 import {
+  beyondCommute,
   COMMUTE_MILES,
   isRegionOnlyLocation,
+  localRolePlace,
   locationOutliers,
   outsideSearchArea,
 } from "./recruiting-location.js";
@@ -681,6 +684,7 @@ import {
   updateScratchpadItemFromTool,
 } from "./scratchpad-tools.js";
 import { inferScript } from "./scripted-runtime.js";
+import { needsSenderNotice, notifyMissingSender } from "./sender-missing-notice.js";
 import {
   isRunningShellCommand,
   observeShellCommand,
@@ -691,7 +695,13 @@ import {
   SILENT_RUN_RETRIED_TEXT,
   SILENT_RUN_STOP_TEXT,
 } from "./silence-watch.js";
-import { isExactNoResponse, NO_RESPONSE, stripNoResponseReply } from "./silent-reply.js";
+import {
+  isAgentBrief,
+  isExactNoResponse,
+  NO_RESPONSE,
+  stripNoResponseReply,
+  withoutAgentBrief,
+} from "./silent-reply.js";
 import {
   listAgentSkillRecords,
   skillCreateFromTool,
@@ -1297,7 +1307,20 @@ const nextStepAlreadyGiven = (reply: string) =>
  */
 const MODEL_OUTAGE =
   /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|^terminated$|^fetch failed/i;
-const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
+const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn";
+
+/**
+ * How long to wait before resuming a turn the model dropped, or undefined when it has been resumed
+ * enough. A brief outage gets a few spaced tries before the recruiter sees a failure; a turn that
+ * went silent for the whole silence limit is resumed once, since each try already took that long.
+ */
+export function modelOutageRetryDelayMs(
+  previousRetries: number,
+  silent: boolean,
+): number | undefined {
+  const delays = silent ? [0] : [2_000, 10_000, 30_000];
+  return delays[previousRetries];
+}
 
 /** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
 export function jobStatesYears(text: string): boolean {
@@ -1309,10 +1332,10 @@ const YEARS_OPEN_NOTE =
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
 const ASK_WITHOUT_ROLE =
-  "Not asked: no role is saved in this chat yet, so there is no question card to show. Answer the recruiter in plain text in one or two lines. If their message describes a role they are hiring for, save it with recruiting_role create first, then ask.";
+  'Not asked yet: no role is saved in this chat, and a question card needs one. When the recruiter names a role or asks you to find people for one, however short or vague (for example "We need a backend engineer, can you help me find people?"), that is a role: save it now with recruiting_role create, titled with the role in their words, then ask this same question with ask_user. Only a greeting or a question about what you can do gets a one or two line plain-text answer instead.';
 
 const ROLE_NOT_SAVED_NOTE =
-  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
+  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
 const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
@@ -1330,6 +1353,10 @@ export const REPORT_IN_FINAL_REPLY =
   "Not sent: another turn is answering the person's newer message. Give this report once, as this turn's final reply.";
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
+/** Model-facing: a message this turn took before it paused, shown again when it resumes. */
+export const EARLIER_STEERING =
+  "The recruiter sent this earlier in this turn and you already acknowledged it and folded it into the work. Keep following it; do not acknowledge, repeat or restate it.";
+
 export const STEERING_ACK =
   'The recruiter wrote this while you are working. Before any other call, answer it or say in one line with message_user how it changes the work, then continue the work with it. A limit they set on the earlier request (such as "do nothing else") does not cover this newer message.';
 
@@ -5390,8 +5417,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!failed.continuationRunId) {
             await notifyRun(deps, run, {
               kind: "failure",
-              title: `${bot.name} failed`,
-              body: failureNotificationBody(message),
+              ...(await failureNotice(deps.prisma, thread.id, bot.name, message)),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -5981,6 +6007,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) return;
+          // A handoff brief the model wrote out as text is for the teammate, not the recruiter.
+          if (hideVendors && isAgentBrief(narration)) {
+            assembled = "";
+            hasStreamedText = false;
+            pendingProgress = "";
+            discardedMidTurnNarration = true;
+            return;
+          }
           assembled = "";
           hasStreamedText = false;
           pendingProgress = "";
@@ -6160,7 +6194,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const outliers = new Map(
             locationOutliers(located).map((key) => [key, labels.get(key) as string]),
           );
-          return { regionOnly, outliers };
+          // A local role's own city: people beyond commuting distance of it are always outside.
+          const role = await deps.prisma.recruitingRole.findUnique({
+            where: { id: roleId },
+            select: { currentRevision: { select: { brief: true, criteria: true } } },
+          });
+          const place = localRolePlace([
+            JSON.stringify(role?.currentRevision ?? {}),
+            ...(await recruiterWords(deps.prisma, run.threadId)),
+          ]);
+          const beyond = new Map(
+            place
+              ? [...located]
+                  .filter(([, location]) => beyondCommute(location, place))
+                  .map(([key]) => [key, labels.get(key) as string])
+              : [],
+          );
+          return { regionOnly, outliers, beyond, place };
         };
         /** Picked people whose profile passage shows every current role started under six months ago. */
         const newInCurrentRole = async (roleId: string, keys: readonly string[]) => {
@@ -6428,7 +6478,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
           if (!(await roundRecordedThisRun())) return undefined;
-          return recruitingNextStepCard();
+          return recruitingNextStepCard(isChineseText(lastRecruiterText));
         };
         // The next-step card stands in for the agent's own question only right after the round
         // (a brief save after it aside): the round's list is then the report, and the recruiter
@@ -6452,7 +6502,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? (await readRecruitingPlaybookStep(deps.prisma, roleId).catch(() => null))
                 ?.savedCandidates
             : undefined;
-          return turnReportText(work, saved);
+          return turnReportText(work, saved, isChineseText(lastRecruiterText));
         };
         /** Text of the last message this run already put in the conversation. */
         const lastRunMessageText = async () => {
@@ -7081,19 +7131,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             // Someone whose profile shows only a country or a state, or under six months in the
             // current role, is left out of the first picks rather than costing a step.
-            const [{ regionOnly }, recent] = await Promise.all([
+            const [{ regionOnly, beyond, place }, recent] = await Promise.all([
               locationSlips(roleId, picked),
               newInCurrentRole(roleId, picked),
             ]);
             const left = [
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
+              beyond.size &&
+                place &&
+                `${[...beyond.values()].join(", ")}: over ${COMMUTE_MILES} miles from ${place.label}.`,
               recent.size &&
                 `${[...recent.values()].join(", ")}: under ${MIN_CURRENT_ROLE_MONTHS} months in the current role.`,
             ]
               .filter(Boolean)
               .join(" ");
-            const keys = picked.filter((key) => !regionOnly.has(key) && !recent.has(key));
+            const keys = picked.filter(
+              (key) => !regionOnly.has(key) && !beyond.has(key) && !recent.has(key),
+            );
             if (!keys.length)
               return {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
@@ -7132,10 +7187,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId
           ) {
-            const { regionOnly, outliers } = await locationSlips(
+            const { regionOnly, outliers, beyond, place } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
             );
+            // Beyond commuting distance of a local role's own city is never a fit, however often
+            // the same people come back.
+            if (beyond.size && place)
+              return {
+                error: `Not recorded. ${[...beyond.values()].join(", ")} ${beyond.size > 1 ? "live" : "lives"} over ${COMMUTE_MILES} miles from ${place.label}, outside the role's location. Replace them with people from the rows who fit. If fewer than ten fit, show the ones who do with show_picks and ask the recruiter how to go on, as the round instructions say.`,
+              };
             // Asked once per person: when the same people come back the model has decided they fit
             // (a role open to a whole country or state, or a real commute), and they are recorded.
             const unasked = (people: Map<string, string>) =>
@@ -10270,20 +10331,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : rows;
                   // A required language is checked on each person's full profile text, which
                   // the short passage rarely holds; those who show it come first.
-                  const people = Array.isArray(shown)
+                  const words = await recruiterWords(deps.prisma, thread.id);
+                  const checked = Array.isArray(shown)
                     ? await withRequiredLanguage(
                         deps.judge,
                         {
                           revision: role.currentRevision,
                           query: connectorCall.args?.query,
-                          stated: statedLanguageRequirement(
-                            await recruiterWords(deps.prisma, thread.id),
-                          ),
+                          stated: statedLanguageRequirement(words),
                         },
                         shown,
                         returned,
                       )
-                    : shown;
+                    : { rows: shown, withoutLanguage: 0 };
+                  // A local role's people beyond commuting distance of its city never make the
+                  // ten; a search filtered on a language returns them from across the country.
+                  const place = localRolePlace([
+                    String(connectorCall.args?.query ?? ""),
+                    JSON.stringify(role.currentRevision ?? {}),
+                    ...words,
+                  ]);
+                  const people = Array.isArray(checked.rows)
+                    ? checked.rows.filter(
+                        (row: Record<string, unknown>) =>
+                          !place ||
+                          typeof row.location !== "string" ||
+                          !beyondCommute(row.location, place),
+                      )
+                    : checked.rows;
+                  const farAway = Array.isArray(checked.rows)
+                    ? checked.rows.length - (people as unknown[]).length
+                    : 0;
                   // People new to the role get the research service's grade once the turn settles.
                   if ((saved as { newPeople?: unknown }).newPeople)
                     await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
@@ -10312,6 +10390,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                       : {}),
                     people,
+                    // People whose profile shows no sign of a required language are in Results
+                    // but never offered for the pick.
+                    ...(checked.withoutLanguage
+                      ? {
+                          leftOutNoLanguage: `${checked.withoutLanguage} more people's profiles show no sign of the required language; they are in Results but not listed here and never make the ten.`,
+                        }
+                      : {}),
+                    ...(farAway && place
+                      ? {
+                          leftOutFarAway: `${farAway} more people live over ${COMMUTE_MILES} miles from ${place.label}; they are in Results but not listed here and never make the ten.`,
+                        }
+                      : {}),
                     ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
                       ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
                       : {}),
@@ -13257,7 +13347,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
               }
               const failure = toolResultError(result);
-              if (failure === undefined && isSenderRead(name, rawArgs)) senderRead = true;
+              if (failure === undefined && isSenderRead(name, rawArgs)) {
+                senderRead = true;
+                if (needsSenderNotice(result)) void notifyMissingSender(deps, run);
+              }
               turnReport.settle(executionId, {
                 ok: failure === undefined,
                 result,
@@ -13684,10 +13777,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A required language is required on the profile in two of the searches: worded into a
           // query alone, it still returned people with no sign of it. When the planned queries
           // left it out, the recruiter's own words name it and the other two queries carry it.
+          const words = await recruiterWords(deps.prisma, thread.id);
           const { filters: languages, queriesNameIt } = plannedLanguageFilters(
             planned.data.queries,
-            await recruiterWords(deps.prisma, thread.id),
+            words,
           );
+          const place = localRolePlace([...planned.data.queries, ...words]);
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -13721,8 +13816,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           };
           const keyOf = (row: PlannedRow) =>
             typeof row.candidateKey === "string" ? row.candidateKey : undefined;
-          // The searches name the role's metro, so rows away from where most of them are, or
-          // showing only a country or a state, never make the ten: they are left out of the pick.
+          // The searches name the role's metro, so rows beyond commuting distance of it (or, with
+          // no city named, of where most rows are), or showing only a country or a state, never
+          // make the ten: they are left out of the pick. A required language spreads the rows
+          // across the country, so the named city holds the area rather than the rows' centre.
           const outsideOf = (rows: PlannedRow[]) =>
             outsideSearchArea(
               new Map(
@@ -13733,6 +13830,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : [];
                 }),
               ),
+              place,
             );
           const inArea = (rows: PlannedRow[], outside: Set<string>) =>
             rows.filter((row) => !outside.has(keyOf(row) ?? ""));
@@ -13797,7 +13895,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rows = rowsOf(result);
             return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
               ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
@@ -14765,6 +14863,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // Older rounds asked this card in Chinese; its answer is not an intake answer either.
                     const nextStep = [
                       recruitingNextStepCard().text,
+                      recruitingNextStepCard(true).text,
                       "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
                     ];
                     const known = answeredAsk(
@@ -14837,12 +14936,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           leaseFence: fence,
                           seenIds,
                         });
-                        const humanSteering = steering.findLast(
-                          (item) =>
-                            item.blocks.length > 0 &&
-                            item.blocks.every((block) =>
-                              ["text", "file", "image"].includes(block.kind),
-                            ),
+                        const isHuman = (item: (typeof steering)[number]) =>
+                          item.blocks.length > 0 &&
+                          item.blocks.every((block) =>
+                            ["text", "file", "image"].includes(block.kind),
+                          );
+                        const humanSteering = steering.findLast(isHuman);
+                        // A message an earlier attempt already took is context, not a new message
+                        // to acknowledge again after the turn resumes.
+                        const freshHumanSteering = steering.findLast(
+                          (item) => isHuman(item) && !item.earlier,
                         );
                         if (humanSteering) {
                           recruitingSourceMessageId = humanSteering.messageId;
@@ -14902,7 +15005,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                 )
                                   ? nativeMessageSourceInstruction(item.messageId, item.blocks)
                                   : undefined,
-                                item === humanSteering ? STEERING_ACK : undefined,
+                                item.earlier
+                                  ? EARLIER_STEERING
+                                  : item === freshHumanSteering
+                                    ? STEERING_ACK
+                                    : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
@@ -15511,6 +15618,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             quietRun || probeFoundNothing
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
+          if (hideVendors)
+            silentReply = withoutAgentBrief(silentReply.assembled, silentReply.blocks);
           // Consequential work ends with a report of it: when the model wrote none (its report
           // step included), the server reports from the run's own records.
           const unreportedAtEnd = handedOff ? [] : turnReport.owed();
@@ -15907,9 +16016,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             runSecrets,
           );
           const retryable = hideVendors && (silenceWatch.fired || MODEL_OUTAGE.test(reported));
-          const retried =
-            retryable &&
-            (await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } })) > 0;
+          const retryDelay = retryable
+            ? modelOutageRetryDelayMs(
+                await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } }),
+                silenceWatch.fired,
+              )
+            : undefined;
+          const retried = retryable && retryDelay === undefined;
           const message = silenceWatch.fired
             ? retried
               ? SILENT_RUN_RETRIED_TEXT
@@ -15917,9 +16030,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : reported;
           // A recruiter's request must not vanish because the model went silent, the run made no
           // progress for the silence limit, or the model was briefly unavailable after its own
-          // retries: resume the turn once (the resume brief says what was done and cut off)
-          // before reporting failure.
-          if (retryable && !retried) {
+          // retries: resume the turn (the resume brief says what was done and cut off) before
+          // reporting failure.
+          if (retryDelay !== undefined) {
             const released = await writeComputerRunRequeue(
               deps,
               run,
@@ -15940,7 +16053,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               await deps.jobs.enqueue({
                 ...runContinueJob(runId),
-                availableAt: new Date(Date.now() + computerRetryDelay(fence)),
+                availableAt: new Date(Date.now() + Math.max(retryDelay, computerRetryDelay(fence))),
               });
               return;
             }
@@ -15991,8 +16104,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {
               kind: "failure",
-              title: `${bot.name} failed`,
-              body: failureNotificationBody(message),
+              ...(await failureNotice(deps.prisma, thread.id, bot.name, message)),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -16078,8 +16190,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 await notifyRun(deps, run, {
                   kind: "failure",
-                  title: `${owner?.name ?? "Your assistant"} failed`,
-                  body: failureNotificationBody(COMPUTER_START_FAILED),
+                  ...(await failureNotice(
+                    deps.prisma,
+                    run.threadId,
+                    owner?.name ?? "Your assistant",
+                    COMPUTER_START_FAILED,
+                  )),
                   botId: run.botId,
                   threadId: run.threadId,
                 });
@@ -16115,6 +16231,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
             return;
           }
+          // Retries back off for hours; after a few the recruiter hears that the work is still
+          // coming, once, instead of a silent chat.
+          if (!isBackgroundRunTrigger(run.trigger))
+            await announceSetupRetry(deps, run).catch((error) =>
+              getLogger().error("setup retry notice", error),
+            );
           throw new Error("Run setup failed; retrying");
         }
       } finally {
@@ -17129,16 +17251,104 @@ export function runIdentityInstruction(
 }
 
 /** What stopped, in the recruiter's terms, and the one thing to do next; never raw error text. */
-export function failureNotificationBody(error: string): string {
-  const reason =
+export function failureNotificationBody(error: string, chinese = false): string {
+  const kind =
     /rate.?limit|too many requests|overload|capacity|unavailable|timed? out|timeout/i.test(error)
-      ? "The model service was busy."
+      ? "busy"
       : /budget|spend|\$\d/i.test(error)
-        ? "It reached this task's spending limit."
+        ? "budget"
         : /\bminutes?\b|time limit/i.test(error)
-          ? "It reached this task's time limit."
-          : "It stopped on an error.";
-  return `${reason} Send a message in the chat to pick up where it stopped.`;
+          ? "time"
+          : "error";
+  if (chinese) return `${FAILURE_REASON_ZH[kind]}在对话里发一条消息，就从停下的地方接着做。`;
+  return `${FAILURE_REASON[kind]} Send a message in the chat to pick up where it stopped.`;
+}
+
+const FAILURE_REASON = {
+  busy: "The model service was busy.",
+  budget: "It reached this task's spending limit.",
+  time: "It reached this task's time limit.",
+  error: "It stopped on an error.",
+};
+
+const FAILURE_REASON_ZH: Record<keyof typeof FAILURE_REASON, string> = {
+  busy: "模型服务繁忙。",
+  budget: "这个任务的费用到上限了。",
+  time: "这个任务的时间到上限了。",
+  error: "出错停下了。",
+};
+
+/**
+ * A failure notification names the role when the work is a role's, in the language the
+ * recruiter last wrote in, like the chat it opens.
+ */
+export async function failureNotice(
+  prisma: Pick<PrismaClient, "thread">,
+  threadId: string,
+  botName: string,
+  error: string,
+): Promise<{ title: string; body: string }> {
+  const { chinese, roleName } = await recruiterThreadVoice(prisma, threadId);
+  const name = roleName || botName;
+  return {
+    title: chinese ? `${name} 失败` : `${name} failed`,
+    body: failureNotificationBody(error, chinese),
+  };
+}
+
+/** The role a thread belongs to and whether its recruiter last wrote Chinese; best-effort. */
+async function recruiterThreadVoice(
+  prisma: Pick<PrismaClient, "thread">,
+  threadId: string,
+): Promise<{ chinese: boolean; roleName?: string }> {
+  const thread = await Promise.resolve()
+    .then(() =>
+      prisma.thread.findUnique({
+        where: { id: threadId },
+        select: {
+          group: { select: { name: true } },
+          messages: {
+            where: { role: "user" },
+            orderBy: { seq: "desc" },
+            take: 1,
+            select: { blocks: true },
+          },
+        },
+      }),
+    )
+    .catch(() => null);
+  const blocks = thread?.messages?.[0]?.blocks;
+  return {
+    chinese: writesChinese(
+      Array.isArray(blocks) ? [{ role: "user", blocks: blocks as MessageBlock[] }] : [],
+    ),
+    roleName: thread?.group?.name?.trim() || undefined,
+  };
+}
+
+async function announceSetupRetry(
+  deps: ExecutorDeps,
+  run: { id: string; spaceId: string; threadId: string; botId: string; trigger: string },
+) {
+  if ((await setupFailures(deps.prisma, run.id)) !== SETUP_RETRY_NOTICE_AFTER) return;
+  const { chinese } = await recruiterThreadVoice(deps.prisma, run.threadId);
+  await publishMessage(
+    deps,
+    run,
+    "system",
+    [{ kind: "meta", text: setupRetryNoticeText(chinese) }],
+    undefined,
+    `setup-retry:${run.id}`,
+  );
+}
+
+/** Setup failures before the recruiter is told the work is still retrying. */
+export const SETUP_RETRY_NOTICE_AFTER = 3;
+
+export function setupRetryNoticeText(chinese: boolean): string {
+  return chinese
+    ? "启动遇到问题，正在自动重试，不用重发。"
+    : "Starting is taking longer than usual. It keeps retrying on its own, so there is no need to send again.";
 }
 
 export function runSendsFinishNotification(trigger: string, continuationPending = false): boolean {

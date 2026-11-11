@@ -14,6 +14,7 @@ import {
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
+  recruitingNextStepCard,
 } from "./recruiting-defaults.js";
 
 describe("calibration fast path", () => {
@@ -137,5 +138,25 @@ describe("creditEstimateNote", () => {
     expect(note).toContain("9,876 left");
     expect(note).toContain("150 people about 600 to 1,000");
     expect(note).toContain("Never ask permission because of cost alone");
+  });
+});
+
+describe("recruitingNextStepCard", () => {
+  it("asks in the recruiter's language, so a Chinese chat gets no English card", () => {
+    const card = recruitingNextStepCard(true);
+    expect(`${card.text}${card.options.join("")}`).not.toMatch(/[A-Za-z]/);
+    expect(card.options).toHaveLength(3);
+    expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
+  });
+});
+
+describe("global recruiting overview", () => {
+  // Staging eval 11-11: "email alex… ask if he's free next week" opened a new role to send it.
+  it("hands a one-off email to Outreach without opening a role", () => {
+    const body = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Global recruiting overview",
+    )?.body;
+    expect(body).toContain("goes to Outreach in this conversation with handoff_to_bot");
+    expect(body).toContain("never open a role for it");
   });
 });

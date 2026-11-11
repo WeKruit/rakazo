@@ -67,6 +67,12 @@ describe("quick reply", () => {
   it("keeps only the first sentence", () => {
     expect(cleanQuickReply("我来看看你的职位。目前看不到任何职位。")).toBe("我来看看你的职位。");
     expect(cleanQuickReply("On it. Checking now.")).toBe("On it.");
+    expect(
+      cleanQuickReply("I'm on it for the U.S.I'll focus on remote people.I can help you."),
+    ).toBe("I'm on it for the U.S.");
+    expect(cleanQuickReply("Finding engineers.I can help you find them.")).toBe(
+      "Finding engineers.",
+    );
     expect(firstSentence("我来看看")).toBeUndefined();
     expect(firstSentence("Version 2.5 is out")).toBeUndefined();
   });

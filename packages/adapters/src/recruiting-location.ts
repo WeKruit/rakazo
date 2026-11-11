@@ -102,20 +102,95 @@ export function locationOutliers(locations: ReadonlyMap<string, string>): string
  */
 export function outsideSearchArea(
   locations: ReadonlyMap<string, string | null | undefined>,
+  place?: NamedPlace,
 ): Set<string> {
   const points = [...locations]
     .map(([key, location]) => [key, location ? locate(location) : undefined] as const)
     .filter((entry): entry is readonly [string, [number, number]] => Boolean(entry[1]));
-  if (points.length < 5) return new Set();
+  if (!place && points.length < 5) return new Set();
   const spread = (point: [number, number]) =>
     points.reduce((sum, [, other]) => sum + miles(point, other), 0);
-  const centre = points.reduce((best, entry) =>
-    spread(entry[1]) < spread(best[1]) ? entry : best,
-  )[1];
+  const centre =
+    place?.point ??
+    points.reduce((best, entry) => (spread(entry[1]) < spread(best[1]) ? entry : best))[1];
   const far = points.filter(([, point]) => miles(point, centre) > COMMUTE_MILES);
-  if (far.length > points.length * 0.4) return new Set();
+  // Without a named place, rows spread across the country mean a remote or nationwide search.
+  if (!place && far.length > points.length * 0.4) return new Set();
   return new Set([
     ...far.map(([key]) => key),
-    ...[...locations].filter(([, location]) => isRegionOnlyLocation(location)).map(([key]) => key),
+    ...[...locations]
+      .filter(
+        ([, location]) =>
+          isRegionOnlyLocation(location) || Boolean(place && location && isAbroad(location)),
+      )
+      .map(([key]) => key),
   ]);
+}
+
+export type NamedPlace = { label: string; point: [number, number] };
+
+const STATE_NAMES = Object.keys(STATE_CODES)
+  .map((name) => name.replace(/\b\w/g, (letter) => letter.toUpperCase()))
+  .join("|");
+const PLACE_MENTION = new RegExp(
+  `((?:[A-Z][\\w.'-]*\\s+){0,2}[A-Z][\\w.'-]*),?\\s+(${[...CODES].join("|")}|${STATE_NAMES})\\b`,
+  "g",
+);
+
+/**
+ * The US city a role's searches or words name most often, such as "Linden, NJ" in "within 30
+ * miles of Linden, NJ 07036". A required language narrows a search to profiles across the
+ * country, so the area is held to this place instead of to where most rows happen to be.
+ */
+export function namedPlace(texts: readonly string[]): NamedPlace | undefined {
+  const counts = new Map<string, NamedPlace & { count: number }>();
+  for (const text of texts)
+    for (const [, city = "", state = ""] of text.matchAll(PLACE_MENTION)) {
+      const words = city.split(/\s+/);
+      // The longest run of capitalised words before the state that is a known place.
+      for (let take = words.length; take > 0; take--) {
+        const label = `${words.slice(-take).join(" ")}, ${state}`;
+        const code = STATE_CODES[state.toLowerCase()] ?? state;
+        const point = coordinates(words.slice(-take).join(" ").toLowerCase(), code);
+        if (!point) continue;
+        const key = point.join(",");
+        const entry = counts.get(key) ?? { label, point, count: 0 };
+        entry.count++;
+        counts.set(key, entry);
+        break;
+      }
+    }
+  const best = [...counts.values()].sort((a, b) => b.count - a.count)[0];
+  return best ? { label: best.label, point: best.point } : undefined;
+}
+
+/** Whether a profile location is beyond commuting distance of the named place. */
+export function beyondCommute(location: string, place: NamedPlace): boolean {
+  const point = locate(location);
+  return point ? miles(point, place.point) > COMMUTE_MILES : isAbroad(location);
+}
+
+/** Profile locations outside the US, which the US place list cannot place. */
+const ABROAD =
+  /\b(canada|british columbia|ontario|quebec|alberta|toronto|vancouver|burnaby|montreal|ottawa|calgary|edmonton|mississauga|waterloo|kitchener|mexico|singapore|china|hong kong|taiwan|japan|korea|india|vietnam|malaysia|philippines|thailand|australia|united kingdom|england|ireland|germany|france|netherlands|spain|italy|brazil|united arab emirates|dubai)\b/i;
+
+/** Whether a profile location is outside the US. */
+export function isAbroad(location: string): boolean {
+  return ABROAD.test(location) && !/\bunited states\b/i.test(location);
+}
+
+const LOCAL_ROLE =
+  /\b(within \d+|miles? (?:of|from)|commut\w*|on-?site|hybrid|near|area|metro)\b|通勤|现场|驻场|附近|英里|公里/i;
+const OPEN_LOCATION =
+  /(?<!\b(?:no|not|non)[\s-]?)\b(remote|relocat\w*|anywhere|nationwide|across the (?:us|country)|any location)\b|远程|搬迁|全国|不限地点/i;
+
+/**
+ * The place a local role is held to: the city its searches or the recruiter's words name, when
+ * they describe an on-site, hybrid or commuting role and never a remote, relocation or nationwide
+ * one.
+ */
+export function localRolePlace(texts: readonly string[]): NamedPlace | undefined {
+  if (!texts.some((text) => LOCAL_ROLE.test(text))) return undefined;
+  if (texts.some((text) => OPEN_LOCATION.test(text))) return undefined;
+  return namedPlace(texts);
 }

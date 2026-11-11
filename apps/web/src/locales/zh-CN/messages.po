@@ -272,7 +272,7 @@ msgstr "添加"
 #. placeholder {0}: offer.name
 #: src/pages/RoutineList.tsx
 msgid "Add {0}"
-msgstr ""
+msgstr "添加{0}"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -4444,7 +4444,7 @@ msgstr "通知"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Notify when done"
-msgstr ""
+msgstr "完成时通知我"
 
 #: src/pages/ActivityList.tsx
 msgid "Now"
@@ -4539,7 +4539,7 @@ msgstr "仅提议满足最短提前通知时间的已记录时段。预约前会
 
 #: src/pages/RoutineEditor.tsx
 msgid "Only run when"
-msgstr ""
+msgstr "仅在以下情况运行"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -6672,7 +6672,7 @@ msgstr "这个结果暂时无法显示"
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "This sequence is not saved for this role."
-msgstr ""
+msgstr "这个邮件序列还没存到这个岗位。"
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
@@ -7025,7 +7025,7 @@ msgstr "投票"
 
 #: src/components/LiveWork.tsx
 msgid "Waiting for background work"
-msgstr ""
+msgstr "在等后台任务"
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
@@ -7088,7 +7088,7 @@ msgstr "这个 Bot 是做什么的"
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
 msgid "When a role changes"
-msgstr ""
+msgstr "岗位有变化时"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
@@ -7098,7 +7098,7 @@ msgstr "当 Webhook 触发时"
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
 msgid "When people are saved"
-msgstr ""
+msgstr "有候选人存入时"
 
 #: src/pages/RoutineEditor.tsx
 msgid "When to run"

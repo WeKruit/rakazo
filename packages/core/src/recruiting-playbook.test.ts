@@ -5,6 +5,7 @@ import {
   RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { RECRUITING_MISSED_REQUIREMENT } from "./recruiting-defaults.js";
 import {
   classifyTurnEnd,
   laterPlaybookStage,
@@ -648,13 +649,24 @@ describe("a failed save never stops the work", () => {
 
 describe("a missed requirement is searched for again", () => {
   it("feedback that the list missed a requirement runs new searches instead of relabeling", () => {
-    const step = nextPlaybookStep("feedback", {
-      title: "Engineer",
-      hasBrief: true,
-      savedCandidates: 10,
-    });
-    expect(step?.prompt).toContain("run new searches that target it");
-    expect(step?.prompt).toContain("never answer by only rechecking or relabeling");
+    // The rule sits in the role context, so it holds at every stage, not only after the first ten.
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("at any stage");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
+      "Never answer by only rechecking or relabeling",
+    );
+  });
+
+  it("the recruiter's latest words beat the saved brief", () => {
+    // Prod 11-10: the card answer "你能听的懂话吗？中文是必须！" got "我按当前岗位记录执行：中文口语不是硬性条件".
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
+      "The recruiter's latest words always win over the saved brief",
+    );
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("in a card's custom answer");
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain(
+      "never reply that you follow the current role record",
+    );
+    expect(RECRUITING_MISSED_REQUIREMENT).toContain("run new people searches that target it");
   });
 
   it("every scale query carries a required language", () => {

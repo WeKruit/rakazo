@@ -45,6 +45,7 @@ import {
   replyAttachment,
   resolveComposerSendPlan,
   resolvePersonaColorDef,
+  retryMessageText,
   runRecoveryAction,
   selectedAskActionLabel,
   specialistWorkLabel,
@@ -1771,15 +1772,16 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         snapRef.current.run.status !== "failed"
       )
         return;
+      const text = retryMessageText(writesChinese(snapRef.current?.messages ?? []));
       const attempt = feedback.sendAttempt({
         originThreadKey: threadKey!,
-        displayText: "Try again",
+        displayText: text,
         replyPreview: null,
         initialBotTarget,
         botTarget: initialBotTarget,
         groupTarget: initialGroupTarget,
         reroutedToGroup: false,
-        plan: resolveComposerSendPlan({ text: "Try again", mentions: [], hasAttachments: false }),
+        plan: resolveComposerSendPlan({ text, mentions: [], hasAttachments: false }),
         attachments: [],
         replyQuote: null,
       });

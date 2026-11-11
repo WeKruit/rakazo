@@ -4842,6 +4842,55 @@ describe("claimSteering", () => {
     });
   });
 
+  // Staging 11-10: after the recruiter answered a question, the resumed turn got their earlier
+  // feedback again as if new and acknowledged it a second time.
+  it("marks a message an earlier attempt of the run already took", async () => {
+    const tx = {
+      $queryRaw: vi.fn(),
+      run: {
+        findFirst: vi.fn().mockResolvedValue({ id: "run-1", spaceId: "space-1" }),
+        findUnique: vi.fn().mockResolvedValue({ status: "running", startedAt: null }),
+      },
+      thread: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ nextMessageSeq: 7 }),
+        update: vi.fn().mockResolvedValue({ nextEventSeq: 1 }),
+      },
+      event: { create: vi.fn() },
+      steeringMessage: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "steer-old",
+            messageId: "message-old",
+            claimedAt: new Date(1),
+            message: { seq: 5, blocks: [{ kind: "text", text: "Must speak Mandarin" }] },
+          },
+          {
+            id: "steer-new",
+            messageId: "message-new",
+            claimedAt: null,
+            message: { seq: 6, blocks: [{ kind: "text", text: "Find 20 more" }] },
+          },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = appendClient({
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    });
+    const claimed = await claimSteering(prisma, {
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      leaseOwner: "worker-1",
+      leaseFence: 2,
+      seenIds: [],
+    });
+    expect(claimed.map((item) => [item.id, item.earlier ?? false])).toEqual([
+      ["steer-old", true],
+      ["steer-new", false],
+    ]);
+  });
+
   it("does not claim steering into a tool-free creation intro", async () => {
     const tx = {
       $queryRaw: vi.fn(),
