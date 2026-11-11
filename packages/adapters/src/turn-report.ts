@@ -486,6 +486,21 @@ export type DeclineRetry = { sentence: string; note: string; keep?: string; card
 export const DRAFT_VARIABLES_NOTE =
   "Your draft shows template variables or placeholders. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
 
+/**
+ * The recruiter asked for a template: named it, or asked for an email about a role without naming
+ * anyone ("write me a short cold outreach email for a senior data engineer role in Seattle").
+ */
+export function askedTemplate(request: string): boolean {
+  if (/template|模板|模版/i.test(request)) return true;
+  return (
+    /\b(?:e-?mail|message|note)\b|邮件/i.test(request) &&
+    /\b(?:role|position|job|opening)\b|职位|岗位/i.test(request) &&
+    !/@|\b(?:these|those|them|him|her|each|everyone|people|candidates?)\b|这些|他们|候选人|这位/i.test(
+      request,
+    )
+  );
+}
+
 /** A drafted email shown with {{variables}} instead of a real person's details. */
 export function draftVariables(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;

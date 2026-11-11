@@ -14,7 +14,13 @@ import type { ExecutorDeps } from "./executor.js";
 import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
-import { declineRetry, draftVariables, questionCard, retryReason } from "./turn-report.js";
+import {
+  askedTemplate,
+  declineRetry,
+  draftVariables,
+  questionCard,
+  retryReason,
+} from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -802,8 +808,9 @@ export async function planDeclineRetry(
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
   // A template the recruiter asked for is meant to keep its blanks.
-  const askedTemplate = /template|模板|模版/i.test(input.personRequest ?? input.request);
-  const variables = askedTemplate ? undefined : draftVariables(input.reply);
+  const variables = askedTemplate(input.personRequest ?? input.request)
+    ? undefined
+    : draftVariables(input.reply);
   const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
     : undefined;
