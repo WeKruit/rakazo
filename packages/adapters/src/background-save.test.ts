@@ -132,6 +132,11 @@ describe("role saves in the background", () => {
     expect(transientSaveError("Role revision conflict")).toBe(true);
     expect(transientSaveError("connection terminated unexpectedly")).toBe(true);
     expect(transientSaveError("brief.fields[0].key: Required")).toBe(false);
+    expect(
+      transientSaveError(
+        '[{"expected":"number","code":"invalid_type","path":["expectedRoleRevision"],"message":"Invalid input: expected number, received undefined"}]',
+      ),
+    ).toBe(false);
   });
 
   it("moves a revision this run saved on to the newest, and leaves others' revisions alone", () => {
@@ -207,5 +212,11 @@ describe("preferenceInputError", () => {
     expect(revisionConflict(other)).toBe(false);
     expect(preferenceInputError(other, other.error)).toBe(true);
     expect(preferenceInputError({ error: "quote must match" }, "quote must match")).toBe(true);
+  });
+
+  it("hands a preference missing its revision back, though the refusal names the revision", () => {
+    const missing =
+      '[{"expected":"number","code":"invalid_type","path":["expectedRevision"],"message":"Invalid input: expected number, received undefined"}]';
+    expect(preferenceInputError({ error: missing }, missing)).toBe(true);
   });
 });

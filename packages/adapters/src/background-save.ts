@@ -125,18 +125,30 @@ export function revisionConflict(result: unknown): boolean {
 
 /**
  * A preference failure only the agent can fix: anything but a revision race or a passing outage.
- * It goes back to the agent instead of being retried with the same arguments.
+ * It goes back to the agent instead of being retried with the same arguments. A race is known
+ * only by its current revision, never by the word "revision" in a refusal.
  */
 export function preferenceInputError(result: unknown, error: unknown): boolean {
-  if (revisionConflict(result)) return false;
-  return savedPayload(result)?.code === "CONFLICT" || !transientSaveError(error);
+  return !revisionConflict(result) && !outageError(error);
+}
+
+const OUTAGE = /timed? ?out|temporar|unavailable|deadlock|serializ|ECONN|connection/i;
+/** A schema refusal, which names fields such as expectedRevision but never passes by itself. */
+const INVALID_INPUT = /invalid_type|invalid_value|invalid_union|Invalid input/i;
+
+function errorText(error: unknown): string {
+  return typeof error === "string" ? error : JSON.stringify(error ?? "");
+}
+
+function outageError(error: unknown): boolean {
+  const text = errorText(error);
+  return OUTAGE.test(text) && !INVALID_INPUT.test(text);
 }
 
 /** A failed save that a retry can fix: a revision race or a passing outage, not bad input. */
 export function transientSaveError(error: unknown): boolean {
-  return /conflict|revision|timed? ?out|temporar|unavailable|deadlock|serializ|ECONN|connection/i.test(
-    typeof error === "string" ? error : JSON.stringify(error ?? ""),
-  );
+  const text = errorText(error);
+  return /conflict|revision/i.test(text) ? !INVALID_INPUT.test(text) : outageError(text);
 }
 
 /**

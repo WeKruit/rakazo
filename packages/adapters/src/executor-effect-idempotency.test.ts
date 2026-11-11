@@ -3874,6 +3874,19 @@ describe("native recruiting feedback effect dispatch", () => {
     });
   });
 
+  it("hands a preference missing its revision back to the agent instead of retrying it", async () => {
+    const f = fixture("run-feedback-preference-missing-revision");
+    const { expectedRevision: _, ...withoutRevision } = feedback;
+    f.setCalls([
+      { name: "recruiting_feedback", args: withoutRevision, executionId: "feedback-no-revision" },
+    ]);
+
+    await f.run();
+
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("expectedRevision") });
+    expect(f.results[0]).not.toHaveProperty("status", "saving");
+  });
+
   it("hands a recruiting conflict on a preference back to the agent instead of retrying it", async () => {
     const f = fixture("run-feedback-preference-recruiting-conflict");
     const { RecruitingConflictError } = await vi.importActual<typeof DatabaseModule>("@rakazo/db");
