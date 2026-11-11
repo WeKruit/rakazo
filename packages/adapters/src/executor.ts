@@ -1389,6 +1389,8 @@ const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** With this many new people from the planned searches, the first ten come from them. */
 /** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
 const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
+/** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
+const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
@@ -6246,6 +6248,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // New people-search agent runs this turn started before its round was recorded.
         let agentRunsBeforeRound = 0;
+        // Quick people searches this turn ran itself (not the planned ones) before its round.
+        let quickSearchesBeforeRound = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
         // People still to look up for a find_emails next_from_role request after this run's last batch.
@@ -6968,18 +6972,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Each agent run takes most of a minute: after two that still leave the ten short, the
           // recruiter decides whether to relax a requirement or search deeper, instead of the turn
           // running one after another while they wait. Reading a started run's result is free.
+          // Quick searches are capped the same way. The first round counts from the start, before
+          // any picks are on screen: a role whose people are hard to find otherwise searches on
+          // for many minutes and shows nobody.
+          const newAgentRun = name.endsWith("agent_run") && !rawArgs.runId;
+          const ownQuickSearch =
+            name.endsWith("web_search_advanced_exa") &&
+            !executionId.startsWith(`${runId}:planned-search:`);
           if (
-            name.endsWith("agent_run") &&
-            !rawArgs.runId &&
-            firstPicksShown &&
+            (newAgentRun || ownQuickSearch) &&
+            (firstPicksShown || firstRoundPending) &&
             run.trigger !== "recruiting_grade" &&
             !(await roundRecordedThisRun())
           ) {
-            if (agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND)
+            const searched = newAgentRun
+              ? agentRunsBeforeRound >= MAX_AGENT_RUNS_BEFORE_ROUND &&
+                `${agentRunsBeforeRound} people-search agent runs`
+              : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
+                `${quickSearchesBeforeRound} people searches`;
+            if (searched)
               return {
-                error: `Not run: ${agentRunsBeforeRound} people-search agent runs already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
               };
-            agentRunsBeforeRound++;
+            if (newAgentRun) agentRunsBeforeRound++;
+            else quickSearchesBeforeRound++;
           }
           // Tools that use the role from a job wait for its save; the first question and progress
           // lines do not, so the save never holds them up. The turn still ends after the save.
