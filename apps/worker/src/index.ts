@@ -1,5 +1,10 @@
 import type { JobPublisher, JobWorkerHost } from "@rakazo/adapter-kit";
-import { ComposioConnector, IntegrationProviderSettings, JudgeSettings } from "@rakazo/adapters";
+import {
+  ComposioConnector,
+  createExaPageReader,
+  IntegrationProviderSettings,
+  JudgeSettings,
+} from "@rakazo/adapters";
 import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import { createWorkerDrain } from "./drain.js";
@@ -337,6 +342,7 @@ async function main() {
     web: createWebProvider(),
     embedder,
     judge: new JudgeSettings(prisma, secrets),
+    profileReader: createExaPageReader(),
     cloudAgent,
     shutdownSignal: shutdown.signal,
   });

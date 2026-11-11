@@ -1,4 +1,5 @@
 import type { TextJudge } from "./judge.js";
+import type { PageReader } from "./keyless-http-web.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 
 /**
@@ -219,11 +220,51 @@ export function textLanguageJudge(requirement: string): TextJudge {
  * (they stay in Results). Uses the deployment's judge, or the profile text alone without one.
  * Any failure returns the rows unchanged.
  */
+/** Full profile pages one turn may read before the pick, across all its searches. */
+export const FULL_PROFILE_READS = 40;
+const FULL_PROFILE_CHARS = 16_000;
+const FULL_PROFILE_WAIT_MS = 12_000;
+
+/** The public profile page of a LinkedIn candidate key. */
+export function profilePageUrl(candidateKey: string): string | undefined {
+  const path = /^linkedin:(\/in\/[^/?#\s]+)/.exec(candidateKey)?.[1];
+  return path ? `https://www.linkedin.com${path}` : undefined;
+}
+
+/**
+ * The search's own text often leaves the language out, so people it does not show it for get
+ * their full profile page read and judged again, in row order, while the turn's reads last.
+ */
+async function fullProfileSignals(
+  judge: TextJudge,
+  requirement: string,
+  people: ReadonlyArray<{ candidateKey: string; name?: string }>,
+  signals: ReadonlyMap<string, LanguageSignal>,
+  reader: { read: PageReader; reads: { left: number } },
+): Promise<Map<string, LanguageSignal>> {
+  const pending = people.filter((person) => signals.get(person.candidateKey) !== "shown");
+  const picked = pending.slice(0, Math.max(0, reader.reads.left));
+  reader.reads.left -= picked.length;
+  const signal = AbortSignal.timeout(FULL_PROFILE_WAIT_MS);
+  const texts = new Map<string, string>();
+  await Promise.all(
+    picked.map(async (person) => {
+      const url = profilePageUrl(person.candidateKey);
+      if (!url) return;
+      const page = await reader.read(url, FULL_PROFILE_CHARS, signal).catch(() => undefined);
+      if (page?.text) texts.set(person.candidateKey, page.text);
+    }),
+  );
+  if (!texts.size) return new Map();
+  return languageSignals(judge, requirement, picked, texts, signal).catch(() => new Map());
+}
+
 export async function withRequiredLanguage<T extends { candidateKey?: unknown; name?: unknown }>(
   judgeSettings: { resolve(): Promise<TextJudge | undefined> } | undefined,
   role: unknown,
   rows: readonly T[],
   result: unknown,
+  reader?: { read: PageReader; reads: { left: number } },
 ): Promise<{ rows: Array<T & { requiredLanguage?: LanguageSignal }>; withoutLanguage: number }> {
   try {
     const requirement = requiredLanguage(role);
@@ -239,6 +280,15 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
     // A judge that answered for nobody (down or timed out) falls back to the profile text.
     if (!signals.size)
       signals = await languageSignals(textLanguageJudge(requirement), requirement, people, texts);
+    if (reader)
+      for (const [key, value] of await fullProfileSignals(
+        judge,
+        requirement,
+        people,
+        signals,
+        reader,
+      ))
+        signals.set(key, value);
     if (!signals.size) return { rows: [...rows], withoutLanguage: 0 };
     const ordered = withLanguageSignals(rows, signals);
     const kept = ordered.filter((row) => row.requiredLanguage !== "no sign");
