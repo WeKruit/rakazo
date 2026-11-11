@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { conversationChecks, deadEnd, requirementSaved } from "./real-user-checks.mjs";
+import { botText, conversationChecks, deadEnd, requirementSaved } from "./real-user-checks.mjs";
 
 const user = (text) => ({ role: "user", text, card: false });
 const bot = (text, card = false) => ({ role: "bot", text, card });
@@ -130,5 +130,31 @@ test("an address inside Chinese text does not hide the Chinese around it", () =>
       user("帮我约 Alex Chen（alex@example.com）下周二下午两点面试，30分钟"),
       bot("Which time zone should 2pm be in?"),
     ]).some((failure) => failure.startsWith("language: recruiter wrote Chinese")),
+  );
+});
+
+test("a connect card is read by its reason, not the untranslated title", () => {
+  const card = {
+    blocks: [
+      {
+        kind: "ask",
+        text: "Connect Gmail",
+        status: "pending",
+        connection: { name: "Gmail", reason: "连接你的邮箱后，我就能把这封邮件从你的地址发出。" },
+      },
+    ],
+  };
+  const text = botText(card);
+  assert.equal(text, "连接你的邮箱后，我就能把这封邮件从你的地址发出。");
+  assert.deepEqual(conversationChecks([user("那你就直接发啊"), bot(text, true)]), []);
+  const english = {
+    blocks: [
+      { ...card.blocks[0], connection: { name: "Gmail", reason: "Connect Gmail to send." } },
+    ],
+  };
+  assert(
+    conversationChecks([user("那你就直接发啊"), bot(botText(english), true)]).some((f) =>
+      f.startsWith("language"),
+    ),
   );
 });

@@ -22,7 +22,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { conversationChecks, requirementSaved } from "./real-user-checks.mjs";
+import { botText, conversationChecks, requirementSaved } from "./real-user-checks.mjs";
 import { SCENARIOS } from "./real-user-scenarios.mjs";
 
 const args = process.argv.slice(2);
@@ -84,12 +84,6 @@ function client() {
   return { auth, rpc };
 }
 
-const botText = (message) =>
-  (message.blocks ?? [])
-    .filter((block) => block.kind !== "handoff")
-    .map((block) => block.text ?? block.question ?? "")
-    .filter(Boolean)
-    .join("\n");
 const openCards = (message) =>
   (message.blocks ?? []).filter(
     (block) => block.kind === "ask" && (!block.status || block.status === "pending"),
@@ -291,9 +285,12 @@ async function play(scenario, owner, sample) {
           threadId: role.threadId ?? role.id,
         });
         fs.writeFileSync(path.join(OUT, `${label}.role.json`), JSON.stringify(workspace, null, 1));
-        failures.push(
-          ...requirementSaved(JSON.stringify(workspace?.revision ?? {}), scenario.requirement),
+        // Judge what the role now requires, not the quotes it keeps of the original JD, which
+        // still say "会说中文更好，不强求" after the recruiter makes it a must.
+        const requirements = JSON.stringify(workspace?.revision ?? {}, (key, value) =>
+          key === "quote" || key === "sourceRefs" ? undefined : value,
         );
+        failures.push(...requirementSaved(requirements, scenario.requirement));
       }
     }
     chats = await transcripts(user.rpc, startedAt);
