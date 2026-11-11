@@ -45,13 +45,19 @@ const SCENARIOS = [
   {
     // A self-signup account asks to email someone: it has no product mailbox.
     name: "email-no-mailbox-zh",
+    // One email is not a new role.
+    noRole: true,
     turns: [
       { say: "帮我给 alex.chen.test@example.com 发封邮件，问他下周有没有空聊一个后端岗位" },
       { say: "其他几位可以根据实际情况发送邮件吗" },
       { say: "那你就直接发啊" },
     ],
   },
-  { name: "email-no-mailbox-en", turns: [{ say: "Can you just email the candidates for me?" }] },
+  {
+    name: "email-no-mailbox-en",
+    noRole: true,
+    turns: [{ say: "Can you just email the candidates for me?" }],
+  },
   { name: "angry-zh", turns: [{ say: "你能听懂我说话吗？" }] },
   { name: "vague-en", turns: [{ say: "need people. fast" }] },
   {
@@ -245,6 +251,13 @@ async function play(scenario, owner) {
         // The reply to the answer is what is judged; a search it starts is stopped right after.
         await settle(user.rpc, { quietMs: 25_000, limitMs: 3 * 60_000 });
       }
+    }
+    if (scenario.noRole) {
+      const roles = (await groupsOf(user.rpc)).filter(
+        (group) => !group.id.startsWith("recruiting-global-"),
+      );
+      if (roles.length)
+        failures.push(`opened a role for an email: ${roles.map((g) => g.name).join(", ")}`);
     }
     if (scenario.requirement) {
       const role = (await groupsOf(user.rpc)).find(

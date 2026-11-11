@@ -114,3 +114,12 @@ test("an English email draft inside a Chinese reply is not a language switch", (
     [],
   );
 });
+
+test("an agent's brief shown to the recruiter fails", () => {
+  assert(
+    conversationChecks([
+      user("帮我给 alex@example.com 发封邮件"),
+      bot("Goal: Draft and send an email to Alex Chen asking whether he is available next week."),
+    ]).some((failure) => failure.startsWith("internal agent brief")),
+  );
+});

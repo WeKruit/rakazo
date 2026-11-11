@@ -22,6 +22,8 @@ const BLOCKED =
 const NEXT_STEP =
   /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I)\b/i;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// The brief one agent writes for another, shown to the recruiter as if it were a reply.
+const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 
 // Addresses and links say nothing about the language a message is written in.
@@ -91,6 +93,7 @@ export function conversationChecks(messages) {
       ["supplier name", SUPPLIER],
       ["internal tool name", TOOL_NAME],
       ["internal gate code", GATE_CODE],
+      ["internal agent brief", AGENT_BRIEF],
     ]) {
       const match = text.match(pattern);
       if (match) failures.push(`${name}: ${quote(text, match)}`);
