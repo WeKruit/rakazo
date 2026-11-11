@@ -17,6 +17,7 @@ import type { ActionApprovalRule } from "@rakazo/core";
 import {
   boundDirectApprovalRequest,
   COMPUTER_START_FAILED,
+  REPLY_IN_CHINESE_NOTE,
   RecruitingAssessmentValidationError,
 } from "@rakazo/core";
 import {
@@ -1282,6 +1283,34 @@ describe("computer that will not start", () => {
       "Run setup failed; retrying",
     );
     expect(f.finalizeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("steered message language", () => {
+  // Staging eval 11-11: an English JD, then 「对了，远程也可以」 4 s later, got English replies.
+  it("tells the turn to switch to the language of a message steered into it", async () => {
+    const f = fixture("steered-language");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-zh",
+        messageId: "message-zh",
+        text: "对了，远程也可以，不一定要在西雅图",
+        blocks: [{ kind: "text", text: "对了，远程也可以，不一定要在西雅图" }],
+      },
+    ]);
+    let steered = "";
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const [steering] = await request.claimSteering!([]);
+      steered = steering!.text;
+      yield { type: "done" as const, text: "好的。" };
+    });
+    await f.run();
+    expect(steered).toContain(REPLY_IN_CHINESE_NOTE);
   });
 });
 
