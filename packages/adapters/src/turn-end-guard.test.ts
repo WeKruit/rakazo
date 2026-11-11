@@ -1283,6 +1283,21 @@ describe("planDeclineRetry", () => {
     expect(await planDeclineRetry(human, { ...input, reply: recruiter, request })).toBeUndefined();
   });
 
+  it("sends a sequence back when one email was asked for (2026-11-11 staging)", async () => {
+    const email = (n: number) =>
+      `**Email ${n}**\n**Subject:** Senior Data Engineer\n\nHi [Candidate Name],\n\nA role.`;
+    const reply = [1, 2, 3].map(email).join("\n\n");
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
+    const handed = { ...input, request: "Draft it", handedIn: true, personRequest: ask };
+    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain("not a sequence");
+    expect(await planDeclineRetry(human, { ...handed, reply: email(1) })).toBeUndefined();
+    const sequence = "Write a cold email sequence for the data engineer role";
+    expect(
+      await planDeclineRetry(human, { ...handed, reply, personRequest: sequence }),
+    ).toBeUndefined();
+  });
+
   it("keeps the blanks in an email about a role that names nobody (2026-11-11 staging)", async () => {
     const reply =
       "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";

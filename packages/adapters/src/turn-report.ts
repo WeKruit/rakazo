@@ -514,6 +514,18 @@ export function candidateVoiceDraft(reply: string): DeclineRetry | undefined {
   return greeting ? { sentence: greeting, note: CANDIDATE_VOICE_NOTE } : undefined;
 }
 
+/** Model-facing: one email was asked for and a sequence came back. */
+export const ONE_EMAIL_NOTE =
+  "They asked for one email, not a sequence: show just that one email, with its subject and full body.";
+
+/** A sequence of drafts shown when the recruiter asked for one email ("a short cold email…", "一封…"). */
+export function sequenceForOneEmail(reply: string, request: string): DeclineRetry | undefined {
+  if (!/\b(?:an?|one|single)\s+(?:\w+\s+){0,3}e-?mail\b|一封/i.test(request)) return undefined;
+  if (/\b(?:sequence|campaign|follow-?ups)\b|序列|跟进序列/i.test(request)) return undefined;
+  const subjects = reply.match(/(?:^|\n)\s*(?:[#*_]+\s*)?Subject:/gi) ?? [];
+  return subjects.length > 1 ? { sentence: "", note: ONE_EMAIL_NOTE } : undefined;
+}
+
 /** A drafted email shown with {{variables}} instead of a real person's details. */
 export function draftVariables(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;

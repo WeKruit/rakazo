@@ -21,6 +21,7 @@ import {
   draftVariables,
   questionCard,
   retryReason,
+  sequenceForOneEmail,
 } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
@@ -810,8 +811,9 @@ export async function planDeclineRetry(
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
   // A template the recruiter asked for is meant to keep its blanks.
   // …but it is the recruiter's email to the candidate, never the candidate's note to an interviewer.
-  const variables = askedTemplate(input.personRequest ?? input.request)
-    ? candidateVoiceDraft(input.reply)
+  const asked = input.personRequest ?? input.request;
+  const variables = askedTemplate(asked)
+    ? (candidateVoiceDraft(input.reply) ?? sequenceForOneEmail(input.reply, asked))
     : draftVariables(input.reply);
   const reason = input.request.trim()
     ? retryReason(input.reply, input.request, input.personRequest)
