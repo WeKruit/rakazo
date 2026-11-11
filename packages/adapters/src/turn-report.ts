@@ -501,6 +501,19 @@ export function askedTemplate(request: string): boolean {
   );
 }
 
+/** Model-facing: a template written as the candidate thanking an interviewer is written again. */
+export const CANDIDATE_VOICE_NOTE =
+  'This template is written as a candidate thanking an interviewer. The recruiter is the one writing, to the candidate: write it again from the recruiter, opening "Hi [Candidate Name]", and show the whole template.';
+
+/** A drafted template addressed to the interviewer, as if the candidate were writing. */
+export function candidateVoiceDraft(reply: string): DeclineRetry | undefined {
+  if (!DRAFT_START.test(reply)) return undefined;
+  const greeting = reply.match(
+    /\b(?:Hi|Dear|Hello)\s+\[(?:Interviewer|Hiring Manager)[^\]\n]{0,30}\]/i,
+  )?.[0];
+  return greeting ? { sentence: greeting, note: CANDIDATE_VOICE_NOTE } : undefined;
+}
+
 /** A drafted email shown with {{variables}} instead of a real person's details. */
 export function draftVariables(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;
