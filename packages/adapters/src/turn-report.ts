@@ -20,6 +20,7 @@ export type TurnWork =
   | "crm"
   | "contacts"
   | "draft"
+  | "sent"
   | "scheduling"
   | "sender"
   | "connected";
@@ -128,6 +129,9 @@ export function turnWork(
   const action = (target.split("__").at(-1) ?? target).toLowerCase();
   // A writable tool's read operation ("ensure_sender" with operation "read") changed nothing.
   if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
+  // A send runs only once its card is confirmed, so a returned send went out.
+  if (/^(?:native_[a-z]+_)?(?:activate_campaign|send_email|send_message|send)$/.test(action))
+    return "sent";
   if (/sender|mailbox|sending_account/.test(action)) return "sender";
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
@@ -145,6 +149,7 @@ const WORK_DONE: Record<TurnWork, string> = {
   crm: "updated candidate records",
   contacts: "looked up contact details",
   draft: "saved the email draft",
+  sent: "sent the email",
   scheduling: "updated the schedule",
   sender: "got the sending email address ready",
   connected: "made changes in a connected app",
@@ -160,6 +165,7 @@ const WORK_DONE_ZH: Record<TurnWork, string> = {
   crm: "更新了候选人记录",
   contacts: "查了联系方式",
   draft: "存好了邮件草稿",
+  sent: "发出了邮件",
   scheduling: "更新了日程",
   sender: "准备好了发件邮箱",
   connected: "在已连接的应用里做了修改",
@@ -310,6 +316,14 @@ export class TurnReportLedger {
   }
 
   /** Any consequential work in this attempt. */
+  /** A send or booking returned this attempt: its card was shown and confirmed. */
+  sent(): boolean {
+    return this.entries.some((entry) => {
+      const work = this.workOf(entry);
+      return work === "sent" || work === "scheduling";
+    });
+  }
+
   worked(): boolean {
     return this.entries.some((entry) => this.workOf(entry) !== undefined);
   }

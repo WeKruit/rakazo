@@ -1400,6 +1400,12 @@ const SAYS_NOTHING = new Set([
   "bot_message_sent",
   "bot_message_received",
 ]);
+/** A reply that says a teammate's work is not done yet ("还没有发送", "the flow is paused"). */
+export const waitsOnTeammate = (text: string) =>
+  /还没有?(?:准备好|发送|发出)|尚未(?:发送|发出|给出)|(?:流程|处理).{0,6}暂停|\bnot (?:yet )?(?:been )?(?:sent|ready)\b|\bis paused\b/i.test(
+    text,
+  );
+
 /** Built-in calls after a handoff that leave the request with the teammate. */
 const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory"]);
 export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
@@ -6766,7 +6772,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         /** The person's newest message since this run began that a different run answers. */
         /** A question another turn already put to the recruiter here, still unanswered. */
-        const openQuestionElsewhere = async (): Promise<string | undefined> => {
+        const openQuestionElsewhere = async (approvals = false): Promise<string | undefined> => {
           let recent: Array<{
             role: string;
             botId: string | null;
@@ -6794,7 +6800,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (block) =>
                 block.kind === "ask" &&
                 (!block.status || block.status === "pending") &&
-                !block.approvalEffectId,
+                (approvals || !block.approvalEffectId),
             );
             if (open && open.kind === "ask") return open.text;
           }
@@ -16206,6 +16212,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   handedIn: Boolean(handedIn),
                   noQuestionCard: noRoleYet(),
                   answersCard: Boolean(nativeSources?.currentAnswer),
+                  sent: turnReport.sent(),
                   ...(handedIn
                     ? {
                         personRequest: turnRequestText(
@@ -16294,6 +16301,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...blocks.filter((block) => block.kind !== "text"),
               ...(text ? [{ kind: "text" as const, text }] : []),
             ];
+          }
+          // A teammate's Send card is the answer for now: a line saying the email is not sent yet
+          // would contradict the card the recruiter is looking at.
+          if (
+            hideVendors &&
+            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
+            waitsOnTeammate(text) &&
+            (await openQuestionElsewhere(true)) !== undefined
+          ) {
+            text = "";
+            blocks = [];
           }
           // Gray next-message text in the composer. It starts as soon as the reply text is final,
           // beside the checkpoint and finalize below, so it is ready about when the reply lands.

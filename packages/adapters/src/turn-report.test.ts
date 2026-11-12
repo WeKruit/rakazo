@@ -27,6 +27,11 @@ describe("turnWork", () => {
     expect(
       turnWork("instantly__mail__ensure_role_campaign", {}, { ok: true, readOnly: false }),
     ).toBe("draft");
+    // A send returns only after its card was confirmed: it went out, it is no draft.
+    const sentCall = { ok: true, readOnly: false } as const;
+    expect(turnWork("instantly__mail__activate_campaign", {}, sentCall)).toBe("sent");
+    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("sent");
+    expect(turnWork("mcp__gmail__send_message", {}, sentCall)).toBe("sent");
     expect(turnWork("cal__main__create_booking", {}, { ok: true, readOnly: false })).toBe(
       "scheduling",
     );

@@ -9,6 +9,7 @@ import {
   STEERING_PEEK_MS,
   STEERING_QUICK_REPLY_SENDING,
   saysSomething,
+  waitsOnTeammate,
 } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
@@ -455,6 +456,17 @@ describe("reply suggestion", () => {
       replySuggestions: true,
     });
     expect(runtimeRun.mock.calls.every(([call]) => !call.runId.endsWith(":suggestion"))).toBe(true);
+  });
+});
+
+describe("waitsOnTeammate", () => {
+  it("reads a line saying a teammate's email is not sent yet", () => {
+    expect(
+      waitsOnTeammate(
+        "这封邮件还没有准备好或发送。负责处理的流程目前暂停，尚未给出邮件草稿或需要你补充的信息。",
+      ),
+    ).toBe(true);
+    expect(waitsOnTeammate("初次联系邮件已发送给 Noah Test。")).toBe(false);
   });
 });
 

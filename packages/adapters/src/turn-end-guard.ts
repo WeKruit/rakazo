@@ -786,6 +786,8 @@ export async function planDeclineRetry(
     noQuestionCard?: boolean;
     /** The turn answers a card: a send or booking card was already shown and answered. */
     answersCard?: boolean;
+    /** A send or booking went out this turn (see TurnReportLedger.sent). */
+    sent?: boolean;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -822,11 +824,11 @@ export async function planDeclineRetry(
   const variables = askedTemplate(asked)
     ? (candidateVoiceDraft(input.reply) ?? sequenceForOneEmail(input.reply, asked))
     : draftVariables(input.reply);
-  // After a send or booking card was answered, a reply that talks about that work ("已发送给
+  // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
   const reason = !input.request.trim()
     ? undefined
-    : input.answersCard && REPORTS_SENT.test(input.reply)
+    : input.sent || (input.answersCard && REPORTS_SENT.test(input.reply))
       ? declinedSentence(input.reply)
       : retryReason(input.reply, input.request, input.personRequest);
   const declined = input.noQuestionCard && reason?.kind !== "decline" ? undefined : reason;
