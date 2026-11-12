@@ -1995,3 +1995,24 @@ export async function saveRecruitingGrades(
     },
   );
 }
+
+/**
+ * A role create sent after this thread's role was already saved, as an update of that role: its
+ * title, brief, citations and lists are written to the saved role, and its criteria are upserted
+ * so the criteria already saved there (the recruiter's stated must-haves) stay.
+ */
+export function createAsUpdate(
+  args: Record<string, unknown>,
+  role: { id: string; revision: number },
+): Record<string, unknown> {
+  const { operation: _operation, criteria, ...rest } = args;
+  return {
+    ...rest,
+    operation: "update",
+    roleId: role.id,
+    expectedRevision: role.revision,
+    ...(Array.isArray(criteria) && criteria.length
+      ? { criteria: { upsert: criteria } }
+      : {}),
+  };
+}
