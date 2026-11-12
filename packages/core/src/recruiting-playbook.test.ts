@@ -376,7 +376,7 @@ describe("deterministic playbook approval gates", () => {
       expect(() => requireRecruitingPlaybookGate({ ...input, receipts })).not.toThrow(/\bG[0-4]\b/);
     }
   });
-  it("rejects nine, eleven, duplicated or unevidenced calibration profiles", () => {
+  it("rejects none, eleven, duplicated or unevidenced calibration profiles", () => {
     const receipts = gates.map((gate) => ({
       gate,
       roleRevisionId: "revision",
@@ -386,7 +386,7 @@ describe("deterministic playbook approval gates", () => {
       approvedAt: "2026-10-16T18:00:00Z",
     }));
     for (const calibration of [
-      profiles.slice(1),
+      [],
       [...profiles, profiles[0]!],
       profiles.map(() => profiles[0]!),
       profiles.map((profile) => ({
@@ -405,9 +405,7 @@ describe("deterministic playbook approval gates", () => {
           receipts,
           calibration,
         }),
-      ).toThrow(
-        "Candidate review requires exactly ten distinct profiles with supporting evidence.",
-      );
+      ).toThrow("Candidate review requires up to ten distinct profiles with supporting evidence.");
   });
   it("blocks suppression, hold/pass and duplicates before the CRM-note exception", () => {
     const base = {

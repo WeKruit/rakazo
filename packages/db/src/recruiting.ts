@@ -5193,7 +5193,7 @@ export async function latestRecruitingCalibrationProfiles(
     orderBy: { round: "desc" },
     select: { candidateKeys: true },
   });
-  if (round?.candidateKeys.length !== 10) return null;
+  if (!round?.candidateKeys.length) return null;
   const profiles = [];
   for (const candidateKey of round.candidateKeys) {
     const occurrence = await prisma.recruitingCandidateOccurrence.findFirst({
@@ -5412,9 +5412,9 @@ async function recruitingApprovalPackage(
       recruitingCalibrationIdentity(profile.linkedinUrl),
     );
     if (
-      unique.size !== 10 ||
+      unique.size !== input.profiles.length ||
       identities.some((identity) => !identity) ||
-      new Set(identities).size !== 10
+      new Set(identities).size !== input.profiles.length
     )
       throw new IsolationError();
     const nativeRefs = input.profiles.flatMap((profile) =>
