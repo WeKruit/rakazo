@@ -8763,14 +8763,18 @@ export function candidateIndexQuery(
   ),`
       : Prisma.empty
   } profile_fact_pages AS MATERIALIZED (
-    -- Read only newly marked source receipts once per role, using the partial intent index.
+    -- Newly marked source receipts of this role's pages, looked up per page by the partial
+    -- source index. A join or EXISTS hashes every account's receipts instead, reading each
+    -- large result on every list; the LIMIT keeps it a per-page lookup.
     -- Grades can repeat every display field without becoming the source of profile/media facts.
-    SELECT DISTINCT page."effectId" AS "pageId"
-    FROM "external_effects" saving
-    JOIN "recruiting_candidate_pages" page ON page."effectId" = saving.result->>'sourceEffectId'
+    SELECT page."effectId" AS "pageId" FROM "recruiting_candidate_pages" page
+    CROSS JOIN LATERAL (
+      SELECT 1 FROM "external_effects" saving
+      WHERE saving.result->>'sourceEffectId' = page."effectId"
+        AND saving.kind = 'recruiting_research' AND saving.status = 'completed'
+        AND saving.result->>'profileFactsVersion' = '1'
+      LIMIT 1) saved
     WHERE page."roleId" = ${roleId} ${sourceScope}
-      AND saving.kind = 'recruiting_research' AND saving.status = 'completed'
-      AND saving.result->>'profileFactsVersion' = '1'
   ), base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted",
       to_char(c."shortlistedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "shortlistedAt",
