@@ -1276,7 +1276,11 @@ describe("native cross-role recruiting reads", () => {
         { operation: "replies" },
         context,
       ),
-    ).toMatchObject({ counts: { messages: 0, complete: true } });
+    ).toMatchObject({
+      counts: { messages: 0, complete: true },
+      // A one-off email outside a role is not in this read; its reply is in the mailbox.
+      note: expect.stringContaining("search_contact_emails"),
+    });
   });
 
   it("counts only received mail and keeps page completeness explicit", async () => {
