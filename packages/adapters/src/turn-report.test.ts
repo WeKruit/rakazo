@@ -6,6 +6,8 @@ import {
   questionStatesWork,
   REPORT_BEFORE_ASK,
   restatesUpdate,
+  readsOnly,
+  CLAIMS_CARD_PENDING,
   retryReason,
   TEXT_QUESTION_NOTE,
   TurnReportLedger,
@@ -522,6 +524,30 @@ describe("declineRetry", () => {
         worked: true,
       })?.note,
     ).toContain("activate_campaign");
+  });
+});
+
+describe("readsOnly", () => {
+  it("tells reads from work, so a read after a handoff leaves the request with the teammate", () => {
+    expect(readsOnly("recruiting_candidates", { operation: "list" })).toBe(true);
+    expect(readsOnly("recruiting_role", { operation: "update" })).toBe(false);
+    expect(readsOnly("mcp__instantly__list_campaigns", {})).toBe(true);
+    expect(readsOnly("mcp__instantly__activate_campaign", {})).toBe(false);
+  });
+});
+
+describe("CLAIMS_CARD_PENDING", () => {
+  // Staging 11-12: after the recruiter confirmed the Send card and the email went out.
+  it("reads a reply that says the card still waits or the email is not sent", () => {
+    expect(
+      CLAIMS_CARD_PENDING.test(
+        "已核实：当前的审批卡仍待你确认；审批未完成前我不会重复创建或发送。",
+      ),
+    ).toBe(true);
+    expect(CLAIMS_CARD_PENDING.test("核对结果：没有可确认的发送回执，目前状态为**未发送**。")).toBe(
+      true,
+    );
+    expect(CLAIMS_CARD_PENDING.test("初次联系邮件已发出，收件人仅为 Noah Test。")).toBe(false);
   });
 });
 

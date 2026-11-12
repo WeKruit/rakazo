@@ -771,6 +771,8 @@ import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
   questionStatesWork,
+  CLAIMS_CARD_PENDING,
+  readsOnly,
   restatesUpdate,
   TurnReportLedger,
   turnReportText,
@@ -6811,6 +6813,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (open && open.kind === "ask") return open.text;
           }
           return undefined;
+        };
+        // An approval card answered since the person's latest message: its outcome is on the card.
+        const approvalAnsweredSinceRequest = async () => {
+          const recent = await deps.prisma.message
+            .findMany({
+              where: { threadId: thread.id },
+              orderBy: { seq: "desc" },
+              take: 30,
+              select: { role: true, botId: true, blocks: true },
+            })
+            .catch(() => []);
+          for (const message of recent) {
+            if (message.role === "user" && !message.botId && personWrote(message.blocks))
+              return false;
+            const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+            if (
+              blocks.some(
+                (block) =>
+                  block.kind === "ask" &&
+                  Boolean(block.approvalEffectId) &&
+                  block.status !== undefined &&
+                  block.status !== "pending",
+              )
+            )
+              return true;
+          }
+          return false;
         };
         const newerMessageAnsweredElsewhere = async () => {
           if (!run.createdAt) return undefined;
@@ -13716,7 +13745,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             handedOff &&
             name !== "handoff_to_bot" &&
             !AFTER_HANDOFF_QUIET.has(name) &&
-            !connectorTools.get(name)?.readOnly
+            !connectorTools.get(name)?.readOnly &&
+            !readsOnly(name, rawArgs as Record<string, unknown>)
           )
             handedOff = false;
           const outOfCredits = credits.refusal(name);
@@ -16315,6 +16345,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...blocks.filter((block) => block.kind !== "text"),
               ...(text ? [{ kind: "text" as const, text }] : []),
             ];
+          }
+          // A card answered while this turn ran: "the card still waits / not sent" read an earlier
+          // record and contradicts the card and its receipt, which the recruiter already sees.
+          if (
+            hideVendors &&
+            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
+            CLAIMS_CARD_PENDING.test(text) &&
+            (
+              await waitingCardBlocks(deps.prisma, thread.id)
+                .then(waitingApprovalCards)
+                .catch(() => ["unknown"])
+            ).length === 0 &&
+            (await approvalAnsweredSinceRequest())
+          ) {
+            getLogger().info("run.stale_card_claim.dropped", { runId });
+            text = "";
+            blocks = [];
           }
           // A teammate's Send card is the answer for now: a line saying the email is not sent yet
           // would contradict the card the recruiter is looking at.
