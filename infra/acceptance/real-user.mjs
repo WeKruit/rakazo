@@ -17,7 +17,9 @@
 // To reproduce one failure before and after a fix, play just that scenario a few times:
 //     node infra/acceptance/real-user.mjs --only jd-zh-must-have --samples 3 --out /tmp/repro
 // RAKAZO_ONBOARDED_EMAIL/PASSWORD name a fixture account set up by hand (no credit limit, no
-// mailbox) for the onboarded-account scenarios; without them those are skipped.
+// mailbox) for the onboarded-account scenarios, and RAKAZO_MAILBOX_EMAIL/PASSWORD an outside account
+// given a mailbox by the owner (assignSendingMailbox) for the mailbox scenarios; without them those
+// are skipped. A mailbox is held by one account, so that account is reused, never made per run.
 // Replies vary from run to run, so the nightly benchmark plays each free scenario --samples 3
 // times; the release gate plays each once, and a failed one once more before it blocks. Rows go to <out>/results.jsonl and, with --bench, are
 // appended to the shared benchmark folder for the scoreboard.
@@ -201,6 +203,7 @@ async function transcripts(rpc, since, chinese = false) {
           ? asSeen(botText(message), chinese)
           : botText(message),
         card: (message.blocks ?? []).some((block) => block.kind === "ask"),
+        sendCard: (message.blocks ?? []).some((block) => block.approvalEffectId),
         at: message.createdAt,
       }));
     chats.push({ group, messages });
@@ -310,9 +313,9 @@ async function play(scenario, owner, sample) {
   let startedAt = Date.now() - 5_000;
   const label = `${scenario.name}#${sample}`;
   const user = client();
-  if (scenario.account === "onboarded") {
+  if (scenario.account) {
     // A hand-onboarded account cannot be made through the API, so a fixed one is reused.
-    await user.auth(ONBOARDED_EMAIL, ONBOARDED_PASSWORD);
+    await user.auth(...FIXTURES[scenario.account]);
     // Close what earlier runs left open, let the replies land, and judge only what follows.
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
@@ -476,6 +479,9 @@ async function play(scenario, owner, sample) {
       reply: messages.findLast((message) => message.role !== "user" && message.text.trim()),
     }))
     .sort((a, b) => Date.parse(b.sent || 0) - Date.parse(a.sent || 0))[0]?.reply;
+  // Denied by stopAll above, so the benchmark itself never sends.
+  if (scenario.sendCard && !chats.some(({ messages }) => messages.some((m) => m.sendCard)))
+    failures.push("no send card: the email could not be sent");
   if (scenario.last && !scenario.last.test(latest?.text ?? ""))
     failures.push(`last reply misses ${scenario.last}: "${(latest?.text ?? "").slice(0, 120)}"`);
   const wrong = scenario.lastNot && (latest?.text ?? "").match(scenario.lastNot);
@@ -484,17 +490,22 @@ async function play(scenario, owner, sample) {
   return failures;
 }
 
-const { RAKAZO_ONBOARDED_EMAIL: ONBOARDED_EMAIL, RAKAZO_ONBOARDED_PASSWORD: ONBOARDED_PASSWORD } =
-  process.env;
+const env = process.env;
+const FIXTURES = Object.fromEntries(
+  [
+    ["onboarded", env.RAKAZO_ONBOARDED_EMAIL, env.RAKAZO_ONBOARDED_PASSWORD],
+    ["mailbox", env.RAKAZO_MAILBOX_EMAIL, env.RAKAZO_MAILBOX_PASSWORD],
+  ].flatMap(([name, email, password]) => (email && password ? [[name, [email, password]]] : [])),
+);
 const only = option("--only")?.split(",");
 const wanted = SCENARIOS.filter(
   (scenario) =>
     (!only || only.includes(scenario.name)) &&
     (!scenario.paid || args.includes("--paid")) &&
-    (scenario.account !== "onboarded" || (ONBOARDED_EMAIL && ONBOARDED_PASSWORD)),
+    (!scenario.account || FIXTURES[scenario.account]),
 );
-if (!ONBOARDED_EMAIL)
-  log("RAKAZO_ONBOARDED_EMAIL/PASSWORD not set: skipping the onboarded-account scenarios");
+for (const name of ["onboarded", "mailbox"])
+  if (!FIXTURES[name]) log(`No ${name} fixture account set: skipping its scenarios`);
 const SAMPLES = Number(option("--samples", "1"));
 // --model provider/id and --thinking level compare models on the same scenarios; the deployment's
 // own key must serve that provider.
