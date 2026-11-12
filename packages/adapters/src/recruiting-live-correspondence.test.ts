@@ -223,7 +223,12 @@ describe("live role correspondence", () => {
         spaceId: actor.spaceId,
         status: "completed",
         idempotencyKey: {
-          in: ["instantly-role-campaign:calendar:role", "instantly-role-campaign:instantly:role"],
+          in: [
+            "instantly-role-campaign:calendar:role",
+            "instantly-role-campaign:calendar:role:history",
+            "instantly-role-campaign:instantly:role",
+            "instantly-role-campaign:instantly:role:history",
+          ],
         },
       },
       select: { idempotencyKey: true, result: true },
@@ -362,6 +367,29 @@ describe("live role correspondence", () => {
     expect(output.emails.every((email) => email.direction === "received")).toBe(true);
     expect(execute).toHaveBeenCalledTimes(3);
     expect(execute.mock.calls[1]?.[0].args.starting_after).toBe("100");
+  });
+  it("reads the role's imported campaign beside its own", async () => {
+    const { prisma } = fixture();
+    const imported = "00000000-0000-4000-8000-000000000009";
+    vi.mocked(prisma.externalEffect.findMany).mockResolvedValueOnce([
+      { idempotencyKey: "instantly-role-campaign:instantly:role", result: { campaignId } },
+      {
+        idempotencyKey: "instantly-role-campaign:instantly:role:history",
+        result: { campaignId: imported },
+      },
+    ] as never);
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+    });
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      { ...actor, userId: "imported-campaign" },
+      { roleId: "role", threadId: "thread", view: "inbox", pageEnd: 50 },
+      [source("instantly")],
+      empty(),
+    );
+    const calls = execute.mock.calls as unknown as [{ args: Record<string, unknown> }][];
+    expect(calls.map((call) => call[0].args.campaign_id)).toEqual([campaignId, imported]);
   });
   it.each(["calendar", "cal"] as const)(
     "rejects malformed %s provider identities before generating event keys",

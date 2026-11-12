@@ -611,6 +611,12 @@ type StagedLead = {
 };
 const bindingKey = (serverId: string, roleId: string) =>
   `instantly-role-campaign:${serverId}:${roleId}`;
+/**
+ * A role's imported campaign: another tool's sequence that keeps emailing and answering the people
+ * it already holds. The role reads and can reply in it, but adds new people to its own campaign.
+ */
+export const historyKey = (serverId: string, roleId: string) =>
+  `${bindingKey(serverId, roleId)}:history`;
 
 /** The recruiting role linked to this run's conversation, if any. */
 async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
@@ -852,11 +858,35 @@ export async function readRoleCampaignBinding(
   const binding = effect.result as Partial<RoleBinding> | null;
   return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
+
+/** The campaigns a role's mail is read from: its own, then the one its imported history used. */
+export async function roleCampaignIds(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+  roleId: string,
+) {
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      idempotencyKey: { in: [bindingKey(serverId, roleId), historyKey(serverId, roleId)] },
+      spaceId,
+      status: "completed",
+    },
+    select: { idempotencyKey: true, result: true },
+  });
+  return effects
+    .toSorted((a, b) => a.idempotencyKey.length - b.idempotencyKey.length)
+    .map((effect) => (effect.result as Partial<RoleBinding> | null)?.campaignId)
+    .filter((id): id is string => typeof id === "string");
+}
 /**
  * Links each role of an onboarded account to the one campaign its imported mail history came
  * from, once every mailbox that history used is assigned to (or already sends for) the account,
  * so the role's Inbox reads new replies from that campaign and the account can reply in it.
- * A campaign any role already uses is left alone. Returns the number of roles linked.
+ * The link is the role's history, not its own campaign: the other tool keeps the people it holds,
+ * and people this product adds go to a campaign of its own. A link made before that, which nobody
+ * was added through yet, becomes history. A campaign any role already uses is left alone.
+ * Returns the number of roles linked.
  */
 export async function bindImportedCampaigns(prisma: PrismaClient, userId: string) {
   const imports = await prisma.externalEffect.findMany({
@@ -918,7 +948,27 @@ export async function bindImportedCampaigns(prisma: PrismaClient, userId: string
     });
     if (!role || servers.length !== 1) continue;
     const serverId = servers[0]!.id;
-    const key = bindingKey(serverId, roleId);
+    const key = historyKey(serverId, roleId);
+    const earlier = await prisma.externalEffect.findUnique({
+      where: { idempotencyKey: bindingKey(serverId, roleId) },
+      select: { id: true, request: true, result: true },
+    });
+    const earlierRequest = (earlier?.request ?? {}) as { importedHistory?: unknown };
+    const earlierResult = (earlier?.result ?? {}) as Partial<RoleBinding>;
+    if (
+      earlier &&
+      earlierRequest.importedHistory === true &&
+      earlierResult.campaignId === campaignId &&
+      !Object.keys(earlierResult.leads ?? {}).length &&
+      !Object.keys(earlierResult.staged ?? {}).length
+    ) {
+      await prisma.externalEffect.update({
+        where: { id: earlier.id },
+        data: { idempotencyKey: key },
+      });
+      linked++;
+      continue;
+    }
     const taken = await prisma.externalEffect.findFirst({
       where: {
         OR: [
@@ -1302,7 +1352,11 @@ export async function requireReplySendingMailboxReady(
   const key = bindingKey(serverId, roleId);
   let owned: Partial<RoleBinding> | null = null;
   // Existing native associations have unique keys; never scan unrelated effect history for proof.
-  for (const idempotencyKey of [key, `${key}:campaign:${original.campaign_id}`]) {
+  for (const idempotencyKey of [
+    key,
+    historyKey(serverId, roleId),
+    `${key}:campaign:${original.campaign_id}`,
+  ]) {
     const binding = await prisma.externalEffect.findUnique({
       where: {
         idempotencyKey,
@@ -1809,11 +1863,15 @@ async function sameTitleCampaigns(
 ) {
   const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`);
   const title = role.title.trim().toLowerCase();
+  // An imported campaign is the other tool's, even for this role: it is read, never adopted.
   const otherRoles = await prisma.externalEffect.findMany({
     where: {
       spaceId: context.spaceId,
       kind: "instantly_role_campaign",
-      NOT: { request: { path: ["roleId"], equals: role.id } },
+      OR: [
+        { NOT: { request: { path: ["roleId"], equals: role.id } } },
+        { request: { path: ["importedHistory"], equals: true } },
+      ],
     },
     select: { result: true },
   });
@@ -1923,7 +1981,28 @@ async function addShortlistLeads(
     (c) => inRole.has(c.candidate_key) && !stopped.has(c.candidate_key),
   );
   const missingEmail = eligible.filter((c) => !c.email);
-  const withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
+  let withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
+  // People the role's imported campaign already holds stay with it: that tool keeps emailing and
+  // answering them, so this campaign never emails them as well.
+  const history = await readBinding(prisma, context, historyKey(serverId, role.id));
+  const earlierCampaign: string[] = [];
+  if (withEmail.length && history?.effect.status === "completed" && history.binding.campaignId) {
+    const listed = await rest("POST", "/leads/list", {
+      campaign: history.binding.campaignId,
+      contacts: withEmail.map((c) => c.email),
+      limit: 100,
+    });
+    const held = new Set(
+      (Array.isArray(listed.items) ? (listed.items as { email?: string | null }[]) : []).flatMap(
+        (lead) => (lead.email ? [lead.email.toLowerCase()] : []),
+      ),
+    );
+    withEmail = withEmail.filter((candidate) => {
+      if (!held.has(candidate.email.toLowerCase())) return true;
+      earlierCampaign.push(candidate.candidate_key);
+      return false;
+    });
+  }
   const leads = { ...binding.leads };
   const already: string[] = [];
   let pending = withEmail;
@@ -2005,6 +2084,13 @@ async function addShortlistLeads(
         }
       : {}),
     alreadyInCampaign: already,
+    ...(earlierCampaign.length
+      ? {
+          inImportedCampaign: earlierCampaign,
+          inImportedCampaignNote:
+            "These people are already in the role's imported campaign, which keeps emailing and answering them; they were not added here.",
+        }
+      : {}),
     skippedMissingEmail: missingEmail.map((c) => c.candidate_key),
     notInRole: notInRole.map((c) => c.candidate_key),
     onHoldOrPassed: onHoldOrPassed.map((c) => c.candidate_key),
