@@ -532,7 +532,9 @@ describe("group handoff report back", () => {
     ["completed", undefined, "Finished the stage"],
     ["failed", "provider down", "Could not finish the stage you handed me: provider down"],
   ] as const)("wakes the sender when the stage %s", async (status, error, text) => {
-    const { deps, messageCreate, runCreate } = harness([asked]);
+    const { deps, messageCreate, runCreate } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "Saved ten people." }] },
+    ]);
     await expect(
       reportGroupHandoffOutcome(deps as never, worker, "group-1", { status, error }),
     ).resolves.toEqual({ runId: "run-b" });
@@ -557,6 +559,20 @@ describe("group handoff report back", () => {
         data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
       }),
     );
+  });
+
+  it("tells the sender a stage that ended with no message or card is not done", async () => {
+    // Staging: Outreach read a skill and ended silently; the report said its result was above,
+    // so Main accepted nothing and the recruiter never got the reply card.
+    const { deps, messageCreate } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "steps", steps: [] }] },
+    ]);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    const text = (
+      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
+    )[0].data.blocks[0]!.text;
+    expect(text).toContain("without posting any result");
+    expect(text).not.toMatch(/my result is my last message|NO_RESPONSE/);
   });
 
   it("stays quiet when the sender did not ask, or already got the report", async () => {
