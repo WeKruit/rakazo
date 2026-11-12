@@ -423,7 +423,15 @@ async function syncSlice(
       create: { ...owner, targetKey, token, progress: cursor },
       update: { targetKey, token, progress: cursor },
     });
-  else await prisma.recruitingCrmSyncProgress.deleteMany({ where: owner });
+  else {
+    await prisma.recruitingCrmSyncProgress.deleteMany({ where: owner });
+    if (!dryRun)
+      await prisma.recruitingCrmSyncPass.upsert({
+        where: { userId_spaceId: owner },
+        create: { ...owner, finishedAt: began },
+        update: { finishedAt: began },
+      });
+  }
   return {
     dryRun,
     startedAt: cursor.startedAt,
