@@ -867,7 +867,9 @@ async function bindRoleInTransaction(
 ) {
   const thread = await requireThread(tx, actor, input.threadId);
   if (input.roleId && thread.groupId?.startsWith("recruiting-global-"))
-    throw new IsolationError("Open the role conversation; Main stays across all roles");
+    throw new IsolationError(
+      "The global conversation stays across all roles; hand one role's work to its team with delegate_to_role",
+    );
   const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
   if ((thread.activeRecruitingRoleId ?? null) === (role?.id ?? null))
     return role ? roleSnapshot(tx, actor, role) : null;

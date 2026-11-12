@@ -470,7 +470,12 @@ async function play(scenario, owner, sample) {
       lines.push(
         `[${message.at}] ${message.role}${message.card ? " (card)" : ""}: ${message.text}`,
       );
-    failures.push(...conversationChecks(messages).map((failure) => `${group.name}: ${failure}`));
+    failures.push(
+      ...conversationChecks(messages)
+        // A contact lookup's deliverable is an address the recruiter never typed.
+        .filter((failure) => !(scenario.foundEmail && failure.startsWith("shows an address")))
+        .map((failure) => `${group.name}: ${failure}`),
+    );
   }
   // The last reply in the chat the recruiter last wrote in.
   const latest = chats

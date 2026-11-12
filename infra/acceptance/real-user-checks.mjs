@@ -14,6 +14,10 @@ const CONTACT_ADMIN =
 // A request declined outright.
 const DECLINE =
   /(?:我)?(?:无法|不能|没法)(?:为你|帮你|替你)?(?:处理|完成|执行|做到)(?:这个|此)?(?:请求|要求)?|\bI (?:can['’]t|cannot|am unable to) (?:help with|do) (?:that|this)\b/i;
+// Blames a permission or a path the product did not build ("当前权限不支持创建一次性邮件"). The
+// agents work with general tools, so a missing permission is never the answer to a recruiter.
+const NO_PERMISSION =
+  /(?:没有|无|缺少|不支持|需要|开通)[^。！？\n]{0,10}权限|权限(?:不足|不够|不支持|未开通|受限)|(?:先)?(?:打开|进入|切换到)[^。！？\n]{0,6}(?:岗位|职位|角色)(?:对话|页面|会话)?(?:后|再|才)|\b(?:don['’]t|do not|doesn['’]t) have (?:the )?(?:permission|access)\b|\bnot (?:permitted|authorized|allowed) to\b|\bno permission\b|\bopen (?:a|the) role (?:conversation|chat) (?:first|before)\b/i;
 // The work is blocked: the reply must then leave a step the recruiter can take.
 const BLOCKED =
   /无法|不能|没有可用|尚无|还没有|暂时不|没法|\b(?:can['’]t|cannot|unable|isn['’]t (?:ready|set up)|not (?:ready|set up|available)|no (?:sending|sender))\b/i;
@@ -135,6 +139,7 @@ export function conversationChecks(messages) {
       ["overrides what the recruiter said", OVERRIDE],
       ["sends the recruiter to someone else", CONTACT_ADMIN],
       ["declines the request", DECLINE],
+      ["blames a permission or a missing path", NO_PERMISSION],
       ["supplier name", SUPPLIER],
       ["internal tool name", TOOL_NAME],
       // People's evidence quotes their profiles, where "S3" is the AWS service.
