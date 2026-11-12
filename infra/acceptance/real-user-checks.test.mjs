@@ -367,3 +367,26 @@ test("a message left unanswered behind an open send card fails", () => {
     [],
   );
 });
+
+test("a list of similar role names is not a repeat", () => {
+  assert.deepEqual(
+    conversationChecks([
+      user("对了，我现在有几个岗位？"),
+      bot(
+        "你现在有 4 个岗位：\n- 测试固定 · 发信测试2（后端工程师）\n- 测试固定 · 发信测试3（后端工程师）\n- 测试固定 · 发信测试4（后端工程师）\n- 测试固定 · 发信测试5（后端工程师）",
+      ),
+    ]),
+    [],
+  );
+});
+
+test("the account's own sending address may be shown, another address may not", () => {
+  const failures = conversationChecks([
+    user("请给 alex@example.com 发一封简短的邮件"),
+    bot("这封邮件会从发件地址 liu@sender.test 发出，抄送 boss@company.test。"),
+  ]);
+  assert.deepEqual(
+    failures.filter((failure) => failure.startsWith("shows an address")),
+    ["shows an address the recruiter never gave: boss@company.test"],
+  );
+});

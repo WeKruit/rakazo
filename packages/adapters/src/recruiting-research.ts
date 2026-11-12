@@ -13,7 +13,7 @@ import {
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
-import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
+import { IsolationError, listRecruitingResearch, listRunToolResults, Prisma } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
@@ -31,6 +31,9 @@ const LOOKUP_RECEIPT_PAGE = 500;
 /**
  * This person's native creation receipts on one connection, newest first, read one page at a
  * time so a caller that finds what it needs in the newest receipts never loads the whole history.
+ *
+ * The route is matched with literal JSON paths so the external_effects_*_tool_receipts indexes
+ * find the receipts; a JSON filter with bound paths read every one of the account's effects.
  */
 async function* nativeMcpCreationReceipts(
   prisma: PrismaClient,
@@ -40,32 +43,32 @@ async function* nativeMcpCreationReceipts(
   scope: { threadId?: string; since?: Date; pageSize?: number } = {},
 ): AsyncGenerator<{ args: Record<string, unknown>; result: unknown }> {
   const pageSize = scope.pageSize ?? RECEIPT_PAGE;
+  const routeIs = (path: "direct" | "catalog") => {
+    const at = (field: string) =>
+      Prisma.raw(`e."request" #> '{${path === "direct" ? "2,route" : "3"},${field}}'`);
+    const text = (field: string) =>
+      Prisma.raw(`e."request" #>> '{${path === "direct" ? "2,route" : "3"},${field}}'`);
+    return Prisma.sql`(${text("resourceId")} = ${server.id} AND ${text("toolName")} = ${toolName}
+      AND ${at("connectorId")} = '"mcp"'::jsonb AND ${at("resourceId")} = to_jsonb(${server.id}::text)
+      AND ${at("toolName")} = to_jsonb(${toolName}::text)
+      AND ${at("resourceRevision")} = to_jsonb(${server.revision}::int))`;
+  };
   // ponytail: inspect only native creation receipts, never full saved candidate outputs.
-  for (let skip = 0; ; skip += pageSize) {
-    const page = await prisma.externalEffect.findMany({
-      where: {
-        spaceId: actor.spaceId,
-        status: "completed",
-        run: {
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-          ...(scope.threadId ? { threadId: scope.threadId } : {}),
-        },
-        ...(scope.since ? { createdAt: { gte: scope.since } } : {}),
-        OR: [["2", "route"], ["3"]].map((path) => ({
-          AND: [
-            { request: { path: [...path, "connectorId"], equals: "mcp" } },
-            { request: { path: [...path, "resourceId"], equals: server.id } },
-            { request: { path: [...path, "resourceRevision"], equals: server.revision } },
-            { request: { path: [...path, "toolName"], equals: toolName } },
-          ],
-        })),
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { request: true, result: true },
-      skip,
-      take: pageSize,
-    });
+  let before: { createdAt: Date; id: string } | undefined;
+  for (;;) {
+    const page = await prisma.$queryRaw<
+      Array<{ id: string; createdAt: Date; request: unknown; result: unknown }>
+    >(Prisma.sql`
+      SELECT e."id", e."createdAt", e."request", e."result"
+      FROM "external_effects" e JOIN "runs" r ON r."id" = e."runId"
+      WHERE e."spaceId" = ${actor.spaceId} AND e."status" = 'completed'
+        AND r."spaceId" = ${actor.spaceId} AND r."userId" = ${actor.userId}
+        ${scope.threadId ? Prisma.sql`AND r."threadId" = ${scope.threadId}` : Prisma.empty}
+        ${scope.since ? Prisma.sql`AND e."createdAt" >= ${scope.since}` : Prisma.empty}
+        ${before ? Prisma.sql`AND (e."createdAt", e."id") < (${before.createdAt}, ${before.id})` : Prisma.empty}
+        AND (${routeIs("direct")} OR ${routeIs("catalog")})
+      ORDER BY e."createdAt" DESC, e."id" DESC
+      LIMIT ${pageSize}`);
     for (const effect of page) {
       const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
       const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
@@ -90,6 +93,8 @@ async function* nativeMcpCreationReceipts(
       };
     }
     if (page.length < pageSize) return;
+    const last = page[page.length - 1]!;
+    before = { createdAt: last.createdAt, id: last.id };
   }
 }
 

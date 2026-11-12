@@ -18,6 +18,7 @@ import {
   requireFullEnrichJobOwnership,
   savedContactLookups,
 } from "./recruiting-research.js";
+import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
 describe("agent run output schemas", () => {
   it("ask for education, so Results can show it for found and graded people", () => {
@@ -52,11 +53,11 @@ describe("people-search agent runs", () => {
   };
   function fixture(roleId: string | null = "role-1") {
     return {
-      externalEffect: {
-        findMany: vi.fn(async ({ where }) =>
-          where.run.userId === actor.userId && where.spaceId === actor.spaceId ? [started] : [],
+      $queryRaw: vi.fn(
+        receiptQuery((scope) =>
+          scope.userId === actor.userId && scope.spaceId === actor.spaceId ? [started] : [],
         ),
-      },
+      ),
       run: {
         findFirst: vi.fn(async () => ({
           threadId: "thread-1",
@@ -83,24 +84,20 @@ describe("people-search agent runs", () => {
     await expect(
       prepare(db, { query: "More like these", previousRunId: "agent_run_other" }),
     ).rejects.toThrow(/previousRunId/);
-    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ run: { spaceId: "space", userId: "owner" } }),
-      }),
-    );
+    const scope = receiptScope(db.$queryRaw.mock.calls[0]![0]);
+    expect(scope).toMatchObject({ spaceId: "space", userId: "owner" });
+    expect(scope).not.toHaveProperty("threadId");
   });
 
   it("stops reading older runs once the named run is found", async () => {
     const db = fixture();
     const page = Array.from({ length: 20 }, () => started);
-    db.externalEffect.findMany.mockImplementation(async () => page as never);
+    db.$queryRaw.mockImplementation(receiptQuery(() => page) as never);
     await expect(prepare(db, { runId: "agent_run_mine" })).resolves.toEqual({
       runId: "agent_run_mine",
     });
-    expect(db.externalEffect.findMany).toHaveBeenCalledTimes(1);
-    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skip: 0, take: 20 }),
-    );
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(receiptScope(db.$queryRaw.mock.calls[0]![0]).limit).toBe(20);
   });
 
   it("returns people and leaves out people already in the role", async () => {
@@ -200,7 +197,7 @@ describe("people-search agent runs", () => {
       { id: "agent_run_graded", status: "running" },
     );
     const db = fixture();
-    db.externalEffect.findMany.mockImplementation(async () => [graded] as never);
+    db.$queryRaw.mockImplementation(receiptQuery(() => [graded]) as never);
     await expect(
       prepare(db, {
         query: "Grade again",
@@ -212,24 +209,21 @@ describe("people-search agent runs", () => {
         },
       }),
     ).resolves.toEqual({ runId: "agent_run_graded" });
-    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          run: { spaceId: "space", userId: "owner", threadId: "thread-1" },
-          createdAt: { gte: expect.any(Date) },
-        }),
-      }),
-    );
+    expect(receiptScope(db.$queryRaw.mock.calls.at(-1)![0])).toMatchObject({
+      spaceId: "space",
+      userId: "owner",
+      threadId: "thread-1",
+      since: expect.any(Date),
+    });
     // Other people, or a run that failed, are graded anew.
     await expect(
       prepare(db, { query: "Grade", input: { data: people.slice(0, 1) } }),
     ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
-    db.externalEffect.findMany.mockImplementation(
-      async () =>
-        [
-          graded,
-          effect({ runId: "agent_run_graded" }, { id: "agent_run_graded", status: "failed" }),
-        ] as never,
+    db.$queryRaw.mockImplementation(
+      receiptQuery(() => [
+        graded,
+        effect({ runId: "agent_run_graded" }, { id: "agent_run_graded", status: "failed" }),
+      ]) as never,
     );
     await expect(prepare(db, { query: "Grade", input: { data: people } })).resolves.toMatchObject({
       outputSchema: AGENT_RUN_GRADE_SCHEMA,
@@ -351,15 +345,13 @@ describe("FullEnrich job ownership", () => {
   };
   function fixture(savedRequest: unknown = request, savedResult: unknown = result) {
     return {
-      externalEffect: {
-        findMany: vi.fn(async ({ where }) =>
-          where.spaceId === actor.spaceId &&
-          where.run.spaceId === actor.spaceId &&
-          where.run.userId === actor.userId
+      $queryRaw: vi.fn(
+        receiptQuery((scope) =>
+          scope.spaceId === actor.spaceId && scope.userId === actor.userId
             ? [{ request: savedRequest, result: savedResult }]
             : [],
         ),
-      },
+      ),
     };
   }
   const authorize = (
@@ -384,15 +376,12 @@ describe("FullEnrich job ownership", () => {
             ];
       const db = fixture(saved);
       await expect(authorize(db)).resolves.toBeTruthy();
-      expect(db.externalEffect.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            status: "completed",
-            spaceId: actor.spaceId,
-            run: actor,
-          }),
-        }),
-      );
+      expect(db.$queryRaw.mock.calls[0]![0].sql).toContain(`e."status" = 'completed'`);
+      expect(receiptScope(db.$queryRaw.mock.calls[0]![0])).toMatchObject({
+        ...actor,
+        serverId: server.id,
+        toolName: "enrich_bulk",
+      });
     },
   );
   it("reads the person's newest lookup for latest", async () => {
@@ -400,7 +389,7 @@ describe("FullEnrich job ownership", () => {
       authorize(fixture(), "get_enrichment_results", { enrichment_id: "latest" }),
     ).resolves.toEqual({ enrichment_id: "owned-job" });
     await expect(
-      authorize({ externalEffect: { findMany: vi.fn(async () => []) } }, "get_enrichment_results", {
+      authorize({ $queryRaw: vi.fn(async () => []) } as never, "get_enrichment_results", {
         enrichment_id: "latest",
       }),
     ).rejects.toThrow();
@@ -452,7 +441,7 @@ describe("FullEnrich job ownership", () => {
     const db = fixture();
     await expect(authorize(db, "enrich_bulk", creation)).resolves.toBeTruthy();
     await expect(authorize(db, "get_credits", {})).resolves.toBeTruthy();
-    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     for (const [tool, args] of [
       ["export_enrichment_results", { enrichment_id: "owned-job" }],
       ["get_enrichment_results", {}],
@@ -470,7 +459,7 @@ describe("FullEnrich job ownership", () => {
         endpoint: "https://custom.example.test/mcp",
       }),
     ).resolves.toBeTruthy();
-    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });
 
@@ -495,15 +484,13 @@ describe("Autumn task ownership", () => {
   ) {
     return {
       recruitingResearchTask: { findFirst: vi.fn(async () => null) },
-      externalEffect: {
-        findMany: vi.fn(async ({ where }) =>
-          where.spaceId === actor.spaceId &&
-          where.run.spaceId === actor.spaceId &&
-          where.run.userId === actor.userId
+      $queryRaw: vi.fn(
+        receiptQuery((scope) =>
+          scope.spaceId === actor.spaceId && scope.userId === actor.userId
             ? [{ request, result }]
             : [],
         ),
-      },
+      ),
     };
   }
   const authorize = (
@@ -576,14 +563,14 @@ describe("Autumn task ownership", () => {
         }),
       }),
     );
-    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
   it.each(["list_tasks", "get_team", "get_usage", "invite_member", "unknown"])(
     "denies account-wide or unsupported %s before querying receipts",
     async (tool) => {
       const db = fixture();
       await expect(authorize(db, tool, {})).rejects.toThrow(/Listing all research is unavailable/i);
-      expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
     },
   );
   it("does not constrain other MCP providers or require a task for a new research call", async () => {
@@ -593,7 +580,7 @@ describe("Autumn task ownership", () => {
     await expect(
       authorize(db, "list_tasks", {}, actor, { ...server, endpoint: "https://mcp.example.test" }),
     ).resolves.toBeUndefined();
-    expect(db.externalEffect.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     await expect(
       authorize(db, "research", { prompt: "Find engineers", task_id: "foreign-task" }),
     ).rejects.toThrow();
@@ -1308,7 +1295,7 @@ describe("savedContactLookups", () => {
       ]),
     ]);
     const saved = await savedContactLookups(
-      { externalEffect: { findMany } } as never,
+      { $queryRaw: findMany } as never,
       { userId: "user", spaceId: "space" },
       { id: "enrich", revision: 1 },
       "native_find_emails",
@@ -1322,8 +1309,13 @@ describe("savedContactLookups", () => {
 
   it("reads every receipt in few pages and shares one read between parallel lists", async () => {
     const findMany = vi.fn(async () => []);
+    const receipts = vi.fn(async () => []);
     const mcpServers = vi.fn(async () => [{ id: "enrich", revision: 1 }]);
-    const prisma = { externalEffect: { findMany }, mcpServer: { findMany: mcpServers } } as never;
+    const prisma = {
+      $queryRaw: receipts,
+      externalEffect: { findMany },
+      mcpServer: { findMany: mcpServers },
+    } as never;
     const actor = { userId: "user", spaceId: "space" };
     const [first, second] = await Promise.all([
       lookedUpContacts(prisma, actor),
@@ -1331,13 +1323,14 @@ describe("savedContactLookups", () => {
     ]);
     expect(mcpServers).toHaveBeenCalledTimes(1);
     // One read of the lookup receipts and one of the imported lists.
-    expect(findMany).toHaveBeenCalledTimes(2);
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+    expect(receipts).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(receiptScope((receipts.mock.calls[0] as never)[0]).limit).toBe(500);
     // Each caller adds to its own copy.
     expect(first.emails).not.toBe(second.emails);
     // A later read sees receipts saved since.
     await lookedUpContacts(prisma, actor);
-    expect(findMany).toHaveBeenCalledTimes(4);
+    expect(receipts).toHaveBeenCalledTimes(2);
   });
 
   // 11-12: a list imported with emails lost them, so Outreach paid for a lookup, found nothing
@@ -1384,11 +1377,9 @@ describe("savedContactLookups", () => {
         ],
       },
     };
-    const findMany = vi.fn(async (query: { where: { request?: unknown } }) =>
-      JSON.stringify(query.where.request ?? null).includes("import_csv") ? [imported] : [lookup],
-    );
     const prisma = {
-      externalEffect: { findMany },
+      $queryRaw: vi.fn(receiptQuery(() => [lookup])),
+      externalEffect: { findMany: vi.fn(async () => [imported]) },
       mcpServer: { findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]) },
     } as never;
     const { emails } = await lookedUpContacts(prisma, { userId: "list-user", spaceId: "space" });

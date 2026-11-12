@@ -828,7 +828,9 @@ export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): 
     else if (route === "/leads/list") own(fields.campaign);
     else if (route === "/leads/add") {
       own(fields.campaign_id);
-      if (fields.skip_if_in_workspace) refuse();
+      // Skipping people already in the shared account would reveal other accounts' leads.
+      if (fields.skip_if_in_workspace)
+        return rest(method, path, { ...fields, skip_if_in_workspace: false });
     } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
     else if (route === "/emails/reply") {
       if (!sender(fields.eaccount)) refuse("mailbox");
