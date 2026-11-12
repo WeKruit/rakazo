@@ -1,6 +1,7 @@
 import { IsolationError, RecruitingIntentQuoteError } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import {
+  createAsUpdate,
   normalizeRecruitingRoleArgs,
   repairedRoleSave,
 } from "./recruiting-tools.js";
@@ -309,5 +310,44 @@ describe("repairedRoleSave", () => {
         new IsolationError(),
       ),
     ).toBeUndefined();
+  });
+});
+
+// 2026-11-12 staging gate (jd-zh-must-have): the model created the role a second time right after
+// the server saved it with the recruiter's must-haves; the empty duplicate took its place.
+describe("createAsUpdate", () => {
+  it("writes a second create to the saved role and keeps its saved criteria", () => {
+    const criterion = { id: "lang", priority: "hard" };
+    expect(
+      createAsUpdate(
+        {
+          operation: "create",
+          title: "华东区销售总监",
+          brief: null,
+          criteria: [criterion],
+          intent: { basis: "direct", quote: "新岗位" },
+        },
+        { id: "role-1", revision: 1 },
+      ),
+    ).toEqual({
+      operation: "update",
+      roleId: "role-1",
+      expectedRevision: 1,
+      title: "华东区销售总监",
+      brief: null,
+      criteria: { upsert: [criterion] },
+      intent: { basis: "direct", quote: "新岗位" },
+    });
+    expect(
+      createAsUpdate(
+        { operation: "create", title: "T", criteria: [] },
+        { id: "r", revision: 2 },
+      ),
+    ).toEqual({
+      operation: "update",
+      roleId: "r",
+      expectedRevision: 2,
+      title: "T",
+    });
   });
 });
