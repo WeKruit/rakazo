@@ -1166,6 +1166,24 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  // Staging 11-12: after the recruiter approved the Send card, "已发送给 Noah" was retried as a refusal.
+  it("keeps a reply that reports the send after its card was answered", async () => {
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const sent = {
+      ...input,
+      reply: "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
+    };
+    expect(await planDeclineRetry(human, { ...sent, answersCard: true })).toBeUndefined();
+    expect(await planDeclineRetry(human, sent)).toBeDefined();
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply: "我无法发送这封邮件。",
+        answersCard: true,
+      }),
+    ).toBeDefined();
+  });
+
   it("retries once when every memory save failed, so a failed save is not told as saved", async () => {
     const saved = { ...input, reply: "Got it, I'll reply in Chinese.", memorySaveFailed: true };
     expect(

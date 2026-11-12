@@ -1400,6 +1400,8 @@ const SAYS_NOTHING = new Set([
   "bot_message_sent",
   "bot_message_received",
 ]);
+/** Built-in calls after a handoff that leave the request with the teammate. */
+const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory"]);
 export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
   (blocks ?? []).some((block) =>
     block.kind === "text" ? block.text.trim().length > 0 : !SAYS_NOTHING.has(block.kind),
@@ -13688,8 +13690,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
           // Work after a handoff (a search, a save, a question) means this turn still owns the
-          // request, so it reports and asks as usual instead of ending silently.
-          if (handedOff && name !== "handoff_to_bot") handedOff = false;
+          // request, so it reports and asks as usual instead of ending silently. A read or a
+          // memory note is bookkeeping: the teammate has the request, and it says nothing.
+          if (
+            handedOff &&
+            name !== "handoff_to_bot" &&
+            !AFTER_HANDOFF_QUIET.has(name) &&
+            !connectorTools.get(name)?.readOnly
+          )
+            handedOff = false;
           const outOfCredits = credits.refusal(name);
           const applied = (
             outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)
@@ -16196,6 +16205,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
                   noQuestionCard: noRoleYet(),
+                  answersCard: Boolean(nativeSources?.currentAnswer),
                   ...(handedIn
                     ? {
                         personRequest: turnRequestText(

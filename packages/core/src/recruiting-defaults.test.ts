@@ -3,6 +3,7 @@ import {
   creditEstimateNote,
   isChineseText,
   isEnglishText,
+  signedAsTeam,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -85,6 +86,17 @@ describe("maintained recruiting defaults", () => {
     ].map((step) => sourcer.instructions.indexOf(step));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+});
+
+describe("signedAsTeam", () => {
+  it("finds an email signed by a team instead of a person", () => {
+    expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
+      true,
+    );
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nThe Recruiting Team.")).toBe(true);
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nJules Hou")).toBe(false);
+    expect(signedAsTeam("Hi Noah, are you open to recruiting work?")).toBe(false);
   });
 });
 
