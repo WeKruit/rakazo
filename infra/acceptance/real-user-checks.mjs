@@ -28,6 +28,8 @@ const CAVEAT =
 const NEXT_STEP =
   /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const SENDER =
+  /(?:发件(?:地址|邮箱|人)|\b(?:sender|sending (?:address|mailbox)|from)\b)[^@\n]{0,12}?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi;
 // The brief one agent writes for another, shown to the recruiter as if it were a reply.
 export const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 // The header of a round of people the search returns.
@@ -154,8 +156,10 @@ export function conversationChecks(messages) {
       const match = (where ?? text).match(pattern);
       if (match) failures.push(`${name}: ${quote(where ?? text, match)}`);
     }
+    // The account's own sending mailbox is the product's to show ("发件地址是 liu@…").
+    const senders = [...text.matchAll(SENDER)].map((match) => match[1].toLowerCase());
     for (const address of text.match(EMAIL) ?? [])
-      if (!typed.includes(address.toLowerCase()))
+      if (!typed.includes(address.toLowerCase()) && !senders.includes(address.toLowerCase()))
         failures.push(`shows an address the recruiter never gave: ${address}`);
     // A new round of people starts over: its header and the next-step card come with every round.
     if (ROUND.test(text)) said.length = 0;
@@ -173,7 +177,12 @@ export function conversationChecks(messages) {
       });
     };
     // The same sentence again, in this reply or an earlier one.
-    for (const sentence of sentences(prose(text))) {
+    // A list's items ("- 测试固定 · 发信测试2", "- …3") share their wording by design.
+    const listless = prose(text)
+      .split("\n")
+      .filter((line) => !/^\s*[-*•]\s/.test(line))
+      .join("\n");
+    for (const sentence of sentences(listless)) {
       const again =
         !quotesThem(sentence) && said.find((earlier) => similar(earlier, sentence) >= 0.8);
       if (again) failures.push(`repeats itself: "${sentence.slice(0, 80)}"`);
