@@ -5704,6 +5704,50 @@ describe("MCP discovery tool-list cache", () => {
 });
 
 describe("Gmail search in a role", () => {
+  it("does not report Gmail's send names as allowlist drift", async () => {
+    // Google's Gmail server offers no send; send_message is served locally, so staging logged a
+    // false "3/9 allowed tools are not offered" on every discovery.
+    const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
+    const assignment = {
+      ...ASSIGNMENT,
+      allowAllTools: false,
+      allowedTools: ["search_threads", "send_message", "reply", "forward", "vanished_tool"],
+      server: gmail,
+    };
+    const state = {
+      failNext: false,
+      initializations: 0,
+      tools: [{ name: "search_threads", inputSchema: { type: "object" } }],
+      callResult: { content: [] },
+    };
+    vi.stubGlobal("fetch", mcpFetch(state, gmail.endpoint));
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([assignment]),
+        findFirst: vi.fn().mockResolvedValue(assignment),
+      },
+      user: { findUnique: vi.fn().mockResolvedValue({ usageCreditLimit: null }) },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const sink = createTestSink();
+    const previousLogger = getLogger();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    try {
+      await connector.discoverTools({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never);
+      const drift = sink.events.filter((event) => event.message.startsWith("mcp allowlist drift"));
+      expect(drift).toHaveLength(1);
+      expect(drift[0]).toMatchObject({ missing: ["vanished_tool"] });
+    } finally {
+      await connector.close();
+      installLogger(previousLogger);
+    }
+  });
   it("adds the role's own mailbox to a Gmail thread search result", async () => {
     const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
     const assignment = { ...ASSIGNMENT, server: gmail };

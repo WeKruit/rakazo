@@ -271,6 +271,23 @@ export async function handoffToGroupBot(
   };
 }
 
+/** Whether the run left the user anything to see: a message or card, not only steps or a handoff. */
+async function postedResult(tx: Pick<PrismaClient, "message">, runId: string): Promise<boolean> {
+  const posted = await tx.message.findMany({
+    where: { runId, role: "bot" },
+    select: { blocks: true },
+    take: 50,
+  });
+  return posted.some((message) =>
+    (Array.isArray(message.blocks) ? message.blocks : []).some(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        !["handoff", "steps"].includes(String((block as { kind?: unknown }).kind)),
+    ),
+  );
+}
+
 /**
  * Returns a stage handed over with report_back to the member that asked for it, once the stage
  * ends either way, so it can check the result against its brief. Idempotent per run; the result
@@ -340,13 +357,15 @@ export async function reportGroupHandoffOutcome(
       const mail = await readMailReplyOutcomeReport(tx, run);
       const report = mail
         ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
-        : outcome.status === "completed"
-          ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when; a send or booking whose card the recruiter confirmed is done, never a stage to verify. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
-          : outcome.watch
-            ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
-            : outcome.status === "progress"
-              ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
-              : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+        : outcome.status === "completed" && !(await postedResult(tx, run.id))
+          ? `Ended the stage you handed me without posting any result: no message and no card. This is not done. Hand me a correction that restates what this request needs, at most twice; after that, tell the user it did not get done.`
+          : outcome.status === "completed"
+            ? `Finished the stage you handed me; my result is my last message above, which the user already sees. Check it against your brief's Done when; a send or booking whose card the recruiter confirmed is done, never a stage to verify. If it is met, reply exactly ${NO_RESPONSE}. If it falls short and another try can close the gap, hand me a correction naming exactly what is missing, at most twice for the same gap; after that, or when I said what blocks it, tell the user the result so far and what blocks the rest. Never repeat my result.`
+            : outcome.watch
+              ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+              : outcome.status === "progress"
+                ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+                : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
       const reask =
         outcome.status === "progress"
           ? undefined

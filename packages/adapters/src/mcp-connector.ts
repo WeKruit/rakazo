@@ -21,6 +21,7 @@ import {
   abortableDelay,
   boundDirectApprovalDetails,
   catalogApprovalDetails,
+  GMAIL_SEND_TOOLS,
   recruitingBotKey,
   signedAsTeam,
   TEAM_SIGNATURE_NOTE,
@@ -1075,7 +1076,15 @@ export class McpConnector implements ConnectorProvider {
             getLogger().info("discovery.deferred", { server: assignment.server.slug });
             return withCore(localInstantlyTools(assignment, []));
           }
-          reportAllowlistDrift(assignment, listed.tools, context);
+          reportAllowlistDrift(
+            assignment,
+            // Gmail's send names stay allowed for when Google offers them; send_message is served
+            // here meanwhile, so none of them is drift.
+            assignment.server.endpoint === GMAIL_MCP
+              ? [...listed.tools, ...GMAIL_SEND_TOOLS.map((name) => ({ name }))]
+              : listed.tools,
+            context,
+          );
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
               (tool) =>
