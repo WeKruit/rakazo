@@ -6438,6 +6438,11 @@ describe("native recruiting assessment effect delivery", () => {
     expect(pastedJobTitle(`招一名奥斯汀的高级后端工程师\n${body}`)).toBe("奥斯汀的高级后端工程师");
     expect(pastedJobTitle(`招聘经理\n${body}`)).toBe("招聘经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
+    // A Chinese JD of about 250 characters is a full JD, though under 400 characters long.
+    const chineseJd = `我们要招一名高级后端工程师，地点 Austin, TX，可混合办公。职责：${"负责支付与订单核心服务的设计和稳定性；".repeat(12)}`;
+    expect(chineseJd.length).toBeLessThan(400);
+    expect(pastedJobTitle(chineseJd)).toBe("高级后端工程师");
+    expect(pastedJobTitle("帮我找几个在 Austin 做支付系统的后端工程师，最好会 Go。")).toBeNull();
     expect(
       pastedJobTitle(
         "新岗位：仓库运营经理（亚特兰大 Atlanta，现场办公）。要求：5年以上仓储或配送中心运营管理，带过50人以上的小时工团队。",
