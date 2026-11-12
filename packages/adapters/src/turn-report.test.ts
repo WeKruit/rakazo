@@ -51,7 +51,7 @@ describe("turnWork", () => {
       ),
     ).toBeUndefined();
     expect(turnWork("instantly__mail__ensure_sender", { operation: "confirm" }, wrote)).toBe(
-      "connected",
+      "sender",
     );
     expect(turnWork("connectors_execute_tool", { id: "srv:create_booking" }, wrote)).toBe(
       "scheduling",
@@ -136,6 +136,25 @@ describe("turnReportText", () => {
       "已完成：记下了你的反馈、搜索了候选人。这个岗位现在存了 12 人。",
     );
     expect(turnReportText(["feedback"], 12, true)).not.toMatch(/[A-Za-z]/);
+  });
+
+  // 11-12: "查了联系方式、在已连接的应用里做了修改" told the recruiter nothing.
+  it("names a sender setup and drops the vague connected-app line beside named work", () => {
+    expect(
+      turnWork(
+        "instantly__instantly__ensure_sender",
+        { operation: "confirm" },
+        {
+          ok: true,
+          readOnly: false,
+          result: {},
+        },
+      ),
+    ).toBe("sender");
+    expect(turnReportText(["contacts", "connected"], undefined, true)).toBe(
+      "已完成：查了联系方式。",
+    );
+    expect(turnReportText(["connected"])).toBe("Done: made changes in a connected app.");
   });
 });
 

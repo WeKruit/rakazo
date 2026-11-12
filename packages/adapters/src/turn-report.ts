@@ -21,6 +21,7 @@ export type TurnWork =
   | "contacts"
   | "draft"
   | "scheduling"
+  | "sender"
   | "connected";
 
 /** Operations of the recruiting tools that read or show and change nothing. */
@@ -127,6 +128,7 @@ export function turnWork(
   const action = (target.split("__").at(-1) ?? target).toLowerCase();
   // A writable tool's read operation ("ensure_sender" with operation "read") changed nothing.
   if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
+  if (/sender|mailbox|sending_account/.test(action)) return "sender";
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
   return "connected";
@@ -144,6 +146,7 @@ const WORK_DONE: Record<TurnWork, string> = {
   contacts: "looked up contact details",
   draft: "saved the email draft",
   scheduling: "updated the schedule",
+  sender: "got the sending email address ready",
   connected: "made changes in a connected app",
 };
 
@@ -158,6 +161,7 @@ const WORK_DONE_ZH: Record<TurnWork, string> = {
   contacts: "查了联系方式",
   draft: "存好了邮件草稿",
   scheduling: "更新了日程",
+  sender: "准备好了发件邮箱",
   connected: "在已连接的应用里做了修改",
 };
 
@@ -167,7 +171,9 @@ export function turnReportText(
   savedPeople?: number,
   chinese = false,
 ): string {
-  const items = [...new Set(work)];
+  // "A change in a connected app" says nothing beside work that names itself.
+  const named = [...new Set(work)];
+  const items = named.length > 1 ? named.filter((item) => item !== "connected") : named;
   const counted =
     savedPeople && work.some((item) => item === "people_search" || item === "people_saved");
   if (chinese)

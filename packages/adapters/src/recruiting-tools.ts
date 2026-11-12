@@ -713,7 +713,10 @@ const CSV_IMPORT_FIELDS = {
   title: "current_title",
   location: "location",
   resumeUrl: "resume_url",
+  email: "email",
 } as const;
+
+const CSV_EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
 /** Save a recruiter-supplied text/csv artifact as one unassessed candidate page on the role. */
 export async function importRecruitingCandidateCsv(
@@ -769,7 +772,9 @@ export async function importRecruitingCandidateCsv(
     const row: Record<string, string> = {};
     for (const [key, index] of columns) {
       const value = cells[index]?.trim();
-      if (value) row[key] = value;
+      // An address that is not one is left out, never guessed into one.
+      if (value && (key !== "email" || CSV_EMAIL.test(value)))
+        row[key] = key === "email" ? value.toLowerCase() : value;
     }
     if (!row.name && !row.linkedin_url)
       skipped.push({ csvRowIndex, reason: "missing_name_and_linkedin_url" });
