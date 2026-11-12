@@ -1639,7 +1639,8 @@ function firstClause(text: string) {
 export function pastedJobTitle(text: string): string | null {
   const trimmed = text.trim();
   const ledIn = ROLE_LEAD_IN.test(trimmed);
-  if (trimmed.length < (ledIn ? 60 : 400)) return null;
+  // Width, not length: a Chinese JD says as much in half the characters.
+  if (titleWidth(trimmed) < (ledIn ? 60 : 400)) return null;
   const lines = trimmed
     .split("\n")
     .map((line) => line.trim())
@@ -1661,12 +1662,13 @@ export function pastedJobTitle(text: string): string | null {
   );
   if (ledIn || titleWidth(title) > TITLE_WIDTH)
     title = title.split(/[。；;]|\.\s/)[0] ?? "";
-  if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
-  // "招一名奥斯汀的高级后端工程师" names the role after its lead-in.
+  // "招一名奥斯汀的高级后端工程师" names the role after its lead-in, up to the first comma.
+  const hire = /^(?:帮我|我要|我想|我们要|我们想)?招(?:聘)?[一两几1-9](?:名|个|位)/;
+  if (titleWidth(title) > TITLE_WIDTH || hire.test(title)) title = firstClause(title);
   return (
     title
       .replace(/^[#*\s]+|[*\s]+$/g, "")
-      .replace(/^(?:帮我|我要|我想)?招(?:聘)?[一两几1-9](?:名|个|位)/, "")
+      .replace(hire, "")
       .slice(0, 120) || null
   );
 }
