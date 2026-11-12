@@ -27,6 +27,7 @@ Outreach goes through the product's shared outreach account. Accounts we onboard
 
 1. Pick a mailbox no other account or campaign uses.
 2. Signed in as the deployment owner, call `POST /rpc/deployment/assignSendingMailbox` with `{"json":{"accountEmail":"<the account's sign-in email>","mailbox":"<mailbox>","displayName":"<name candidates see>"}}`. An empty `displayName` keeps the mailbox's current name. A mailbox already held by another account is refused.
-3. The account's next conversation records the mailbox as its sender (renaming it to `displayName`), and from then on its outreach sends from it after the recruiter confirms each send.
+3. The account's next mail action records the mailbox as its sender (renaming it to `displayName`), and from then on its outreach sends from it after the recruiter confirms each send. Assign several mailboxes the same way to give an account all the mailboxes its earlier outreach used, so it can also reply in those threads.
+4. To take back a mailbox the account has not used yet, call `POST /rpc/deployment/unassignSendingMailbox` with `{"json":{"accountEmail":"…","mailbox":"…"}}`.
 
 Later work on split services and worker slots is tracked as C5 in [../wekruit/ARCHITECTURE-WORKPLAN.md](../wekruit/ARCHITECTURE-WORKPLAN.md) and the `../wekruit/C5-*.md` notes.

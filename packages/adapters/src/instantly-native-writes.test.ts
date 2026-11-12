@@ -426,6 +426,7 @@ describe("shared mail account isolation", () => {
     const create = vi.fn(async () => ({}));
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: { create },
     };
     const result = await runInstantlyWrite(
@@ -509,6 +510,7 @@ describe("reply sender checks before card creation", () => {
     );
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: { findUnique },
     };
     const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
@@ -565,6 +567,7 @@ it.each([false, true])(
     const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: {
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>
