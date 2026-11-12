@@ -353,12 +353,25 @@ describe("shared mail account isolation", () => {
       ["POST", "/leads/list", { contacts: ["ada@example.test"] }],
       ["POST", "/leads/list", { campaign: THEIRS }],
       ["POST", "/leads/add", { campaign_id: THEIRS, leads: [] }],
-      ["POST", "/leads/add", { campaign_id: MINE, leads: [], skip_if_in_workspace: true }],
       ["POST", "/leads/update-interest-status", { lead_email: "ada@example.test" }],
       ["GET", "/workspaces/current"],
     ] as const)
       await expect(own(method, path, body)).rejects.toThrow("does not belong to this account");
     expect(rest).toHaveBeenCalledTimes(3);
+  });
+
+  it("adds people to its own campaign without checking the rest of the shared account", async () => {
+    const rest = account();
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(),
+    });
+    await own("POST", "/leads/add", { campaign_id: MINE, leads: [], skip_if_in_workspace: true });
+    expect(rest).toHaveBeenCalledWith("POST", "/leads/add", {
+      campaign_id: MINE,
+      leads: [],
+      skip_if_in_workspace: false,
+    });
   });
 
   it("never finds another account's campaign by name and owns the one it creates", async () => {
