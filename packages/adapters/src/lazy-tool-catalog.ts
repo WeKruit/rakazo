@@ -435,14 +435,16 @@ function termScore(entry: CatalogEntry, query: string): number {
 
 /**
  * Its words or tool names one by one (agents list several in one query), ranked by how many
- * match and how well. 4 means no match.
+ * match, then how well. 4 means no match.
  */
 function termsScore(entry: CatalogEntry, query: string): number {
   const terms = [...new Set(query.split(/[\s,;|/]+/).filter((term) => term.length >= 3))];
   if (terms.length < 2) return 4;
   const scores = terms.map((term) => termScore(entry, term)).filter((score) => score < 4);
   if (!scores.length) return 4;
-  return Math.min(3.9, Math.min(...scores) + (1 - scores.length / terms.length) * 0.9);
+  // How many words match comes first: a tool that matches most of what was asked beats one whose
+  // name holds a single common word ("email").
+  return Math.min(3.9, (1 - scores.length / terms.length) * 3.5 + Math.min(...scores) * 0.1);
 }
 
 const ACTION_WORDS = new Set(

@@ -184,6 +184,20 @@ export const SCENARIOS = [
     sendCard: true,
   },
   {
+    // A second one-off email: tool search returned only mail reads, so no card came.
+    name: "email-assigned-mailbox-again-zh",
+    area: "email",
+    source: "11-12 second one-off email found no way to send and asked to connect a mailbox",
+    account: "mailbox",
+    noRole: true,
+    turns: [
+      {
+        say: `再给 ${CANDIDATE} 发一封新邮件，主题 Kruit test 2，正文：Second test, please ignore.`,
+      },
+    ],
+    sendCard: true,
+  },
+  {
     name: "email-no-mailbox-en",
     area: "email",
     source: "11-10 outside user told to contact an internal address",
