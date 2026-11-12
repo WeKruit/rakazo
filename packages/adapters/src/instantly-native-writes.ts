@@ -12,6 +12,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  adoptAssignedSenders,
   adoptLegacySender,
   confirmedSendingMailbox,
   confirmedSendingMailboxes,
@@ -2508,6 +2509,13 @@ export async function runInstantlyWrite(
       : false;
   if (owned && toolName === "native_instantly_create_campaign" && !direct)
     throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
+  // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
+  // reply in a thread one of them already holds works as well as a new send.
+  if (owned && toolName !== "native_instantly_ensure_sender") {
+    const adopted = await adoptAssignedSenders(prisma, accountRest, context, serverId);
+    if (adopted.length)
+      owned = { ...owned, mailboxes: new Set([...owned.mailboxes, ...adopted.map(mailboxKey)]) };
+  }
   if (
     owned &&
     !owned.mailboxes.size &&
