@@ -21,6 +21,7 @@ import {
   abortableDelay,
   boundDirectApprovalDetails,
   catalogApprovalDetails,
+  GMAIL_SEND_TOOLS,
   recruitingBotKey,
   signedAsTeam,
   TEAM_SIGNATURE_NOTE,
@@ -55,8 +56,8 @@ import {
   MailReplySendingError,
   nativeInstantlyWrites,
   ownedInstantly,
-  readRoleCampaignBinding,
   requireReplySendingMailboxReady,
+  roleCampaignIds,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -263,6 +264,10 @@ export function scopedInstantlyCampaign(
   campaigns: readonly string[],
 ): string {
   const selected = args.campaign_id ?? (campaigns.length === 1 ? campaigns[0] : undefined);
+  if (selected === undefined && campaigns.length > 1)
+    throw new IsolationError(
+      `Select an exact campaign of the current recruiting role before reading its email: pass campaign_id, one of ${campaigns.join(", ")}`,
+    );
   if (typeof selected !== "string" || !campaigns.includes(selected))
     throw new IsolationError(
       "Select an exact campaign of the current recruiting role before reading its email",
@@ -1071,7 +1076,15 @@ export class McpConnector implements ConnectorProvider {
             getLogger().info("discovery.deferred", { server: assignment.server.slug });
             return withCore(localInstantlyTools(assignment, []));
           }
-          reportAllowlistDrift(assignment, listed.tools, context);
+          reportAllowlistDrift(
+            assignment,
+            // Gmail's send names stay allowed for when Google offers them; send_message is served
+            // here meanwhile, so none of them is drift.
+            assignment.server.endpoint === GMAIL_MCP
+              ? [...listed.tools, ...GMAIL_SEND_TOOLS.map((name) => ({ name }))]
+              : listed.tools,
+            context,
+          );
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
               (tool) =>
@@ -2188,15 +2201,16 @@ export class McpConnector implements ConnectorProvider {
       };
     }
     if (run.thread.activeRecruitingRoleId) {
-      const binding = await readRoleCampaignBinding(
+      const campaignIds = await roleCampaignIds(
         this.prisma,
         context.spaceId,
         serverId,
         run.thread.activeRecruitingRoleId,
       );
-      if (!binding) throw new IsolationError("This role has no verified existing email campaign");
+      if (!campaignIds.length)
+        throw new IsolationError("This role has no verified existing email campaign");
       return {
-        campaignIds: [binding.campaignId],
+        campaignIds,
         workspaceKey: JSON.stringify([run.threadId, run.thread.activeRecruitingRoleId, serverId]),
       };
     }

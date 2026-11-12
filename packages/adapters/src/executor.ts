@@ -180,6 +180,7 @@ import {
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
+  roleOpenedNote,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
@@ -15153,7 +15154,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish({
               ok: true,
               team: `${title} team`,
-              note: "The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line, in their language, that the role is open and its first question is waiting there (for example \"I opened the role. Its first question is waiting there.\"); never say intake, and do not paste a link.",
+              note: roleOpenedNote(isChineseText(lastRecruiterText)),
             });
           }
           if (name === "render_view") {
