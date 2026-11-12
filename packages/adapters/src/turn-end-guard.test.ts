@@ -1174,6 +1174,14 @@ describe("planDeclineRetry", () => {
       reply: "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
     };
     expect(await planDeclineRetry(human, { ...sent, answersCard: true })).toBeUndefined();
+    // Staging 11-12 rerun: the send went out in the same turn as the confirmed card.
+    expect(
+      await planDeclineRetry(human, {
+        ...sent,
+        reply: "已提交并发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
+        sent: true,
+      }),
+    ).toBeUndefined();
     expect(await planDeclineRetry(human, sent)).toBeDefined();
     expect(
       await planDeclineRetry(human, {
