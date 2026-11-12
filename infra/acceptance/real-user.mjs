@@ -536,6 +536,15 @@ const SHA =
     .catch(() => null)) ??
   "unknown";
 const rows = [];
+// A fixture account is one person with one Kruit conversation: its scenarios take turns, or
+// their messages land in the same chat and each is scored on the other's replies.
+const accountTurns = new Map();
+const onAccount = (scenario, run) => {
+  if (!scenario.account) return run();
+  const turn = (accountTurns.get(scenario.account) ?? Promise.resolve()).then(run);
+  accountTurns.set(scenario.account, turn.catch(() => undefined));
+  return turn;
+};
 let nextPlay = 0;
 async function worker(plays) {
   while (nextPlay < plays.length) {
@@ -543,7 +552,7 @@ async function worker(plays) {
     const at = Date.now();
     let failures;
     try {
-      failures = await play(scenario, owner, sample);
+      failures = await onAccount(scenario, () => play(scenario, owner, sample));
     } catch (error) {
       failures = [
         error instanceof InfraError

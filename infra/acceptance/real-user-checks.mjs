@@ -37,8 +37,12 @@ const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 // Addresses and links say nothing about the language a message is written in. A Chinese
 // sentence often carries English role titles and names ("这份 Senior Data Engineer 职位"), so
 // Chinese characters are weighed against English words, not letters.
+// An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language.
+const DICTATED = /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
 export const mostlyChinese = (raw) => {
-  const text = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
+  const own = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
+  const said = own.replace(DICTATED, " ");
+  const text = /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
   return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]+/g)?.length ?? 0);
 };
 const quote = (text, match) =>

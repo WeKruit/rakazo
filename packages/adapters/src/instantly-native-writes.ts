@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
+import { signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -39,7 +40,8 @@ const Step = z.strictObject({
     .string()
     .min(1)
     .max(20_000)
-    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.'),
+    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.')
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
   delay_days: z
     .number()
     .int()

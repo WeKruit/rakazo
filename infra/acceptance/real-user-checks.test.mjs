@@ -214,6 +214,16 @@ test("one question, a draft with its own question and a quoted line count as one
     ["要现在发吗？"],
   );
 });
+test("an email body the recruiter dictates in English does not make their message English", () => {
+  const failures = conversationChecks([
+    user(
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?",
+    ),
+    bot("我会只向 Alex 的地址发送这封指定内容的邮件，并提交发送确认。"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
 test("a Chinese question with an English role title is still Chinese", () => {
   const failures = conversationChecks([
     user("继续吧"),

@@ -22,6 +22,8 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   recruitingBotKey,
+  signedAsTeam,
+  TEAM_SIGNATURE_NOTE,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -462,7 +464,13 @@ const GmailSendInput = z.strictObject({
     .length(1)
     .describe("The one person this email is for. Never several people."),
   subject: z.string().trim().min(1).max(500),
-  body: z.string().trim().min(1).max(50_000).describe("Plain-text body."),
+  body: z
+    .string()
+    .trim()
+    .min(1)
+    .max(50_000)
+    .describe("Plain-text body.")
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
   replyThreadId: z
     .string()
     .regex(/^[0-9a-f]{6,64}$/i)
