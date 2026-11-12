@@ -209,6 +209,16 @@ describe("activation card for one person's own first email", () => {
     expect(display.refusal).toBeUndefined();
   });
 
+  it("names the sending mailbox from get_campaign when no role says it", async () => {
+    const { email_list: _, ...rest } = campaign;
+    const fromTool = async (tool: string) =>
+      tool === "native_instantly_get_campaign"
+        ? { ...rest, sendingMailbox: ["me@x.test"] }
+        : { items: leads };
+    const display = await describeCampaignActivation(fromTool, "c-1", null, null, ["ada@x.test"]);
+    expect(display.mailbox).toBe("me@x.test");
+  });
+
   it("shows the role's email for the people who keep it", async () => {
     const display = await describeCampaignActivation(read, "c-1", null, binding);
     expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([

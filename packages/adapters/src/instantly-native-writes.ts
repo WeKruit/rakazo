@@ -1009,7 +1009,12 @@ export async function describeCampaignActivation(
       () => undefined,
     ),
   ]);
-  const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  // get_campaign names the sending mailbox sendingMailbox; the raw provider read calls it email_list.
+  const emails = Array.isArray(campaign?.sendingMailbox)
+    ? campaign.sendingMailbox
+    : Array.isArray(campaign?.email_list)
+      ? campaign.email_list
+      : [];
   const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
   const templated = isTemplated(campaign);
   const people = (items ?? []).flatMap(asPerson);
