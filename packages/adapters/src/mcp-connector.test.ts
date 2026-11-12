@@ -1625,7 +1625,7 @@ describe("official Autumn task dispatch", () => {
             }),
           },
           recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
-          externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+          $queryRaw: vi.fn().mockResolvedValue([]),
         } as never,
         { load } as never,
         { network: TEST_NETWORK },
@@ -1676,7 +1676,7 @@ it("denies an unowned FullEnrich job before connecting or loading credentials", 
           server: { ...SERVER, endpoint: "https://mcp.fullenrich.com/mcp" },
         }),
       },
-      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never,
     { load } as never,
     { network: TEST_NETWORK },
@@ -4127,11 +4127,13 @@ describe("local native Instantly campaign and lead tools", () => {
                 })),
         ),
       },
+      // Saved contact lookup receipts.
+      $queryRaw: vi.fn(async () => state.lookups),
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
           where.OR
-            ? state.lookups
+            ? []
             : [...state.effects.values()].filter(
                 (e) =>
                   e.kind === where.kind &&
