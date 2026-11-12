@@ -1422,6 +1422,11 @@ const PLANNED_SEARCH_GRACE_MS = 3_000;
 /** With this many new people from the planned searches, the first ten come from them. */
 /** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
 const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
+/**
+ * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
+ * search runs; the round then holds everyone who fits, even fewer than ten.
+ */
+const SHORT_OF_TEN = `tell the recruiter in one line, in their language, how many people the quick search found who fit and that you are now searching deeper, which takes a few more minutes (ask nothing); in the same step run one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement. Once that deeper search has returned (or if it already ran), record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line how many short of ten it is and which requirement rules out the most. Never pick someone who does not fit to fill it`;
 /** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
 const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
@@ -6343,6 +6348,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let agentRunsBeforeRound = 0;
         // Quick people searches this turn ran itself (not the planned ones) before its round.
         let quickSearchesBeforeRound = 0;
+        let deeperRunBeforeRound = false;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
@@ -7130,7 +7136,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
             peopleSearchesRun = Math.max(peopleSearchesRun, 8);
             return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.${lateText}`,
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
@@ -7155,9 +7161,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 `${agentRunsBeforeRound} people-search agent runs`
               : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
                 `${quickSearchesBeforeRound} people searches`;
-            if (searched)
+            // The one deeper search for a round short of ten runs past the cap.
+            const deeper =
+              newAgentRun &&
+              typeof rawArgs.effort === "string" &&
+              rawArgs.effort !== "low" &&
+              !deeperRunBeforeRound &&
+              Boolean(searched);
+            if (deeper) deeperRunBeforeRound = true;
+            else if (searched)
               return {
-                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise do not search again: show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say (how many fit, which requirement rules out the most, relax it, or search deeper, which is slower and costs more).`,
+                error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise show the ones who fit with show_picks, then ${SHORT_OF_TEN}.`,
               };
             if (newAgentRun) agentRunsBeforeRound++;
             else quickSearchesBeforeRound++;
@@ -7501,7 +7515,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ask the recruiter how to go on, as the round instructions say.",
+              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (
@@ -7516,7 +7530,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // the same people come back.
             if (beyond.size && place)
               return {
-                error: `Not recorded. ${[...beyond.values()].join(", ")} ${beyond.size > 1 ? "live" : "lives"} over ${COMMUTE_MILES} miles from ${place.label}, outside the role's location. Replace them with people from the rows who fit. If fewer than ten fit, show the ones who do with show_picks and ask the recruiter how to go on, as the round instructions say.`,
+                error: `Not recorded. ${[...beyond.values()].join(", ")} ${beyond.size > 1 ? "live" : "lives"} over ${COMMUTE_MILES} miles from ${place.label}, outside the role's location. Replace them with people from the rows who fit. If fewer than ten fit, show the ones who do with show_picks, then ${SHORT_OF_TEN}.`,
               };
             // Asked once per person: when the same people come back the model has decided they fit
             // (a role open to a whole country or state, or a real commute), and they are recorded.
@@ -8438,8 +8452,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return {
                   error: round?.approvedAt
                     ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; no card is needed."
-                    : round?.candidateKeys.length === 10
-                      ? "Calibration rounds never use an approval card. The round is recorded: list the ten in chat and end with the next-step question. When the recruiter asks for more people or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
+                    : round?.candidateKeys.length
+                      ? "Calibration rounds never use an approval card. The round is recorded: list its people in chat and end with the next-step question. When the recruiter asks for more people or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
                       : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
                 };
               }
@@ -14323,8 +14337,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
-              ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
-              : `Then complete the ten: if the answer does not change who you are looking for, fill the rest in your next step with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). No save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round; show_picks names only the people who fit. Keep the people already shown unless one clearly fails a hard requirement.`;
+              ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
+              : `Then complete the ten: if the answer does not change who you are looking for, fill the rest in your next step with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). No save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks (it names only the people who fit), then ${SHORT_OF_TEN}. Keep the people already shown unless one clearly fails a hard requirement.`;
           return `${note} ${next}\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread

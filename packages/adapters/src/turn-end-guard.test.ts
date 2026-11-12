@@ -487,7 +487,9 @@ describe("guardRecruitingTurnEnd", () => {
 
   it.each([
     [10, false, true, false, "ended"],
-    [9, false, true, false, "continued"],
+    // A round short of ten after the deeper search waits on the recruiter like a full one.
+    [9, false, true, false, "ended"],
+    [0, false, true, false, "continued"],
     [10, true, true, false, "continued"],
     [10, false, false, false, "ended"],
     [10, false, false, true, "continued"],

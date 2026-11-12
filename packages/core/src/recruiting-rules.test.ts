@@ -359,20 +359,21 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "show only fitting people in a short pool",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "show only the people who fit, never anyone who fails a requirement",
+    phrase: "never fill the round with people who fail a requirement",
     why: "A short pool was shown with people who fail a requirement.",
   },
   {
-    rule: "a short pool goes to the recruiter",
+    rule: "a short pool tells the recruiter and searches deeper once",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "offering to relax that named requirement or to keep searching with a deeper search",
-    why: "A hard-to-fill role silently relaxed a requirement or started paid research.",
+    phrase:
+      "how many the quick search found who fit and that you are searching deeper, which takes a few more minutes (ask nothing)",
+    why: "A hard-to-fill role asked the recruiter, then searched on for many minutes without a round.",
   },
   {
-    rule: "the deeper search says it costs more",
+    rule: "a short round holds everyone who fits",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "whose option says it takes longer and costs more",
-    why: "The recruiter picked the deeper search without knowing it is slower and paid.",
+    phrase: "record the round with calibration_round with everyone who fits, even fewer than ten",
+    why: "A role with only a few fitting people never got its first round.",
   },
   {
     rule: "top-up only the missing number",

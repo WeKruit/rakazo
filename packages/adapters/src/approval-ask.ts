@@ -505,7 +505,7 @@ function formatApprovalDetail(
           const verified = recruiting?.profiles?.[index];
           if (
             !recruiting?.roleTitle.trim() ||
-            recruiting.profiles?.length !== 10 ||
+            recruiting.profiles?.length !== request.profiles.length ||
             !verified?.name.trim() ||
             verified.linkedinUrl !== profile.linkedinUrl ||
             verified.evidenceUrl !== profile.evidenceUrl

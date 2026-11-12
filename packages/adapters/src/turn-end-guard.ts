@@ -472,8 +472,8 @@ export async function guardRecruitingTurnEnd(
     if (
       round &&
       !round.approvedAt &&
-      round.candidateKeys.length === 10 &&
-      new Set(round.candidateKeys).size === 10
+      round.candidateKeys.length > 0 &&
+      new Set(round.candidateKeys).size === round.candidateKeys.length
     ) {
       // A presented round waits on the recruiter until they write (panel feedback is a message);
       // later turns cannot reopen the panel, so pushing them only repeats the same reply.

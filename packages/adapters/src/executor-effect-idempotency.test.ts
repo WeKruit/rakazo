@@ -6967,4 +6967,47 @@ describe("people searches before the first round", () => {
       expect(f.results[allowed]).toEqual({ error: expect.stringContaining(refusal) });
     },
   );
+
+  it("lets one deeper agent run through when the round is still short, then refuses more", async () => {
+    const f = fixture("run-first-round-deeper");
+    f.thread.activeRecruitingRoleId = "role-1";
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+    const tool = (name: string) =>
+      ({
+        name: `mcp__people-search__${name}`,
+        description: name,
+        inputSchema: { type: "object", properties: {} },
+        readOnly: true,
+        route: { connectorId: "people-search", toolName: name },
+      }) as never;
+    f.connector.discoverTools.mockResolvedValue([
+      tool("web_search_advanced_exa"),
+      tool("agent_run"),
+    ]);
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "always_allow", matchKind: "tool", matchValue: "mcp__people-search__agent_run" },
+    ]);
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
+    });
+    f.setCalls(
+      ["low", "low", "auto", "auto"].map((effort, n) => ({
+        name: "mcp__people-search__agent_run",
+        args: { effort, query: `Find 6 more Korean-speaking quality engineers, set ${n}` },
+        executionId: `search-${n}`,
+      })),
+    );
+
+    await f.run();
+
+    expect(f.results.slice(0, 3)).not.toContainEqual(
+      expect.objectContaining({ error: expect.stringContaining("already returned") }),
+    );
+    expect(f.results[3]).toEqual({
+      error: expect.stringContaining("with everyone who fits, even fewer than ten"),
+    });
+  });
 });
