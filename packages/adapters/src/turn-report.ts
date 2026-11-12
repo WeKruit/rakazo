@@ -98,6 +98,18 @@ export function toolOperation(args: Record<string, unknown>): string | undefined
   return typeof operation === "string" ? operation : undefined;
 }
 
+/** A call that only reads: a recruiting read operation or a get/list/search tool by name. */
+export function readsOnly(name: string, args: Record<string, unknown>): boolean {
+  const operation = toolOperation(args);
+  if (name.startsWith("recruiting_"))
+    return operation !== undefined && READ_OPERATIONS.has(operation);
+  return READ_ACTION.test((name.split("__").at(-1) ?? name).toLowerCase());
+}
+
+/** A reply saying an approval card still waits or the email is not sent ("审批卡仍待你确认"). */
+export const CLAIMS_CARD_PENDING =
+  /(?:仍|还)?(?:在)?(?:等待|待)(?:你的?)?确认|(?:目前|状态)(?:为|是)?\**未发送|尚未发送|还没有?发送|\bstill (?:waiting|pending)\b|\bnot (?:yet )?(?:been )?sent\b/i;
+
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
  * when it changed nothing a person needs to hear about. A failed call did nothing.
