@@ -462,6 +462,10 @@ describe("quick reply", () => {
   it("counts only words or cards as a reply, not a row of the run's steps", () => {
     expect(saysSomething([{ kind: "steps", steps: [] } as never])).toBe(false);
     expect(saysSomething([{ kind: "text", text: "  " }])).toBe(false);
+    // A handoff to a teammate is a marker, not a reply: the quick first line still goes out.
+    expect(
+      saysSomething([{ kind: "handoff", fromBotId: "a", toBotId: "b", text: "Find people." }]),
+    ).toBe(false);
     expect(saysSomething([{ kind: "text", text: "On it." }])).toBe(true);
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
   });

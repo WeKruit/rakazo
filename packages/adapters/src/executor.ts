@@ -1390,11 +1390,19 @@ export const STEERING_ACK =
 export const STEERING_PEEK_MS = 2_500;
 /** Model-facing: the short reply already sent for a message that arrived mid-run. */
 /** Whether a bot message shows the person words or a card, not only the run's steps. */
+// A handoff or teammate message shows the recruiter only a marker, never words to them.
+const SAYS_NOTHING = new Set([
+  "steps",
+  "progress",
+  "meta",
+  "computer",
+  "handoff",
+  "bot_message_sent",
+  "bot_message_received",
+]);
 export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
   (blocks ?? []).some((block) =>
-    block.kind === "text"
-      ? block.text.trim().length > 0
-      : !["steps", "progress", "meta", "computer"].includes(block.kind),
+    block.kind === "text" ? block.text.trim().length > 0 : !SAYS_NOTHING.has(block.kind),
   );
 
 /** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
