@@ -1170,6 +1170,8 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       title: ResearchText.optional(),
       location: ResearchText.optional(),
       resumeUrl: ResearchText.optional(),
+      // The recruiter's own address for each person: kept as their known contact email.
+      email: ResearchText.optional(),
     }),
   }),
   z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),

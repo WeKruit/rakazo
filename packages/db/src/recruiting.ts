@@ -7789,10 +7789,16 @@ export async function saveRecruitingCandidateCsvImport(
             observedAt: observedAt.toISOString(),
           },
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          candidateRows: candidateRows.map((row) => ({
-            ...row,
-            csvRowIndex: captured.rows[row.rowIndex]!.csvRowIndex,
-          })),
+          candidateRows: candidateRows.map((row) => {
+            const { csvRowIndex, row: cells } = captured.rows[row.rowIndex]!;
+            // The recruiter's own address for the person, read back as a known contact email.
+            const email = typeof cells.email === "string" ? cells.email : undefined;
+            return {
+              ...row,
+              csvRowIndex,
+              ...(email ? { email, linkedinUrl: cells.linkedin_url ?? null } : {}),
+            };
+          }),
           skipped: captured.skipped,
           truncated: captured.truncated,
         }),

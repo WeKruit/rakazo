@@ -492,7 +492,7 @@ function localGmailTools(
     {
       name: `mcp__${assignment.server.slug}__${GMAIL_SEND}`,
       description:
-        "Send one plain-text email from the recruiter's own connected Gmail to one person. The recruiter confirms each email on its own card before it goes out. To follow up, pass replyThreadId (the thread id of the earlier email) so it goes as a reply in that thread.",
+        "Send one plain-text email from the recruiter's own connected Gmail to one person, signed as the recruiter (their saved signature or name), never a generic name such as Recruiting Team. The recruiter confirms each email on its own card before it goes out. To follow up, pass replyThreadId (the thread id of the earlier email) so it goes as a reply in that thread.",
       inputSchema: z.toJSONSchema(GmailSendInput, { io: "input" }),
       readOnly: false,
       route: {

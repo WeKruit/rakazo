@@ -580,7 +580,7 @@ export async function ensureSendingIdentity(
       // The read itself says what to do, so an agent that never loaded sender setup still answers right.
       ...(current.length
         ? {
-            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.",
+            next: "This account sends only through its outreach mailbox, never the recruiter's own email. When asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email. Sign each email as the sender: the recruiter's saved signature, else the mailbox's displayName, never a generic name such as Recruiting Team.",
           }
         : {}),
       // missingSender asks the executor to tell support once that this account needs a mailbox.
