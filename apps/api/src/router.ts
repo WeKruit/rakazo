@@ -46,6 +46,7 @@ import {
   applyTeachingDesktopInput,
   archiveBot,
   assertSafeRemoteUrl,
+  bindImportedCampaigns,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
   CHATGPT_OAUTH_PROVIDER,
@@ -1647,7 +1648,9 @@ export function createRouter(deps: RouterDeps) {
             },
             update: { displayName: input.displayName },
           });
-          return { userId: user.id, mailbox };
+          // Roles whose imported history used only this account's mailboxes get that campaign.
+          const linkedRoles = await bindImportedCampaigns(deps.prisma, user.id);
+          return { userId: user.id, mailbox, linkedRoles };
         },
       ),
       unassignSendingMailbox: authed.deployment.unassignSendingMailbox.handler(
