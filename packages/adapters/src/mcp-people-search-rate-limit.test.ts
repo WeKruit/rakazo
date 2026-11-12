@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   loadMcpCredentialRecord,
   McpConnector,
+  PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   resetPeopleSearchSpacing,
 } from "./mcp-connector.js";
@@ -288,7 +289,7 @@ describe("people search rate limits", () => {
       expect(await pending).toEqual([
         {
           type: "error",
-          message: "MCP tool is not assigned to this bot",
+          message: `MCP tool is not assigned to this bot. ${PATH_REFUSAL_NOTE}`,
           outcome: "uncertain",
         },
       ]);

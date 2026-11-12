@@ -163,6 +163,10 @@ describe("declinedSentence", () => {
     ["我无法确认这些人的邮箱是否已保存。", "decline"],
     ["我不能直接发送这封邮件。", "decline"],
     ["我没法查到他的联系方式。", "decline"],
+    // 11-12: a one-off email outside a role, blamed on a permission.
+    ["当前权限不支持创建一次性邮件，因此无法提交发送确认。", "decline"],
+    ["需要开通支持单封邮件发送的权限后才能完成。", "decline"],
+    ["I'm not permitted to send a one-off email from this conversation.", "decline"],
     ["I haven't looked up their emails yet. Do you want me to do that now?", "defer"],
     ["Would you like me to draft the first email?", "defer"],
     ["Want me to book Wednesday afternoon?", "defer"],
@@ -187,6 +191,7 @@ describe("declinedSentence", () => {
     "Here are the ten for this round.",
     "已为前5个人找到邮箱，其中1人没有找到。",
     "Booked Wednesday at 2 PM; the confirmation card is above.",
+    "已发起连接请求，授权后就能读取你的日历。",
     "The send card is above; once you confirm, the five emails go out.",
   ];
   it.each(["Which of these look closest to what you want?", "下周三约哪天下午比较方便？"])(

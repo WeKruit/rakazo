@@ -17,9 +17,11 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   NO_EMAIL_HISTORY_YET,
+  PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
   SHARED_MAIL_DISCOVERY_BUDGET_MS,
+  scopeRefusal,
   sharedInstantlyAccount,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
@@ -53,6 +55,28 @@ const ASSIGNMENT = {
   allowedTools: [],
   server: SERVER,
 };
+
+describe("scope refusals", () => {
+  // 11-12: "Check the current assigned connection and requested scope" read as a missing
+  // permission, and a one-off email ended as "the current permission does not support it".
+  it("keeps the server's reason and names the way on, never a permission", () => {
+    const text = scopeRefusal(
+      new IsolationError(
+        "In a role conversation, use ensure_role_campaign for the role's campaign",
+      ),
+    );
+    expect(text).toMatch(
+      /^In a role conversation, use ensure_role_campaign for the role's campaign\. /,
+    );
+    expect(text).toContain("another of your tools, the teammate who can");
+    expect(text).toContain("Never tell the recruiter you lack permission");
+    expect(text).not.toContain("Check the current assigned connection");
+  });
+
+  it("drops the generic not-found reason", () => {
+    expect(scopeRefusal(new IsolationError())).toBe(PATH_REFUSAL_NOTE);
+  });
+});
 
 describe("MCP assignment denial identity", () => {
   it.each(["context", "assignment", "revision"])(
@@ -3193,7 +3217,10 @@ describe("MCP connector session cache", () => {
         if (revision === "missing") delete route.resourceRevision;
         const initializations = state.initializations;
         expect(await collect({ ...old, route })).toEqual([
-          { type: "error", message: "MCP server changed; rediscover the tool before trying again" },
+          {
+            type: "error",
+            message: `MCP server changed; rediscover the tool before trying again. ${PATH_REFUSAL_NOTE}`,
+          },
         ]);
         expect(state.initializations).toBe(initializations);
         expect(state.calls).toEqual([]);
