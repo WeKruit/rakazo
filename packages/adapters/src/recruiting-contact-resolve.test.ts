@@ -275,11 +275,11 @@ describe("agent list_crm_candidates arguments", () => {
   });
   it("refuses missing or ambiguous scope instead of selecting another owned role", async () => {
     await expect(agentCrmCandidatesArgs({ p_org: org, p_role: roleId })).rejects.toThrow(
-      /workspace/,
+      /one role at a time/,
     );
     await expect(
       agentCrmCandidatesArgs({ p_q: "Example" }, [binding, { ...binding, roleLabel: "Other" }]),
-    ).rejects.toThrow(/workspace/);
+    ).rejects.toThrow(/one role at a time/);
   });
 
   it("finds incoming candidate mail beyond the former twenty-page cutoff", async () => {

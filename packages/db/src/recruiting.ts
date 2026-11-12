@@ -822,7 +822,7 @@ async function createRoleInTransaction(
   const thread = await requireThread(tx, actor, input.sourceThreadId);
   if (thread.groupId?.startsWith("recruiting-global-"))
     throw new IsolationError(
-      "Open a role conversation to create a role; Main stays across all roles",
+      "The global conversation stays across all roles; open a new role with start_role",
     );
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);

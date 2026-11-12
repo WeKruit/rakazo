@@ -55,7 +55,7 @@ describe("global recruiting conversation", () => {
         preferences: [],
         definitionQuestions: [],
       }),
-    ).rejects.toThrow("Main stays across all roles");
+    ).rejects.toThrow("The global conversation stays across all roles");
     expect(f.create).not.toHaveBeenCalled();
     expect(f.update).not.toHaveBeenCalled();
   });
@@ -63,7 +63,7 @@ describe("global recruiting conversation", () => {
     const f = fixture();
     await expect(
       bindRecruitingRole(f.prisma, actor, { threadId: "global-thread", roleId: "role" }),
-    ).rejects.toThrow("Main stays across all roles");
+    ).rejects.toThrow("The global conversation stays across all roles");
     await expect(
       bindRecruitingRole(f.prisma, actor, { threadId: "global-thread", roleId: null }),
     ).resolves.toBeNull();
