@@ -57,7 +57,12 @@ const prose = (text) =>
   text
     .slice(0, DRAFT.test(text) ? text.search(DRAFT) : undefined)
     .split("\n")
-    .filter((line) => !/linkedin\.com|^\s*\d+\.\s|^\s*>|^\s*Not verified:/i.test(line))
+    .filter(
+      (line) =>
+        !/linkedin\.com|^\s*\d+\.\s|^\s*>|^\s*(?:Not verified|所有人都还未核实|未核实)[:：]/i.test(
+          line,
+        ),
+    )
     .join("\n");
 // Addresses are kept whole; their dots are not sentence ends.
 const sentences = (text) =>
