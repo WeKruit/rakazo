@@ -218,6 +218,23 @@ export const SCENARIOS = [
     last: /岗位|角色|没有|0|个/,
   },
   {
+    // The 11-11 case on an account with a mailbox: a real Send card is open when the
+    // recruiter asks something else, and the question gets its own answer.
+    name: "ask-while-send-card-mailbox",
+    area: "email",
+    source: "11-11 messages sat unread behind an open send card",
+    account: "mailbox",
+    noRole: true,
+    turns: [
+      {
+        say: `请给 ${CANDIDATE} 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?`,
+      },
+      { say: "对了，我现在有几个岗位？" },
+    ],
+    sendCard: true,
+    last: /岗位|角色|没有|0|个/,
+  },
+  {
     name: "cold-email-en",
     area: "email",
     source: "10-27 T1: drafts in Chinese for English candidates",

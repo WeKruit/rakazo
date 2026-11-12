@@ -349,3 +349,21 @@ test("a reply that blames a permission or tells the recruiter to open a role fai
     ]).some((failure) => failure.startsWith("blames a permission")),
   );
 });
+
+test("a message left unanswered behind an open send card fails", () => {
+  const failures = conversationChecks([
+    user("帮我给 alex@example.com 写封邮件，写好就发"),
+    bot("写好了，确认后发出。", true),
+    user("对了，我现在有几个岗位？"),
+  ]);
+  assert(failures.some((failure) => failure.startsWith('no reply to "对了')));
+  assert.deepEqual(
+    conversationChecks([
+      user("帮我给 alex@example.com 写封邮件，写好就发"),
+      bot("写好了，确认后发出。", true),
+      user("对了，我现在有几个岗位？"),
+      bot("你现在有 2 个岗位。邮件还在等你确认。"),
+    ]),
+    [],
+  );
+});

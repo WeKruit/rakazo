@@ -81,6 +81,7 @@ export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
 export {
+  bindImportedCampaigns,
   describeCampaignActivation,
   EMPTY_ACTIVATION_DISPLAY,
   lastUsedMailbox,

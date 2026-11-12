@@ -26,7 +26,7 @@ function fixture(staff = false) {
     unpricedCount: 0,
     tokenRows: 1,
     calls: 1,
-    costSources: ["provider-reported"],
+    costSource: "provider-reported",
     unpricedInput: 0,
     unpricedOutput: 0,
     unpricedCacheRead: 0,
@@ -111,6 +111,27 @@ describe("product credits and internal cost privacy", () => {
       vendors: [],
     });
     expect(result.pricing).toEqual({ creditsPerUsd: 100, grossMargin: 0.5 });
+  });
+  it("prices legacy rows once per account instead of rescanning unknown prices on every read", async () => {
+    const { prisma, raw } = fixture();
+    const reader = { spaceId: "space-once", userId: "user-once" };
+    raw.usageRecord.findMany.mockResolvedValue([
+      {
+        id: "row-unknown",
+        provider: "vendor-a",
+        model: "unknown-model",
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        cacheWrite1hTokens: null,
+      },
+    ]);
+    const priceTokens = vi.fn().mockReturnValue(null);
+    await summarizeUsageCosts(prisma, reader, { priceTokens });
+    await summarizeUsageCosts(prisma, reader, { priceTokens });
+    expect(raw.usageRecord.findMany).toHaveBeenCalledTimes(1);
+    expect(priceTokens).toHaveBeenCalledTimes(1);
   });
   it("marks unknown cost and token buckets instead of presenting them as zero", async () => {
     const { prisma, raw, group } = fixture(true);
