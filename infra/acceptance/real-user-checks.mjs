@@ -38,7 +38,8 @@ const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 // sentence often carries English role titles and names ("这份 Senior Data Engineer 职位"), so
 // Chinese characters are weighed against English words, not letters.
 // An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language.
-const DICTATED = /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
+const DICTATED =
+  /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
 export const mostlyChinese = (raw) => {
   const own = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
   const said = own.replace(DICTATED, " ");
@@ -196,8 +197,14 @@ export function conversationChecks(messages) {
         `asks ${questions.length} questions at once: ${questions.map((q) => `"${q.slice(0, 60)}"`).join(" ")}`,
       );
   }
-  const last = messages.findLast((message) => message.role !== "user" && message.text.trim());
+  const lastAt = messages.findLastIndex(
+    (message) => message.role !== "user" && message.text.trim(),
+  );
+  const last = messages[lastAt];
+  const lastAsk = messages.findLastIndex((message) => message.role === "user");
   if (!last) failures.push("no reply");
+  // An open card or a running search never holds the recruiter's latest message unanswered.
+  else if (lastAt < lastAsk) failures.push(`no reply to "${messages[lastAsk].text.slice(0, 40)}"`);
   else if (deadEnd(last))
     failures.push(`dead end: "${last.text.slice(-160).replace(/\s+/g, " ")}"`);
   return [...new Set(failures)];
