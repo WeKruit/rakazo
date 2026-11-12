@@ -1408,6 +1408,13 @@ export const waitsOnTeammate = (text: string) =>
     text,
   );
 
+/**
+ * The recruiter sees one assistant: a question for them is an ask_user card. A poll closed on its
+ * own and the agent answered it itself (staging 11-11 and 11-12), so recruiting runs have none.
+ */
+export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting: boolean): T[] =>
+  recruiting ? tools.filter((tool) => tool.name !== "create_poll") : tools;
+
 /** Built-in calls after a handoff that leave the request with the teammate. */
 const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory"]);
 export const saysSomething = (blocks: readonly MessageBlock[] | null | undefined) =>
@@ -5992,7 +5999,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? gradingTools(listedTools, run.clientNonce)
               : run.trigger === "recruiting_checkin"
                 ? checkinTools(listedTools)
-                : listedTools;
+                : withoutPolls(listedTools, hideVendors || Boolean(recruitingBotKey(bot)));
         if (run.trigger === "recruiting_grade")
           getLogger().info("recruiting.grade.tools", {
             runId: run.id,
