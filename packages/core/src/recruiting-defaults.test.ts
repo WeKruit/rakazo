@@ -93,6 +93,12 @@ describe("isChineseText", () => {
   it("ignores email addresses and links when reading the language", () => {
     expect(isChineseText("发给 alex.chen.test@example.com")).toBe(true);
     expect(isEnglishText("发给 alex.chen.test@example.com")).toBe(false);
+    // The email body the recruiter dictates is the candidate's language, not theirs.
+    const dictated =
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?";
+    expect(isChineseText(dictated)).toBe(true);
+    expect(isEnglishText(dictated)).toBe(false);
+    expect(isEnglishText('Send Alex "你好，下周有空吗" please, thanks a lot')).toBe(true);
     expect(isChineseText("看看这个 https://www.linkedin.com/in/some-person-name")).toBe(true);
     expect(recruiterLanguageText(["发给 alex.chen.test@example.com", "Write a template"])).toBe(
       "发给 alex.chen.test@example.com",

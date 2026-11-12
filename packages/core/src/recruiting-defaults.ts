@@ -138,7 +138,7 @@ export const REPLY_IN_ENGLISH_NOTE =
  * JD that quotes a Chinese name or tag is still English.
  */
 export function isEnglishText(text: string): boolean {
-  text = withoutAddresses(text);
+  text = ownWords(text);
   const words = text.match(/[A-Za-z]{2,}/g)?.length ?? 0;
   const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
   return words >= 3 && words > han;
@@ -152,7 +152,7 @@ export function recruiterLanguageText(newestFirst: string[]): string {
   return (
     newestFirst.find(
       (text) =>
-        isChineseText(text) || (withoutAddresses(text).match(/[A-Za-z]{2,}/g)?.length ?? 0) >= 5,
+        isChineseText(text) || (ownWords(text).match(/[A-Za-z]{2,}/g)?.length ?? 0) >= 5,
     ) ??
     newestFirst[0] ??
     ""
@@ -202,12 +202,18 @@ export function sendToNote(count: number) {
  * Emails and links say nothing about the language a recruiter writes in: 「发给 alex.chen@example.com」
  * is Chinese, though its address has more English words than it has Han characters.
  */
-function withoutAddresses(text: string): string {
-  return text.replace(/\S+@\S+|https?:\/\/\S+|www\.\S+/gi, " ");
+// An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language,
+// not the one they write to us in.
+const DICTATED = /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
+
+function ownWords(text: string): string {
+  const own = text.replace(/\S+@\S+|https?:\/\/\S+|www\.\S+/gi, " ");
+  const said = own.replace(DICTATED, " ");
+  return /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
 }
 
 export function isChineseText(text: string): boolean {
-  text = withoutAddresses(text);
+  text = ownWords(text);
   // A Han character is about a word, so compare it with English words, not letters: a Chinese
   // request naming USC, CS and AI agent is still Chinese.
   const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;

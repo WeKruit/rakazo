@@ -649,5 +649,7 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
   const b = words(update);
   let shared = 0;
   for (const word of a) if (b.has(word)) shared += 1;
+  // A reply that only repeats the update's closing question or one of its sentences says nothing new.
+  if (a.size >= 5 && shared / a.size >= 0.9) return true;
   return shared / (a.size + b.size - shared) >= 0.55;
 }

@@ -538,6 +538,13 @@ describe("restatesUpdate", () => {
         "Recorded the first 10-person review set for the Atlanta on-site Warehouse Operations Manager role, with Chinese preferred and English assumed. The role brief is saved; the first review set includes the candidates and profile passages shown above.",
       ),
     ).toBe(true);
+    // The update already asked the question; the final reply asks it again.
+    expect(
+      restatesUpdate(
+        "Which candidates should I email, and what should the email be about?",
+        "I checked your active roles and existing outreach, and there are no candidates or prior emails available in this conversation to act on. Which candidates should I email, and what should the email be about?",
+      ),
+    ).toBe(true);
   });
 
   it("keeps a reply with new content or no update before it", () => {
