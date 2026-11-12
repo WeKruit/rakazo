@@ -93,3 +93,41 @@ it("projects only the page's owner-scoped saved media and matches the displayed 
   expect(mediaQuery.text).toContain('"personKey" IN');
   expect(mediaQuery.values).toEqual(["space", "owner", "one", "two"]);
 });
+
+it("orders the whole pool in one grouped pass and skips display fields a date order does not need", async () => {
+  const actor = { userId: "owner", spaceId: "space" } as Actor;
+  const pageSql = async (sort: "name" | "added", filters = {}) => {
+    const query = vi.fn().mockResolvedValue([]);
+    await listRecruitingContacts({ $queryRaw: query } as unknown as PrismaClient, actor, {
+      sort,
+      limit: 50,
+      filters,
+    });
+    return (query.mock.calls[0]![0] as { sql: string }).sql;
+  };
+  const display = /array_agg\(name ORDER BY/;
+  for (const sql of [await pageSql("name"), await pageSql("added")]) {
+    // Each person's entries are grouped once; no second sort-and-join over everyone.
+    expect(sql).not.toMatch(/DISTINCT ON \(person_key\)/);
+    expect(sql.match(/GROUP BY person_key/g)).toHaveLength(1);
+  }
+  expect(await pageSql("name")).toMatch(display);
+  expect(await pageSql("added")).not.toMatch(display);
+  expect(await pageSql("added", { company: "Acme" })).toMatch(display);
+});
+
+it("reads only the filtered roles' people instead of the whole account", async () => {
+  const query = vi.fn().mockResolvedValue([]);
+  await listRecruitingContacts(
+    { $queryRaw: query } as unknown as PrismaClient,
+    { userId: "owner", spaceId: "space" } as Actor,
+    { sort: "name", limit: 50, filters: { roleIds: ["role-a", "crm:role-b"] } },
+  );
+  const page = query.mock.calls[0]![0] as { sql: string; values: unknown[] };
+  expect(page.sql).toMatch(/matching_keys AS MATERIALIZED/);
+  // Every source of people is narrowed to those keys before it is merged and sorted.
+  expect(
+    page.sql.match(/IN \(SELECT person_key FROM matching_keys\)/g)?.length,
+  ).toBeGreaterThanOrEqual(3);
+  expect(page.values).toEqual(expect.arrayContaining(["role-a", "crm:role-b"]));
+});

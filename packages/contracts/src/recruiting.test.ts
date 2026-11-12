@@ -590,10 +590,11 @@ describe("recruiting contracts", () => {
       expect(schema.safeParse({ ...input, expectedRoleRevision: 0 }).success).toBe(false);
     }
     expect(schema.safeParse({ ...documents, documents: { jdText: artifact } }).success).toBe(false);
-    for (const profiles of [
-      calibration.profiles.slice(1),
-      [...calibration.profiles, calibration.profiles[0]],
-    ])
+    // A round short of ten after the deeper search is approved as it stands; eleven never is.
+    expect(
+      schema.safeParse({ ...calibration, profiles: calibration.profiles.slice(1) }).success,
+    ).toBe(true);
+    for (const profiles of [[], [...calibration.profiles, calibration.profiles[0]]])
       expect(schema.safeParse({ ...calibration, profiles }).success).toBe(false);
   });
 

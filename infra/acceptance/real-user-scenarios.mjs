@@ -7,8 +7,11 @@
 // { wait } pauses (ms), { stop } presses Stop.
 // Expectations: noRole (no role may be opened), role (a role must be opened, not titled "New
 // role"), roleTitle (regex the new role's name must match), requirement (regex that must be saved as required in the role brief), last / lastNot
-// (regex the last reply must / must not match). account: "onboarded" plays on the fixture account
-// we set up by hand (no credit limit, no mailbox) instead of a fresh self-signup account. Every conversation also passes the common checks
+// (regex the last reply must / must not match), sendCard (a send card must appear; it is denied),
+// foundEmail (the reply may show an address the recruiter never typed: a lookup's result).
+// account: "onboarded" plays on the fixture account we set up by hand (no credit limit, no
+// mailbox), "mailbox" on the outside fixture account we gave a mailbox, instead of a fresh
+// self-signup account. Every conversation also passes the common checks
 // in real-user-checks.mjs. paid: answering a role's first question starts the paid first-ten search.
 // known: a product failure already handed to a fix thread; it still fails on the scoreboard but
 // does not fail the release gate. Remove it with the fix.
@@ -167,6 +170,20 @@ export const SCENARIOS = [
     turns: [{ say: "其他几位可以根据实际情况发送邮件吗" }, { say: "那你就直接发啊" }],
   },
   {
+    // An account we gave a mailbox emails an address the recruiter typed, outside any role.
+    name: "email-assigned-mailbox-zh",
+    area: "email",
+    source: "11-12 assigned mailbox had no way to send one email to a named address",
+    account: "mailbox",
+    noRole: true,
+    turns: [
+      {
+        say: `请给 ${CANDIDATE} 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?`,
+      },
+    ],
+    sendCard: true,
+  },
+  {
     name: "email-no-mailbox-en",
     area: "email",
     source: "11-10 outside user told to contact an internal address",
@@ -254,6 +271,83 @@ export const SCENARIOS = [
       { say: "帮我写一封面试后跟进邮件的模板" },
       { say: "Actually, talk to me in English from now on. Make it shorter." },
     ],
+  },
+  // Off the built paths: one-off asks no role step was made for. Each must be done with the
+  // general tools (or asked about once), never answered with "no permission" or "open a role".
+  {
+    // A contact lookup charges for what it finds, so it plays only with --paid.
+    name: "offpath-find-email-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    paid: true,
+    foundEmail: true,
+    noRole: true,
+    turns: [
+      {
+        say: "帮我查一下这个人的邮箱：Alex Chen，linkedin.com/in/alex-chen-test-0000，现在在 Stripe 做后端",
+      },
+    ],
+  },
+  {
+    // Two addresses typed at once, outside any role: one email each, each on its own Send card.
+    name: "offpath-email-two-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    account: "mailbox",
+    noRole: true,
+    turns: [
+      {
+        say: `给 ${CANDIDATE} 和 sam.lee.test@example.com 各发一封邮件，主题 Quick chat，正文：Hi, do you have 15 minutes next week to talk about a backend role?`,
+      },
+    ],
+    sendCard: true,
+  },
+  {
+    name: "offpath-add-candidate-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    turns: [
+      {
+        say: `把这个人存到我的候选人里：Alex Chen，linkedin.com/in/alex-chen-test-0000，邮箱 ${CANDIDATE}`,
+      },
+    ],
+  },
+  {
+    name: "offpath-reply-no-mail-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    noRole: true,
+    turns: [{ say: `帮我回复 ${CANDIDATE} 的上一封邮件，就说周四下午可以聊` }],
+  },
+  {
+    name: "offpath-company-en",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    noRole: true,
+    turns: [{ say: "Roughly how big is Stripe's engineering team, and which cities are they in?" }],
+    last: /Stripe/,
+  },
+  {
+    name: "offpath-reminder-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    noRole: true,
+    turns: [{ say: "下周一上午提醒我跟进一下 Alex Chen" }],
+  },
+  {
+    name: "offpath-rewrite-jd-zh",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    noRole: true,
+    turns: [{ say: `先别开岗位，帮我把这段 JD 改写得更吸引候选人：${JD_ZH_MUST}` }],
+    last: /销售总监/,
+  },
+  {
+    name: "offpath-calendar-en",
+    area: "off path",
+    source: "11-12 agents dead-ended outside pre-built paths",
+    noRole: true,
+    turns: [{ say: "What's on my calendar tomorrow?" }],
   },
   // Paid: answering a role's first question starts the first-ten search.
   {

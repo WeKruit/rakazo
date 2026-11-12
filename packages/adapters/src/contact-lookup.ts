@@ -31,7 +31,8 @@ export type FoundEmail = {
   type: "work" | "personal";
   /** The provider's own delivery check, e.g. DELIVERABLE; null when it gives none. */
   status: string | null;
-  provider: ContactProvider;
+  /** "import": the address came on a list the recruiter imported. */
+  provider: ContactProvider | "import";
 };
 /** What each provider did for this person, in the order they ran. */
 export type ProviderAttempt = {

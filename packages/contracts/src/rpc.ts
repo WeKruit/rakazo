@@ -491,6 +491,15 @@ export const appContract = {
         }),
       )
       .output(z.object({ userId: Id, mailbox: z.string() })),
+    /** The owner takes back a mailbox it assigned that the account has not started using. */
+    unassignSendingMailbox: oc
+      .input(
+        z.object({
+          accountEmail: z.string().trim().email().max(320),
+          mailbox: z.string().trim().email().max(320),
+        }),
+      )
+      .output(z.object({ userId: Id, mailbox: z.string() })),
   },
   /**
    * Deployment-owner product updates. When the Compose updater sidecar is reachable, these proxy

@@ -20,7 +20,9 @@ export type TurnWork =
   | "crm"
   | "contacts"
   | "draft"
+  | "sent"
   | "scheduling"
+  | "sender"
   | "connected";
 
 /** Operations of the recruiting tools that read or show and change nothing. */
@@ -96,6 +98,18 @@ export function toolOperation(args: Record<string, unknown>): string | undefined
   return typeof operation === "string" ? operation : undefined;
 }
 
+/** A call that only reads: a recruiting read operation or a get/list/search tool by name. */
+export function readsOnly(name: string, args: Record<string, unknown>): boolean {
+  const operation = toolOperation(args);
+  if (name.startsWith("recruiting_"))
+    return operation !== undefined && READ_OPERATIONS.has(operation);
+  return READ_ACTION.test((name.split("__").at(-1) ?? name).toLowerCase());
+}
+
+/** A reply saying an approval card still waits or the email is not sent ("审批卡仍待你确认"). */
+export const CLAIMS_CARD_PENDING =
+  /(?:仍|还)?(?:在)?(?:等待|待)(?:你的?)?确认|(?:目前|状态)(?:为|是)?\**未发送|尚未发送|还没有?发送|\bstill (?:waiting|pending)\b|\bnot (?:yet )?(?:been )?sent\b/i;
+
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
  * when it changed nothing a person needs to hear about. A failed call did nothing.
@@ -127,6 +141,10 @@ export function turnWork(
   const action = (target.split("__").at(-1) ?? target).toLowerCase();
   // A writable tool's read operation ("ensure_sender" with operation "read") changed nothing.
   if (READ_ACTION.test(action) || (operation && READ_ACTION.test(operation))) return undefined;
+  // A send runs only once its card is confirmed, so a returned send went out.
+  if (/^(?:native_[a-z]+_)?(?:activate_campaign|send_email|send_message|send)$/.test(action))
+    return "sent";
+  if (/sender|mailbox|sending_account/.test(action)) return "sender";
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
   return "connected";
@@ -143,7 +161,9 @@ const WORK_DONE: Record<TurnWork, string> = {
   crm: "updated candidate records",
   contacts: "looked up contact details",
   draft: "saved the email draft",
+  sent: "sent the email",
   scheduling: "updated the schedule",
+  sender: "got the sending email address ready",
   connected: "made changes in a connected app",
 };
 
@@ -157,7 +177,9 @@ const WORK_DONE_ZH: Record<TurnWork, string> = {
   crm: "更新了候选人记录",
   contacts: "查了联系方式",
   draft: "存好了邮件草稿",
+  sent: "发出了邮件",
   scheduling: "更新了日程",
+  sender: "准备好了发件邮箱",
   connected: "在已连接的应用里做了修改",
 };
 
@@ -167,7 +189,9 @@ export function turnReportText(
   savedPeople?: number,
   chinese = false,
 ): string {
-  const items = [...new Set(work)];
+  // "A change in a connected app" says nothing beside work that names itself.
+  const named = [...new Set(work)];
+  const items = named.length > 1 ? named.filter((item) => item !== "connected") : named;
   const counted =
     savedPeople && work.some((item) => item === "people_search" || item === "people_saved");
   if (chinese)
@@ -304,6 +328,14 @@ export class TurnReportLedger {
   }
 
   /** Any consequential work in this attempt. */
+  /** A send or booking returned this attempt: its card was shown and confirmed. */
+  sent(): boolean {
+    return this.entries.some((entry) => {
+      const work = this.workOf(entry);
+      return work === "sent" || work === "scheduling";
+    });
+  }
+
   worked(): boolean {
     return this.entries.some((entry) => this.workOf(entry) !== undefined);
   }
@@ -395,7 +427,7 @@ const TEAMMATE_KINDS: Record<Capability, RegExp> = {
  * checks so the server and the harness agree.
  */
 const DECLINE =
-  /\bI (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)/i;
+  /\bI (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)|权限(?:不支持|不足|不允许|不够)|没有(?:相应的?|足够的?)?权限|需要开通[^。！？\n]{0,20}权限|\bnot (?:permitted|authorized|allowed) to\b|\b(?:my|the current) permissions? (?:do(?:es)?n['’]t|do(?:es)? not) (?:allow|support)\b/i;
 /** A reply that offers the work back instead of doing it ("Do you want me to…?", 要不要我…). */
 const DEFER =
   /\b(?:do you want|would you like|want) me to\b|\bshall I\b|\bshould I (?:go ahead|proceed|start|send|draft|look|find|search|book|schedule|reach|contact)\b|\bif you(?:['’]d| would)? like,? I can\b|要不要我|需要我.{0,24}[吗么]|是否需要我|要我.{0,24}[吗么]|需要你先|请先(?:确认|提供|告诉)/i;
@@ -643,5 +675,7 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
   const b = words(update);
   let shared = 0;
   for (const word of a) if (b.has(word)) shared += 1;
+  // A reply that only repeats the update's closing question or one of its sentences says nothing new.
+  if (a.size >= 5 && shared / a.size >= 0.9) return true;
   return shared / (a.size + b.size - shared) >= 0.55;
 }

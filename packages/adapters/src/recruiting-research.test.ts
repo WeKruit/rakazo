@@ -7,6 +7,7 @@ import {
   AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
   AGENT_RUN_ULTRA_MAX_COST_USD,
+  bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
   lookedUpContacts,
@@ -1329,12 +1330,73 @@ describe("savedContactLookups", () => {
       lookedUpContacts(prisma, actor),
     ]);
     expect(mcpServers).toHaveBeenCalledTimes(1);
-    expect(findMany).toHaveBeenCalledTimes(1);
+    // One read of the lookup receipts and one of the imported lists.
+    expect(findMany).toHaveBeenCalledTimes(2);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
     // Each caller adds to its own copy.
     expect(first.emails).not.toBe(second.emails);
     // A later read sees receipts saved since.
     await lookedUpContacts(prisma, actor);
-    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenCalledTimes(4);
+  });
+
+  // 11-12: a list imported with emails lost them, so Outreach paid for a lookup, found nothing
+  // and asked the recruiter for the address the list already had.
+  it("counts an imported list's addresses as known contact emails, after lookups", async () => {
+    const lookup = {
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "enrich",
+            resourceRevision: 1,
+            toolName: "native_find_emails",
+          },
+          args: { people: [] },
+        },
+      ],
+      result: {
+        structuredContent: {
+          people: [
+            {
+              linkedin_url: "https://www.linkedin.com/in/found",
+              emails: [
+                { address: "found@x.test", type: "work", status: null, provider: "fullenrich" },
+              ],
+              lookups: [{ provider: "fullenrich", outcome: "found" }],
+            },
+          ],
+        },
+      },
+    };
+    const imported = {
+      result: {
+        candidateRows: [
+          { candidateKey: "source-row:import:0", email: "noah@x.test", linkedinUrl: null },
+          {
+            candidateKey: "linkedin:/in/found",
+            email: "list@x.test",
+            linkedinUrl: "https://www.linkedin.com/in/found",
+          },
+          { candidateKey: "linkedin:/in/none" },
+        ],
+      },
+    };
+    const findMany = vi.fn(async (query: { where: { request?: unknown } }) =>
+      JSON.stringify(query.where.request ?? null).includes("import_csv") ? [imported] : [lookup],
+    );
+    const prisma = {
+      externalEffect: { findMany },
+      mcpServer: { findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]) },
+    } as never;
+    const { emails } = await lookedUpContacts(prisma, { userId: "list-user", spaceId: "space" });
+    expect(bestLookedUpEmail(emails, null, "source-row:import:0")?.address).toBe("noah@x.test");
+    // A lookup's result stands; the list only fills in people it lacks.
+    expect(
+      bestLookedUpEmail(emails, "https://www.linkedin.com/in/found", "linkedin:/in/found")?.address,
+    ).toBe("found@x.test");
+    expect(bestLookedUpEmail(emails, null, "linkedin:/in/none")).toBeUndefined();
   });
 });

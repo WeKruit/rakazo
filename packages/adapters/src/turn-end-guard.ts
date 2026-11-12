@@ -18,6 +18,7 @@ import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
   candidateVoiceDraft,
+  declinedSentence,
   declineRetry,
   draftVariables,
   questionCard,
@@ -26,6 +27,10 @@ import {
 } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
+
+/** A reply saying the email went out or the interview was booked. */
+const REPORTS_SENT =
+  /已(?:经)?(?:发送|发出|发给|预约|约好)|\b(?:was|were|has been|have been) (?:sent|booked|scheduled)\b|\bsent (?:it|the|your|an?)\b/i;
 
 /**
  * Turns the guard may push: human turns, its own continuations, the research wake that brings
@@ -472,8 +477,8 @@ export async function guardRecruitingTurnEnd(
     if (
       round &&
       !round.approvedAt &&
-      round.candidateKeys.length === 10 &&
-      new Set(round.candidateKeys).size === 10
+      round.candidateKeys.length > 0 &&
+      new Set(round.candidateKeys).size === round.candidateKeys.length
     ) {
       // A presented round waits on the recruiter until they write (panel feedback is a message);
       // later turns cannot reopen the panel, so pushing them only repeats the same reply.
@@ -779,6 +784,10 @@ export async function planDeclineRetry(
     judge?: () => Promise<TextJudge | undefined>;
     /** A question in the reply stays in text: there is nothing to ask on a card (no role yet). */
     noQuestionCard?: boolean;
+    /** The turn answers a card: a send or booking card was already shown and answered. */
+    answersCard?: boolean;
+    /** A send or booking went out this turn (see TurnReportLedger.sent). */
+    sent?: boolean;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -815,9 +824,13 @@ export async function planDeclineRetry(
   const variables = askedTemplate(asked)
     ? (candidateVoiceDraft(input.reply) ?? sequenceForOneEmail(input.reply, asked))
     : draftVariables(input.reply);
-  const reason = input.request.trim()
-    ? retryReason(input.reply, input.request, input.personRequest)
-    : undefined;
+  // After a send went out or its card was answered, a reply that talks about that work ("已发送给
+  // Noah") owes no card; only an actual refusal is retried.
+  const reason = !input.request.trim()
+    ? undefined
+    : input.sent || (input.answersCard && REPORTS_SENT.test(input.reply))
+      ? declinedSentence(input.reply)
+      : retryReason(input.reply, input.request, input.personRequest);
   const declined = input.noQuestionCard && reason?.kind !== "decline" ? undefined : reason;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;

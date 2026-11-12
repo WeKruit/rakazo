@@ -22,8 +22,8 @@ const OWNER_GAP_MS = 20_000;
 type Owner = { userId: string; spaceId: string; email: string };
 
 /**
- * People whose CRM copy is older than a day, or whose last pass stopped partway (a restart or a
- * failed read). Only owners with the product's own CRM connection are considered.
+ * People whose CRM copy was last read over a day ago, or whose last pass stopped partway (a
+ * restart or a failed read). Only owners with the product's own CRM connection are considered.
  */
 export async function dueRecruitingCrmOwners(
   prisma: Pick<PrismaClient, "$queryRaw">,
@@ -40,8 +40,13 @@ export async function dueRecruitingCrmOwners(
       AND (
         EXISTS (SELECT 1 FROM recruiting_crm_sync_progress p
           WHERE p."userId" = s."userId" AND p."spaceId" = s."spaceId")
-        OR coalesce((SELECT max(c."syncedAt") FROM recruiting_crm_contacts c
-          WHERE c."userId" = s."userId" AND c."spaceId" = s."spaceId"), 'epoch') < ${before}
+        -- Every pass rereads the role list and touches it; contacts change only when the CRM did.
+        OR coalesce(
+          (SELECT max(r."syncedAt") FROM recruiting_crm_roles r
+            WHERE r."userId" = s."userId" AND r."spaceId" = s."spaceId"),
+          (SELECT max(c."syncedAt") FROM recruiting_crm_contacts c
+            WHERE c."userId" = s."userId" AND c."spaceId" = s."spaceId"),
+          'epoch') < ${before}
       )`;
 }
 

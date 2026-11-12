@@ -6,6 +6,8 @@ import {
   questionStatesWork,
   REPORT_BEFORE_ASK,
   restatesUpdate,
+  readsOnly,
+  CLAIMS_CARD_PENDING,
   retryReason,
   TEXT_QUESTION_NOTE,
   TurnReportLedger,
@@ -27,6 +29,11 @@ describe("turnWork", () => {
     expect(
       turnWork("instantly__mail__ensure_role_campaign", {}, { ok: true, readOnly: false }),
     ).toBe("draft");
+    // A send returns only after its card was confirmed: it went out, it is no draft.
+    const sentCall = { ok: true, readOnly: false } as const;
+    expect(turnWork("instantly__mail__activate_campaign", {}, sentCall)).toBe("sent");
+    expect(turnWork("native_instantly_activate_campaign", {}, sentCall)).toBe("sent");
+    expect(turnWork("mcp__gmail__send_message", {}, sentCall)).toBe("sent");
     expect(turnWork("cal__main__create_booking", {}, { ok: true, readOnly: false })).toBe(
       "scheduling",
     );
@@ -51,7 +58,7 @@ describe("turnWork", () => {
       ),
     ).toBeUndefined();
     expect(turnWork("instantly__mail__ensure_sender", { operation: "confirm" }, wrote)).toBe(
-      "connected",
+      "sender",
     );
     expect(turnWork("connectors_execute_tool", { id: "srv:create_booking" }, wrote)).toBe(
       "scheduling",
@@ -137,6 +144,25 @@ describe("turnReportText", () => {
     );
     expect(turnReportText(["feedback"], 12, true)).not.toMatch(/[A-Za-z]/);
   });
+
+  // 11-12: "查了联系方式、在已连接的应用里做了修改" told the recruiter nothing.
+  it("names a sender setup and drops the vague connected-app line beside named work", () => {
+    expect(
+      turnWork(
+        "instantly__instantly__ensure_sender",
+        { operation: "confirm" },
+        {
+          ok: true,
+          readOnly: false,
+          result: {},
+        },
+      ),
+    ).toBe("sender");
+    expect(turnReportText(["contacts", "connected"], undefined, true)).toBe(
+      "已完成：查了联系方式。",
+    );
+    expect(turnReportText(["connected"])).toBe("Done: made changes in a connected app.");
+  });
 });
 
 it("questionStatesWork", () => {
@@ -163,6 +189,10 @@ describe("declinedSentence", () => {
     ["我无法确认这些人的邮箱是否已保存。", "decline"],
     ["我不能直接发送这封邮件。", "decline"],
     ["我没法查到他的联系方式。", "decline"],
+    // 11-12: a one-off email outside a role, blamed on a permission.
+    ["当前权限不支持创建一次性邮件，因此无法提交发送确认。", "decline"],
+    ["需要开通支持单封邮件发送的权限后才能完成。", "decline"],
+    ["I'm not permitted to send a one-off email from this conversation.", "decline"],
     ["I haven't looked up their emails yet. Do you want me to do that now?", "defer"],
     ["Would you like me to draft the first email?", "defer"],
     ["Want me to book Wednesday afternoon?", "defer"],
@@ -187,6 +217,7 @@ describe("declinedSentence", () => {
     "Here are the ten for this round.",
     "已为前5个人找到邮箱，其中1人没有找到。",
     "Booked Wednesday at 2 PM; the confirmation card is above.",
+    "已发起连接请求，授权后就能读取你的日历。",
     "The send card is above; once you confirm, the five emails go out.",
   ];
   it.each(["Which of these look closest to what you want?", "下周三约哪天下午比较方便？"])(
@@ -496,6 +527,30 @@ describe("declineRetry", () => {
   });
 });
 
+describe("readsOnly", () => {
+  it("tells reads from work, so a read after a handoff leaves the request with the teammate", () => {
+    expect(readsOnly("recruiting_candidates", { operation: "list" })).toBe(true);
+    expect(readsOnly("recruiting_role", { operation: "update" })).toBe(false);
+    expect(readsOnly("mcp__instantly__list_campaigns", {})).toBe(true);
+    expect(readsOnly("mcp__instantly__activate_campaign", {})).toBe(false);
+  });
+});
+
+describe("CLAIMS_CARD_PENDING", () => {
+  // Staging 11-12: after the recruiter confirmed the Send card and the email went out.
+  it("reads a reply that says the card still waits or the email is not sent", () => {
+    expect(
+      CLAIMS_CARD_PENDING.test(
+        "已核实：当前的审批卡仍待你确认；审批未完成前我不会重复创建或发送。",
+      ),
+    ).toBe(true);
+    expect(CLAIMS_CARD_PENDING.test("核对结果：没有可确认的发送回执，目前状态为**未发送**。")).toBe(
+      true,
+    );
+    expect(CLAIMS_CARD_PENDING.test("初次联系邮件已发出，收件人仅为 Noah Test。")).toBe(false);
+  });
+});
+
 describe("restatesUpdate", () => {
   const update =
     "The search has brought the role’s Results pool to 122 people, above your target of 100. I included San Francisco Bay Area profiles as a preferred search segment while keeping Atlanta onsite as the role’s primary location.";
@@ -512,6 +567,13 @@ describe("restatesUpdate", () => {
       restatesUpdate(
         "Recorded the first 10-person review set and saved the role brief, including **Chinese preferred; English assumed**. The candidates and their profile passages are shown above.",
         "Recorded the first 10-person review set for the Atlanta on-site Warehouse Operations Manager role, with Chinese preferred and English assumed. The role brief is saved; the first review set includes the candidates and profile passages shown above.",
+      ),
+    ).toBe(true);
+    // The update already asked the question; the final reply asks it again.
+    expect(
+      restatesUpdate(
+        "Which candidates should I email, and what should the email be about?",
+        "I checked your active roles and existing outreach, and there are no candidates or prior emails available in this conversation to act on. Which candidates should I email, and what should the email be about?",
       ),
     ).toBe(true);
   });

@@ -56,8 +56,12 @@ type PeopleOptions = {
   activity: boolean;
   /** Each role entry, for display. */
   detail: boolean;
+  /** Name, title, company, location, LinkedIn and note key, for display, name order or text filters. */
+  display: boolean;
   skills: boolean;
   query?: string;
+  /** Only people with an entry in one of these roles (the role filter). */
+  roleIds?: readonly string[];
 };
 
 /**
@@ -67,20 +71,23 @@ type PeopleOptions = {
 function peopleSql(actor: Actor, options: PeopleOptions) {
   const user = actor.userId;
   const space = actor.spaceId;
-  const { keys, activity, detail, skills, query } = options;
+  const { keys, activity, detail, display, skills, query } = options;
+  const roleIds = keys ? undefined : options.roleIds?.length ? options.roleIds : undefined;
+  const narrow = !keys && Boolean(query || roleIds);
   const only = (column: Prisma.Sql) =>
     keys
       ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})`
-      : query
+      : narrow
         ? Prisma.sql`AND ${column} IN (SELECT person_key FROM matching_keys)`
         : Prisma.empty;
   const pattern = query ? like(query) : "";
   const crmOwner = Prisma.sql`cc."userId" = ${user} AND cc."spaceId" = ${space} AND cc."archivedAt" IS NULL`;
-  const crmCandidates = keys
-    ? Prisma.sql`AND "crmCandidateId" IN (
+  const crmCandidates =
+    keys || narrow
+      ? Prisma.sql`AND "crmCandidateId" IN (
         SELECT cc."crmCandidateId" FROM recruiting_crm_contacts cc
         WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})`
-    : Prisma.empty;
+      : Prisma.empty;
   return Prisma.sql`
     roles AS (
       SELECT r.id, r.title, t."groupId" AS group_id, r."sourceThreadId" AS thread_id
@@ -92,9 +99,12 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
           SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
     ),
     ${
-      query
+      narrow
         ? Prisma.sql`matching_keys AS MATERIALIZED (
-      SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
+      ${Prisma.join(
+        [
+          query &&
+            Prisma.sql`(SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
       WHERE ${crmOwner} AND concat_ws(' ',cc.name,cc.title,cc.company,cc.location,cc.email) ILIKE ${pattern}
       UNION
       SELECT o."candidateKey" FROM recruiting_candidate_occurrences o
@@ -102,7 +112,26 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND concat_ws(' ',o.name,o.title,o.company,o.location) ILIKE ${pattern}
       UNION
       SELECT sp."personKey" FROM recruiting_saved_profiles sp
-      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern}
+      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern})`,
+          // A role filter reads only that role's people: its own candidates and the CRM
+          // contacts linked to it (directly, or through the product role it is attached to).
+          roleIds &&
+            Prisma.sql`(SELECT c."candidateKey" AS person_key FROM recruiting_candidates c
+      WHERE c."roleId" IN (SELECT id FROM roles WHERE id IN (${Prisma.join(roleIds)}))
+      UNION
+      SELECT ${CRM_PERSON_KEY} FROM recruiting_crm_roles cr
+      JOIN recruiting_crm_role_contacts rc ON rc."roleId" = cr.id AND rc."archivedAt" IS NULL
+      JOIN recruiting_crm_contacts cc ON cc.id = rc."contactId" AND ${crmOwner}
+      LEFT JOIN recruiting_crm_workspace_attachments a
+        ON a."userId" = ${user} AND a."spaceId" = ${space}
+        AND a."mcpServerId" = cr."mcpServerId" AND a."organizationId" = cr."organizationId"
+        AND a."crmRoleId" = cr."crmRoleId"
+      LEFT JOIN roles ar ON ar.id = a."roleId"
+      WHERE cr."userId" = ${user} AND cr."spaceId" = ${space} AND cr."archivedAt" IS NULL
+        AND COALESCE(ar.id, 'crm:' || cr.id) IN (${Prisma.join(roleIds)}))`,
+        ].filter((part): part is Prisma.Sql => Boolean(part)),
+        "\n      INTERSECT\n      ",
+      )}
     ),`
         : Prisma.empty
     }
@@ -212,15 +241,23 @@ ${
       UNION ALL
       SELECT * FROM crm
     ),
-    -- One sort picks each person's display row: a role's own row before the CRM's copy.
-    primary_entry AS (
-      SELECT DISTINCT ON (person_key) person_key, name, title, company, location, linkedin_url, note_key
-      FROM entries
-      ORDER BY person_key, source_rank, (name IS NULL), added_at DESC NULLS LAST
-    ),
+    -- One pass groups each person's entries. The display fields come from one row, a role's own
+    -- row before the CRM's copy; reads that neither show nor sort by them skip that ordering.
     totals AS (
       SELECT
         person_key,
+        ${
+          display
+            ? Prisma.join(
+                ["name", "title", "company", "location", "linkedin_url", "note_key"].map(
+                  (column) =>
+                    Prisma.sql`(array_agg(${Prisma.raw(column)} ORDER BY source_rank, (name IS NULL), added_at DESC NULLS LAST, note_key))[1] AS ${Prisma.raw(column)}`,
+                ),
+                ",\n        ",
+              )
+            : Prisma.sql`NULL::text AS name, NULL::text AS title, NULL::text AS company,
+        NULL::text AS location, NULL::text AS linkedin_url, NULL::text AS note_key`
+        },
         max(email) AS email,
         -- The CRM's pipeline stage says more than a saved/shortlisted mark when both exist.
         max(status) FILTER (WHERE source_rank = 1) AS crm_status,
@@ -245,14 +282,15 @@ ${
       GROUP BY person_key
     ),
     people AS (
-      SELECT f.*, COALESCE(t.email, NULLIF(btrim(sp.profile->>'email'), '')) AS email,
+      SELECT t.person_key, t.name, t.title, t.company, t.location, t.linkedin_url, t.note_key,
+        COALESCE(t.email, NULLIF(btrim(sp.profile->>'email'), '')) AS email,
         t.role_ids, t.roles, t.shortlisted, t.added_at, t.last_contacted,
         t.last_replied, ${skills ? Prisma.sql`t.skills,` : Prisma.empty}
         COALESCE(t.crm_status,
           CASE t.product_status WHEN 0 THEN 'shortlisted' WHEN 1 THEN 'on_hold' WHEN 2 THEN 'passed' ELSE 'saved' END
         ) AS status
-      FROM primary_entry f JOIN totals t USING (person_key)
-      LEFT JOIN recruiting_saved_profiles sp ON sp."personKey" = f.person_key
+      FROM totals t
+      LEFT JOIN recruiting_saved_profiles sp ON sp."personKey" = t.person_key
         AND sp."ownerUserId" = ${user} AND sp."spaceId" = ${space}
     )`;
 }
@@ -377,7 +415,16 @@ export async function listRecruitingContacts(
     ].some((value) => value !== undefined);
   // Which people, in order: only the columns the sort and filters need, for everyone.
   const page = await prisma.$queryRaw<{ person_key: string; total: bigint | number }[]>(Prisma.sql`
-    WITH ${peopleSql(actor, { activity, detail: false, skills: Boolean(filters.skills), query: filters.query })}
+    WITH ${peopleSql(actor, {
+      activity,
+      detail: false,
+      display:
+        input.sort === "name" ||
+        Boolean(filters.query || filters.location || filters.company || filters.title),
+      skills: Boolean(filters.skills),
+      query: filters.query,
+      roleIds: filters.roleIds,
+    })}
     SELECT p.person_key, count(*) OVER () AS total
     FROM people p
     ${filterSql(actor, filters)}
@@ -387,7 +434,13 @@ export async function listRecruitingContacts(
   // Everything shown for just this page's people.
   const detail = order.length
     ? await prisma.$queryRaw<Row[]>(Prisma.sql`
-        WITH ${peopleSql(actor, { keys: order, activity: true, detail: true, skills: false })}
+        WITH ${peopleSql(actor, {
+          keys: order,
+          activity: true,
+          detail: true,
+          display: true,
+          skills: false,
+        })}
         SELECT p.person_key, p.name, p.title, p.company, p.location, p.linkedin_url, p.email,
           p.status, p.roles, p.note_key, p.added_at, p.last_contacted, p.last_replied, 0 AS total
         FROM people p`)

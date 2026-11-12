@@ -84,8 +84,11 @@ const lastBy = <T>(rows: T[], key: (row: T) => string) => [
 ];
 
 /**
- * Upserts rows keyed by their CRM id inside one owner scope. Unchanged rows only get `syncedAt`
- * touched, so a later "not seen since" archive pass can find what disappeared from the CRM.
+ * Upserts rows keyed by their CRM id inside one owner scope. Unchanged rows of small tables get
+ * `syncedAt` touched, which records when they were last read. Large tables pass `touch: false`:
+ * Postgres rewrites a whole row for every touch, so touching every contact and message on every
+ * pass bloats the table and evicts the cache the contact lists read from. Their full pass finds
+ * what disappeared from the CRM by the identities it saw, not by `syncedAt`.
  */
 async function upsertKeyed<T extends Record<string, unknown>>(
   delegate: {
@@ -97,7 +100,7 @@ async function upsertKeyed<T extends Record<string, unknown>>(
   where: Record<string, unknown>,
   keyField: string,
   rows: T[],
-  options: Options & { archivable: boolean },
+  options: Options & { archivable: boolean; touch: boolean },
 ): Promise<RecruitingCrmSyncCounts> {
   const counts = emptyCrmSyncCounts();
   const unique = lastBy(rows, (row) => String(row[keyField]));
@@ -130,7 +133,7 @@ async function upsertKeyed<T extends Record<string, unknown>>(
     const restored = options.archivable && existing.archivedAt != null;
     if (!restored && !changed(existing, row)) {
       counts.unchanged++;
-      touch.push(String(existing.id));
+      if (options.touch) touch.push(String(existing.id));
       continue;
     }
     if (restored) counts.restored++;
@@ -177,6 +180,7 @@ export async function syncRecruitingCrmRoles(
   const counts = await upsertKeyed(prisma.recruitingCrmRole, where, "crmRoleId", roles, {
     ...options,
     archivable: true,
+    touch: true,
   });
   if (!options.complete) return counts;
   const gone = {
@@ -207,32 +211,8 @@ export function syncRecruitingCrmContacts(
   return upsertKeyed(prisma.recruitingCrmContact, owned(actor, scope), "crmCandidateId", contacts, {
     ...options,
     archivable: true,
+    touch: false,
   });
-}
-
-/**
- * After a complete organization pass that started at `since`, archives contacts it did not see.
- * A dry run cannot mark rows, so it reports active stored contacts minus those the pass matched.
- */
-export async function archiveUnseenRecruitingCrmContacts(
-  prisma: PrismaClient,
-  actor: Actor,
-  scope: CrmSyncScope,
-  since: Date,
-  options: Options & { matchedStored: number },
-) {
-  const where = { ...owned(actor, scope), archivedAt: null };
-  if (options.dryRun)
-    return Math.max(
-      0,
-      (await prisma.recruitingCrmContact.count({ where })) - options.matchedStored,
-    );
-  return (
-    await prisma.recruitingCrmContact.updateMany({
-      where: { ...where, syncedAt: { lt: since } },
-      data: { archivedAt: options.now, syncedAt: options.now },
-    })
-  ).count;
 }
 
 /** Links one page of a role's contacts (which must already be synced) to that role. */
@@ -264,7 +244,6 @@ export async function syncRecruitingCrmRoleLinks(
     : [];
   const stored = new Map(links.map((link) => [link.contactId, link]));
   const create: string[] = [];
-  const touch: string[] = [];
   const restore: string[] = [];
   // A dry run has not created the new contacts yet; a real run links only stored contacts.
   if (options.dryRun) counts.created = ids.length - contacts.length;
@@ -272,58 +251,28 @@ export async function syncRecruitingCrmRoleLinks(
     const link = stored.get(contact.id);
     if (!link) create.push(contact.id);
     else if (link.archivedAt) restore.push(contact.id);
-    else touch.push(contact.id);
+    // A current link is left as it is; the full pass finds unlinked people by who it saw.
+    else counts.unchanged++;
   }
   counts.created += create.length;
   counts.restored = restore.length;
-  counts.unchanged = touch.length;
   if (options.dryRun || !role) return counts;
   if (create.length)
     await prisma.recruitingCrmRoleContact.createMany({
       data: create.map((contactId) => ({ roleId: role.id, contactId, syncedAt: options.now })),
       skipDuplicates: true,
     });
-  if (touch.length || restore.length)
+  if (restore.length)
     await prisma.recruitingCrmRoleContact.updateMany({
       where: {
         roleId: role.id,
-        contactId: { in: [...touch, ...restore] },
+        contactId: { in: restore },
         syncedAt: { lte: options.now },
         OR: [{ archivedAt: null }, { archivedAt: { lt: options.now } }],
       },
       data: { syncedAt: options.now, archivedAt: null },
     });
   return counts;
-}
-
-/** After a complete pass of one role's contacts, archives the links it did not see. */
-export async function archiveUnseenRecruitingCrmRoleLinks(
-  prisma: PrismaClient,
-  actor: Actor,
-  scope: CrmSyncScope,
-  crmRoleId: string,
-  since: Date,
-  options: Options & { matchedStored: number },
-) {
-  const role = await prisma.recruitingCrmRole.findUnique({
-    where: {
-      userId_spaceId_mcpServerId_organizationId_crmRoleId: { ...owned(actor, scope), crmRoleId },
-    },
-    select: { id: true },
-  });
-  if (!role) return 0;
-  const where = { roleId: role.id, archivedAt: null };
-  if (options.dryRun)
-    return Math.max(
-      0,
-      (await prisma.recruitingCrmRoleContact.count({ where })) - options.matchedStored,
-    );
-  return (
-    await prisma.recruitingCrmRoleContact.updateMany({
-      where: { ...where, syncedAt: { lt: since } },
-      data: { archivedAt: options.now, syncedAt: options.now },
-    })
-  ).count;
 }
 
 export function syncRecruitingCrmMessages(
@@ -336,6 +285,7 @@ export function syncRecruitingCrmMessages(
   return upsertKeyed(prisma.recruitingCrmMessage, owned(actor, scope), "crmMessageId", messages, {
     ...options,
     archivable: false,
+    touch: false,
   });
 }
 
@@ -427,6 +377,7 @@ export function syncRecruitingCrmCampaigns(
     {
       ...options,
       archivable: false,
+      touch: true,
     },
   );
 }
@@ -442,6 +393,7 @@ export function syncRecruitingCrmLeads(
   return upsertKeyed(prisma.recruitingCrmLead, owned(actor, scope), "crmLeadId", leads, {
     ...options,
     archivable: false,
+    touch: true,
   });
 }
 

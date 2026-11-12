@@ -487,7 +487,9 @@ describe("guardRecruitingTurnEnd", () => {
 
   it.each([
     [10, false, true, false, "ended"],
-    [9, false, true, false, "continued"],
+    // A round short of ten after the deeper search waits on the recruiter like a full one.
+    [9, false, true, false, "ended"],
+    [0, false, true, false, "continued"],
     [10, true, true, false, "continued"],
     [10, false, false, false, "ended"],
     [10, false, false, true, "continued"],
@@ -1164,6 +1166,32 @@ describe("planDeclineRetry", () => {
         input,
       ),
     ).toBeUndefined();
+  });
+
+  // Staging 11-12: after the recruiter approved the Send card, "已发送给 Noah" was retried as a refusal.
+  it("keeps a reply that reports the send after its card was answered", async () => {
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const sent = {
+      ...input,
+      reply: "初次联系邮件已发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
+    };
+    expect(await planDeclineRetry(human, { ...sent, answersCard: true })).toBeUndefined();
+    // Staging 11-12 rerun: the send went out in the same turn as the confirmed card.
+    expect(
+      await planDeclineRetry(human, {
+        ...sent,
+        reply: "已提交并发送给 Noah Test（noah-scheduling@mail.grokbot.com）。",
+        sent: true,
+      }),
+    ).toBeUndefined();
+    expect(await planDeclineRetry(human, sent)).toBeDefined();
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply: "我无法发送这封邮件。",
+        answersCard: true,
+      }),
+    ).toBeDefined();
   });
 
   it("retries once when every memory save failed, so a failed save is not told as saved", async () => {

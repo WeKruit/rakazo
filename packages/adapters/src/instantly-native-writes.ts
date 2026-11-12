@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
+import { signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -11,6 +12,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  adoptAssignedSenders,
   adoptLegacySender,
   confirmedSendingMailbox,
   confirmedSendingMailboxes,
@@ -39,7 +41,8 @@ const Step = z.strictObject({
     .string()
     .min(1)
     .max(20_000)
-    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.'),
+    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.')
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
   delay_days: z
     .number()
     .int()
@@ -234,7 +237,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send one email to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
   ),
   tool(
     "add_leads",
@@ -621,7 +624,10 @@ async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
 
 async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId?: string) {
   const id = roleId ?? (await activeRoleId(prisma, context));
-  if (!id) throw new Error("Pass role_id: this conversation has no linked recruiting role");
+  if (!id)
+    throw new Error(
+      "Pass role_id: this conversation has no linked recruiting role. To email someone the recruiter names outside a role, use create_campaign with that email as steps, then add_leads, then activate_campaign with its campaign_id.",
+    );
   const role = await prisma.recruitingRole.findFirst({
     where: { id, spaceId: context.spaceId, userId: context.userId },
     select: { id: true, title: true },
@@ -1006,7 +1012,12 @@ export async function describeCampaignActivation(
       () => undefined,
     ),
   ]);
-  const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  // get_campaign names the sending mailbox sendingMailbox; the raw provider read calls it email_list.
+  const emails = Array.isArray(campaign?.sendingMailbox)
+    ? campaign.sendingMailbox
+    : Array.isArray(campaign?.email_list)
+      ? campaign.email_list
+      : [];
   const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
   const templated = isTemplated(campaign);
   const people = (items ?? []).flatMap(asPerson);
@@ -2490,13 +2501,27 @@ export async function runInstantlyWrite(
   /** Set on the shared account: the campaigns and senders this connection owns. */
   owned?: OwnedInstantly,
 ): Promise<unknown> {
-  if (owned && toolName === "native_instantly_create_campaign")
-    throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  // On the shared account a role's campaign comes only from ensure_role_campaign; outside a role,
+  // create_campaign makes this account's own campaign for an email to someone the recruiter names.
+  const direct =
+    owned && toolName === "native_instantly_create_campaign"
+      ? !(await activeRoleId(prisma, context))
+      : false;
+  if (owned && toolName === "native_instantly_create_campaign" && !direct)
+    throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
+  // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
+  // reply in a thread one of them already holds works as well as a new send.
+  if (owned && toolName !== "native_instantly_ensure_sender") {
+    const adopted = await adoptAssignedSenders(prisma, accountRest, context, serverId);
+    if (adopted.length)
+      owned = { ...owned, mailboxes: new Set([...owned.mailboxes, ...adopted.map(mailboxKey)]) };
+  }
   if (
     owned &&
     !owned.mailboxes.size &&
     (toolName === "native_instantly_ensure_role_campaign" ||
-      toolName === "native_instantly_add_shortlist_leads")
+      toolName === "native_instantly_add_shortlist_leads" ||
+      direct)
   ) {
     const adopted = await adoptLegacySender(prisma, accountRest, context, serverId);
     if (adopted) owned = { ...owned, mailboxes: new Set([mailboxKey(adopted)]) };
@@ -2648,9 +2673,39 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
-      const campaign = await createCampaign(rest, input);
-      await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
-      return campaign;
+      if (!direct) {
+        const campaign = await createCampaign(rest, input);
+        await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
+        return campaign;
+      }
+      if (!context.runId) throw new IsolationError("A run is required to create a campaign");
+      // An email to someone the recruiter names goes out when they confirm it, not next weekday.
+      const campaign = await createCampaign(rest, {
+        ...input,
+        send_hours: input.send_hours ?? "any_time",
+      });
+      if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
+      await prisma.externalEffect.create({
+        data: {
+          spaceId: context.spaceId,
+          runId: context.runId,
+          kind: "instantly_role_campaign",
+          idempotencyKey: `instantly-direct-campaign:${serverId}:${campaign.id}`,
+          status: "completed",
+          request: { serverId, direct: true },
+          result: {
+            campaignId: campaign.id,
+            campaignName: String(campaign.name ?? input.name),
+            eaccount: input.eaccount,
+            leads: {},
+          },
+        },
+      });
+      if (input.steps) await requireSavedEmail(rest, campaign.id);
+      return {
+        ...campaign,
+        next: "Add the person with add_leads on this campaign_id, then call activate_campaign with this campaign_id and them as recipients; its card is the recruiter's one confirmation.",
+      };
     }
     case "native_instantly_add_leads": {
       const input = AddLeadsInput.parse(args);

@@ -214,6 +214,16 @@ test("one question, a draft with its own question and a quoted line count as one
     ["要现在发吗？"],
   );
 });
+test("an email body the recruiter dictates in English does not make their message English", () => {
+  const failures = conversationChecks([
+    user(
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?",
+    ),
+    bot("我会只向 Alex 的地址发送这封指定内容的邮件，并提交发送确认。"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
 test("a Chinese question with an English role title is still Chinese", () => {
   const failures = conversationChecks([
     user("继续吧"),
@@ -318,4 +328,24 @@ test("a factual answer with a caveat is not a dead end", () => {
     !deadEnd(bot("结果会保留来源和证据，资料缺失或无法核实时会标明。覆盖范围取决于公开资料。")),
   );
   assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
+});
+
+test("a reply that blames a permission or tells the recruiter to open a role fails", () => {
+  for (const reply of [
+    "测试邮件尚未发出。当前权限不支持创建一次性邮件，因此无法提交发送确认；需要开通支持单封邮件发送的权限后才能完成。",
+    "请先打开岗位对话后再查看这位候选人的邮件。",
+    "I don't have permission to send a one-off email from here.",
+  ]) {
+    const failures = conversationChecks([user("帮我给 alex@example.com 发封邮件"), bot(reply)]);
+    assert(
+      failures.some((failure) => failure.startsWith("blames a permission or a missing path")),
+      reply,
+    );
+  }
+  assert(
+    !conversationChecks([
+      user("帮我连 Gmail"),
+      bot("我已经发起 Gmail 授权，请在卡片上连接。"),
+    ]).some((failure) => failure.startsWith("blames a permission")),
+  );
 });

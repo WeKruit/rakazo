@@ -9,6 +9,8 @@ import {
   STEERING_PEEK_MS,
   STEERING_QUICK_REPLY_SENDING,
   saysSomething,
+  waitsOnTeammate,
+  withoutPolls,
 } from "./executor.js";
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
@@ -458,10 +460,34 @@ describe("reply suggestion", () => {
   });
 });
 
+describe("withoutPolls", () => {
+  // Staging 11-12: "请只发一张多选问题卡片…" became a poll, which closed and the agent then voted on.
+  it("leaves recruiting runs no poll, so a question for the recruiter is a question card", () => {
+    const tools = [{ name: "ask_user" }, { name: "create_poll" }];
+    expect(withoutPolls(tools, true).map((tool) => tool.name)).toEqual(["ask_user"]);
+    expect(withoutPolls(tools, false)).toHaveLength(2);
+  });
+});
+
+describe("waitsOnTeammate", () => {
+  it("reads a line saying a teammate's email is not sent yet", () => {
+    expect(
+      waitsOnTeammate(
+        "这封邮件还没有准备好或发送。负责处理的流程目前暂停，尚未给出邮件草稿或需要你补充的信息。",
+      ),
+    ).toBe(true);
+    expect(waitsOnTeammate("初次联系邮件已发送给 Noah Test。")).toBe(false);
+  });
+});
+
 describe("quick reply", () => {
   it("counts only words or cards as a reply, not a row of the run's steps", () => {
     expect(saysSomething([{ kind: "steps", steps: [] } as never])).toBe(false);
     expect(saysSomething([{ kind: "text", text: "  " }])).toBe(false);
+    // A handoff to a teammate is a marker, not a reply: the quick first line still goes out.
+    expect(
+      saysSomething([{ kind: "handoff", fromBotId: "a", toBotId: "b", text: "Find people." }]),
+    ).toBe(false);
     expect(saysSomething([{ kind: "text", text: "On it." }])).toBe(true);
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
   });

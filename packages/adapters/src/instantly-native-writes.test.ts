@@ -209,6 +209,16 @@ describe("activation card for one person's own first email", () => {
     expect(display.refusal).toBeUndefined();
   });
 
+  it("names the sending mailbox from get_campaign when no role says it", async () => {
+    const { email_list: _, ...rest } = campaign;
+    const fromTool = async (tool: string) =>
+      tool === "native_instantly_get_campaign"
+        ? { ...rest, sendingMailbox: ["me@x.test"] }
+        : { items: leads };
+    const display = await describeCampaignActivation(fromTool, "c-1", null, null, ["ada@x.test"]);
+    expect(display.mailbox).toBe("me@x.test");
+  });
+
   it("shows the role's email for the people who keep it", async () => {
     const display = await describeCampaignActivation(read, "c-1", null, binding);
     expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
@@ -362,17 +372,22 @@ describe("shared mail account isolation", () => {
     expect(rest).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses a raw campaign create and other accounts' campaigns through the tools", async () => {
+  it("refuses a raw campaign create in a role and other accounts' campaigns", async () => {
     const rest = account();
+    const inRole = {
+      run: {
+        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-1" } })),
+      },
+    };
     await expect(
       runInstantlyWrite(
-        {} as never,
+        inRole as never,
         rest as never,
-        context,
+        { ...(context as object), runId: "run-1" } as never,
         "server",
         "native_instantly_create_campaign",
         {},
-        { campaigns: new Set(), mailboxes: new Set() },
+        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
       ),
     ).rejects.toThrow("ensure_role_campaign");
     await expect(
@@ -387,6 +402,57 @@ describe("shared mail account isolation", () => {
       ),
     ).rejects.toThrow("does not belong to this account");
     expect(rest).not.toHaveBeenCalled();
+  });
+
+  it("outside a role, creates this account's own campaign for one email to a named address", async () => {
+    const saved = {
+      id: NEW,
+      name: "Test note",
+      sequences: [{ steps: [{ variants: [{ subject: "Test note", body: "<p>Hello</p>" }] }] }],
+    };
+    const rest = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === "GET" && path === "/accounts/me%40ours.test") return { email: "me@ours.test" };
+      if (method === "POST" && path === "/campaigns") {
+        expect(body).toMatchObject({
+          name: "Test note",
+          email_list: ["me@ours.test"],
+          campaign_schedule: { schedules: [{ timing: { from: "00:00", to: "23:59" } }] },
+        });
+        return { id: NEW, name: "Test note" };
+      }
+      if (method === "GET" && path === `/campaigns/${NEW}`) return saved;
+      throw new Error(`unexpected ${method} ${path}`);
+    });
+    const create = vi.fn(async () => ({}));
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { create },
+    };
+    const result = await runInstantlyWrite(
+      prisma as never,
+      rest as never,
+      { ...(context as object), runId: "run-1" } as never,
+      "server",
+      "native_instantly_create_campaign",
+      {
+        name: "Test note",
+        eaccount: "me@ours.test",
+        steps: [{ subject: "Test note", body: "Hello" }],
+      },
+      { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
+    );
+    expect(result).toMatchObject({ id: NEW, next: expect.stringContaining("activate_campaign") });
+    // Recorded as this account's campaign, so add_leads and activate_campaign may use it.
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "instantly_role_campaign",
+        status: "completed",
+        idempotencyKey: `instantly-direct-campaign:server:${NEW}`,
+        request: { serverId: "server", direct: true },
+        result: expect.objectContaining({ campaignId: NEW, eaccount: "me@ours.test" }),
+      }),
+    });
   });
 
   it("lists and uses only this account's own sending mailboxes", async () => {
@@ -444,6 +510,7 @@ describe("reply sender checks before card creation", () => {
     );
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: { findUnique },
     };
     const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
@@ -500,6 +567,7 @@ it.each([false, true])(
     const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: {
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>

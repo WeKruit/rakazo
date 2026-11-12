@@ -378,6 +378,8 @@ const RecruitingCalibrationApproval = {
   documentsApprovalEffectId: RecruitingId,
   ruleChanges: z.array(Text).readonly(),
 };
+/** A calibration round shows ten people, or every fitting person a deeper search found when fewer fit. */
+export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
   z.strictObject({ ...RecruitingApprovalScope, stage: z.literal("brief") }),
   RecruitingDocumentsApprovalInputSchema,
@@ -390,7 +392,8 @@ export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
           source: z.strictObject(RecruitingCandidateEvidenceReference),
         }),
       )
-      .length(10),
+      .min(1)
+      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
   }),
 ]);
 export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
@@ -422,7 +425,8 @@ export const RetainedRecruitingApprovalRequestSchema = z.union([
           assessmentVersion: Revision,
         }),
       )
-      .length(10),
+      .min(1)
+      .max(RECRUITING_CALIBRATION_ROUND_SIZE),
   }),
 ]);
 export type RetainedRecruitingApprovalRequest = z.infer<
@@ -1097,7 +1101,6 @@ export const RecruitingGradeRowSchema = z.object({
     .max(20),
 });
 export type RecruitingGradeRow = z.infer<typeof RecruitingGradeRowSchema>;
-export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
   z.strictObject({
@@ -1105,7 +1108,8 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     expectedRoleRevision: Revision,
     candidateKeys: z
       .array(RecruitingId)
-      .length(RECRUITING_CALIBRATION_ROUND_SIZE)
+      .min(1)
+      .max(RECRUITING_CALIBRATION_ROUND_SIZE)
       .superRefine((keys, ctx) => {
         const repeated = keys.filter((key, index) => keys.indexOf(key) !== index);
         if (repeated.length)
@@ -1170,6 +1174,8 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       title: ResearchText.optional(),
       location: ResearchText.optional(),
       resumeUrl: ResearchText.optional(),
+      // The recruiter's own address for each person: kept as their known contact email.
+      email: ResearchText.optional(),
     }),
   }),
   z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),

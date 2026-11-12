@@ -507,6 +507,37 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     expect(await prisma.recruitingCrmContact.count({ where: scoped(actor) })).toBe(3);
   });
 
+  it("leaves unchanged contacts, links and mail unwritten on a later pass", async () => {
+    await runAll(actor, crm.read);
+    // xmin changes whenever Postgres writes a new row version, even for the same values.
+    const versions = () =>
+      prisma.$queryRaw<{ xmin: string }[]>`
+        SELECT xmin::text FROM recruiting_crm_contacts
+        WHERE "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+        UNION ALL
+        SELECT l.xmin::text FROM recruiting_crm_role_contacts l
+        JOIN recruiting_crm_contacts c ON c.id = l."contactId"
+        WHERE c."userId" = ${actor.userId} AND c."spaceId" = ${actor.spaceId}
+        UNION ALL
+        SELECT xmin::text FROM recruiting_crm_messages
+        WHERE "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+        ORDER BY 1`;
+    const before = await versions();
+    expect(before).toHaveLength(7);
+    expect(await runAll(actor, crm.read)).toMatchObject({
+      contacts: { unchanged: 3, archived: 0 },
+      links: { unchanged: 3, archived: 0 },
+      messages: { unchanged: 1 },
+    });
+    expect(await versions()).toEqual(before);
+    // The role list is still read and stamped, so the owner is not due again for a day.
+    expect(
+      await prisma.recruitingCrmRole.count({
+        where: { ...scoped(actor), syncedAt: { gt: new Date(Date.now() - 60_000) } },
+      }),
+    ).toBe(2);
+  });
+
   it("archives what left the CRM and restores it when it returns, never deleting", async () => {
     await runAll(actor, crm.read);
     crm.state.contacts = [contact(1, { stage: "Interview" }), contact(2)];

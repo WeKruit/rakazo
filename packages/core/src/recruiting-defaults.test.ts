@@ -3,6 +3,7 @@ import {
   creditEstimateNote,
   isChineseText,
   isEnglishText,
+  signedAsTeam,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -88,11 +89,28 @@ describe("maintained recruiting defaults", () => {
   });
 });
 
+describe("signedAsTeam", () => {
+  it("finds an email signed by a team instead of a person", () => {
+    expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
+      true,
+    );
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nThe Recruiting Team.")).toBe(true);
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nJules Hou")).toBe(false);
+    expect(signedAsTeam("Hi Noah, are you open to recruiting work?")).toBe(false);
+  });
+});
+
 describe("isChineseText", () => {
   // Staging eval 11-11: 「发给 alex.chen.test@example.com」 got English replies.
   it("ignores email addresses and links when reading the language", () => {
     expect(isChineseText("发给 alex.chen.test@example.com")).toBe(true);
     expect(isEnglishText("发给 alex.chen.test@example.com")).toBe(false);
+    // The email body the recruiter dictates is the candidate's language, not theirs.
+    const dictated =
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?";
+    expect(isChineseText(dictated)).toBe(true);
+    expect(isEnglishText(dictated)).toBe(false);
+    expect(isEnglishText('Send Alex "你好，下周有空吗" please, thanks a lot')).toBe(true);
     expect(isChineseText("看看这个 https://www.linkedin.com/in/some-person-name")).toBe(true);
     expect(recruiterLanguageText(["发给 alex.chen.test@example.com", "Write a template"])).toBe(
       "发给 alex.chen.test@example.com",

@@ -295,6 +295,22 @@ describe("recruiter CSV import", () => {
   const run = (d: ReturnType<typeof deps>, ctx = adapterContext) =>
     tools.importRecruitingCandidateCsv(d as never, trusted, input, ctx);
 
+  it("keeps a valid email column, lowercased, and leaves out what is not an address", async () => {
+    vi.mocked(saveRecruitingCandidateCsvImport).mockResolvedValue({ status: "saved" } as never);
+    const d = deps("Name,Email\r\nNoah Test,Noah@Example.test\r\nAda,not an email\r\n");
+    await tools.importRecruitingCandidateCsv(
+      d as never,
+      trusted,
+      { ...input, mapping: { name: "Name", email: "Email" } },
+      adapterContext,
+    );
+    const captured = vi.mocked(saveRecruitingCandidateCsvImport).mock.calls[0]![4];
+    expect(captured.rows.map((row) => row.row)).toEqual([
+      { name: "Noah Test", email: "noah@example.test" },
+      { name: "Ada" },
+    ]);
+  });
+
   it("maps columns, skips rows with no name and no LinkedIn, and binds the receipt", async () => {
     vi.mocked(saveRecruitingCandidateCsvImport).mockResolvedValue({ status: "saved" } as never);
     const d = deps(

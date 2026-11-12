@@ -616,7 +616,42 @@ async function readLookedUpContacts(
   const saved: SavedContactLookups = { emails: new Map(), searched: new Map() };
   for (const server of servers)
     await savedContactLookups(prisma, actor, server, "native_find_emails", saved);
+  await importedContactEmails(prisma, actor, saved.emails);
   return saved;
+}
+
+/**
+ * Addresses the recruiter's own imported lists gave, by LinkedIn key or else the saved person's
+ * key. A list with emails is a known contact: its people are never looked up (and paid for)
+ * again, nor asked for. Lookup results come first; a list fills in only who they lack.
+ */
+async function importedContactEmails(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  into: Map<string, FoundEmail[]>,
+) {
+  const imports = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      run: { userId: actor.userId },
+      kind: "recruiting_research",
+      status: "completed",
+      request: { path: ["operation"], equals: "import_csv" },
+    },
+    select: { result: true },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
+  for (const { result } of imports) {
+    const rows = record(result)?.candidateRows;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const entry = record(row);
+      const address = typeof entry?.email === "string" ? entry.email : undefined;
+      const key = linkedinPersonKey(entry?.linkedinUrl) ?? entry?.candidateKey;
+      if (!address || typeof key !== "string" || into.has(key)) continue;
+      into.set(key, [{ address, type: "personal", status: null, provider: "import" }]);
+    }
+  }
 }
 
 /** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
@@ -632,8 +667,9 @@ export function bestLookedUpEmail(
   found: Map<string, FoundEmail[]>,
   ...profiles: (string | null | undefined)[]
 ) {
+  // A saved person without a LinkedIn profile is known by their saved key.
   const emails = profiles
-    .map((value) => linkedinPersonKey(value))
+    .flatMap((value) => [linkedinPersonKey(value), value])
     .filter((key): key is string => Boolean(key))
     .flatMap((key) => found.get(key) ?? []);
   return emails.find((email) => email.status === "DELIVERABLE") ?? emails[0];
