@@ -237,7 +237,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send one email to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
   ),
   tool(
     "add_leads",
