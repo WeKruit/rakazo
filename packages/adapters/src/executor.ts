@@ -869,6 +869,9 @@ const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
 
 /** People Kruit lists from a role when the recruiter named no number. */
 const SHOWN_ROLE_PEOPLE = 10;
+/** Outside a role there is no campaign to default to; a card naming nothing must never show. */
+export const NO_CAMPAIGN_TO_ACTIVATE =
+  "Pass campaign_id: outside a role conversation, activate the campaign create_campaign returned (its id) with the same recipients. Nothing was sent.";
 // One mail page saves the files of at most this many received emails; a later read saves the rest.
 const MAX_ATTACHMENT_EMAILS = 5;
 
@@ -11615,6 +11618,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
+                (approvalRoute.toolName ===
+                  "native_instantly_activate_campaign" && !campaignId
+                  ? NO_CAMPAIGN_TO_ACTIVATE
+                  : null) ??
                 instantlyActivation?.refusal ??
                 (instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
