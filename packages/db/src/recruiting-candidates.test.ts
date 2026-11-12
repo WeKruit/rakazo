@@ -200,12 +200,16 @@ describe("candidate listing and shortlist boundaries", () => {
           CREATE TEMP TABLE recruiting_candidates ("roleId" text, "candidateKey" text, shortlisted boolean DEFAULT false, "shortlistedAt" timestamptz, revision int DEFAULT 0, consideration jsonb);
           CREATE TEMP TABLE recruiting_candidate_pages ("effectId" text, "roleId" text, "roleRevisionId" text, "observedAt" timestamptz, "actionId" text);
           CREATE TEMP TABLE runs (id text, "clientNonce" text);
-          CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, "runId" text);
+          CREATE TEMP TABLE external_effects (id text, kind text, status text, request jsonb, result jsonb, "runId" text);
           CREATE TEMP TABLE recruiting_assessments ("roleId" text, "candidateKey" text, version int, "roleRevisionId" text, "createdAt" timestamptz, judgments jsonb);
           CREATE TEMP TABLE recruiting_candidate_occurrences ("roleId" text, "candidateKey" text, "pageId" text, "rowIndex" int, "matchFields" jsonb, name text, title text, company text, location text, "linkedinUrl" text, "resumeUrl" text, "evidenceUrls" jsonb, issues jsonb DEFAULT '[]');
           INSERT INTO recruiting_roles VALUES ('role', 'revision');
           INSERT INTO recruiting_candidate_pages VALUES ('current', 'role', 'revision', '2026-01-03', null), ('old', 'role', 'old-revision', '2026-01-02', null), ('provider', 'role', 'revision', '2026-01-04', null);
-          INSERT INTO external_effects (id,kind,status,request) VALUES ('current', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('old', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('provider', 'recruiting_research', 'completed', '{"operation":"save_search"}');
+          INSERT INTO external_effects (id,kind,status,request) VALUES ('current', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('old', 'recruiting_research', 'completed', '{"operation":"save_grades"}'), ('provider', 'recruiting_research', 'completed', '{"operation":"save_search"}'), ('facts', 'recruiting_research', 'completed', '{"operation":"save_search"}');
+          INSERT INTO recruiting_candidate_pages VALUES ('facts', 'role', 'revision', '2026-01-01', null), ('elsewhere', 'other-role', 'revision', '2026-01-05', null);
+          -- Profile intents: one for this role's facts page, one for another role's page.
+          INSERT INTO external_effects (id,kind,status,result) VALUES ('save-facts', 'recruiting_research', 'completed', '{"profileFactsVersion":1,"sourceEffectId":"facts"}'), ('save-elsewhere', 'recruiting_research', 'completed', '{"profileFactsVersion":1,"sourceEffectId":"elsewhere"}');
+          INSERT INTO recruiting_candidate_occurrences ("roleId", "candidateKey", "pageId", "rowIndex", issues) VALUES ('role', 'zero', 'facts', 0, '["missing_field:name","missing_field:current_title","missing_field:current_company","missing_field:location","missing_field:linkedin_url","missing_field:resume_url","missing_field:evidence_urls"]');
         `);
         const candidates = [
           ["strong", "current", "Strong", 1],
@@ -261,6 +265,9 @@ describe("candidate listing and shortlist boundaries", () => {
         expect(all.map((row) => row.candidateKey)).toEqual(candidates.map(([key]) => key));
         expect(all.at(-2).providerScore).toBe("0");
         expect(all.at(-1).providerScore).toBeNull();
+        // The facts page supplies no display field but is the person's saved profile source.
+        expect(all.at(-2).profileSourcePageIds.toSorted()).toEqual(["facts", "provider"]);
+        expect(all.at(-1).profileSourcePageIds).toEqual(["provider"]);
         const worth = await read({ rankingGroup: "worth_talking", limit: 1 });
         expect(worth.map((row) => row.candidateKey)).toEqual(["promising-a", "promising-b"]);
         expect(worth[0].total).toBe("2");
