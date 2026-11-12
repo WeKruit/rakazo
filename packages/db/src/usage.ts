@@ -129,7 +129,7 @@ type UsageGroup = Record<TokenField, bigint | number | null> & {
   unpricedCount: bigint | number;
   calls: bigint | number;
   tokenRows: bigint | number;
-  costSources: string[] | null;
+  costSource: string | null;
 };
 const DAY_MS = 86_400_000;
 const SPEND_UNITS = Prisma.sql`u."unit" IN ('tokens', 'credits', 'calls')`;
@@ -139,13 +139,23 @@ const scoped = (scope?: Scope) =>
     : Prisma.empty;
 const rounded = (n: number) => Math.round((n + Number.EPSILON) * 10_000) / 10_000;
 
+// Scopes whose legacy rows were already priced by this process. Writes price new rows with the same
+// code catalog, so rows still unpriced after one pass stay unpriced until a deploy changes it.
+const snapshotted = new Set<string>();
+
 /** Finalize legacy unpriced model rows once, rather than repricing history on every read. */
 async function snapshotPendingModelCosts(
   prisma: UsageDb,
   priceTokens?: TokenPricer,
   scope?: Scope,
 ) {
-  if (!priceTokens) return;
+  const key = scope ? `${scope.spaceId}:${scope.userId}` : "*";
+  if (!priceTokens || snapshotted.has(key) || snapshotted.has("*")) return;
+  await priceLegacyRows(prisma, priceTokens, scope);
+  snapshotted.add(key);
+}
+
+async function priceLegacyRows(prisma: UsageDb, priceTokens: TokenPricer, scope?: Scope) {
   let cursor: string | undefined;
   for (;;) {
     const rows = await prisma.usageRecord.findMany({
@@ -207,29 +217,41 @@ const TOKEN_SUMS = Prisma.sql`
   COUNT(*) FILTER (WHERE u."costUsd" IS NULL) AS "unpricedCount",
   COUNT(*) FILTER (WHERE u."unit" = 'tokens') AS "tokenRows",
   SUM(CASE WHEN u."unit" = 'calls' THEN COALESCE(u."quantity", 0) WHEN u."unit" = 'tokens' THEN 1 ELSE 0 END) AS "calls",
-  ARRAY_AGG(DISTINCT u."costSource") FILTER (WHERE u."costSource" IS NOT NULL) AS "costSources",
   ${tokenSum("totalTokens", Prisma.sql`COALESCE(u."totalTokens", u."inputTokens" + u."outputTokens" + u."cacheReadTokens" + u."cacheWriteTokens")`)} AS "tokens",
   ${Prisma.join(TOKEN_FIELDS.filter((field) => field !== "tokens").map((field) => Prisma.sql`${tokenSum(field)} AS ${Prisma.raw(`"${field}"`)}`))}`;
 
+/**
+ * A row belongs to the first round created at or after it, else to the next round, or to scale
+ * once the last round is approved. Each round owns the time span (latest earlier round, its own
+ * creation], so one hash join assigns rounds instead of a subquery per usage row.
+ */
 async function usageGroups(prisma: UsageDb, scope?: Scope): Promise<UsageGroup[]> {
   return prisma.$queryRaw<UsageGroup[]>`
+    WITH spans AS (
+      SELECT c."roleId", c."round", c."createdAt" AS "until",
+        MAX(c."createdAt") OVER (PARTITION BY c."roleId" ORDER BY c."round"
+          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS "after",
+        FIRST_VALUE(c."round") OVER latest AS "lastRound",
+        FIRST_VALUE(c."approvedAt") OVER latest AS "lastApprovedAt"
+      FROM "recruiting_calibration_rounds" c
+      WINDOW latest AS (PARTITION BY c."roleId" ORDER BY c."round" DESC)
+    ), last AS (
+      SELECT DISTINCT ON ("roleId") "roleId", "lastRound" AS "round", "lastApprovedAt" AS "approvedAt"
+      FROM spans
+    )
     SELECT u."unit", u."provider", u."model", u."userId", u."roleId",
       date_trunc('day', u."createdAt") AS "day",
       CASE WHEN u."roleId" IS NULL THEN NULL WHEN nxt."round" IS NOT NULL THEN nxt."round"
         WHEN last."approvedAt" IS NOT NULL AND u."createdAt" >= last."approvedAt" THEN NULL
         ELSE COALESCE(last."round", 0) + 1 END AS "round",
       (u."roleId" IS NOT NULL AND nxt."round" IS NULL AND last."approvedAt" IS NOT NULL AND u."createdAt" >= last."approvedAt") AS "scale",
+      u."costSource",
       ${TOKEN_SUMS}
     FROM "usage_records" u
-    LEFT JOIN LATERAL (
-      SELECT MIN(c."round") AS "round" FROM "recruiting_calibration_rounds" c
-      WHERE c."roleId" = u."roleId" AND c."createdAt" >= u."createdAt"
-    ) nxt ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT c."round", c."approvedAt" FROM "recruiting_calibration_rounds" c
-      WHERE c."roleId" = u."roleId" ORDER BY c."round" DESC LIMIT 1
-    ) last ON TRUE
-    WHERE ${SPEND_UNITS} ${scoped(scope)} GROUP BY 1,2,3,4,5,6,7,8`;
+    LEFT JOIN spans nxt ON nxt."roleId" = u."roleId" AND u."createdAt" <= nxt."until"
+      AND (nxt."after" IS NULL OR u."createdAt" > nxt."after")
+    LEFT JOIN last ON last."roleId" = u."roleId"
+    WHERE ${SPEND_UNITS} ${scoped(scope)} GROUP BY 1,2,3,4,5,6,7,8,9`;
 }
 
 /** Only a verified operator-domain mailbox can access provider accounting. */
@@ -246,10 +268,12 @@ export async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, user
 
 /** Credits an account with a starting grant has left; null means it is not limited. */
 export async function remainingUsageCredits(prisma: UsageDb, userId: string) {
+  // An unlimited account skips summing its whole ledger.
   const [row] = await prisma.$queryRaw<Array<{ limit: number | null; spent: number | null }>>`
     SELECT a."usageCreditLimit" AS "limit",
-      (SELECT SUM(u."costUsd"::numeric * u."creditRate"::numeric)::float8 FROM "usage_records" u
-        WHERE u."userId" = a."id" AND ${SPEND_UNITS}) AS "spent"
+      CASE WHEN a."usageCreditLimit" IS NOT NULL THEN
+        (SELECT SUM(u."costUsd"::numeric * u."creditRate"::numeric)::float8 FROM "usage_records" u
+          WHERE u."userId" = a."id" AND ${SPEND_UNITS}) END AS "spent"
     FROM "user" a WHERE a."id" = ${userId}`;
   if (row?.limit == null || (await seesOperatorSpend(prisma, userId))) return null;
   return Math.max(0, rounded(row.limit - (row.spent ?? 0)));
@@ -262,7 +286,11 @@ export async function summarizeUsageCosts(
 ): Promise<UsageCosts> {
   await snapshotPendingModelCosts(prisma, options.priceTokens, actor);
   const now = options.now ?? new Date();
-  const groups = await usageGroups(prisma, actor);
+  const [groups, canViewInternalCosts, remaining] = await Promise.all([
+    usageGroups(prisma, actor),
+    seesOperatorSpend(prisma, actor.userId),
+    remainingUsageCredits(prisma, actor.userId),
+  ]);
   const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const daysStart =
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 29 * DAY_MS;
@@ -304,8 +332,8 @@ export async function summarizeUsageCosts(
     ).map((role) => [role.id, role.title]),
   );
   return {
-    canViewInternalCosts: await seesOperatorSpend(prisma, actor.userId),
-    remaining: await remainingUsageCredits(prisma, actor.userId),
+    canViewInternalCosts,
+    remaining,
     total: { credits: rounded(total), pending: pending.has("total") },
     month: { credits: rounded(month), pending: pending.has("month") },
     days: [...days]
@@ -402,7 +430,7 @@ function vendors(groups: UsageGroup[]): UsageVendor[] {
     };
     add(model.sum, group);
     if (model.quantity != null) model.quantity += Number(group.quantity ?? 0);
-    for (const source of group.costSources ?? []) model.sources.add(source);
+    if (group.costSource) model.sources.add(group.costSource);
     vendor.models.set(key, model);
     byVendor.set(group.provider, vendor);
   }
