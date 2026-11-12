@@ -9,8 +9,14 @@ const mail = (campaignId: string, eaccount: string) => ({
   direction: "sent",
 });
 
-function store(input: { emails: Record<string, unknown>[]; assigned: string[]; taken?: boolean }) {
+function store(input: {
+  emails: Record<string, unknown>[];
+  assigned: string[];
+  taken?: boolean;
+  earlier?: Record<string, unknown>;
+}) {
   const created: Record<string, unknown>[] = [];
+  const updated: Record<string, unknown>[] = [];
   const prisma = {
     externalEffect: {
       findMany: vi.fn(async ({ where }: { where: { kind: string } }) =>
@@ -26,6 +32,11 @@ function store(input: { emails: Record<string, unknown>[]; assigned: string[]; t
           : [],
       ),
       findFirst: vi.fn(async () => (input.taken ? { id: "someone-else" } : null)),
+      findUnique: vi.fn(async () => input.earlier ?? null),
+      update: vi.fn(async (args: Record<string, unknown>) => {
+        updated.push(args);
+        return args;
+      }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         created.push(data);
         return data;
@@ -37,11 +48,11 @@ function store(input: { emails: Record<string, unknown>[]; assigned: string[]; t
     recruitingRole: { findFirst: vi.fn(async () => ({ title: "Backend Engineer" })) },
     mcpServer: { findMany: vi.fn(async () => [{ id: "server-1" }]) },
   };
-  return { prisma: prisma as never, created };
+  return { prisma: prisma as never, created, updated };
 }
 
 describe("bindImportedCampaigns", () => {
-  it("links a role to its imported campaign once every mailbox it used is the account's", async () => {
+  it("links a role to its imported campaign as history once every mailbox it used is the account's", async () => {
     const { prisma, created } = store({
       emails: [mail(campaign, "a@x.com"), mail(campaign, "B@x.com"), mail(campaign, "a@x.com")],
       assigned: ["a@x.com", "b@x.com"],
@@ -52,7 +63,7 @@ describe("bindImportedCampaigns", () => {
         runId: "run-1",
         spaceId: "space-1",
         kind: "instantly_role_campaign",
-        idempotencyKey: "instantly-role-campaign:server-1:role-1",
+        idempotencyKey: "instantly-role-campaign:server-1:role-1:history",
         request: { roleId: "role-1", serverId: "server-1", importedHistory: true },
         result: {
           campaignId: campaign,
@@ -63,6 +74,36 @@ describe("bindImportedCampaigns", () => {
         },
       }),
     ]);
+  });
+
+  it("turns an earlier link nobody was added through into history, so new people get the role's own campaign", async () => {
+    const earlier = {
+      id: "binding-1",
+      request: { roleId: "role-1", serverId: "server-1", importedHistory: true },
+      result: { campaignId: campaign, leads: {} },
+    };
+    const { prisma, created, updated } = store({
+      emails: [mail(campaign, "a@x.com")],
+      assigned: ["a@x.com"],
+      earlier,
+    });
+    await expect(bindImportedCampaigns(prisma, "user-1")).resolves.toBe(1);
+    expect(created).toEqual([]);
+    expect(updated).toEqual([
+      {
+        where: { id: "binding-1" },
+        data: { idempotencyKey: "instantly-role-campaign:server-1:role-1:history" },
+      },
+    ]);
+    // Someone was already added through it: it stays the role's own campaign.
+    const used = store({
+      emails: [mail(campaign, "a@x.com")],
+      assigned: ["a@x.com"],
+      earlier: { ...earlier, result: { campaignId: campaign, leads: { k: { email: "p@y.com" } } } },
+      taken: true,
+    });
+    await expect(bindImportedCampaigns(used.prisma, "user-1")).resolves.toBe(0);
+    expect(used.updated).toEqual([]);
   });
 
   it("leaves the role alone while a mailbox is not the account's, the history spans campaigns, or the campaign is taken", async () => {

@@ -253,7 +253,12 @@ export async function refreshRecruitingCorrespondence(
         where: {
           spaceId: actor.spaceId,
           status: "completed",
-          idempotencyKey: { in: sources.map((source) => bindingKey(source.id, scope.roleId)) },
+          idempotencyKey: {
+            in: sources.flatMap((source) => [
+              bindingKey(source.id, scope.roleId),
+              `${bindingKey(source.id, scope.roleId)}:history`,
+            ]),
+          },
         },
         select: { idempotencyKey: true, result: true },
       })
@@ -342,7 +347,9 @@ export async function refreshRecruitingCorrespondence(
     try {
       if (scope.view === "inbox") {
         for (const binding of campaignBindings) {
-          if (binding.idempotencyKey !== bindingKey(source.id, scope.roleId)) continue;
+          const key = bindingKey(source.id, scope.roleId);
+          if (binding.idempotencyKey !== key && binding.idempotencyKey !== `${key}:history`)
+            continue;
           const campaignId = record(binding.result)?.campaignId;
           if (
             typeof campaignId !== "string" ||

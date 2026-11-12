@@ -4080,6 +4080,8 @@ describe("local native Instantly campaign and lead tools", () => {
         sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
+      /** The people the role's imported campaign holds. */
+      importedLeads: [] as { id: string; email: string }[],
       /** The role campaign's own leads, as /leads/list returns them for it. */
       campaignLeads: [] as Record<string, unknown>[],
       campaigns: [] as Record<string, unknown>[],
@@ -4132,14 +4134,18 @@ describe("local native Instantly campaign and lead tools", () => {
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
-          where.OR
+          where.OR && where.kind !== "instantly_role_campaign"
             ? []
-            : [...state.effects.values()].filter(
-                (e) =>
+            : [...state.effects.values()].filter((e) => {
+                const request = e.request as
+                  | { roleId?: string; importedHistory?: boolean }
+                  | undefined;
+                const role = where.OR?.[0]?.NOT?.request?.equals ?? where.NOT?.request?.equals;
+                return (
                   e.kind === where.kind &&
-                  (e.request as { roleId?: string } | undefined)?.roleId !==
-                    where.NOT?.request?.equals,
-              ),
+                  (request?.roleId !== role || (where.OR && request?.importedHistory === true))
+                );
+              }),
         ),
         findFirst: vi.fn(async () => {
           const bound = [...state.effects.values()].filter(
@@ -4216,6 +4222,12 @@ describe("local native Instantly campaign and lead tools", () => {
                 : body.campaign === CAMPAIGN
                   ? state.campaignLeads
                   : [],
+          });
+        if (url.pathname === "/api/v2/leads/list" && body.campaign === "imported")
+          return Response.json({
+            items: state.importedLeads.filter((lead) =>
+              (body.contacts as string[]).some((email) => email.toLowerCase() === lead.email),
+            ),
           });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
@@ -4680,6 +4692,44 @@ describe("local native Instantly campaign and lead tools", () => {
     const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(ensured).toMatchObject({ created: true });
     expect(ensured.campaignId).not.toBe("with-leads");
+  });
+
+  it("gives a role with an imported campaign its own campaign, and leaves the imported campaign's people to it", async () => {
+    const f = fixture();
+    f.state.campaigns = [
+      { id: "imported", name: "Founding Engineer", status: 2, timestamp_created: "2026-10-01" },
+    ];
+    f.state.effects.set(`instantly-role-campaign:${SERVER.id}:role-1:history`, {
+      id: "effect-history",
+      kind: "instantly_role_campaign",
+      status: "completed",
+      spaceId: "w1",
+      idempotencyKey: `instantly-role-campaign:${SERVER.id}:role-1:history`,
+      request: { roleId: "role-1", serverId: SERVER.id, importedHistory: true },
+      result: { campaignId: "imported", eaccount: "team@example.test", leads: {}, created: false },
+    });
+    f.state.importedLeads = [{ id: "lead-old", email: "old@x.test" }];
+    const out = f.result(
+      await f.run("add_shortlist_leads", {
+        role_id: "role-1",
+        candidates: [
+          { candidate_key: "new", email: "new@x.test" },
+          { candidate_key: "old", email: "Old@x.test" },
+        ],
+      }),
+    );
+    expect(out).toMatchObject({
+      campaignId: CAMPAIGN,
+      added: ["new"],
+      inImportedCampaign: ["old"],
+    });
+    expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toMatchObject({
+      campaign_id: CAMPAIGN,
+      leads: [{ email: "new@x.test" }],
+    });
+    expect(f.state.requests.some((r) => r.method === "PATCH" && r.path.includes("imported"))).toBe(
+      false,
+    );
   });
 
   it("repairs an empty mapped campaign to the same-title campaign that has the leads", async () => {
