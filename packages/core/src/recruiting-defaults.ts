@@ -134,6 +134,17 @@ export const REPLY_IN_ENGLISH_NOTE =
   "The recruiter wrote in English: write every reply, summary, question and card of this turn in English, even where earlier messages were in Chinese.";
 
 /**
+ * What start_role tells Main to say once the role's card is shown. The example is in the language
+ * of the recruiter's newest message: an English one pulled a reply to 「远程也可以」 into English.
+ */
+export function roleOpenedNote(chinese: boolean): string {
+  const example = chinese
+    ? "「岗位已经开好，第一个问题在岗位对话里等你。」"
+    : '"I opened the role. Its first question is waiting there."';
+  return `The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line, in the language of their newest message (also one that arrives now), that the role is open and its first question is waiting there (for example ${example}); never say intake, and do not paste a link.`;
+}
+
+/**
  * Mostly English text: at least three English words, outnumbering Han characters, so an English
  * JD that quotes a Chinese name or tag is still English.
  */

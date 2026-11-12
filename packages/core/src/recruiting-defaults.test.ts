@@ -3,7 +3,6 @@ import {
   creditEstimateNote,
   isChineseText,
   isEnglishText,
-  signedAsTeam,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -16,6 +15,8 @@ import {
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
+  roleOpenedNote,
+  signedAsTeam,
 } from "./recruiting-defaults.js";
 
 describe("calibration fast path", () => {
@@ -200,5 +201,13 @@ describe("global recruiting overview", () => {
     // Staging gate 11-11: Kruit handed it to Outreach, which wrote a three-email sequence.
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain("an email or template naming no one you write yourself");
+  });
+});
+
+describe("roleOpenedNote", () => {
+  it("gives its example in the language of the recruiter's newest message", () => {
+    expect(roleOpenedNote(true)).toContain("「岗位已经开好");
+    expect(roleOpenedNote(true)).not.toContain("I opened the role");
+    expect(roleOpenedNote(false)).toContain("I opened the role");
   });
 });

@@ -390,3 +390,15 @@ test("the account's own sending address may be shown, another address may not", 
     ["shows an address the recruiter never gave: boss@company.test"],
   );
 });
+
+test("the same unverified label under several people in a Chinese round is not a repeat", () => {
+  const person = (n, name) =>
+    `${n}. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Senior Data Engineer\n   > Built Spark pipelines on AWS.\n   未核实：years of experience`;
+  assert.deepEqual(
+    conversationChecks([
+      user("对了，远程也可以，不一定要在西雅图"),
+      bot(`本轮 10 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
+    ]),
+    [],
+  );
+});
