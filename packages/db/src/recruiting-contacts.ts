@@ -60,6 +60,8 @@ type PeopleOptions = {
   display: boolean;
   skills: boolean;
   query?: string;
+  /** Only people with an entry in one of these roles (the role filter). */
+  roleIds?: readonly string[];
 };
 
 /**
@@ -70,19 +72,22 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
   const user = actor.userId;
   const space = actor.spaceId;
   const { keys, activity, detail, display, skills, query } = options;
+  const roleIds = keys ? undefined : options.roleIds?.length ? options.roleIds : undefined;
+  const narrow = !keys && Boolean(query || roleIds);
   const only = (column: Prisma.Sql) =>
     keys
       ? Prisma.sql`AND ${column} IN (${Prisma.join(keys)})`
-      : query
+      : narrow
         ? Prisma.sql`AND ${column} IN (SELECT person_key FROM matching_keys)`
         : Prisma.empty;
   const pattern = query ? like(query) : "";
   const crmOwner = Prisma.sql`cc."userId" = ${user} AND cc."spaceId" = ${space} AND cc."archivedAt" IS NULL`;
-  const crmCandidates = keys
-    ? Prisma.sql`AND "crmCandidateId" IN (
+  const crmCandidates =
+    keys || narrow
+      ? Prisma.sql`AND "crmCandidateId" IN (
         SELECT cc."crmCandidateId" FROM recruiting_crm_contacts cc
         WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})`
-    : Prisma.empty;
+      : Prisma.empty;
   return Prisma.sql`
     roles AS (
       SELECT r.id, r.title, t."groupId" AS group_id, r."sourceThreadId" AS thread_id
@@ -94,9 +99,12 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
           SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
     ),
     ${
-      query
+      narrow
         ? Prisma.sql`matching_keys AS MATERIALIZED (
-      SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
+      ${Prisma.join(
+        [
+          query &&
+            Prisma.sql`(SELECT ${CRM_PERSON_KEY} AS person_key FROM recruiting_crm_contacts cc
       WHERE ${crmOwner} AND concat_ws(' ',cc.name,cc.title,cc.company,cc.location,cc.email) ILIKE ${pattern}
       UNION
       SELECT o."candidateKey" FROM recruiting_candidate_occurrences o
@@ -104,7 +112,26 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND concat_ws(' ',o.name,o.title,o.company,o.location) ILIKE ${pattern}
       UNION
       SELECT sp."personKey" FROM recruiting_saved_profiles sp
-      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern}
+      WHERE sp."ownerUserId"=${user} AND sp."spaceId"=${space} AND sp.profile->>'email' ILIKE ${pattern})`,
+          // A role filter reads only that role's people: its own candidates and the CRM
+          // contacts linked to it (directly, or through the product role it is attached to).
+          roleIds &&
+            Prisma.sql`(SELECT c."candidateKey" AS person_key FROM recruiting_candidates c
+      WHERE c."roleId" IN (SELECT id FROM roles WHERE id IN (${Prisma.join(roleIds)}))
+      UNION
+      SELECT ${CRM_PERSON_KEY} FROM recruiting_crm_roles cr
+      JOIN recruiting_crm_role_contacts rc ON rc."roleId" = cr.id AND rc."archivedAt" IS NULL
+      JOIN recruiting_crm_contacts cc ON cc.id = rc."contactId" AND ${crmOwner}
+      LEFT JOIN recruiting_crm_workspace_attachments a
+        ON a."userId" = ${user} AND a."spaceId" = ${space}
+        AND a."mcpServerId" = cr."mcpServerId" AND a."organizationId" = cr."organizationId"
+        AND a."crmRoleId" = cr."crmRoleId"
+      LEFT JOIN roles ar ON ar.id = a."roleId"
+      WHERE cr."userId" = ${user} AND cr."spaceId" = ${space} AND cr."archivedAt" IS NULL
+        AND COALESCE(ar.id, 'crm:' || cr.id) IN (${Prisma.join(roleIds)}))`,
+        ].filter((part): part is Prisma.Sql => Boolean(part)),
+        "\n      INTERSECT\n      ",
+      )}
     ),`
         : Prisma.empty
     }
@@ -396,6 +423,7 @@ export async function listRecruitingContacts(
         Boolean(filters.query || filters.location || filters.company || filters.title),
       skills: Boolean(filters.skills),
       query: filters.query,
+      roleIds: filters.roleIds,
     })}
     SELECT p.person_key, count(*) OVER () AS total
     FROM people p
