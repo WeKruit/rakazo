@@ -11,6 +11,8 @@ const FIRST_CHECK_MS = 2 * 60 * 1000;
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 /** A complete pass at most this often per person; an unfinished one resumes at the next check. */
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+/** An owner whose CRM had nothing to copy: most new accounts, until they use it. */
+const EMPTY_STALE_AFTER_MS = 7 * STALE_AFTER_MS;
 const MAX_SLICES = 2_000;
 /**
  * Time between owners. Each owner's pass may open a CRM session, and the identity provider limits
@@ -22,8 +24,9 @@ const OWNER_GAP_MS = 20_000;
 type Owner = { userId: string; spaceId: string; email: string };
 
 /**
- * People whose CRM copy was last read over a day ago, or whose last pass stopped partway (a
- * restart or a failed read). Only owners with the product's own CRM connection are considered.
+ * People whose last finished CRM pass is over a day old (a week when their CRM had nothing to
+ * copy), or whose last pass stopped partway (a restart or a failed read). Only owners with the
+ * product's own CRM connection are considered.
  */
 export async function dueRecruitingCrmOwners(
   prisma: Pick<PrismaClient, "$queryRaw">,
@@ -31,22 +34,25 @@ export async function dueRecruitingCrmOwners(
   now: Date,
 ): Promise<Owner[]> {
   const before = new Date(now.getTime() - STALE_AFTER_MS);
+  const emptyBefore = new Date(now.getTime() - EMPTY_STALE_AFTER_MS);
   return prisma.$queryRaw<Owner[]>`
     SELECT DISTINCT s."userId", s."spaceId", u.email
     FROM mcp_servers s
     JOIN "user" u ON u.id = s."userId"
     JOIN space_members m ON m."userId" = s."userId" AND m."spaceId" = s."spaceId"
+    LEFT JOIN recruiting_crm_sync_passes pass
+      ON pass."userId" = s."userId" AND pass."spaceId" = s."spaceId"
     WHERE s.endpoint = ${crmEndpoint} AND s.enabled
       AND (
         EXISTS (SELECT 1 FROM recruiting_crm_sync_progress p
           WHERE p."userId" = s."userId" AND p."spaceId" = s."spaceId")
-        -- Every pass rereads the role list and touches it; contacts change only when the CRM did.
-        OR coalesce(
-          (SELECT max(r."syncedAt") FROM recruiting_crm_roles r
-            WHERE r."userId" = s."userId" AND r."spaceId" = s."spaceId"),
-          (SELECT max(c."syncedAt") FROM recruiting_crm_contacts c
-            WHERE c."userId" = s."userId" AND c."spaceId" = s."spaceId"),
-          'epoch') < ${before}
+        OR pass."finishedAt" IS NULL
+        OR pass."finishedAt" < CASE
+          WHEN EXISTS (SELECT 1 FROM recruiting_crm_roles r
+              WHERE r."userId" = s."userId" AND r."spaceId" = s."spaceId")
+            OR EXISTS (SELECT 1 FROM recruiting_crm_contacts c
+              WHERE c."userId" = s."userId" AND c."spaceId" = s."spaceId")
+          THEN ${before}::timestamp ELSE ${emptyBefore}::timestamp END
       )`;
 }
 
@@ -141,9 +147,6 @@ export function startRecruitingCrmAutoSync(
   },
 ): void {
   let running = false;
-  // An owner whose CRM is empty never gets a newer contact, so the query above keeps returning
-  // them. A finished pass counts as fresh for a day in this process instead.
-  const finished = new Map<string, number>();
   const check = async () => {
     if (running || deps.signal.aborted) return;
     running = true;
@@ -154,14 +157,11 @@ export function startRecruitingCrmAutoSync(
       let started = false;
       for (const owner of owners) {
         if (deps.signal.aborted) break;
-        const key = JSON.stringify([owner.userId, owner.spaceId]);
-        if (Date.now() - (finished.get(key) ?? 0) < STALE_AFTER_MS) continue;
         if (started) await new Promise((resolve) => setTimeout(resolve, OWNER_GAP_MS));
         started = true;
         if (deps.signal.aborted) break;
-        await syncRecruitingCrmOwner(deps, owner).then(
-          () => finished.set(key, Date.now()),
-          (error) => getLogger().warn("crm.autosync.failed", { reason: String(error) }),
+        await syncRecruitingCrmOwner(deps, owner).catch((error) =>
+          getLogger().warn("crm.autosync.failed", { reason: String(error) }),
         );
       }
     } catch (error) {

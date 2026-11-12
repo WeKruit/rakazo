@@ -490,7 +490,7 @@ export const appContract = {
             .default(""),
         }),
       )
-      .output(z.object({ userId: Id, mailbox: z.string() })),
+      .output(z.object({ userId: Id, mailbox: z.string(), linkedRoles: z.number().int() })),
     /** The owner takes back a mailbox it assigned that the account has not started using. */
     unassignSendingMailbox: oc
       .input(

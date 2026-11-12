@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
-import { signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -850,6 +850,107 @@ export async function readRoleCampaignBinding(
   const binding = effect.result as Partial<RoleBinding> | null;
   return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
+/**
+ * Links each role of an onboarded account to the one campaign its imported mail history came
+ * from, once every mailbox that history used is assigned to (or already sends for) the account,
+ * so the role's Inbox reads new replies from that campaign and the account can reply in it.
+ * A campaign any role already uses is left alone. Returns the number of roles linked.
+ */
+export async function bindImportedCampaigns(prisma: PrismaClient, userId: string) {
+  const imports = await prisma.externalEffect.findMany({
+    where: { kind: "recruiting_history_import", status: "completed", run: { userId } },
+    select: { id: true, runId: true, spaceId: true, result: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const roles = new Map<
+    string,
+    { runId: string; spaceId: string; campaigns: Set<string>; mailboxes: Map<string, number> }
+  >();
+  for (const receipt of imports) {
+    const result = (receipt.result ?? {}) as { roleId?: unknown; emails?: unknown };
+    if (typeof result.roleId !== "string" || !Array.isArray(result.emails)) continue;
+    const role = roles.get(result.roleId) ?? {
+      runId: receipt.runId,
+      spaceId: receipt.spaceId,
+      campaigns: new Set<string>(),
+      mailboxes: new Map<string, number>(),
+    };
+    if (role.spaceId !== receipt.spaceId) continue;
+    for (const email of result.emails as { campaignId?: unknown; eaccount?: unknown }[]) {
+      if (typeof email?.campaignId === "string") role.campaigns.add(email.campaignId);
+      if (typeof email?.eaccount === "string" && email.eaccount.includes("@")) {
+        const mailbox = email.eaccount.trim().toLowerCase();
+        role.mailboxes.set(mailbox, (role.mailboxes.get(mailbox) ?? 0) + 1);
+      }
+    }
+    roles.set(result.roleId, role);
+  }
+  if (!roles.size) return 0;
+  const assigned = await prisma.sendingMailboxAssignment.findMany({
+    where: { userId },
+    select: { email: true },
+  });
+  const senders = await prisma.externalEffect.findMany({
+    where: { kind: "instantly_sender_account", status: "completed", run: { userId } },
+    select: { result: true },
+  });
+  const mine = new Set([
+    ...assigned.map((row) => row.email.toLowerCase()),
+    ...senders.flatMap(({ result }) => {
+      const email = (result as { email?: unknown } | null)?.email;
+      return typeof email === "string" ? [email.toLowerCase()] : [];
+    }),
+  ]);
+  let linked = 0;
+  for (const [roleId, history] of roles) {
+    const [campaignId, ...others] = [...history.campaigns];
+    if (!campaignId || others.length || !history.mailboxes.size) continue;
+    if (![...history.mailboxes.keys()].every((mailbox) => mine.has(mailbox))) continue;
+    const role = await prisma.recruitingRole.findFirst({
+      where: { id: roleId, userId, spaceId: history.spaceId, archivedAt: null },
+      select: { title: true },
+    });
+    const servers = await prisma.mcpServer.findMany({
+      where: { userId, spaceId: history.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT, enabled: true },
+      select: { id: true },
+    });
+    if (!role || servers.length !== 1) continue;
+    const serverId = servers[0]!.id;
+    const key = bindingKey(serverId, roleId);
+    const taken = await prisma.externalEffect.findFirst({
+      where: {
+        OR: [
+          { idempotencyKey: key },
+          { kind: "instantly_role_campaign", result: { path: ["campaignId"], equals: campaignId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (taken) continue;
+    const eaccount = [...history.mailboxes].sort((a, b) => b[1] - a[1])[0]![0];
+    const binding: RoleBinding = {
+      campaignId,
+      campaignName: role.title,
+      eaccount,
+      leads: {},
+      created: false,
+    };
+    await prisma.externalEffect.create({
+      data: {
+        spaceId: history.spaceId,
+        runId: history.runId,
+        kind: "instantly_role_campaign",
+        idempotencyKey: key,
+        status: "completed",
+        request: { roleId, serverId, importedHistory: true },
+        result: binding as unknown as Prisma.InputJsonValue,
+      },
+    });
+    linked++;
+  }
+  return linked;
+}
+
 /** A campaign lead or a staged person, as one send would address them. */
 type Person = StagedLead & {
   id?: string;

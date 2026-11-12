@@ -241,6 +241,42 @@ describe("saved recruiting correspondence", () => {
     expect(output.contacts).toEqual([contact]);
   });
 
+  it("returns every contact in one read for the interview page instead of 200 at a time", async () => {
+    const f = fixture({ enabled: false });
+    const contacts = Array.from({ length: 450 }, (_, index) => ({
+      candidateKey: `linkedin:/in/person-${index}`,
+      linkedinUrl: `https://www.linkedin.com/in/person-${index}`,
+      emails: [{ address: `person-${index}@example.test`, status: null }],
+      phones: [],
+      source: "Contact history",
+      checkedAt: "2026-10-24T00:00:00.000Z",
+    }));
+    const imported = {
+      checkedAt: "2026-10-24T00:00:00.000Z",
+      emails: [],
+      events: [],
+      history: [],
+      contacts,
+    };
+    vi.mocked(db.readRecruitingImportedCorrespondence)
+      .mockResolvedValueOnce(imported)
+      .mockResolvedValueOnce(imported);
+    const paged = await api.getRecruitingCorrespondence(f.prisma, actor, target, "contacts");
+    expect(paged.contacts).toHaveLength(200);
+    expect(paged.nextCursor).toBe("200");
+    const all = await api.getRecruitingCorrespondence(
+      f.prisma,
+      actor,
+      target,
+      "contacts",
+      undefined,
+      undefined,
+      { allContacts: true },
+    );
+    expect(all.contacts).toHaveLength(450);
+    expect(all.nextCursor).toBeNull();
+  });
+
   it.each(["mail", "history"])(
     "deduplicates only a proven same-source provider message, retaining original attachments (%s)",
     async (sourceId) => {
