@@ -1393,6 +1393,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Global Main said the new round was not ready 23 s after the role team had shown it (11-13).",
   },
   {
+    rule: "round repeats are answered, not handed off",
+    in: "Global recruiting overview skill",
+    phrase: "asked whether a round repeats anyone from an earlier one, answer no yourself in that reply",
+    why: "Asked yes or no whether round 2 repeated round 1, global Main twice handed the check to the team and said it could not confirm (11-13).",
+  },
+  {
     rule: "a drop is answered before any card",
     in: "RECRUITER_LANGUAGE",
     phrase: "say in its text who is dropped and who is left, before any card",
