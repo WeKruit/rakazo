@@ -439,7 +439,9 @@ async function play(journey, label, owner, mailbox, out) {
           const action = card.actions.find((item) => item.id === value);
           pressed = action
             ? await ui.clickLabel(action.label)
-            : typeof value === "string" && (await ui.answerTyped(value));
+            : // A form card takes the typed text in its field; the API gets the parsed content.
+              typeof answer === "string" &&
+              (await ui.answerTyped(typeof value === "string" ? value : answer));
           if (pressed) pressed = await answered(rpc, card);
           if (!pressed)
             problems.push(
