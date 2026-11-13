@@ -1339,6 +1339,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Asked to drop A and B and replace them, Kruit only said what it would do (11-13).",
   },
   {
+    rule: "round feedback relayed from global stays a round of ten",
+    in: "Global recruiting overview skill",
+    phrase: "a message that turns down people in the round and asks for more like the rest is feedback for the next round of ten",
+    why: "Global Main relayed \"4 and 8 are off, find more like the other 8\" as a request for 150 more; the team scaled and never showed a next round (11-13).",
+  },
+  {
+    rule: "new people leave out the round already shown",
+    in: "Global recruiting overview skill",
+    phrase: "when they ask for the new people, not the ones already shown, first read recruiting_candidates operation round",
+    why: "Asked for the new people, global Main listed the pool's first pages, repeating first-round people and one the recruiter turned down (11-13).",
+  },
+  {
     rule: "a drop is answered before any card",
     in: "RECRUITER_LANGUAGE",
     phrase: "say in its text who is dropped and who is left, before any card",
