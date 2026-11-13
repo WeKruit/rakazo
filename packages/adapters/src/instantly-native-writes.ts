@@ -3,7 +3,13 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
-import { INSTANTLY_MCP_ENDPOINT, signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
+import {
+  greetsByName,
+  INSTANTLY_MCP_ENDPOINT,
+  NAMED_GREETING_NOTE,
+  signedAsTeam,
+  TEAM_SIGNATURE_NOTE,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -62,7 +68,16 @@ const CampaignSetup = {
       "When emails may go out; a campaign sends as soon as the recruiter confirms (any_time) unless they ask for weekdays_9_to_5.",
     ),
 };
-const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
+const CreateCampaignInput = z.strictObject({
+  name: z.string().min(1).max(200),
+  ...CampaignSetup,
+  // Everyone added to a new campaign gets its email, so a name written into the greeting is wrong
+  // for all but one of them (ensure_role_campaign's per-person email keeps its own schema).
+  steps: CampaignSetup.steps.refine(
+    (steps) => !steps?.some((step) => greetsByName(step.body)),
+    NAMED_GREETING_NOTE,
+  ),
+});
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
 const CloneRoleDraftInput = z.strictObject({
   client_nonce: z.string().min(1).max(200),
@@ -245,7 +260,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients. Several people get one campaign with all of them added, so one card confirms them together.",
   ),
   tool(
     "add_leads",
@@ -848,6 +863,35 @@ function sendTime(
     return window ? "Now" : describeSchedule(campaign);
   return window.now ? "Now" : `${window.local} (${describeSchedule(campaign)})`;
 }
+/**
+ * When `count` people queued now in a sending campaign have all been emailed: one mailbox sends
+ * one email every `email_gap` minutes (the provider's default is 10), so a confirmed send is
+ * queued, not sent, and the recruiter is told until when.
+ */
+export function queuePace(
+  campaign: Record<string, unknown> | undefined,
+  count: number,
+  now = new Date(),
+): string {
+  const gap = Number(campaign?.email_gap) > 0 ? Number(campaign?.email_gap) : 10;
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
+  const pacific = first?.name === PACIFIC_WEEKDAYS;
+  const zone = pacific
+    ? "America/Los_Angeles"
+    : typeof first?.timezone === "string"
+      ? first.timezone
+      : "America/Chicago";
+  const done = new Date(now.getTime() + Math.max(count, 1) * gap * 60_000);
+  let clock: ReturnType<typeof wallClock>;
+  try {
+    clock = wallClock(done, zone);
+  } catch {
+    return `queued with the mail service, which sends about one email every ${gap} minutes from the mailbox`;
+  }
+  const time = `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`;
+  return `queued with the mail service, which sends about one email every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} have` : "it has"} gone out by about ${time} ${pacific ? "Pacific time" : zone}`;
+}
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
 export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
@@ -1173,7 +1217,7 @@ function matchRecipient(people: Person[], wanted: string) {
  * taken out; a campaign that has run keeps everyone and is resumed only when nobody else is in it.
  */
 function planSend(
-  status: unknown,
+  campaign: Record<string, unknown> | undefined,
   leads: Person[],
   staged: Person[],
   wanted?: string[],
@@ -1181,7 +1225,9 @@ function planSend(
   copy: Copy = null,
   sendNow = false,
 ): SendPlan {
-  const plan = sendNow ? planSendNow(status, leads) : planRecipients(status, leads, staged, wanted);
+  const plan = sendNow
+    ? planSendNow(campaign, leads)
+    : planRecipients(campaign, leads, staged, wanted);
   if ("refusal" in plan || !templated) return plan;
   // A templated first email is in each person's variables: nobody goes out without one.
   const blank = plan.recipients.filter((person) =>
@@ -1193,23 +1239,39 @@ function planSend(
       }
     : plan;
 }
-/** Who a send-now emails: everyone in the sending campaign it has not emailed yet. */
-function planSendNow(status: unknown, leads: Person[]): SendPlan {
+/**
+ * Who a send-now emails: everyone in the sending campaign it has not emailed yet, when they wait
+ * for its sending hours. Inside them they are already going out, and nothing changes.
+ */
+function planSendNow(campaign: Record<string, unknown> | undefined, leads: Person[]): SendPlan {
   const queued = leads.filter((lead) => !lead.contacted);
-  if (status !== ACTIVE)
+  if (campaign?.status !== ACTIVE)
     return {
       refusal: "This campaign is not sending, so nobody is queued in it; nothing was sent.",
     };
-  return queued.length
-    ? { send: "now", recipients: queued }
-    : { refusal: "Everyone in this campaign has already been emailed; nothing was sent." };
+  if (!queued.length)
+    return { refusal: "Everyone in this campaign has already been emailed; nothing was sent." };
+  const window = nextSendWindow(campaign);
+  return !window || window.now
+    ? {
+        refusal: `Already sending now, nothing to speed up: ${label(queued)} ${queuePace(campaign, queued.length)}. Nothing failed, nothing was changed and nobody is emailed twice; get_campaign shows who has been emailed.`,
+      }
+    : { send: "now", recipients: queued };
+}
+/** When people queued in a sending campaign get their first email. */
+function queuedWhen(campaign: Record<string, unknown> | undefined, count: number) {
+  const window = nextSendWindow(campaign);
+  return window && !window.now
+    ? `Their first email goes out ${window.local}.`
+    : `They are ${queuePace(campaign, count)}.`;
 }
 function planRecipients(
-  status: unknown,
+  campaign: Record<string, unknown> | undefined,
   leads: Person[],
   staged: Person[],
   wanted?: string[],
 ): SendPlan {
+  const status = campaign?.status;
   const pending =
     status === ACTIVE
       ? staged.filter((s) => !leads.some((l) => sameAddress(l.email, s.email)))
@@ -1240,7 +1302,7 @@ function planRecipients(
       refusal: [
         emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
         queued.length
-          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. Their first email goes out in its next sending hours; nothing more is needed and nothing failed.`
+          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued.length)} Nothing more is needed and nothing failed.`
           : "",
         "Nobody new was added, so nothing else was sent.",
       ]
@@ -1308,15 +1370,7 @@ export async function describeCampaignActivation(
   const people = (items ?? []).flatMap(asPerson);
   const plan =
     campaign && items
-      ? planSend(
-          campaign.status,
-          people,
-          stagedPeople(binding),
-          wanted,
-          templated,
-          binding,
-          sendNow,
-        )
+      ? planSend(campaign, people, stagedPeople(binding), wanted, templated, binding, sendNow)
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
         : { send: "activate" as const, recipients: people, remove: [] };
@@ -2321,7 +2375,7 @@ async function activateCampaign(
   const leads = await allLeads(rest, campaignId);
   const templated = isTemplated(campaign);
   const plan = planSend(
-    campaign.status,
+    campaign,
     leads,
     stagedPeople(bound?.binding),
     input.recipients,
@@ -2355,15 +2409,17 @@ async function activateCampaign(
     }
     campaign = await rest("GET", `/campaigns/${campaignId}`);
   }
+  // Inside sending hours a confirmed send is queued, not sent: say until when.
+  const paced = (count: number) => ({
+    next: `Nobody is emailed at this moment: these people are ${queuePace(campaign, count)}. Tell the recruiter they are queued and that time, never that they were sent; get_campaign shows who has been emailed.`,
+  });
   if (plan.send === "now") {
     if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
     return {
-      sentNow: true,
+      sendingNow: true,
       campaignId,
       recipients: plan.recipients.map((person) => person.email),
-      ...(resume || !window || window.now
-        ? {}
-        : { next: "The campaign already sends at any time; these people go out shortly." }),
+      ...paced(plan.recipients.length),
     };
   }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
@@ -2418,11 +2474,11 @@ async function activateCampaign(
       for (const created of (report.created_leads ?? []) as { index: number }[])
         if (plan.recipients[created.index]) sent.push(plan.recipients[created.index]!.email);
     return {
-      sent: sent.length > 0,
+      queued: sent.length > 0,
       campaignId,
       sendingMailbox,
       recipients: sent,
-      ...when,
+      ...(later && !later.now ? when : paced(sent.length)),
       notCreatedByProvider: plan.recipients
         .filter((person) => !sent.includes(person.email))
         .map((person) => person.email),
@@ -2464,7 +2520,7 @@ async function activateCampaign(
     campaignId,
     sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
     recipients: plan.recipients.map((person) => person.email),
-    ...when,
+    ...(later && !later.now ? when : paced(plan.recipients.length)),
   };
 }
 
@@ -2488,7 +2544,11 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
       ? {
           next: `The queued people are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
         }
-      : {}),
+      : window
+        ? {
+            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length)}. Tell the recruiter who is emailed and who is still queued with that time; do not send them again.`,
+          }
+        : {}),
   };
 }
 
@@ -3153,6 +3213,7 @@ export async function runInstantlyWrite(
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,
+        email_gap: campaign.email_gap,
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),

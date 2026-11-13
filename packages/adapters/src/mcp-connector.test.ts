@@ -5247,7 +5247,11 @@ describe("local native Instantly campaign and lead tools", () => {
           },
         },
       ]);
-      expect(out).toMatchObject({ sent: true, recipients: ["abe.new@x.test"] });
+      expect(out).toMatchObject({
+        queued: true,
+        recipients: ["abe.new@x.test"],
+        next: expect.stringContaining("never that they were sent"),
+      });
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       const saved = binding.result as { leads: object; staged: object };
       expect(saved.leads).toHaveProperty("abe-new", {
@@ -5317,7 +5321,12 @@ describe("local native Instantly campaign and lead tools", () => {
           `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
         ]);
         expect(JSON.stringify(f.state.campaign.campaign_schedule)).toContain('"name":"Any time"');
-        expect(out).toMatchObject({ sent: true, recipients: ["nick@x.test"] });
+        // Queued, not sent: one mailbox sends about one email every 10 minutes.
+        expect(out).toMatchObject({
+          queued: true,
+          recipients: ["nick@x.test"],
+          next: expect.stringContaining("it has gone out by about 00:40 America/Chicago"),
+        });
         expect(out).not.toHaveProperty("firstEmailAt");
       } finally {
         vi.useRealTimers();
@@ -5338,7 +5347,7 @@ describe("local native Instantly campaign and lead tools", () => {
         const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
         expect(f.state.requests.some((r) => r.path.endsWith("/pause"))).toBe(false);
         expect(out).toMatchObject({
-          sent: true,
+          queued: true,
           firstEmailAt: "2026-11-13T15:00:00.000Z",
           next: expect.stringContaining("first email goes out Fri 09:00 America/Chicago"),
         });
@@ -5374,7 +5383,48 @@ describe("local native Instantly campaign and lead tools", () => {
           `PATCH /api/v2/campaigns/${CAMPAIGN}`,
           `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
         ]);
-        expect(out).toMatchObject({ sentNow: true, recipients: ["abe@x.test"] });
+        expect(out).toMatchObject({
+          sendingNow: true,
+          recipients: ["abe@x.test"],
+          next: expect.stringContaining("queued with the mail service"),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("says people queued inside the sending hours are going out, and a send-now changes nothing", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.email_gap = 10;
+        f.state.campaign.campaign_schedule = {
+          schedules: [
+            {
+              ...WEEKDAYS_9_TO_5.schedules[0],
+              name: "Any time",
+              timing: { from: "00:00", to: "23:59" },
+              days: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((day) => [String(day), true])),
+            },
+          ],
+        };
+        for (const lead of f.state.campaignLeads.slice(2))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(read).toMatchObject({
+          queuedFirstEmail: "now",
+          next: expect.stringContaining("all 2 have gone out by about 00:50"),
+        });
+        f.state.requests.length = 0;
+        const events = await f.run("activate_campaign", { send_now: true });
+        expect((events[0] as { message: string }).message).toMatch(
+          /Already sending now, nothing to speed up: .*nobody is emailed twice/,
+        );
+        expect(
+          f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
+        ).toEqual([]);
       } finally {
         vi.useRealTimers();
       }
@@ -5883,6 +5933,52 @@ describe("Gmail search in a role", () => {
       installLogger(previousLogger);
     }
   });
+  it("offers Gmail send only once Gmail is connected", async () => {
+    // Staging 11-13: with Gmail not connected, the send card still showed and the recruiter was
+    // told that confirming it was enough.
+    const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
+    const assignment = {
+      ...ASSIGNMENT,
+      allowAllTools: false,
+      allowedTools: ["search_threads", "send_message"],
+      server: gmail,
+    };
+    vi.stubGlobal(
+      "fetch",
+      mcpFetch(
+        {
+          failNext: false,
+          initializations: 0,
+          tools: [{ name: "search_threads", inputSchema: { type: "object" } }],
+          callResult: { content: [] },
+        },
+        gmail.endpoint,
+      ),
+    );
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([assignment]),
+        findFirst: vi.fn().mockResolvedValue(assignment),
+      },
+      user: { findUnique: vi.fn().mockResolvedValue({ usageCreditLimit: 10_000 }) },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    try {
+      const tools = await connector.discoverTools({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never);
+      const names = tools.map((tool) => tool.name);
+      expect(names).toContain("mcp__gmail__search_threads");
+      expect(names).not.toContain("mcp__gmail__send_message");
+    } finally {
+      await connector.close();
+    }
+  });
+
   it("adds the role's own mailbox to a Gmail thread search result", async () => {
     const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
     const assignment = { ...ASSIGNMENT, server: gmail };

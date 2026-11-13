@@ -494,6 +494,9 @@ function localGmailTools(
   if (
     assignment.server.transport !== "streamable_http" ||
     assignment.server.endpoint !== GMAIL_MCP ||
+    // Staging 11-13: with Gmail not connected yet, the send card still showed and the recruiter
+    // was told confirming it was enough. Without the tool the agent asks to connect first.
+    !assignment.server.secretId ||
     !(
       assignment.allowAllTools ||
       (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(GMAIL_SEND))

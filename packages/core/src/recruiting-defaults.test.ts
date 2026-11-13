@@ -2,6 +2,7 @@ import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   creditEstimateNote,
+  greetsByName,
   isChineseText,
   isEnglishText,
   RECRUITER_LANGUAGE,
@@ -89,6 +90,18 @@ describe("maintained recruiting defaults", () => {
     ].map((step) => sourcer.instructions.indexOf(step));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+});
+
+describe("greetsByName", () => {
+  it("flags a shared email written to one named person", () => {
+    // Staging 11-13: "Hi Noah," made Kruit split Noah and Ada into two campaigns, so the
+    // first card listed only Noah.
+    expect(greetsByName("Hi Noah, I'm reaching out about a role.\n\nBest,\nNoah Liu")).toBe(true);
+    expect(greetsByName("<p>Dear Ada:</p><p>Hello</p>")).toBe(true);
+    expect(greetsByName("Hi {{firstName}},\n\nA role in Seattle.")).toBe(false);
+    expect(greetsByName("Hi there,\n\nA role in Seattle.")).toBe(false);
+    expect(greetsByName("I'm reaching out about a role, Noah.")).toBe(false);
   });
 });
 

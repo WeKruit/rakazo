@@ -518,6 +518,7 @@ describe("delegating to a role team in another conversation", () => {
     prisma.message!.findFirst = vi.fn(async () => ({
       id: "message-delegated",
       seq: 10,
+      createdAt: new Date("2026-11-13T09:06:40Z"),
       blocks: [options.root ?? delegation],
     }));
     prisma.message!.findMany = vi.fn(async () => options.later ?? []);
@@ -590,6 +591,26 @@ describe("delegating to a role team in another conversation", () => {
         },
       }),
     );
+  });
+
+  it("is not held back by a card the role was already waiting on before the request", async () => {
+    // Staging 11-13: the intake turn's next-step card waited the whole time, so the Mandarin
+    // check Kruit asked for finished in the role's chat and never came back to Kruit.
+    const harness = team({ later: [said("4 of the 10 list Mandarin.")] });
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(harness.deps.prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { status: { in: ["queued", "running"] } },
+            { status: "waiting_input", createdAt: { gte: new Date("2026-11-13T09:06:40Z") } },
+          ],
+        }),
+      }),
+    );
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({ text: "4 of the 10 list Mandarin." }),
+    ]);
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {
