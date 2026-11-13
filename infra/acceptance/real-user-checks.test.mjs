@@ -402,3 +402,20 @@ test("the same unverified label under several people in a Chinese round is not a
     [],
   );
 });
+
+test("the 11-13 send-count replies fail on the restated question and the name lecture", () => {
+  const failures = conversationChecks([
+    user("你找了这么多人为什么一个邮件都发不出去？"),
+    bot("我正在梳理你提到的邮件发送问题。"),
+    bot("目前确实一封都没发出。另外，中文能力应以候选人资料中的明确证据为准，不能靠姓名判断。"),
+  ]);
+  assert(failures.some((failure) => failure.startsWith("restates the question")));
+  assert(failures.some((failure) => failure.startsWith("lectures on judging language by name")));
+  assert.deepEqual(
+    conversationChecks([
+      user("现在发送了多少人呢"),
+      bot("已排队 3 人，第一封周五 9:00 芝加哥时间发出。要现在就发吗？"),
+    ]),
+    [],
+  );
+});
