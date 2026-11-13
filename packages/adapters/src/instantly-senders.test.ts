@@ -702,6 +702,8 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   // 11-11 staging: "no sending mailbox" was said three times; the Gmail card is the one ask.
   expect(read).toMatchObject({ next: expect.stringContaining("request_connection once") });
   expect(JSON.stringify(read)).not.toContain("Integrations");
+  // 11-13 staging: "I have no Gmail" ended on "nothing for you to do".
+  expect(read).toMatchObject({ next: expect.stringContaining("never say there is nothing to do") });
 });
 
 it("asks no company name until the turn read the sending email", () => {
