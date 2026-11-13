@@ -742,8 +742,9 @@ for (const journey of JOURNEYS.filter(
   log(`skipping ${journey.name}: set ${missing(journey).join(", ")}`);
 const SAMPLES = Number(option("--samples", "1"));
 const CONCURRENCY = Number(option("--concurrency", "6"));
+// Mailbox samples take turns on the fixture; the batch copy plays once, since each play sends.
 const plays = selected.flatMap((journey) =>
-  Array.from({ length: journey.account ? 1 : SAMPLES }, (_, index) => ({
+  Array.from({ length: journey.account === "batch" ? 1 : SAMPLES }, (_, index) => ({
     journey,
     sample: index + 1,
   })),
