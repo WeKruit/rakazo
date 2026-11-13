@@ -27,8 +27,27 @@ describe("turnWork", () => {
     expect(turnWork("read_file", {})).toBeUndefined();
     expect(turnWork("recruiting_role", { operation: "update" }, { ok: false })).toBeUndefined();
     expect(
-      turnWork("instantly__mail__ensure_role_campaign", {}, { ok: true, readOnly: false }),
+      turnWork(
+        "instantly__mail__ensure_role_campaign",
+        { steps: [{ subject: "Hi", body: "Hello" }] },
+        { ok: true, readOnly: false },
+      ),
     ).toBe("draft");
+    expect(
+      turnWork(
+        "instantly__mail__ensure_role_campaign",
+        {},
+        { ok: true, readOnly: false, result: { structuredContent: { created: true } } },
+      ),
+    ).toBe("draft");
+    // Staging 11-13: each status check that only found the existing campaign reported a saved draft.
+    expect(
+      turnWork(
+        "instantly__mail__ensure_role_campaign",
+        {},
+        { ok: true, readOnly: false, result: { structuredContent: { created: false } } },
+      ),
+    ).toBeUndefined();
     // A send returns only after its card was confirmed: it went out, it is no draft.
     const sentCall = { ok: true, readOnly: false } as const;
     expect(turnWork("instantly__mail__activate_campaign", {}, sentCall)).toBe("sent");

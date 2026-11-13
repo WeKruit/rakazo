@@ -87,6 +87,14 @@ function isContactLookup(result: unknown): boolean {
 const READ_ACTION =
   /^(?:native_[a-z]+_)?(?:(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)|whoami$|me$)/;
 
+/** A catalog call's own arguments (`connectors_execute_tool` nests them). */
+function nestedArgs(args: Record<string, unknown>): Record<string, unknown> | undefined {
+  const nested = args.arguments;
+  return nested && typeof nested === "object" && !Array.isArray(nested)
+    ? (nested as Record<string, unknown>)
+    : undefined;
+}
+
 /** A call's operation, read from a catalog call's nested arguments too. */
 export function toolOperation(args: Record<string, unknown>): string | undefined {
   const nested = args.arguments;
@@ -145,6 +153,14 @@ export function turnWork(
   if (/^(?:native_[a-z]+_)?(?:activate_campaign|send_email|send_message|send)$/.test(action))
     return "sent";
   if (/sender|mailbox|sending_account/.test(action)) return "sender";
+  // Ensuring a campaign that already exists, without new copy, changed nothing (staging 11-13:
+  // each status check reported 「已完成：存好了邮件草稿」).
+  if (
+    action.startsWith("ensure_") &&
+    !("steps" in (nestedArgs(args) ?? args)) &&
+    !/"created"\s*:\s*true/.test(JSON.stringify(settled?.result ?? null))
+  )
+    return undefined;
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
   return "connected";
