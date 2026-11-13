@@ -49,6 +49,24 @@ const CRM_PERSON_KEY = Prisma.sql`CASE
   ELSE 'crm:' || cc.id
 END`;
 
+/**
+ * The inverse of CRM_PERSON_KEY for known keys, so a page's CRM contacts are found through the
+ * owner + identity index instead of computing every contact's key. CRM_PERSON_KEY still decides.
+ */
+function crmKeyLookup(keys: readonly string[]) {
+  const identities = keys
+    .filter((key) => !key.startsWith("crm:"))
+    .map((key) =>
+      key.startsWith("linkedin:") ? `li:linkedin.com${key.slice("linkedin:".length)}` : key,
+    );
+  const ids = keys.filter((key) => key.startsWith("crm:")).map((key) => key.slice("crm:".length));
+  const parts = [
+    identities.length && Prisma.sql`cc."identityKey" IN (${Prisma.join(identities)})`,
+    ids.length && Prisma.sql`(cc."identityKey" IS NULL AND cc.id IN (${Prisma.join(ids)}))`,
+  ].filter((part): part is Prisma.Sql => Boolean(part));
+  return parts.length ? Prisma.sql`AND (${Prisma.join(parts, " OR ")})` : Prisma.sql`AND false`;
+}
+
 type PeopleOptions = {
   /** Only these people (a page's detail read). */
   keys?: readonly string[];
@@ -82,12 +100,12 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         : Prisma.empty;
   const pattern = query ? like(query) : "";
   const crmOwner = Prisma.sql`cc."userId" = ${user} AND cc."spaceId" = ${space} AND cc."archivedAt" IS NULL`;
-  const crmCandidates =
-    keys || narrow
-      ? Prisma.sql`AND "crmCandidateId" IN (
-        SELECT cc."crmCandidateId" FROM recruiting_crm_contacts cc
-        WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})`
-      : Prisma.empty;
+  // The few CRM contacts a page or narrowed read needs, found once: links, sequences and mail
+  // are then read by these ids through their own indexes instead of across the whole account.
+  const matched = Boolean(keys || narrow);
+  const crmCandidates = matched
+    ? Prisma.sql`AND "crmCandidateId" IN (SELECT crm_candidate_id FROM matched_crm)`
+    : Prisma.empty;
   return Prisma.sql`
     roles AS (
       SELECT r.id, r.title, t."groupId" AS group_id, r."sourceThreadId" AS thread_id
@@ -132,6 +150,14 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         ].filter((part): part is Prisma.Sql => Boolean(part)),
         "\n      INTERSECT\n      ",
       )}
+    ),`
+        : Prisma.empty
+    }
+    ${
+      matched
+        ? Prisma.sql`matched_crm AS MATERIALIZED (
+      SELECT cc.id, cc."crmCandidateId" AS crm_candidate_id FROM recruiting_crm_contacts cc
+      WHERE ${crmOwner} ${only(CRM_PERSON_KEY)} ${keys ? crmKeyLookup(keys) : Prisma.empty}
     ),`
         : Prisma.empty
     }
@@ -185,7 +211,7 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
         AND a."crmRoleId" = cr."crmRoleId"
       LEFT JOIN roles ar ON ar.id = a."roleId"
       WHERE cr."userId" = ${user} AND cr."spaceId" = ${space} AND cr."archivedAt" IS NULL
-        ${keys || query ? Prisma.sql`AND rc."contactId" IN (SELECT cc.id FROM recruiting_crm_contacts cc WHERE ${crmOwner} ${only(CRM_PERSON_KEY)})` : Prisma.empty}
+        ${keys || query ? Prisma.sql`AND rc."contactId" IN (SELECT id FROM matched_crm)` : Prisma.empty}
     ),
 ${
   activity
@@ -226,7 +252,7 @@ ${
             : Prisma.sql`NULL::timestamp AS last_contacted, NULL::timestamp AS last_replied,`
         }
         ${skills ? Prisma.sql`(cc.profile->'skills')::text` : Prisma.sql`NULL::text`} AS skills
-      FROM recruiting_crm_contacts cc
+      FROM ${matched ? Prisma.sql`matched_crm k JOIN recruiting_crm_contacts cc ON cc.id = k.id` : Prisma.sql`recruiting_crm_contacts cc`}
       LEFT JOIN crm_links cl ON cl.contact_id = cc.id
       ${
         activity
@@ -234,7 +260,7 @@ ${
       LEFT JOIN crm_mail ml ON ml.candidate_id = cc."crmCandidateId"`
           : Prisma.empty
       }
-      WHERE ${crmOwner} ${only(CRM_PERSON_KEY)}
+      WHERE ${crmOwner}
     ),
     entries AS (
       SELECT * FROM product
