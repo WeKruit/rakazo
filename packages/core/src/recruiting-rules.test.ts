@@ -363,11 +363,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "A short pool was shown with people who fail a requirement.",
   },
   {
-    rule: "a short pool tells the recruiter and searches deeper once",
+    rule: "a short pool gets its round before any deeper search",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase:
-      "how many the quick search found who fit and that you are searching deeper, which takes a few more minutes (ask nothing)",
-    why: "A hard-to-fill role asked the recruiter, then searched on for many minutes without a round.",
+    phrase: "so it never runs before the round: the next-step card offers it",
+    why: "A short round spent about $1 on a deeper search nobody asked for (11-13).",
   },
   {
     rule: "a short round holds everyone who fits",

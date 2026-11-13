@@ -67,6 +67,7 @@ import {
   RecruitingApprovalToolCallSchema,
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
+  RECRUITING_CALIBRATION_ROUND_SIZE,
   RecruitingCrmTargetToolInputSchema,
   RecruitingFeedbackInputSchema,
   RecruitingNotesToolInputSchema,
@@ -1573,7 +1574,7 @@ const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
  * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
  * search runs; the round then holds everyone who fits, even fewer than ten.
  */
-const SHORT_OF_TEN = `tell the recruiter in one line, in their language, how many people the quick search found who fit and that you are now searching deeper, which takes a few more minutes (ask nothing); in the same step run one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement. Once that deeper search has returned (or if it already ran), record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line how many short of ten it is and which requirement rules out the most. Never pick someone who does not fit to fill it`;
+const SHORT_OF_TEN = `record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most. Never pick someone who does not fit to fill it, and run no deeper search before the round: the next-step card offers one, and it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
 /** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
 const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
@@ -7171,7 +7172,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let agentRunsBeforeRound = 0;
         // Quick people searches this turn ran itself (not the planned ones) before its round.
         let quickSearchesBeforeRound = 0;
-        let deeperRunBeforeRound = false;
         // Full profile pages the first round's searches may still read for a required language.
         const fullProfileReads = { left: FULL_PROFILE_READS };
         const profilePages = new Map<string, string>();
@@ -7621,8 +7621,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
-          if (!(await roundRecordedThisRun())) return undefined;
-          return recruitingNextStepCard(isChineseText(lastRecruiterText));
+          const round = await roundRecordedThisRun();
+          if (!round) return undefined;
+          const keys = (round.result as { candidateKeys?: unknown } | null)
+            ?.candidateKeys;
+          return recruitingNextStepCard(
+            isChineseText(lastRecruiterText),
+            Array.isArray(keys) &&
+              keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
+          );
         };
         // The next-step card stands in for the agent's own question only right after the round
         // (a brief save after it aside): the round's list is then the report, and the recruiter
@@ -8177,15 +8184,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 `${agentRunsBeforeRound} people-search agent runs`
               : quickSearchesBeforeRound >= MAX_QUICK_SEARCHES_BEFORE_ROUND &&
                 `${quickSearchesBeforeRound} people searches`;
-            // The one deeper search for a round short of ten runs past the cap.
-            const deeper =
-              newAgentRun &&
-              typeof rawArgs.effort === "string" &&
-              rawArgs.effort !== "low" &&
-              !deeperRunBeforeRound &&
-              Boolean(searched);
-            if (deeper) deeperRunBeforeRound = true;
-            else if (searched)
+            if (searched)
               return {
                 error: `Not run: ${searched} already returned for this round. If ten of all the people returned fit every hard requirement, record them with calibration_round now. Otherwise show the ones who fit with show_picks, then ${SHORT_OF_TEN}.`,
               };
@@ -17848,6 +17847,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     const nextStep = [
                       recruitingNextStepCard().text,
                       recruitingNextStepCard(true).text,
+                      recruitingNextStepCard(false, true).text,
+                      recruitingNextStepCard(true, true).text,
                       "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
                     ];
                     const known = answeredAsk(
