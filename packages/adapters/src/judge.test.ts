@@ -30,6 +30,31 @@ describe("typeSafeJudge", () => {
   });
 });
 
+describe("language check", () => {
+  it("posts one row with the judge key and returns its verdict", async () => {
+    const fetchImpl = answer({ verdict: "no sign", p: 0.1 });
+    const judge = typeSafeJudge("key", fetchImpl, "https://check.example/");
+    await expect(
+      judge.language?.({ requirement: "Mandarin", name: "Pat", profile: "Engineer" }),
+    ).resolves.toBe("no sign");
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    expect(url).toBe("https://check.example/");
+    expect((init!.headers as Record<string, string>).authorization).toBe("Bearer key");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      requirement: "Mandarin",
+      name: "Pat",
+      profile: "Engineer",
+    });
+    expect(typeSafeJudge("key", fetchImpl).language).toBeUndefined();
+    await expect(
+      typeSafeJudge("key", answer({ verdict: "maybe" }), "https://check.example/").language?.({
+        requirement: "Mandarin",
+        profile: "",
+      }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("JudgeSettings", () => {
   const secrets = {
     load: vi.fn(async (ciphertext: string) => ciphertext.replace("sealed:", "")),
@@ -57,5 +82,42 @@ describe("JudgeSettings", () => {
     await settings.save({ provider: "typesafe", apiKey: "good" }, {} as never);
     expect(row).toMatchObject({ id: "judge:typesafe" });
     await expect(settings.resolve()).resolves.toMatchObject({ yes });
+  });
+
+  it("keeps the saved key when only the language check changes, and refuses a check that does not answer", async () => {
+    let row: { id: string; ciphertext: string } | null = null;
+    const prisma = {
+      integrationProviderConfig: {
+        findUnique: vi.fn(async () => row),
+        upsert: vi.fn(async ({ create }: { create: { id: string; ciphertext: string } }) => {
+          row = create;
+          return create;
+        }),
+      },
+    };
+    const language = vi.fn(async () => "shown" as const as "shown" | undefined);
+    const settings = new JudgeSettings(prisma as never, secrets as never, (config) => ({
+      yes: async () => 0.9,
+      ...(config.languageUrl ? { language } : {}),
+    }));
+    await expect(settings.save({ provider: "typesafe" }, {} as never)).rejects.toThrow();
+    await settings.save({ provider: "typesafe", apiKey: "good" }, {} as never);
+    language.mockResolvedValueOnce(undefined);
+    await expect(
+      settings.save({ provider: "typesafe", languageUrl: "https://check.example/" }, {} as never),
+    ).rejects.toThrow();
+    expect(JSON.parse(row!.ciphertext.replace("sealed:", ""))).toEqual({
+      provider: "typesafe",
+      apiKey: "good",
+    });
+    await settings.save(
+      { provider: "typesafe", languageUrl: "https://check.example/" },
+      {} as never,
+    );
+    expect(JSON.parse(row!.ciphertext.replace("sealed:", ""))).toEqual({
+      provider: "typesafe",
+      apiKey: "good",
+      languageUrl: "https://check.example/",
+    });
   });
 });

@@ -88,6 +88,31 @@ describe("required language", () => {
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
+  it("asks the deployment's own language check one row at a time when it has one", async () => {
+    const asked: Array<{ requirement: string; name?: string; profile: string }> = [];
+    const judge: TextJudge = {
+      yes: async () => {
+        throw new Error("the check decides, not the yes/no question");
+      },
+      language: async (row) => {
+        asked.push(row);
+        return row.profile.includes("Mandarin") ? "shown" : undefined;
+      },
+    };
+    const checked = await withRequiredLanguage({ resolve: async () => judge }, brief, rows, result);
+    expect(asked).toHaveLength(3);
+    expect(asked[0]).toMatchObject({
+      requirement: "Must speak Mandarin and English",
+      name: "Joe Sample",
+    });
+    // Unanswered rows stay, as unclear, after those the check shows.
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Wei Test", "shown"],
+      ["Joe Sample", undefined],
+      ["Ana Example", undefined],
+    ]);
+  });
+
   it("reads the full profile page of people the search text does not show it for", async () => {
     const read: string[] = [];
     const reads = { left: 1 };

@@ -1,13 +1,7 @@
-import type { TextJudge } from "./judge.js";
+import type { LanguageSignal, TextJudge } from "./judge.js";
 import type { ProfileReads } from "./recruiting-full-profile.js";
 import { FULL_PROFILE_WAIT_MS, fullProfilePages } from "./recruiting-full-profile.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
-
-/**
- * A required language is rarely in the short passage a people row carries, so the search's own
- * profile text is read by the yes/no judge and each row says whether that text shows it.
- */
-export type LanguageSignal = "shown" | "unclear" | "no sign";
 
 /** Languages a brief may require, matched in English or Chinese. */
 const LANGUAGE_WORDS =
@@ -147,9 +141,23 @@ const QUESTION = (requirement: string) =>
 const SHOWN = 0.6;
 const NO_SIGN = 0.25;
 
+/** The yes/no judge's answer for one row, when the deployment has no language check of its own. */
+async function askedLanguage(
+  judge: TextJudge,
+  requirement: string,
+  name: string,
+  profile: string,
+  signal?: AbortSignal,
+): Promise<LanguageSignal | undefined> {
+  const p = await judge.yes(QUESTION(requirement), { profile: withoutName(profile, name) }, signal);
+  if (p === undefined) return undefined;
+  return p >= SHOWN ? "shown" : p < NO_SIGN ? "no sign" : "unclear";
+}
+
 /**
- * Asks the judge about each person's profile text, all at once. People the judge could not answer
- * for, or with no profile text, are left out; the search result never waits on a failed judge.
+ * Asks the judge about each person's profile text, all at once: the deployment's own language
+ * check when it has one, else one yes/no question each. People the judge could not answer for,
+ * or with no profile text, are left out; the search result never waits on a failed judge.
  */
 export async function languageSignals(
   judge: TextJudge,
@@ -163,13 +171,10 @@ export async function languageSignals(
     people.map(async (person) => {
       const text = texts.get(person.candidateKey);
       if (!text) return;
-      const p = await judge.yes(
-        QUESTION(requirement),
-        { profile: withoutName(text, person.name ?? "") },
-        signal,
-      );
-      if (p === undefined) return;
-      signals.set(person.candidateKey, p >= SHOWN ? "shown" : p < NO_SIGN ? "no sign" : "unclear");
+      const verdict = judge.language
+        ? await judge.language({ requirement, name: person.name, profile: text }, signal)
+        : await askedLanguage(judge, requirement, person.name ?? "", text, signal);
+      if (verdict) signals.set(person.candidateKey, verdict);
     }),
   );
   return signals;
