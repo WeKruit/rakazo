@@ -20,6 +20,7 @@ import {
   recruitingNextStepCard,
   roleOpenedNote,
   signedAsTeam,
+  unfilledPlaceholder,
 } from "./recruiting-defaults.js";
 
 describe("calibration fast path", () => {
@@ -90,6 +91,17 @@ describe("maintained recruiting defaults", () => {
     ].map((step) => sourcer.instructions.indexOf(step));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+});
+
+describe("unfilledPlaceholder", () => {
+  it("finds a bracketed blank left in an email", () => {
+    expect(unfilledPlaceholder("Hi [Candidate Name],\n\nA role.")).toBe("[Candidate Name]");
+    expect(unfilledPlaceholder("<p>Best,</p><p>[Your name]</p>")).toBe("[Your name]");
+    expect(unfilledPlaceholder("您好 [候选人姓名]，")).toBe("[候选人姓名]");
+    expect(unfilledPlaceholder("Hi {{firstName}},\n\nA role.")).toBeUndefined();
+    expect(unfilledPlaceholder("See [our site](https://example.com) for more.")).toBeUndefined();
+    expect(unfilledPlaceholder("Rated [1] of 5.")).toBeUndefined();
   });
 });
 

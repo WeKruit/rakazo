@@ -66,6 +66,31 @@ describe("startRoleFromRecruiterMessage", () => {
     expect(d.jobs.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("adds the requirements given earlier when the latest message is only a go-ahead", async () => {
+    const { deps: d, tx } = deps({
+      role: "user",
+      botId: null,
+      clientNonce: null,
+      externalTranscriptFor: null,
+      blocks: [{ kind: "text", text: "Start finding candidates now" }],
+    });
+    expect(
+      await startRoleFromRecruiterMessage(d as never, run, {
+        ...role,
+        earlier: "Senior nurse, Austin TX, 5+ years ICU",
+      }),
+    ).toBe(true);
+    expect(tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          prompt: expect.stringMatching(
+            /^Start finding candidates now\n\n.*earlier.*\nSenior nurse, Austin TX, 5\+ years ICU$/s,
+          ),
+        }),
+      }),
+    );
+  });
+
   it("starts the role from a JD sent only as a file", async () => {
     const { deps: d, tx } = deps({
       role: "user",

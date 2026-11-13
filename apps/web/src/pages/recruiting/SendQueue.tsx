@@ -49,7 +49,7 @@ export function SendQueue(props: {
           {bounced ? ` · ${t`${bounced} bounced`}` : ""}
         </p>
       </div>
-      {props.onAskChat && (paused || (when && when !== "now")) ? (
+      {props.onAskChat ? (
         <Button
           onClick={() =>
             props.onAskChat?.(

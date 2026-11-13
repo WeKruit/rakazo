@@ -52,10 +52,15 @@ it("says a paused campaign holds people back and offers to resume", () => {
   expect(html).toContain("Resume sending");
 });
 
+it("offers to send now while people wait behind the gap between emails", () => {
+  const html = renderToStaticMarkup(
+    <SendQueue campaign={read(1, { queuedFirstEmail: "now" })} onAskChat={() => {}} />,
+  );
+  expect(html).toContain("2 waiting for their first email<");
+  expect(html).toContain("Send now");
+});
+
 it("stays out of the way when nothing waits or contact times are unknown", () => {
-  expect(
-    renderToStaticMarkup(<SendQueue campaign={read(1, { queuedFirstEmail: "now" })} />),
-  ).not.toContain("Send now");
   const done = read(1);
   done.leads = done.leads.filter((entry) => entry.contactedAt);
   expect(renderToStaticMarkup(<SendQueue campaign={done} />)).toBe("");
