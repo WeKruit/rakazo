@@ -405,7 +405,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "feedback on a missing requirement makes it visible-only",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "the next round takes only people whose rows show it",
-    why: "After \"no more ones w/o kafka\", the next round still had 5 of 10 with no Kafka shown (11-13).",
+    why: 'After "no more ones w/o kafka", the next round still had 5 of 10 with no Kafka shown (11-13).',
+  },
+  {
+    rule: "a later round short of ten is filled by one low agent run",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "when fewer than ten new people fit, fill the rest with one people-search agent run",
+    why: "After feedback the next rounds had 3 and then 7 people because the quick searches mostly returned people already shown (11-13).",
   },
   {
     rule: "no quota talk",
@@ -1143,6 +1149,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Asked which people have production Kafka and for how many years, Main passed it to the role team twice and never gave a list (11-13).",
   },
   {
+    rule: "a drop request is handed on at once in the global conversation",
+    in: "Global recruiting overview skill",
+    phrase: "when the recruiter says to drop people you hand the drop and the search for replacements to the role team in that same turn",
+    why: "Told to drop two people, Main only answered \"I'd drop A and B… I'd look for…\" and did nothing (11-13).",
+  },
+  {
     rule: "hand a named booking to Scheduling in the global conversation",
     in: "Global recruiting overview skill",
     phrase:
@@ -1319,6 +1331,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "never report a failed internal check or save",
     why: "Outreach told the recruiter draft access was blocked although the send card was ready.",
+  },
+  {
+    rule: "drop people when asked",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "Asked to drop people, drop them in that reply and say in its text who is dropped",
+    why: "Asked to drop A and B and replace them, Kruit only said what it would do (11-13).",
+  },
+  {
+    rule: "a drop is answered before any card",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "say in its text who is dropped and who is left, before any card",
+    why: "Asked who it drops from three pasted profiles, Kruit replied only with a card to open a role (11-13).",
   },
   {
     rule: "queued is not sent",

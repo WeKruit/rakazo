@@ -218,7 +218,9 @@ export const SCENARIOS = [
     source: "11-09/10 template written in the candidate's voice",
     noRole: true,
     turns: [{ say: "帮我写一封面试后跟进邮件的模板" }],
-    last: /\[Candidate|候选人|Hi \[|您好/,
+    // Greets the candidate with a mail-merge variable ({{firstName}}); a bracket blank fails the
+    // placeholder check.
+    last: /(?:Hi|Dear|Hello)\s+\{\{|\{\{\s*first_?name\s*\}\}|候选人|您好/i,
     // A recruiter thanking the candidate for their time is fine; the greeting tells whose voice it is.
     lastNot: /\[(?:Interviewer|Hiring Manager)/i,
   },

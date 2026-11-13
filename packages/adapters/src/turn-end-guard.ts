@@ -24,6 +24,7 @@ import {
   questionCard,
   retryReason,
   sequenceForOneEmail,
+  teamSignedDraft,
   templateBlanks,
 } from "./turn-report.js";
 
@@ -752,11 +753,31 @@ export async function planDeclineRetry(
   // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
   // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;
-  const variables = askedTemplate(asked)
+  // A follow-up on a template ("sign it David Chen") is still about the template: staging 11-13,
+  // the variables check dropped "Hi {{firstName}}," for "Hello," on that edit.
+  const template =
+    askedTemplate(asked) ||
+    (draftVariables(input.reply) !== undefined &&
+      (
+        await deps.prisma.message.findMany({
+          where: { threadId: input.run.threadId, role: "user" },
+          orderBy: { seq: "desc" },
+          take: 4,
+          select: { blocks: true },
+        })
+      ).some((message) =>
+        askedTemplate(
+          (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+            .join("\n"),
+        ),
+      ));
+  const variables = template
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??
-      templateBlanks(input.reply))
-    : draftVariables(input.reply);
+      templateBlanks(input.reply) ??
+      teamSignedDraft(input.reply))
+    : (draftVariables(input.reply) ?? teamSignedDraft(input.reply));
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
   const reason = !input.request.trim()

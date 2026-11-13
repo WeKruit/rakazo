@@ -1396,6 +1396,56 @@ describe("planDeclineRetry", () => {
     expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
   });
 
+  it("keeps {{firstName}} when the recruiter edits a template they asked for (2026-11-13 staging)", async () => {
+    // "sign it David Chen" names no template, and the variables check turned the template's
+    // "Hi {{firstName}}," into "Hello,".
+    const reply =
+      "**Subject:** Staff Backend Engineer\n\nHi {{firstName}},\n\nA role in New York.\n\nBest,\nDavid Chen";
+    const asks = (text: string) =>
+      ({
+        prisma: prisma([{ clientNonce: "send:human", blocks: [{ kind: "text", text }] }] as never),
+      }) as const;
+    const edit = { ...input, request: "my name is David Chen, sign it that" };
+    expect(
+      await planDeclineRetry(asks("i need a first outreach email template, no candidates yet"), {
+        ...edit,
+        reply,
+      }),
+    ).toBeUndefined();
+    expect(
+      (
+        await planDeclineRetry(asks("i need a first outreach email template"), {
+          ...edit,
+          reply: reply.replace("David Chen", "{{yourName}}"),
+        })
+      )?.note,
+    ).toContain("bracketed blanks");
+    expect(
+      (await planDeclineRetry(asks("write to Wei at wei@example.com"), { ...edit, reply }))?.note,
+    ).toContain("template variables");
+  });
+
+  it("re-signs a draft signed as a team (2026-11-13 staging)", async () => {
+    const reply =
+      "**Subject:** Backend Go Engineer\n\nHi Wei,\n\nA role in New York.\n\nBest,  \nRecruiting Team";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const handed = {
+      ...input,
+      request: "Draft it",
+      handedIn: true,
+      personRequest: "给 Wei 写封邮件",
+    };
+    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain(
+      "signed as a team",
+    );
+    expect(
+      await planDeclineRetry(human, {
+        ...handed,
+        reply: reply.replace("Recruiting Team", "David"),
+      }),
+    ).toBeUndefined();
+  });
+
   it("puts a question the retry still typed into its reply on a card", async () => {
     const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
     const reply =
