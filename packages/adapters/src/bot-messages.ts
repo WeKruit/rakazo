@@ -478,6 +478,10 @@ export async function returnDelegatedTeamOutcome(
         { status: { in: ["queued", "running"] } },
         { status: "waiting_input", createdAt: { gte: delegated.createdAt } },
       ],
+      // Staging 11-13: Kruit asked "where's the next round?" twice while the round ran; those
+      // follow-ups queued behind it and held the finished round back for six minutes. A later
+      // request still queued is answered by this result, not waited on.
+      NOT: { status: "queued", trigger: "bot_message", createdAt: { gt: delegated.createdAt } },
     },
     select: { id: true },
   });
@@ -537,6 +541,8 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
       role: "user",
       createdAt: { gte: since },
       blocks: { array_contains: [{ kind: "bot_message_received" }] },
+      // A request whose turn has not started yet is not the work that just finished.
+      sourceRuns: { none: { status: "queued" } },
     },
     orderBy: { seq: "desc" },
     select: { id: true, seq: true, blocks: true, createdAt: true },
