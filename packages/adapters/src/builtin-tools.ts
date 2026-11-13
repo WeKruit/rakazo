@@ -1563,7 +1563,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "start_role",
     description:
-      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet; when they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. Leave message out when the request is in the recruiter's latest message (never retype a JD); pass it only for requirements they gave elsewhere, in their own words. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
+      "Global conversation only. Open a new role: creates the role's own conversation with its team, hands it the recruiter's latest message and attached files exactly as they wrote them, and shows the recruiter a card that opens it. Use it when the recruiter wants to start hiring for a role that has no team yet; when they say the role is new, call it directly, and check recruiting_candidates operation roles first only when they may mean a role that already exists. Pass a short title. Leave message out when the request is in the recruiter's latest message (never retype a JD); the role's team cannot see this conversation, so pass message whenever they gave anything the role needs in earlier messages here (requirements, and an email template they wrote or approved, copied word for word), in their own words. The role's team then asks its clarifying questions in that conversation. Never say a role was created unless this returned ok.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1574,7 +1574,7 @@ export const builtinAgentTools: ConnectorTool[] = [
         message: {
           type: "string",
           description:
-            "Only for requirements that are not in the recruiter's latest message, in their own words.",
+            "What the role needs that is not in the recruiter's latest message (earlier requirements, an approved email template word for word), in their own words.",
         },
       },
       required: ["title"],

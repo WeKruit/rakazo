@@ -9,6 +9,7 @@ import {
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   dockerComputerToolInstruction,
+  gmailCardNeedsDraft,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
@@ -3953,5 +3954,16 @@ describe("ticket board tool capability", () => {
     }).map((tool) => tool.name);
     for (const name of ["message_bot", "handoff_to_bot", "message_agent"])
       expect(backgroundNames).not.toContain(name);
+  });
+});
+
+describe("gmailCardNeedsDraft", () => {
+  it("asks for the email in chat before the Gmail card", () => {
+    // Staging 11-13: the card said the email was above when none had been shown.
+    const ask = "给 Wei Zhang 写封邮件，fintech 那个职位。wei.zhang.test@example.com";
+    expect(gmailCardNeedsDraft("gmail", ask, "我先查找现有的 fintech 职位。")).toBe(true);
+    expect(gmailCardNeedsDraft("gmail", ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
+    expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
   });
 });
