@@ -408,6 +408,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "After \"no more ones w/o kafka\", the next round still had 5 of 10 with no Kafka shown (11-13).",
   },
   {
+    rule: "a later round short of ten is filled by one low agent run",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "when fewer than ten new people fit, fill the rest with one people-search agent run",
+    why: "After feedback the next rounds had 3 and then 7 people because the quick searches mostly returned people already shown (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
