@@ -416,7 +416,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "a later round short of ten is filled by one low agent run",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "when fewer than ten new people fit, fill the rest with one people-search agent run",
+    phrase: "when fewer than ten new people fit, or more than half of those that fit leave a hard requirement unshown",
     why: "After feedback the next rounds had 3 and then 7 people because the quick searches mostly returned people already shown (11-13).",
   },
   {
@@ -1355,6 +1355,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "Global recruiting overview skill",
     phrase: "when they ask for the new people, not the ones already shown, first read recruiting_candidates operation round",
     why: "Asked for the new people, global Main listed the pool's first pages, repeating first-round people and one the recruiter turned down (11-13).",
+  },
+  {
+    rule: "a later round is never weaker than the last",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "or more than half of those that fit leave a hard requirement unshown, so the round would be weaker than the last",
+    why: "Round two filled ten with nine people whose rows did not show 6+ years or Spark/Kafka, much weaker than round one (11-13).",
+  },
+  {
+    rule: "round readiness is read, not guessed",
+    in: "Global recruiting overview skill",
+    phrase: "when they ask whether the next round is ready, read operation round and answer from it",
+    why: "Global Main said the new round was not ready 23 s after the role team had shown it (11-13).",
   },
   {
     rule: "a drop is answered before any card",
