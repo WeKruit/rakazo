@@ -1786,6 +1786,8 @@ describe("MCP connector session cache", () => {
             message: expect.stringContaining("is not connected for this recruiter"),
           },
         ]);
+        // 11-13 staging: Kruit told the recruiter the draft was "not saved to the mailbox".
+        expect(JSON.stringify(signedOut)).toContain("Never say the draft is not saved");
 
         state.callError = undefined;
         const returned = [];

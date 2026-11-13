@@ -165,6 +165,11 @@ describe("isChineseText", () => {
     expect(isChineseText("仓库运营经理职位的中文要求应如何设定？")).toBe(true);
     expect(isChineseText("以后都用中文回复我")).toBe(true);
     expect(isChineseText("帮我找应届生，USC 的，CS 专业，会做 AI agent")).toBe(true);
+    // Staging 11-13: this brief got "Got it, on it." and English status lines.
+    const brief =
+      "新role Senior Data Engineer，Seattle，ref 1801，hybrid每周3天，6年+，Spark Kafka生产经验，base 180-220k。两个人：Noah Liu noah-scheduling+noah1801@mail.grokbot.com，Ada Chen noah-scheduling+ada1801@mail.grokbot.com";
+    expect(isChineseText(brief)).toBe(true);
+    expect(isEnglishText(brief)).toBe(false);
   });
 
   it("reads English that quotes a Chinese phrase as English", () => {
