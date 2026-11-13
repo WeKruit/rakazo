@@ -1396,6 +1396,27 @@ describe("planDeclineRetry", () => {
     expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
   });
 
+  it("re-signs a draft signed as a team (2026-11-13 staging)", async () => {
+    const reply =
+      "**Subject:** Backend Go Engineer\n\nHi Wei,\n\nA role in New York.\n\nBest,  \nRecruiting Team";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const handed = {
+      ...input,
+      request: "Draft it",
+      handedIn: true,
+      personRequest: "给 Wei 写封邮件",
+    };
+    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain(
+      "signed as a team",
+    );
+    expect(
+      await planDeclineRetry(human, {
+        ...handed,
+        reply: reply.replace("Recruiting Team", "David"),
+      }),
+    ).toBeUndefined();
+  });
+
   it("puts a question the retry still typed into its reply on a card", async () => {
     const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
     const reply =

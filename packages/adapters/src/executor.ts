@@ -96,6 +96,7 @@ import {
   asksToSendTo,
   assertTransition,
   attachmentExtensionForMimeType,
+  BACKGROUND_RUN_TRIGGERS,
   BLOCKED_TOOL_REFUSAL,
   BOT_MESSAGE_MAX_HOPS,
   blockedToolEffect,
@@ -7067,8 +7068,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return secretPausedToolResult();
         };
 
+        let gmailDraftAsked = false;
         // Like request_secret: an unconnected MCP server pauses on a native connect card.
         const requestConnectionTool = async (args: Record<string, unknown>) => {
+          // Staging 11-13: the Gmail card said "the email is above" when no email had been shown.
+          if (
+            hideVendors &&
+            !gmailDraftAsked &&
+            gmailCardNeedsDraft(
+              args.provider,
+              lastRecruiterText,
+              [...midTurnUserTexts, assembled].join("\n"),
+            )
+          ) {
+            gmailDraftAsked = true;
+            return { error: GMAIL_DRAFT_FIRST_NOTE };
+          }
           let leaseLost = false;
           const result = await requestConnection(
             deps.prisma,
@@ -21008,6 +21023,23 @@ export function runAllowsSilentEmpty(trigger: string): boolean {
   return trigger === "routine" || isBackgroundRunTrigger(trigger);
 }
 
+/** A Gmail connect card for an email the recruiter asked for, before that email was shown in chat. */
+export function gmailCardNeedsDraft(
+  provider: unknown,
+  recruiterText: string,
+  shown: string,
+): boolean {
+  return (
+    /gmail/i.test(String(provider ?? "")) &&
+    asksForOutreach(recruiterText) &&
+    !/Subject\s*[:：]/i.test(shown)
+  );
+}
+
+/** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
+export const GMAIL_DRAFT_FIRST_NOTE =
+  "Not shown yet: write the full email (Subject: and body) in your reply first, so the recruiter sees it above the card, then call request_connection again.";
+
 export function runPromotesMidTurnNarration(trigger: string): boolean {
   return trigger !== "routine" && !isBackgroundRunTrigger(trigger);
 }
@@ -21391,10 +21423,14 @@ async function threadLaneBusy(
   const ancestors = ["bot_message", "tool_background"].includes(run.trigger)
     ? await threadLaneAncestors(tx, run)
     : [];
+  // A teammate's message carries the recruiter's request, like a person's turn: it does not wait
+  // behind background grading (staging 11-13: feedback waited 2 minutes behind a grade run).
+  const delegated = run.trigger === "bot_message";
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
       id: { notIn: [run.id, ...ancestors.map((ancestor) => ancestor.id)] },
+      ...(delegated ? { trigger: { notIn: [...BACKGROUND_RUN_TRIGGERS] } } : {}),
       OR: [
         { status: { in: ["leased", "running"] } },
         // A delegated child inherits an active ancestor turn; queued work cannot preempt that turn.

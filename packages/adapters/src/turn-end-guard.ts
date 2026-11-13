@@ -24,6 +24,7 @@ import {
   questionCard,
   retryReason,
   sequenceForOneEmail,
+  teamSignedDraft,
   templateBlanks,
 } from "./turn-report.js";
 
@@ -755,8 +756,9 @@ export async function planDeclineRetry(
   const variables = askedTemplate(asked)
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??
-      templateBlanks(input.reply))
-    : draftVariables(input.reply);
+      templateBlanks(input.reply) ??
+      teamSignedDraft(input.reply))
+    : (draftVariables(input.reply) ?? teamSignedDraft(input.reply));
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
   const reason = !input.request.trim()
