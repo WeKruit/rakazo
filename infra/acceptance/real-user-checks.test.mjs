@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   botText,
+  cardAnswer,
   conversationChecks,
   deadEnd,
   questionsIn,
@@ -459,4 +460,29 @@ test("a send card's recipients are its To list, never the sending mailbox or the
   assert.deepEqual(recipientsOf("Confirm sending email → wei@test.example", ""), [
     "wei@test.example",
   ]);
+});
+
+test("cardAnswer sends a button id, a filled form, or the typed text", () => {
+  const buttons = {
+    actions: [
+      { id: "a1", label: "开始找人" },
+      { id: "a2", label: "稍后" },
+    ],
+  };
+  assert.equal(cardAnswer(buttons, "开始找人"), "a1");
+  assert.equal(cardAnswer(buttons, "远程也行"), "远程也行");
+  const form = {
+    actions: [],
+    schema: {
+      properties: {
+        level: { enum: ["流利", "会说"] },
+        years: { type: "integer" },
+        note: { type: "string" },
+      },
+    },
+  };
+  assert.deepEqual(cardAnswer(form, "会说就行 5年"), {
+    action: "accept",
+    content: { level: "会说", years: 5, note: "会说就行 5年" },
+  });
 });

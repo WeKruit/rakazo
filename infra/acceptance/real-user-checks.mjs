@@ -277,3 +277,28 @@ export function recipientsOf(title, detail) {
   } else found = (title.split("→")[1] ?? "").match(EMAIL) ?? [];
   return [...new Set(found.map((address) => address.toLowerCase()))];
 }
+
+/** Turns the recruiter's typed answer into what the card takes: a button's id when the answer is
+ * one of its labels, a filled form for a form card, otherwise the typed text as a custom answer. */
+export function cardAnswer(card, text) {
+  const typed = String(text ?? "").trim();
+  if (card.schema) {
+    const content = {};
+    for (const [name, field] of Object.entries(card.schema.properties ?? {})) {
+      const choices = field.enum ?? field.oneOf?.map((option) => option.const) ?? null;
+      if (choices)
+        content[name] = choices.find((choice) => typed.includes(String(choice))) ?? choices[0];
+      else if (field.type === "boolean") content[name] = /^(是|对|要|yes|y|true)/i.test(typed);
+      else if (field.type === "number" || field.type === "integer")
+        content[name] = Number(typed.match(/\d+/)?.[0] ?? field.minimum ?? 0);
+      else if (field.type === "array") {
+        const items = field.items?.enum ?? field.items?.anyOf?.map((option) => option.const) ?? [];
+        const picked = items.filter((item) => typed.includes(String(item)));
+        content[name] = picked.length ? picked : items.slice(0, 1);
+      } else content[name] = typed || "按 JD 来";
+    }
+    return { action: "accept", content };
+  }
+  const button = card.actions.find((action) => action.label === typed || action.id === typed);
+  return button ? button.id : typed;
+}

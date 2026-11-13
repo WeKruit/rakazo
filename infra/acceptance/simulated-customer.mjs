@@ -26,7 +26,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { botText, conversationChecks, recipientsOf } from "./real-user-checks.mjs";
+import { botText, cardAnswer, conversationChecks, recipientsOf } from "./real-user-checks.mjs";
 import {
   client,
   groupsOf,
@@ -158,6 +158,8 @@ async function cardsOpen(rpc) {
           connect: Boolean(block.connection),
           text,
           options: (block.actions ?? []).map((action) => action.label),
+          actions: block.actions ?? [],
+          schema: block.requestedSchema,
           recipients: recipientsOf(block.text, block.detail ?? ""),
         });
       }
@@ -266,7 +268,7 @@ async function simulate(journey, turns, view, cards) {
       ? cards
           .map(
             (card, i) =>
-              `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}`,
+              `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : card.connect ? " ACCOUNT CONNECTION (a sign-in you cannot do here; say what you would do instead)" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}${card.schema ? `\n    form fields: ${Object.keys(card.schema.properties ?? {}).join(", ")} (type your answer)` : ""}`,
           )
           .join("\n")
       : "(none)"
@@ -328,12 +330,26 @@ async function play(journey, label, owner, mailbox) {
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
-        await rpc("threads/answer", {
-          groupId: card.groupId,
-          runId: card.runId,
-          messageId: card.messageId,
-          answer,
-        });
+        if (card.connect) {
+          turn.invalid = "a sign-in card cannot be answered by the simulated recruiter";
+          turns.push(turn);
+          continue;
+        }
+        try {
+          await rpc("threads/answer", {
+            groupId: card.groupId,
+            runId: card.runId,
+            messageId: card.messageId,
+            answer: card.send ? answer : cardAnswer(card, answer),
+          });
+        } catch (failure) {
+          // A card that closed meanwhile or refused the answer is one lost move, not a lost journey.
+          if (failure instanceof InfraError) throw failure;
+          turn.invalid = `the card did not take the answer (${failure.message})`;
+          log(`${label}:   ${turn.invalid}`);
+          turns.push(turn);
+          continue;
+        }
       } else {
         turn.invalid = `no card ${move.card} to ${move.action}`;
         turns.push(turn);
@@ -349,6 +365,13 @@ async function play(journey, label, owner, mailbox) {
       chats: await transcripts(rpc, startedAt, journey.chinese),
       records: await records(rpc, startedAt, before),
     };
+  } catch (error) {
+    // Keep what was played so the report still shows the conversation up to the failure.
+    error.partial = {
+      turns,
+      chats: await transcripts(rpc, startedAt, journey.chinese).catch(() => []),
+    };
+    throw error;
   } finally {
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
@@ -395,6 +418,7 @@ async function runOne(journey, sample, owner, mailbox) {
     verdict = await judge(journey, result);
   } catch (caught) {
     error = caught;
+    result ??= caught.partial;
   }
   // Rule checks the scripted conversations use apply here too.
   const checks = visible(result?.chats ?? []).flatMap(({ group, messages }) =>
