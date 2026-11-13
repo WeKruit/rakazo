@@ -1,32 +1,23 @@
 // Cloudflare Worker that decides, for each person in a batch, whether their profile shows a
 // role's required language. The server posts up to 40 rows and waits for every verdict, so
 // nothing streams:
-//   POST { requirement: string, rows: [{ id: string, name?: string, profile: string }] }
+//   POST { requirement: string, rows: [{ id, name?, profile: string, candidate?: object }] }
 //   200  { verdicts: { [id]: { verdict: "shown" | "unclear" | "no sign", p?: number } } }
-// `profile` is the person's whole profile text. Leave out a row you cannot judge; that person
-// stays unjudged. Any other status judges nobody in the batch, and if nobody in a search is
-// judged the server reads the profile text itself.
+// `profile` is the person's whole profile text; `candidate` is the search's row for them (title,
+// company, location...), which the judge sees only if added to `state`. Leave out a row you
+// cannot judge; that person stays unjudged. Any other status judges nobody in the batch, and if
+// nobody in a search is judged the server reads the profile text itself.
 // The caller's judge key arrives as its Bearer token and is passed on, so the Worker holds no
 // secret. Turn it on by saving the Worker's URL as the judge's languageUrl
 // (integrationSetup.saveJudge; the saved key is kept when none is given).
 // Edit QUESTION or the bounds here to change the check.
 
 const QUESTION = (requirement) =>
-  `The role requires: "${requirement}". Does this profile text show the person can work in the required language? Count only what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it. The name is hidden on purpose; never guess from names, photos or origin.`;
+  `The role requires: "${requirement}". Does this profile text show the person can work in the required language? Count only what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it.`;
 
 /** At or above this the profile shows the language; below the lower bound it shows no sign. */
 const SHOWN = 0.6;
 const NO_SIGN = 0.25;
-
-/** The person's name taken out, so the judge reads only what the profile states. */
-function withoutName(text, name) {
-  let out = text;
-  for (const part of [name, ...name.split(/[\s,.()]+/)].filter((item) => item.length > 1)) {
-    const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`(?<![\\p{L}])${escaped}(?![\\p{L}])`, "gu"), "[name]");
-  }
-  return out;
-}
 
 /** The judge's probability that one profile shows the language, or undefined when it fails. */
 async function judge(authorization, requirement, row) {
@@ -35,7 +26,7 @@ async function judge(authorization, requirement, row) {
     headers: { "content-type": "application/json", authorization },
     body: JSON.stringify({
       model: "jev-latest",
-      state: { profile: withoutName(row.profile, typeof row.name === "string" ? row.name : "") },
+      state: { profile: row.profile },
       questions: { answer: { type: "noul", instructions: QUESTION(requirement) } },
     }),
   }).catch(() => undefined);
