@@ -67,8 +67,7 @@ export function firstSentence(text: string): string | undefined {
 }
 
 // A line that only restates the request ("我正在梳理你问的发送人数") tells the person nothing.
-const RESTATES_REQUEST =
-  /梳理|你(?:问|提到|说|提出)的|按你(?:这条)?(?:消息)?的要求|looking into (?:your|the) (?:question|request|message)|working on your (?:question|request)/i;
+const RESTATES_REQUEST = /正在梳理|梳理你|looking into your (?:question|request)/i;
 
 /** One sentence the chat can show as-is, or null when the model gave nothing usable. */
 export function cleanQuickReply(raw: string): string | null {
