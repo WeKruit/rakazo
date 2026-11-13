@@ -24,6 +24,7 @@ import {
   questionCard,
   retryReason,
   sequenceForOneEmail,
+  templateBlanks,
 } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
@@ -748,11 +749,13 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
-  // A template the recruiter asked for is meant to keep its blanks.
-  // …but it is the recruiter's email to the candidate, never the candidate's note to an interviewer.
+  // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
+  // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;
   const variables = askedTemplate(asked)
-    ? (candidateVoiceDraft(input.reply) ?? sequenceForOneEmail(input.reply, asked))
+    ? (candidateVoiceDraft(input.reply) ??
+      sequenceForOneEmail(input.reply, asked) ??
+      templateBlanks(input.reply))
     : draftVariables(input.reply);
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
