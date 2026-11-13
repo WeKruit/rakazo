@@ -3,7 +3,8 @@
 //   POST { requirement: string, name?: string, profile: string }
 //   200  { verdict: "shown" | "unclear" | "no sign", p?: number }
 // The caller's judge key arrives as its Bearer token and is passed on, so the Worker holds no
-// secret. Any non-200 answer makes the server use its own check for that search.
+// secret. A non-200 answer leaves that person unjudged; if nobody is judged, the server reads the
+// profile text itself.
 // Turn it on by saving the Worker's URL as the judge's languageUrl (integrationSetup.saveJudge;
 // the saved key is kept when none is given). Edit QUESTION or the bounds here to change the check.
 
