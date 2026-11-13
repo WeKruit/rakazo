@@ -376,6 +376,7 @@ export const providerTimezone = (zone: string) => PROVIDER_ZONE[zone] ?? zone;
 // The provider lists no Pacific zone that keeps daylight saving (its America/Dawson is fixed
 // UTC-7), so Pacific hours are scheduled in Mountain time, always exactly one hour ahead.
 const PACIFIC_WEEKDAYS = "Weekdays (Pacific)";
+const PACIFIC_ANY_TIME = "Any time (Pacific)";
 const PACIFIC = new Set([
   "America/Los_Angeles",
   "America/Vancouver",
@@ -571,7 +572,13 @@ function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
   return {
     schedules: [
       {
-        name: anyTime ? "Any time" : pacific ? PACIFIC_WEEKDAYS : "Weekdays",
+        name: anyTime
+          ? pacific
+            ? PACIFIC_ANY_TIME
+            : "Any time"
+          : pacific
+            ? PACIFIC_WEEKDAYS
+            : "Weekdays",
         timing: anyTime
           ? { from: "00:00", to: "23:59" }
           : pacific
@@ -894,21 +901,26 @@ export function queuePace(
   const gap = emailGap(campaign);
   const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
   const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
-  const pacific = first?.name === PACIFIC_WEEKDAYS;
+  // Pacific schedules are stored in Mountain time (see PACIFIC_WEEKDAYS); show both by name.
+  const pacific = first?.name === PACIFIC_WEEKDAYS || first?.name === PACIFIC_ANY_TIME;
   const zone = pacific
     ? "America/Los_Angeles"
     : typeof first?.timezone === "string"
       ? first.timezone
       : "America/Chicago";
+  const shown = pacific
+    ? "Pacific time"
+    : ({ "America/Boise": "Mountain time", "America/Chicago": "Central time (Chicago)" }[zone] ??
+      zone);
   const done = new Date(now.getTime() + (PICKUP_MINUTES + (Math.max(count, 1) - 1) * gap) * 60_000);
   let clock: ReturnType<typeof wallClock>;
   try {
     clock = wallClock(done, zone);
   } catch {
-    return `queued with the mail service, which often starts within minutes but can take up to an hour, then sends about one email every ${gap} minutes from the mailbox`;
+    return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
   }
   const time = `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`;
-  return `queued with the mail service, which often starts within minutes but can take up to an hour, then sends about one email every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${pacific ? "Pacific time" : zone} at the latest`;
+  return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${shown} at the latest`;
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
@@ -2366,6 +2378,10 @@ async function activateCampaign(
   input: z.output<typeof ActivateCampaignInput>,
   confirmedSenderRequired = false,
 ) {
+  if (!input.campaign_id && !(await activeRoleId(prisma, context)))
+    throw new Error(
+      "Pass campaign_id: this conversation has no linked role, so name the campaign to send. It is the campaignId in this conversation's earlier create_campaign or activate_campaign result; read it with get_campaign. Do not ask the recruiter for the role again.",
+    );
   const campaignId =
     input.campaign_id ??
     (await ensureRoleCampaign(prisma, rest, context, serverId, { timezone: "America/Chicago" }))
