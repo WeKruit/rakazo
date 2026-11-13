@@ -1149,6 +1149,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Asked which people have production Kafka and for how many years, Main passed it to the role team twice and never gave a list (11-13).",
   },
   {
+    rule: "a drop request is handed on at once in the global conversation",
+    in: "Global recruiting overview skill",
+    phrase: "when the recruiter says to drop people you hand the drop and the search for replacements to the role team in that same turn",
+    why: "Told to drop two people, Main only answered \"I'd drop A and B… I'd look for…\" and did nothing (11-13).",
+  },
+  {
     rule: "hand a named booking to Scheduling in the global conversation",
     in: "Global recruiting overview skill",
     phrase:
