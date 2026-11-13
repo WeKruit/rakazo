@@ -844,10 +844,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13: the template appeared in a progress line and again in the closing reply.",
   },
   {
-    rule: "a missing signature name is asked in chat",
+    rule: "the email comes first, the signature name question after",
     in: "RECRUITER_LANGUAGE",
-    phrase: "ask in one plain line in chat which name to sign with (no card)",
-    why: "Staging 11-13: the name was asked on a choice card, then the template ended on a bare 「Best,」.",
+    phrase: "Never ask for the name before showing the email",
+    why: "Staging 11-13: the name was asked before the template, on a choice card, then the template ended on a bare 「Best,」.",
   },
   {
     rule: "stop asking means search from the saved role",
@@ -860,6 +860,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "A progress line says only something new since the last one",
     why: "Staging 11-13: repeated status lines while no candidates came back.",
+  },
+  {
+    rule: "a needed role is created, not asked about",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "create it from the details in the conversation at once, with no card asking whether to",
+    why: "Staging 11-13: saving a template to the Sequence page got a card asking whether to create the role first.",
   },
   {
     rule: "no role team in recruiter chat",
