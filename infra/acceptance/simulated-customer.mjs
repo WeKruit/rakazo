@@ -164,39 +164,50 @@ async function cardsOpen(rpc) {
   return open;
 }
 // The send records Kruit's claims are checked against: the campaign of every chat this journey
-// wrote in or got replies in, the Kruit chat included (a send asked for there has no role chat).
-// Chats a reused fixture account had before, and did not touch, are left out.
-async function records(rpc, since) {
-  const touched = [];
-  for (const group of await groupsOf(rpc)) {
-    const messages = await messagesOf(rpc, group.id);
-    if (messages.some((message) => Date.parse(message.createdAt) >= since)) touched.push(group);
-  }
+// wrote in or got replies in, and of every role whose campaign changed since the journey began
+// (a send confirmed in the Kruit chat goes into a role's campaign, new or existing). A reused
+// fixture account's other roles are left out.
+async function campaignOf(rpc, chat) {
+  const campaign = await rpc("recruiting/roleCampaign", { groupId: chat.id }).catch((error) => ({
+    error: error.message,
+  }));
+  return {
+    chat: chat.name,
+    status: campaign.status ?? campaign.error,
+    campaign: campaign.campaign
+      ? {
+          name: campaign.campaign.name,
+          status: campaign.campaign.status,
+          mailbox: campaign.campaign.eaccount,
+          createdAt: campaign.campaign.createdAt ?? null,
+        }
+      : null,
+    sent: campaign.stats?.sent ?? null,
+    queuedFirstEmail: campaign.queuedFirstEmail ?? null,
+    people: (campaign.leads ?? []).map((lead) => ({
+      email: lead.email,
+      status: lead.status,
+      contactedAt: lead.contactedAt ?? null,
+    })),
+  };
+}
+/** Every chat's campaign as it stands, by chat id. */
+async function campaigns(rpc) {
+  const all = new Map();
+  for (const group of await groupsOf(rpc)) all.set(group.id, await campaignOf(rpc, group));
+  return all;
+}
+async function records(rpc, since, before) {
+  const now = await campaigns(rpc);
   const roles = [];
-  for (const chat of touched) {
-    const campaign = await rpc("recruiting/roleCampaign", { groupId: chat.id }).catch((error) => ({
-      error: error.message,
-    }));
-    if (!campaign.campaign && chat.id.startsWith("recruiting-global-")) continue;
-    roles.push({
-      chat: chat.name,
-      status: campaign.status ?? campaign.error,
-      campaign: campaign.campaign
-        ? {
-            name: campaign.campaign.name,
-            status: campaign.campaign.status,
-            mailbox: campaign.campaign.eaccount,
-            createdAt: campaign.campaign.createdAt ?? null,
-          }
-        : null,
-      sent: campaign.stats?.sent ?? null,
-      queuedFirstEmail: campaign.queuedFirstEmail ?? null,
-      people: (campaign.leads ?? []).map((lead) => ({
-        email: lead.email,
-        status: lead.status,
-        contactedAt: lead.contactedAt ?? null,
-      })),
-    });
+  for (const group of await groupsOf(rpc)) {
+    const record = now.get(group.id);
+    if (!record?.campaign) continue;
+    const touched = (await messagesOf(rpc, group.id)).some(
+      (message) => Date.parse(message.createdAt) >= since,
+    );
+    if (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record))
+      roles.push(record);
   }
   return roles;
 }
@@ -276,6 +287,7 @@ async function play(journey, label, owner, mailbox) {
     await user.auth(email, password);
   }
   const { rpc } = user;
+  const before = await campaigns(rpc);
   const startedAt = Date.now();
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
@@ -328,14 +340,14 @@ async function play(journey, label, owner, mailbox) {
         continue;
       }
       turn.firstReplySeconds = await replyAfter(journey, rpc, at);
-      turn.records = await records(rpc, startedAt);
+      turn.records = await records(rpc, startedAt, before);
       turns.push(turn);
       log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
     }
     return {
       turns,
       chats: await transcripts(rpc, startedAt, journey.chinese),
-      records: await records(rpc, startedAt),
+      records: await records(rpc, startedAt, before),
     };
   } finally {
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
