@@ -26,7 +26,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { botText, conversationChecks } from "./real-user-checks.mjs";
+import { botText, conversationChecks, recipientsOf } from "./real-user-checks.mjs";
 import {
   client,
   groupsOf,
@@ -55,10 +55,17 @@ const RECIPIENTS = (process.env.RAKAZO_SIM_RECIPIENTS ?? "")
   .split(",")
   .map((address) => address.trim().toLowerCase())
   .filter(Boolean);
-const MAILBOX = [process.env.RAKAZO_MAILBOX_EMAIL, process.env.RAKAZO_MAILBOX_PASSWORD];
+// Accounts with a sending mailbox: RAKAZO_MAILBOX_EMAIL/PASSWORD, then _2, _3 … Each plays one
+// mailbox journey at a time, so up to that many send journeys run side by side.
+const MAILBOXES = ["", ..."23456789".split("").map((n) => `_${n}`)]
+  .map((suffix) => [
+    process.env[`RAKAZO_MAILBOX_EMAIL${suffix}`],
+    process.env[`RAKAZO_MAILBOX_PASSWORD${suffix}`],
+  ])
+  .filter((pair) => pair.every(Boolean));
 /** What a journey needs that this run was not given. */
 const missing = (journey) => [
-  ...(journey.account === "mailbox" && !MAILBOX.every(Boolean)
+  ...(journey.account === "mailbox" && !MAILBOXES.length
     ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
     : []),
   ...(journey.sends && !RECIPIENTS.length ? ["RAKAZO_SIM_RECIPIENTS"] : []),
@@ -136,7 +143,6 @@ const SIMULATOR = option("--model", "sonnet");
 const JUDGE = option("--judge-model", "sonnet");
 
 // --- What the recruiter sees and what is true ---------------------------------------------------
-const ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 async function cardsOpen(rpc) {
   const open = [];
   for (const group of await groupsOf(rpc))
@@ -153,7 +159,7 @@ async function cardsOpen(rpc) {
           connect: Boolean(block.connection),
           text,
           options: (block.actions ?? []).map((action) => action.label),
-          recipients: [...new Set((text.match(ADDRESS) ?? []).map((a) => a.toLowerCase()))],
+          recipients: recipientsOf(block.text, block.detail ?? ""),
         });
       }
   return open;
@@ -249,10 +255,10 @@ async function simulate(journey, turns, view, cards) {
   return parse(await model(SIMULATOR_RULES, prompt, SIMULATOR));
 }
 
-async function play(journey, label, owner) {
+async function play(journey, label, owner, mailbox) {
   const user = client();
   if (journey.account === "mailbox") {
-    await user.auth(...MAILBOX);
+    await user.auth(...mailbox);
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
   } else {
@@ -356,7 +362,7 @@ const SHA =
   "unknown";
 
 /** Plays one journey, has it judged, and writes its report; returns its scoreboard row. */
-async function runOne(journey, sample, owner) {
+async function runOne(journey, sample, owner, mailbox) {
   const label = `${journey.name}#${sample}`;
   const out = path.join(OUT, label);
   fs.mkdirSync(out, { recursive: true });
@@ -365,7 +371,7 @@ async function runOne(journey, sample, owner) {
   let verdict;
   let error;
   try {
-    result = await play(journey, label, owner);
+    result = await play(journey, label, owner, mailbox);
     verdict = await judge(journey, result);
   } catch (caught) {
     error = caught;
@@ -456,19 +462,28 @@ const plays = selected.flatMap((journey) =>
 );
 const owner = client();
 await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
-let mailboxTurn = Promise.resolve();
+// A mailbox journey waits for a free mailbox account.
+const freeMailboxes = [...MAILBOXES];
+const waiting = [];
+const takeMailbox = () =>
+  freeMailboxes.length ? Promise.resolve(freeMailboxes.pop()) : new Promise((r) => waiting.push(r));
+const giveBack = (mailbox) =>
+  waiting.length ? waiting.shift()(mailbox) : freeMailboxes.push(mailbox);
 const rows = [];
 let next = 0;
 await Promise.all(
   Array.from({ length: Math.min(CONCURRENCY, plays.length) }, async () => {
     while (next < plays.length) {
       const { journey, sample } = plays[next++];
-      const go = () => runOne(journey, sample, owner);
-      if (journey.account !== "mailbox") rows.push(await go());
-      else {
-        const turn = mailboxTurn.then(go);
-        mailboxTurn = turn.catch(() => undefined);
-        rows.push(await turn);
+      if (journey.account !== "mailbox") {
+        rows.push(await runOne(journey, sample, owner));
+        continue;
+      }
+      const mailbox = await takeMailbox();
+      try {
+        rows.push(await runOne(journey, sample, owner, mailbox));
+      } finally {
+        giveBack(mailbox);
       }
     }
   }),

@@ -258,3 +258,22 @@ export function requirementSaved(roleText, pattern) {
   if (optional.test(roleText)) return ["the saved role still treats the requirement as optional"];
   return required.test(roleText) ? [] : ["the requirement is not saved as required in the role"];
 }
+
+/**
+ * Who a send card emails: the "- name <address>" lines of its "To (n):" list, or the address after
+ * the title's arrow. Never the sending mailbox ("From:") or an address inside an email body. A
+ * list cut short ("- and 3 more") cannot be checked, so it reads as no recipients: deny.
+ */
+export function recipientsOf(title, detail) {
+  const lines = detail.split("\n");
+  const start = lines.findIndex((line) => /^(?:To|收件人)(?:\s*\(\d+\+?\))?\s*[:：]/i.test(line));
+  let found = [];
+  if (start >= 0) {
+    for (const line of lines.slice(start + 1)) {
+      if (/^\S/.test(line) && !line.startsWith("- ")) break;
+      if (/^- and \d+ more/.test(line)) return [];
+      if (line.startsWith("- ")) found.push(...(line.match(EMAIL) ?? []));
+    }
+  } else found = (title.split("→")[1] ?? "").match(EMAIL) ?? [];
+  return [...new Set(found.map((address) => address.toLowerCase()))];
+}

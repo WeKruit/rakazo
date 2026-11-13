@@ -5,6 +5,7 @@ import {
   conversationChecks,
   deadEnd,
   questionsIn,
+  recipientsOf,
   requirementSaved,
 } from "./real-user-checks.mjs";
 
@@ -429,4 +430,33 @@ test("a capabilities list that invites the next message is not a dead end", () =
     ),
     false,
   );
+});
+
+test("a send card's recipients are its To list, never the sending mailbox or the email body", () => {
+  const detail = [
+    "Role: Senior Data Engineer",
+    "From: sender@mailbox.example",
+    "To (2):",
+    "- Noah Liu <noah@test.example> (work email)",
+    "  Opening: Saw your Kafka work",
+    "  Subject: Seattle role",
+    "  Body:",
+    "  Write to me at recruiter@agency.example",
+    "- ada@test.example",
+    "Send time: Fri 09:00 America/Los_Angeles",
+    "Subject: Seattle role",
+    "Body:",
+    "reply to hr@agency.example",
+  ].join("\n");
+  assert.deepEqual(recipientsOf("Confirm sending the first email", detail), [
+    "noah@test.example",
+    "ada@test.example",
+  ]);
+  assert.deepEqual(
+    recipientsOf("Confirm", "To (30):\n- a@test.example\n- and 29 more\nSend time: now"),
+    [],
+  );
+  assert.deepEqual(recipientsOf("Confirm sending email → wei@test.example", ""), [
+    "wei@test.example",
+  ]);
 });

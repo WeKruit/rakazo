@@ -583,13 +583,15 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 // Cal.com connection: today Scheduling asks to connect one instead of showing the booking card.
 const STAGING_WAVES = [
   ["smoke", "pages", "memory"],
-  ["ui", "real-user", "simulated"],
+  ["ui", "real-user"],
+  // Its own wave: the real-user replies are timed, and the simulated recruiters would slow them.
+  ["simulated"],
   ["progress", "midwork"],
   ["resume"],
 ];
 // The release gate's quick part: free, about six minutes. The full suite searches, so it is the
 // release thread's one paid run a day.
-const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 2) : STAGING_WAVES;
+const stagingWaves = SUITE === "staging-quick" ? STAGING_WAVES.slice(0, 3) : STAGING_WAVES;
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
