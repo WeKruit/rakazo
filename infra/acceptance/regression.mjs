@@ -30,7 +30,8 @@
 //                  reports at its countdown if one shows and answers a bare "再来点"). Cases in a
 //                  wave run side by side; resume runs alone. approval (--only approval: a new
 //                  message never answers a waiting booking card) needs a calendar connection.
-//   --suite staging-quick  only the free waves (smoke, pages, memory, then ui and real-user):
+//   --suite staging-quick  only the free waves (smoke, pages, memory, then ui, real-user and
+//                  simulated, a model playing a recruiter through whole journeys, judged):
 //                  the deploy gate. ui runs ui-regressions.mjs in a browser; real-user runs
 //                  real-user.mjs (brand-new outside accounts talking the way recruiters wrote when
 //                  replies went wrong: dead ends, overrides, internal addresses, repeats).
@@ -51,6 +52,7 @@ import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { restartTestApp } from "./restart-test-app.mjs";
 import { checkReviewerGrading } from "./reviewer-grading.mjs";
+import { JOURNEYS } from "./simulated-journeys.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
 import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
 import {
@@ -582,7 +584,7 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 // Cal.com connection: today Scheduling asks to connect one instead of showing the booking card.
 const STAGING_WAVES = [
   ["smoke", "pages", "memory"],
-  ["ui", "real-user"],
+  ["ui", "real-user", "simulated"],
   ["progress", "midwork"],
   ["resume"],
 ];
@@ -638,8 +640,8 @@ if (paid.length && !args.includes("--paid"))
 
 // These touch shared state (the account's Kruit memory, a fixture chat's card, the server itself),
 // so they run only on the test environment, whose data the next sync replaces.
-const STAGING_ONLY = ["memory", "approval", "resume", "ui", "real-user"].filter((name) =>
-  wanted.has(name),
+const STAGING_ONLY = ["memory", "approval", "resume", "ui", "real-user", "simulated"].filter(
+  (name) => wanted.has(name),
 );
 if (STAGING_ONLY.length && !args.includes("--staging"))
   throw new Error(`${STAGING_ONLY.join(", ")} run only on the test environment; pass --staging`);
@@ -1487,6 +1489,37 @@ try {
       );
     else if (code !== 0)
       failures.push(`real-user scenarios did not pass (exit ${code}); see real-user.log`);
+  });
+
+  define("simulated", async (failures) => {
+    // A simulated recruiter talks to Kruit through whole journeys and a judge scores the
+    // experience (simulated-customer.mjs). The gate plays the journeys that need no paid search;
+    // one that sends needs the mailbox fixture and the internal test inboxes, or it is skipped.
+    for (const journey of JOURNEYS.filter((item) => item.gate)) {
+      const needs = [
+        ...(journey.account === "mailbox"
+          ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
+          : []),
+        ...(journey.sends ? ["RAKAZO_SIM_RECIPIENTS"] : []),
+      ].filter((name) => !process.env[name]);
+      if (needs.length) {
+        log(`simulated: skipping ${journey.name}, set ${needs.join(", ")}`);
+        continue;
+      }
+      const out = path.join(OUT, "simulated", journey.name);
+      const code = await run(`simulated-${journey.name}`, "simulated-customer.mjs", [
+        "--journey",
+        journey.name,
+        "--out",
+        out,
+      ]);
+      if (code === 2)
+        failures.push(
+          `simulated ${journey.name}: the test environment failed, not the product; rerun; see ${out}/report.md`,
+        );
+      else if (code !== 0)
+        failures.push(`simulated ${journey.name} did not pass; see ${out}/report.md`);
+    }
   });
 
   define("memory", async (failures) => {

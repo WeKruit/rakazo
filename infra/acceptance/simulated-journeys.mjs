@@ -16,6 +16,7 @@ export const JOURNEYS = [
       "11-13 customer: sends confirmed at night were queued for 9:00; Kruit said '0 sent, the system refused', then changed the send window, which paused the sequence for good",
     account: "mailbox",
     sends: true,
+    gate: true,
     chinese: true,
     maxTurns: 10,
     persona: `${AGENCY_RECRUITER} It is late evening for you. You want the first emails to go out tonight.`,
@@ -34,6 +35,8 @@ export const JOURNEYS = [
   },
   {
     name: "language-must-have",
+    // Answering the role's first question starts the first-ten search, so it is paid.
+    paid: true,
     title: "坚持候选人必须会说中文",
     area: "requirements",
     source:
