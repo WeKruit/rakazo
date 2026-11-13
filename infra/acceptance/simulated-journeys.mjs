@@ -11,6 +11,10 @@ const AGENCY_RECRUITER = `You are an agency headhunter in your thirties who plac
 const US_RECRUITER = `You are a US agency recruiter who fills engineering roles for startups. You write English, short and informal, sometimes lowercase, sometimes two asks in one message. You expect Kruit to just do things. When it stalls, dodges or makes you repeat yourself you say so directly ("that's not what I asked", "just do it").`;
 
 // Personas by name, for journeys learned from failures (simulated-customer.mjs --learn).
+// Two candidate addresses from the first test inbox: the inbox itself and a plus-alias of it, so
+// test mail stays out of everyone's own inbox (RAKAZO_SIM_RECIPIENTS lists noah-scheduling first).
+const twoInboxes = ([first]) => [first, first.replace("@", "+ada@")];
+
 export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER };
 
 export const JOURNEYS = [
@@ -27,8 +31,9 @@ export const JOURNEYS = [
     maxTurns: 10,
     persona: `${AGENCY_RECRUITER} It is late evening for you. You want the first emails to go out tonight.`,
     facts: (recipients) =>
-      `The role: Senior Data Engineer for a client in Seattle (hybrid, 3 days in office), 6+ years, Spark and Kafka in production, base $180k–$220k.\nTwo candidates you already found yourself and want emailed now:\n${recipients
-        .slice(0, 2)
+      `The role: Senior Data Engineer for a client in Seattle (hybrid, 3 days in office), 6+ years, Spark and Kafka in production, base $180k–$220k.\nTwo candidates you already found yourself and want emailed now:\n${twoInboxes(
+        recipients,
+      )
         .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
         .join("\n")}`,
     goals: [

@@ -5,6 +5,7 @@ import {
   cardAnswer,
   conversationChecks,
   deadEnd,
+  mostlyChinese,
   questionsIn,
   recipientsOf,
   requirementSaved,
@@ -485,4 +486,31 @@ test("cardAnswer sends a button id, a filled form, or the typed text", () => {
     action: "accept",
     content: { level: "会说", years: 5, note: "会说就行 5年" },
   });
+});
+
+test("Chinese with English titles, skills or a quoted email is Chinese", () => {
+  assert.equal(
+    mostlyChinese(
+      "Senior Data Engineer，西雅图客户，hybrid每周3天，6年+，Spark和Kafka生产经验，base $180k–$220k。Noah Liu <a@b.com>, Ada Chen <c@d.com>",
+    ),
+    true,
+  );
+  assert.equal(
+    mostlyChinese(
+      "我已经写好了首封邮件，请看下面：\nHi Noah, I'm reaching out about a Senior Data Engineer role with a Seattle client. The role is hybrid, three days onsite, and the base is $180k to $220k. Would you be open to a brief call?",
+    ),
+    true,
+  );
+  assert.equal(mostlyChinese("Here is the draft for Wei Zhang. Want me to send it?"), false);
+});
+
+test("an unfilled placeholder in a reply fails, a merge field does not", () => {
+  const ask = { role: "user", text: "写封邮件给 Noah", at: "2026-11-13T00:00:00Z" };
+  const reply = (text) => ({ role: "bot", text, at: "2026-11-13T00:00:01Z" });
+  const failures = (text) => conversationChecks([ask, reply(text)]).join("\n");
+  assert.match(failures("草稿：\nHi [Candidate Name],\nI'm reaching out"), /unfilled placeholder/);
+  assert.doesNotMatch(
+    failures("草稿：\nHi {{firstName}},\nI'm reaching out"),
+    /unfilled placeholder/,
+  );
 });

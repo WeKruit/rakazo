@@ -40,11 +40,16 @@ const SENDER =
 export const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 // The header of a round of people the search returns.
 export const ROUND = /people this round|本轮|这一轮/i;
+// A fill-in left in an email or template ("Hi [Candidate Name],"). A merge field such as
+// {{firstName}} is filled per person by the sender and is fine.
+export const PLACEHOLDER =
+  /\[(?:candidate|first|last|full)?\s*(?:name|company|role|title|interviewer|your name|候选人|姓名|名字|公司)[^\]\n]{0,20}\]/i;
 const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 
 // Addresses and links say nothing about the language a message is written in. A Chinese
 // sentence often carries English role titles and names ("这份 Senior Data Engineer 职位"), so
-// Chinese characters are weighed against English words, not letters.
+// Chinese characters are weighed against English words, not letters, and eight or more Chinese
+// characters make a message Chinese however much English it quotes.
 // An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language.
 const DICTATED =
   /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
@@ -52,7 +57,10 @@ export const mostlyChinese = (raw) => {
   const own = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
   const said = own.replace(DICTATED, " ");
   const text = /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
-  return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]+/g)?.length ?? 0);
+  const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
+  // A Chinese writer mixes in English titles, skills and quoted emails; an English writer does not
+  // write a Chinese sentence. So a clause's worth of Chinese makes the message Chinese.
+  return han >= 8 || han > (text.match(/[A-Za-z]+/g)?.length ?? 0);
 };
 const quote = (text, match) =>
   `"…${text.slice(Math.max(0, match.index - 50), match.index + match[0].length + 50).replace(/\s+/g, " ")}…"`;
@@ -165,6 +173,7 @@ export function conversationChecks(messages) {
       ["internal agent brief", AGENT_BRIEF],
       ["restates the question", RESTATES],
       ["lectures on judging language by name", NAME_LECTURE],
+      ["unfilled placeholder", PLACEHOLDER],
     ]) {
       const match = (where ?? text).match(pattern);
       if (match) failures.push(`${name}: ${quote(where ?? text, match)}`);

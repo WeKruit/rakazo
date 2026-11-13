@@ -26,7 +26,13 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { botText, cardAnswer, conversationChecks, recipientsOf } from "./real-user-checks.mjs";
+import {
+  botText,
+  cardAnswer,
+  conversationChecks,
+  PLACEHOLDER,
+  recipientsOf,
+} from "./real-user-checks.mjs";
 import {
   client,
   groupsOf,
@@ -416,6 +422,9 @@ async function play(journey, label, owner, mailbox, out) {
               ? "allow"
               : move.text;
         if (card.send) answer = guardSend(card, answer, turn);
+        // The email on a send card is what goes out: a fill-in left in it is a product failure.
+        const fillIn = card.send && card.text.match(PLACEHOLDER);
+        if (fillIn) turn.placeholder = fillIn[0];
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
@@ -546,9 +555,14 @@ async function runOne(journey, sample, owner, mailbox) {
     result ??= caught.partial;
   }
   // Rule checks the scripted conversations use apply here too.
-  const checks = visible(result?.chats ?? []).flatMap(({ group, messages }) =>
-    conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
-  );
+  const checks = [
+    ...visible(result?.chats ?? []).flatMap(({ group, messages }) =>
+      conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
+    ),
+    ...(result?.turns ?? [])
+      .filter((turn) => turn.placeholder)
+      .map((turn) => `send card email has an unfilled placeholder: ${turn.placeholder}`),
+  ];
   const falseClaims = (verdict?.turns ?? []).filter((turn) => turn.truthful === "no").length;
   const missed = (verdict?.goals ?? []).filter((goal) => !goal.met);
   const pass =
