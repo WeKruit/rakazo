@@ -91,6 +91,7 @@ import {
   appendToolCallSegment,
   applyJudgeDecision,
   asksAboutThesePeople,
+  asksForPeople,
   asksForOutreach,
   asksToSendTo,
   assertTransition,
@@ -7349,7 +7350,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             !isGlobalRoleList(args) ||
             typeof args.roleId !== "string" ||
-            !items?.length
+            !items?.length ||
+            !asksForPeople(lastRecruiterText)
           )
             return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
