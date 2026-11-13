@@ -17,6 +17,10 @@ msgstr ""
 msgid " (unread)"
 msgstr " (unread)"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {more} more"
+msgstr " and {more} more"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -125,6 +129,16 @@ msgstr "{0} shortlisted candidates"
 msgid "{0} shortlisted people have no recorded shortlist date."
 msgstr "{0} shortlisted people have no recorded shortlist date."
 
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{0} waiting for their first email"
+msgstr "{0} waiting for their first email"
+
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{0} waiting for their first email · goes out {when}"
+msgstr "{0} waiting for their first email · goes out {when}"
+
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
 #. placeholder {1}: offset + visible.length
@@ -164,6 +178,10 @@ msgstr "{attachmentCount} attachments"
 msgid "{botName}’s computer"
 msgstr "{botName}’s computer"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{bounced} bounced"
+msgstr "{bounced} bounced"
+
 #: src/lib/billing.ts
 msgid "{count} days"
 msgstr "{count} days"
@@ -183,6 +201,10 @@ msgstr "{count} years"
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days}d ago"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{emailed} emailed"
+msgstr "{emailed} emailed"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -4139,6 +4161,14 @@ msgstr "Resume provided"
 msgid "Resume ready"
 msgstr "Resume ready"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Resume sending"
+msgstr "Resume sending"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Resume sending this role's emails to everyone not emailed yet."
+msgstr "Resume sending this role's emails to everyone not emailed yet."
+
 #. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
 #: src/pages/shell/Composer.tsx
 msgid "Resume: {0}"
@@ -4616,6 +4646,10 @@ msgstr "Send deletion code"
 msgid "Send feedback"
 msgstr "Send feedback"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Send now"
+msgstr "Send now"
+
 #: src/pages/recruiting/CrmWorkbench.tsx
 msgid "Send outcome unknown"
 msgstr "Send outcome unknown"
@@ -4627,6 +4661,10 @@ msgstr "Send recorded"
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "Send reset link"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Send the queued emails now."
+msgstr "Send the queued emails now."
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Send times are not available yet."
@@ -4645,6 +4683,11 @@ msgstr "Sender not reported"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
 msgstr "Sender unavailable"
+
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Sending is paused · {0} not emailed yet"
+msgstr "Sending is paused · {0} not emailed yet"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Sending mailbox"
@@ -5688,6 +5731,10 @@ msgstr "Waiting for the API to come back…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "Waiting in line…"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Waiting to send"
+msgstr "Waiting to send"
 
 #: src/pages/Auth.tsx
 msgid "We sent a link to {verifyEmail}."

@@ -1839,8 +1839,12 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       openCount: z.number().int().nonnegative().nullable().optional(),
       clickCount: z.number().int().nonnegative().nullable().optional(),
       replyCount: z.number().int().nonnegative().nullable().optional(),
+      /** When the campaign last emailed this person; null while they wait for their first email. */
+      contactedAt: IsoDate.nullable().optional(),
     }),
   ),
+  /** When people waiting in a sending campaign get their first email: "now" or e.g. "Fri 09:00 America/Chicago". */
+  queuedFirstEmail: z.string().max(100).optional(),
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
 
