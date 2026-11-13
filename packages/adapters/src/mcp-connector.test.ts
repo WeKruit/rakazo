@@ -5339,7 +5339,9 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(out).toMatchObject({
           queued: true,
           recipients: ["nick@x.test"],
-          next: expect.stringContaining("it has gone out by about 00:40 America/Chicago"),
+          next: expect.stringContaining(
+            "it should be out by about 01:30 America/Chicago at the latest",
+          ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
       } finally {
@@ -5412,7 +5414,7 @@ describe("local native Instantly campaign and lead tools", () => {
       }
     });
 
-    it("says people queued inside the sending hours are going out, and a send-now sends them within minutes", async () => {
+    it("says people queued inside the sending hours are going out, and a send-now sends them one a minute", async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(NIGHT);
       try {
@@ -5434,7 +5436,7 @@ describe("local native Instantly campaign and lead tools", () => {
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
           queuedFirstEmail: "now",
-          next: expect.stringMatching(/all 2 have gone out by about 00:50.*send_now/),
+          next: expect.stringMatching(/all 2 should be out by about 01:40.*send_now/),
         });
         f.state.requests.length = 0;
         const out = f.result(await f.run("activate_campaign", { send_now: true }));
@@ -5451,7 +5453,7 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(out).toMatchObject({
           sendingNow: true,
           recipients: ["abe@x.test", "p0@x.test"],
-          next: expect.stringContaining("all 2 have gone out by about 00:32"),
+          next: expect.stringContaining("all 2 should be out by about 01:31"),
         });
         f.state.requests.length = 0;
         const again = await f.run("activate_campaign", { send_now: true });
