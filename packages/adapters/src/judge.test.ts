@@ -37,7 +37,14 @@ describe("language check", () => {
       return new Response(
         JSON.stringify({
           verdicts: Object.fromEntries(
-            rows.map((row) => [row.id, { verdict: row.id === "r1" ? "maybe" : "no sign" }]),
+            rows.map((row) => [
+              row.id,
+              {
+                verdict:
+                  { r1: "maybe", r2: "possible", r3: "shown", r4: "confirmed" }[row.id] ??
+                  "no sign",
+              },
+            ]),
           ),
         }),
       );
@@ -61,6 +68,13 @@ describe("language check", () => {
     // An unknown verdict is no verdict.
     expect(verdicts?.size).toBe(12);
     expect(verdicts?.get("r1")).toBeUndefined();
+    // Weaker evidence ranks as unknown; the earlier names still work.
+    expect([2, 3, 4, 5].map((index) => verdicts?.get(`r${index}`))).toEqual([
+      "unknown",
+      "strong",
+      "confirmed",
+      "no sign",
+    ]);
     expect(typeSafeJudge("key", fetchImpl).language).toBeUndefined();
     const failed = await typeSafeJudge("key", answer({}, 502), "https://check.example/").language?.(
       "Mandarin",
@@ -110,7 +124,7 @@ describe("JudgeSettings", () => {
         }),
       },
     };
-    const language = vi.fn(async () => new Map([["probe", "shown" as const]]));
+    const language = vi.fn(async () => new Map([["probe", "confirmed" as const]]));
     const settings = new JudgeSettings(prisma as never, secrets as never, (config) => ({
       yes: async () => 0.9,
       ...(config.languageUrl ? { language } : {}),
