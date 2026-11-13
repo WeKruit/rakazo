@@ -102,7 +102,7 @@ export async function settle(
   let changed = Date.now();
   while (Date.now() - startedAt < limitMs) {
     await sleep(4_000);
-    const groups = await groupsOf(rpc);
+    const groups = await activeGroupsOf(rpc);
     const all = (
       await Promise.all(
         groups.map(async (group) =>
@@ -156,7 +156,7 @@ const asSeen = (text, chinese) =>
     : text;
 export async function transcripts(rpc, since, chinese = false) {
   const chats = [];
-  for (const group of await groupsOf(rpc)) {
+  for (const group of await activeGroupsOf(rpc)) {
     const messages = (await messagesOf(rpc, group.id))
       .filter(
         (message) =>
@@ -177,8 +177,31 @@ export async function transcripts(rpc, since, chinese = false) {
   return chats;
 }
 
+// The chats a play watches. On an account with hundreds of roles, reading every chat every few
+// seconds costs thousands of requests and can use up the deployment's daily request quota. A chat
+// is watched once it is created or written in after the play began, works, or waits on the
+// recruiter; the Kruit chat always. Without watchFrom, every chat is read.
+const watched = new WeakMap();
+export function watchFrom(rpc, since) {
+  watched.set(rpc, { since, ids: new Set() });
+}
+const lively = (group, since) =>
+  group.id.startsWith("recruiting-global-") ||
+  group.working ||
+  group.needsInput ||
+  Date.parse(group.updatedAt) >= since ||
+  Date.parse(group.createdAt) >= since;
+export async function activeGroupsOf(rpc) {
+  const groups = await groupsOf(rpc);
+  const play = watched.get(rpc);
+  if (!play) return groups;
+  for (const group of groups) if (lively(group, play.since)) play.ids.add(group.id);
+  return groups.filter((group) => play.ids.has(group.id));
+}
+
 export async function stopAll(rpc) {
-  for (const group of await groupsOf(rpc)) {
+  // Only a chat that is working or waiting can hold an open card or a run to stop.
+  for (const group of (await groupsOf(rpc)).filter((item) => lively(item, Date.now()))) {
     for (const message of await messagesOf(rpc, group.id))
       for (const block of openCards(message)) {
         if (!message.runId || block.input === "secret" || block.connection) continue;
