@@ -838,6 +838,30 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13: a new role with two named people to email got a search-direction card first.",
   },
   {
+    rule: "an email is written out once per turn",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "an email already shown earlier in this turn (for example in a progress line) is not written out again",
+    why: "Staging 11-13: the template appeared in a progress line and again in the closing reply.",
+  },
+  {
+    rule: "a missing signature name is asked in chat",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "ask in one plain line in chat which name to sign with (no card)",
+    why: "Staging 11-13: the name was asked on a choice card, then the template ended on a bare 「Best,」.",
+  },
+  {
+    rule: "stop asking means search from the saved role",
+    in: "RECRUITING_INTAKE_FLOW",
+    phrase: "When the recruiter says to stop asking and search",
+    why: "Staging 11-13: after 「别问了直接搜」 the role asked Seattle-only though the role said Seattle hybrid.",
+  },
+  {
+    rule: "progress lines only say something new",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "A progress line says only something new since the last one",
+    why: "Staging 11-13: repeated status lines while no candidates came back.",
+  },
+  {
     rule: "no role team in recruiter chat",
     in: "RECRUITER_LANGUAGE",
     phrase: "Teammates are invisible to the recruiter",
