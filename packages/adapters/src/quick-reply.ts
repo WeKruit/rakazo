@@ -31,6 +31,27 @@ export function replyLanguage(userText: string): string {
     : "Write the sentence in the language of the latest message, not Chinese, even if earlier messages were.";
 }
 
+/**
+ * The fixed first line for a message sent while a run works, or for a card answer: sent at once,
+ * with no model call, in the language of the person's message. The run's own answer follows.
+ */
+export function fixedAck(userText: string): string {
+  return isChineseText(userText) ? "收到，马上处理。" : "Got it, on it.";
+}
+
+const LEADING_ACK =
+  /^\s*(?:(?:收到|好的|明白|了解|没问题)(?:了)?[，,：:。！!、\s]*|(?:got it|okay|ok|sure|understood|noted|will do)\b[,.:;!—–\-\s]*)/i;
+
+/**
+ * The run's own line without an opening acknowledgement, once the fixed line already said it.
+ * A line that is only an acknowledgement stays as it is.
+ */
+export function withoutLeadingAck(text: string): string {
+  const rest = text.replace(LEADING_ACK, "");
+  if (!rest.trim() || rest === text) return text;
+  return /^[a-z]/.test(rest) ? rest[0]!.toUpperCase() + rest.slice(1) : rest;
+}
+
 function clip(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;

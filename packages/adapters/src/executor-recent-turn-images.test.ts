@@ -36,9 +36,9 @@ beforeEach(() => {
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 /** The events double of the most recent runWithModel call. */
 /** Run ids the runtime was called with, in the current test. */
-let runtimeRunIds: string[] = [];
 const claimedSteering: { items?: Array<{ text: string }> } = {};
-const lastQuickReplyCalls = () => runtimeRunIds;
+// The newest run's database mock, for checks while that run still works.
+let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
 let lastExecutorEvents:
   | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
   | undefined;
@@ -128,7 +128,6 @@ async function runWithModel(
     }>;
   } = {},
 ) {
-  runtimeRunIds = [];
   claimedSteering.items = undefined;
   const run = {
     id: "run-1",
@@ -148,7 +147,6 @@ async function runWithModel(
   let request: AgentRunRequest | undefined;
   const runtimeRun = vi.fn(async function* (next: AgentRunRequest) {
     request = next;
-    runtimeRunIds.push(next.runId);
     if (next.runId === "run-1") await options.holdMain;
     if (next.runId === "run-1" && options.claimed)
       claimedSteering.items = await next.claimSteering?.([]);
@@ -314,6 +312,7 @@ async function runWithModel(
       ]),
     },
   };
+  lastPrisma = prisma as never;
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
     claimSteering: vi.fn(async () =>
@@ -533,22 +532,60 @@ describe("quick reply", () => {
         },
       ],
     });
-    await vi.waitFor(() => expect(lastQuickReplyCalls()).toContain("run-1:quick-reply:steer-1"), {
+    const fixedLine = JSON.stringify([{ kind: "text", text: "收到，马上处理。" }]);
+    const posted = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
+      prisma.message.create.mock.calls.filter(
+        ([args]) =>
+          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) === fixedLine,
+      ).length;
+    await vi.waitFor(() => expect(lastPrisma && posted(lastPrisma)).toBe(1), {
       timeout: STEERING_PEEK_MS + 3_000,
     });
     release();
     const { prisma, runtimeRun } = await pending;
-    const steered = runtimeRun.mock.calls.find(
-      ([call]) => call.runId === "run-1:quick-reply:steer-1",
-    )?.[0];
-    expect(steered?.prompt).toContain("对了，远程也可以");
-    expect(
-      prisma.message.create.mock.calls.filter(
-        ([args]) =>
-          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) ===
-          JSON.stringify([{ kind: "text", text: "Got it, remote works too." }]),
-      ).length,
-    ).toBeGreaterThanOrEqual(1);
+    // The fixed line goes out at once, with no model call of its own.
+    expect(posted(prisma)).toBe(1);
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-1")).toBe(
+      false,
+    );
+  });
+
+  // Staging 11-13: two messages in a row each got a fixed line, one after the other.
+  it("sends one fixed line for messages sent back to back before the run speaks", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Updated.",
+      quickReplies: true,
+      holdMain,
+      unreadSteering: [
+        {
+          id: "steer-a",
+          messageId: "message-a",
+          blocks: [{ kind: "text", text: "Remote is fine" }],
+        },
+        {
+          id: "steer-b",
+          messageId: "message-b",
+          blocks: [{ kind: "text", text: "对了，远程也可以" }],
+        },
+      ],
+    });
+    const acks = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
+      prisma.message.create.mock.calls.filter(([args]) =>
+        /Got it, on it\.|收到，马上处理。/.test(
+          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks),
+        ),
+      ).length;
+    await vi.waitFor(() => expect(lastPrisma && acks(lastPrisma)).toBe(1), {
+      timeout: STEERING_PEEK_MS + 3_000,
+    });
+    await new Promise((done) => setTimeout(done, 300));
+    release();
+    const { prisma } = await pending;
+    expect(acks(prisma)).toBe(1);
   });
 
   // Staging eval 11-11: the server's automatic continuation ("Continue with the next step: …")
@@ -587,10 +624,8 @@ describe("quick reply", () => {
       quickReplies: true,
       claimed: { id: "steer-2", messageId: "message-10", text: "对了，远程也可以" },
     });
-    await vi.waitFor(() =>
-      expect(
-        runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2"),
-      ).toBe(true),
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-2")).toBe(
+      false,
     );
     expect(claimedSteering.items?.[0]?.text).toContain(STEERING_QUICK_REPLY_SENDING);
   });
