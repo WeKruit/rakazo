@@ -55,7 +55,9 @@ function harness(
     },
     chatGroupMember: { findFirst: vi.fn(async () => ({ botId: "bot-a" })) },
     message: {
-      findFirst: vi.fn(async () => ({ blocks: sourceBlocks })),
+      findFirst: vi.fn(async (query?: { where?: { blocks?: unknown } }) =>
+        query?.where?.blocks ? null : { blocks: sourceBlocks },
+      ),
       findUnique: vi.fn(async () => existing ?? null),
       findMany: vi.fn(async () => waitingCardMessages),
       create: messageCreate,
@@ -69,6 +71,7 @@ function harness(
       ),
     },
     task: { create: vi.fn(async () => ({ id: "task-b" })) },
+    externalEffect: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
     event: {
       findFirst: vi.fn(async () => ({ seq: 1 })),
       create: vi.fn(async () => ({ seq: 1 })),
@@ -570,12 +573,52 @@ describe("group handoff report back", () => {
     const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
       { blocks: [{ kind: "text", text: "已排队 3 人，周五 9:00 发出。" }] },
     ]);
-    tx.message.findFirst.mockImplementation((async (query?: { where?: { role?: string } }) =>
-      query?.where?.role === "user"
-        ? { blocks: [{ kind: "text", text: question }] }
-        : { blocks: [asked] }) as never);
+    tx.message.findFirst.mockImplementation((async (query?: {
+      where?: { role?: string; blocks?: unknown };
+    }) =>
+      query?.where?.blocks
+        ? null
+        : query?.where?.role === "user"
+          ? { blocks: [{ kind: "text", text: question }] }
+          : { blocks: [asked] }) as never);
     await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
     expect(runCreate.mock.calls.length > 0).toBe(wakes);
+  });
+
+  it("leaves the next step to the recruiter while a card waits on them", async () => {
+    // Staging 11-13: the teammate asked to connect Gmail, and the sender re-handed the send four
+    // times, each answer repeating "connect Gmail first".
+    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "Gmail 尚未连接，请先完成连接卡。" }] },
+    ]);
+    tx.message.findFirst.mockImplementation((async (query?: {
+      where?: { role?: string; blocks?: unknown };
+    }) =>
+      query?.where?.blocks
+        ? { id: "connect-card" }
+        : query?.where?.role === "user"
+          ? { blocks: [{ kind: "text", text: "那你就直接发啊" }] }
+          : { blocks: [asked] }) as never);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not wake the sender after a send the recruiter confirmed", async () => {
+    // Staging 11-13: Outreach said the confirmed email went out, then the report woke Main,
+    // which listed the account's five roles nobody asked about.
+    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "已发给 Noah 和 Ada。" }] },
+    ]);
+    tx.externalEffect.findFirst.mockResolvedValue({ id: "effect-sent" });
+    await expect(
+      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(tx.externalEffect.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "run-b", status: "completed" }),
+      }),
+    );
   });
 
   it("tells the sender a stage that ended with no message or card is not done", async () => {

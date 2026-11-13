@@ -385,19 +385,21 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "the language check decides the language",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "The level is the language decision: take it as given, never judge the language again",
-    why: "Strong-rated Korean speakers were left out as \"Korean not verified\" (11-13).",
+    why: 'Strong-rated Korean speakers were left out as "Korean not verified" (11-13).',
   },
   {
     rule: "the hiring company is only a named employer",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "the hiring company is only the employer the JD or the recruiter names, never one guessed from the location or industry",
+    phrase:
+      "the hiring company is only the employer the JD or the recruiter names, never one guessed from the location or industry",
     why: "A battery-plant JD named no employer; half the runs guessed the local plant and left out all its staff, so the first round came back with 4 people (11-13).",
   },
   {
     rule: "dropping unconfirmed language is acted on at once",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "When the recruiter says to leave out people whose <language> is not confirmed, act on it in that same turn",
-    why: "A recruiter twice said to drop the people without confirmed Mandarin and twice got only \"checking\" (11-13).",
+    phrase:
+      "When the recruiter says to leave out people whose <language> is not confirmed, act on it in that same turn",
+    why: 'A recruiter twice said to drop the people without confirmed Mandarin and twice got only "checking" (11-13).',
   },
   {
     rule: "no quota talk",
@@ -1305,6 +1307,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "Never claim queued or approved means sent, saved or booked.",
     why: "Queued or approved actions were reported as done.",
+  },
+  {
+    rule: "count only the send being asked about",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "count only that send's campaign (get_campaign), never other roles' mail",
+    why: "Asked how many went out, Kruit added five test roles' mail and answered 2, then 7, then 6.",
+  },
+  {
+    rule: "name real menus only",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "never invent a tab, folder or button inside it",
+    why: "Asked where sent mail is, Kruit pointed to an Inbox 已发送 tab that does not exist.",
   },
   {
     rule: "turns end on a deliverable",
