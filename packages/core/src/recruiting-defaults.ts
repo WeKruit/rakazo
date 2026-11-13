@@ -15,6 +15,40 @@ export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
 ] as const;
 
 /**
+ * General platform tools a recruiting agent never needs. They are left out of recruiting runs in
+ * code, so every crew (new or old) gets the shorter tool list without a data migration: each
+ * offered tool costs prompt on every model call, and a long list makes the model pick worse.
+ */
+export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
+  "vote_poll",
+  "list_secrets",
+  "secret_request",
+  "forget_secret",
+  "render_plot",
+  "canvas_write",
+  "canvas_read",
+  "add_mcp_server",
+  "cloud_agent_launch",
+  "cloud_agent_status",
+  "cloud_agent_reply",
+  "cloud_agent_cancel",
+  "task_catalog",
+  "scratchpad_list",
+  "scratchpad_add",
+  "scratchpad_update",
+  "scratchpad_complete",
+  "scratchpad_remove",
+  "skill_create",
+  "skill_update",
+  "skill_delete",
+  "run_subagent",
+  "create_space",
+  "spawn_bot",
+  "update_bot",
+  "archive_bot",
+] as const;
+
+/**
  * A required language goes into the search itself. Profiles rarely state it, so checking it only
  * after a generic search left whole lists "unknown" and full of people with no sign of it.
  */

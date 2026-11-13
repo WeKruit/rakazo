@@ -163,7 +163,7 @@ describe("jsonSchemaParameters", () => {
     }
   });
 
-  it.each(["recruiting_role", "recruiting_feedback", "remember", "save_shared_memory"])(
+  it.each(["recruiting_role", "recruiting_feedback"])(
     "preserves exact human quote guidance in the %s model schema",
     (name) => {
       const tool = builtinAgentTools.find((entry) => entry.name === name)!;
@@ -476,10 +476,11 @@ describe("jsonSchemaParameters", () => {
     }
   });
 
-  it("keeps the recruiting feedback guard in native memory tool parameters", () => {
-    const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
-    expect(schema.properties).toHaveProperty("recruitingFeedback");
-    expect(schema.required).not.toContain("recruitingFeedback");
+  it("leaves preference feedback to recruiting_feedback instead of the memory tool schemas", () => {
+    for (const name of ["remember", "save_shared_memory", "save_memory"]) {
+      const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === name)!);
+      expect(schema.properties).not.toHaveProperty("recruitingFeedback");
+    }
   });
 
   it("preserves recursive recruiting criteria through the native Pi tool schema", () => {
