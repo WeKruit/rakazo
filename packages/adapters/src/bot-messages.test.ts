@@ -613,6 +613,32 @@ describe("delegating to a role team in another conversation", () => {
     ]);
   });
 
+  it("returns a finished round while Kruit's later follow-ups to the team still queue", async () => {
+    // Staging 11-13: "where's the next round?" was delegated twice while Sourcer ran the round;
+    // the queued follow-ups held the finished round back and Kruit said it had not come back.
+    const harness = team({ later: [said("10 people this round: …")] });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(harness.deps.prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ sourceRuns: { none: { status: "queued" } } }),
+      }),
+    );
+    expect(harness.deps.prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          NOT: {
+            status: "queued",
+            trigger: "bot_message",
+            createdAt: { gt: new Date("2026-11-13T09:06:40Z") },
+          },
+        }),
+      }),
+    );
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({ text: "10 people this round: …", intent: "result" }),
+    ]);
+  });
+
   it("stops at the recruiter's own next message in the role conversation", async () => {
     const harness = team({
       later: [

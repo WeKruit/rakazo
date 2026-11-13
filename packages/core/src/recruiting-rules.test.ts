@@ -1447,6 +1447,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Asked yes or no whether round 2 repeated round 1, global Main twice handed the check to the team and said it could not confirm (11-13).",
   },
   {
+    rule: "a global handoff of round feedback is judged by the recruiter's words",
+    in: "RECRUITING_SCALE_START",
+    phrase: "judge it by the recruiter's quoted words, never by a number or \"similar people\" the brief adds",
+    why: "Global Main relayed \"2 and 10 are off… find more like them\" as 150 similar people; the role team accepted the round and scaled (11-13).",
+  },
+  {
     rule: "a drop is answered before any card",
     in: "RECRUITER_LANGUAGE",
     phrase: "say in its text who is dropped and who is left, before any card",
