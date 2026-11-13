@@ -35,7 +35,13 @@ function recruiterBlocks(message: {
 export async function startRoleFromRecruiterMessage(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
   run: { spaceId: string; userId: string; threadId: string; sourceMessageId?: string | null },
-  role: { threadId: string; botId: string; deliveryKey: string },
+  role: {
+    threadId: string;
+    botId: string;
+    deliveryKey: string;
+    /** Requirements Kruit gathered from earlier messages, when the latest one alone lacks them. */
+    earlier?: string;
+  },
 ): Promise<boolean> {
   if (!run.sourceMessageId) return false;
   // The recruiter's latest message here: a turn resumed by answering a card keeps the
@@ -64,6 +70,13 @@ export async function startRoleFromRecruiterMessage(
     .join("\n")
     .trim();
   if (!text) return false;
+  // Staging 11-13: "现在开始找候选人" opened the role with only those words, so its team asked
+  // for the location the recruiter had given earlier, and that card held every later request.
+  const earlier = role.earlier?.trim();
+  const prompt =
+    earlier && !text.includes(earlier)
+      ? `${text}\n\nWhat the recruiter said about this role earlier, in the main conversation:\n${earlier}`
+      : text;
   const clientNonce = `start-role:${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
@@ -85,7 +98,7 @@ export async function startRoleFromRecruiterMessage(
           botId: role.botId,
           threadId: role.threadId,
           userId: run.userId,
-          prompt: text,
+          prompt,
           status: "queued",
         },
       });

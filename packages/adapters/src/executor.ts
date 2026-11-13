@@ -7351,6 +7351,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !isGlobalRoleList(args) ||
             typeof args.roleId !== "string" ||
             !items?.length ||
+            // A delegated result waking Kruit is not the recruiter asking for people.
+            run.trigger === "bot_message" ||
             !asksForPeople(lastRecruiterText)
           )
             return undefined;
@@ -15296,6 +15298,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               threadId: group.thread.id,
               botId: bot.id,
               deliveryKey: effectKey,
+              earlier: request,
             });
             if (!started) {
               if (!request)
