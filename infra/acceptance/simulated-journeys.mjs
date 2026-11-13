@@ -73,6 +73,25 @@ export const JOURNEYS = [
     ],
   },
   {
+    // Needs no mailbox and sends nothing, so it runs whenever the batch copy is given.
+    name: "large-account-pick-people",
+    title: "大账号里找还没联系的人，挑一个职位拿名单和草稿",
+    area: "sending",
+    source:
+      "11-13 batch run on a copy of our account (985 roles): ~100 s a turn, wrong roles' send cards, never gave names or a draft for the asked role",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for months: hundreds of roles, many with people already found.`,
+    facts: () =>
+      "You do not remember the exact role names; ask Kruit. Do not approve any send today: you only want to see who and what would go out.",
+    goals: [
+      "Ask Kruit which of your roles have people who have not been emailed yet, and expect a short list of roles in one reply.",
+      "Pick one role from that list and ask for five of its people who have not been emailed, by name.",
+      "Ask for the first email you would send them, and check it is for that role and those people.",
+    ],
+  },
+  {
     name: "language-must-have",
     // Answering the role's first question starts the first-ten search, so it is paid.
     paid: true,
