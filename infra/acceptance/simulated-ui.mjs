@@ -112,8 +112,10 @@ export async function openUi({ origin, email, password, chinese, out }) {
       if (!(await composer.isVisible().catch(() => false))) return false;
       await composer.fill(text);
       await composer.press("Enter");
-      await sleep(1_000);
-      return true;
+      await sleep(1_500);
+      // The composer empties once the page has taken the message (it may wait in a queue while
+      // Kruit is still working, so the chat itself can show it later).
+      return (await composer.inputValue().catch(() => text)).trim() === "";
     },
     /** Presses the visible button or link with this name; false when the page has none. */
     async click(name) {
@@ -143,7 +145,9 @@ export async function openUi({ origin, email, password, chinese, out }) {
       const box = page.getByRole("textbox", { name: /^(Answer|回答|答案)$/ }).last();
       if (!(await box.isVisible().catch(() => false))) return false;
       await box.fill(text);
-      await box.press("Enter");
+      const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
+      if (!(await send.isEnabled().catch(() => false))) return false;
+      await send.click();
       await settle();
       return true;
     },
