@@ -550,6 +550,44 @@ describe("quick reply", () => {
     );
   });
 
+  // Staging 11-13: two messages in a row each got a fixed line, one after the other.
+  it("sends one fixed line for messages sent back to back before the run speaks", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Updated.",
+      quickReplies: true,
+      holdMain,
+      unreadSteering: [
+        {
+          id: "steer-a",
+          messageId: "message-a",
+          blocks: [{ kind: "text", text: "Remote is fine" }],
+        },
+        {
+          id: "steer-b",
+          messageId: "message-b",
+          blocks: [{ kind: "text", text: "对了，远程也可以" }],
+        },
+      ],
+    });
+    const acks = (prisma: { message: { create: { mock: { calls: unknown[][] } } } }) =>
+      prisma.message.create.mock.calls.filter(([args]) =>
+        /Got it, on it\.|收到，马上处理。/.test(
+          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks),
+        ),
+      ).length;
+    await vi.waitFor(() => expect(lastPrisma && acks(lastPrisma)).toBe(1), {
+      timeout: STEERING_PEEK_MS + 3_000,
+    });
+    await new Promise((done) => setTimeout(done, 300));
+    release();
+    const { prisma } = await pending;
+    expect(acks(prisma)).toBe(1);
+  });
+
   // Staging eval 11-11: the server's automatic continuation ("Continue with the next step: …")
   // got a quick reply of its own, which echoed it to the recruiter.
   it("never answers the server's own continuation as if the person wrote it", async () => {
