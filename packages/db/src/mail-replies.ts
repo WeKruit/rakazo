@@ -297,6 +297,53 @@ export async function findSameMailReply(
   return undefined;
 }
 
+/**
+ * The same campaign send card still waiting for the recruiter, in any conversation of the
+ * space: one send gets one card, so a second agent or a status check asking to send the same
+ * people the same email reuses it (a corrected email or other people get their own card). The
+ * card is recorded on the effect (instantlyActivationCampaign, instantlyActivationCard) under a
+ * lock before it is posted, so two runs racing see each other.
+ */
+export async function findWaitingCampaignSend(
+  tx: Prisma.TransactionClient,
+  input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
+): Promise<{ effectId: string; threadId: string } | undefined> {
+  const card = createHash("sha256").update(stableJsonValue(input.card)).digest("hex");
+  const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
+  const waiting = await tx.externalEffect.findFirst({
+    where: {
+      spaceId: input.spaceId,
+      id: { not: input.effectId },
+      kind: { endsWith: "activate_campaign" },
+      status: "intended",
+      AND: [
+        { result: { path: ["instantlyActivationCampaign"], equals: input.campaignId } },
+        { result: { path: ["instantlyActivationCard"], equals: card } },
+      ],
+      run: { status: { in: LIVE_RUN_STATUSES } },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, run: { select: { threadId: true } } },
+  });
+  if (waiting) return { effectId: waiting.id, threadId: waiting.run.threadId };
+  const current = await tx.externalEffect.findUnique({
+    where: { id: input.effectId },
+    select: { result: true },
+  });
+  await tx.externalEffect.updateMany({
+    where: { id: input.effectId, status: "intended" },
+    data: {
+      result: {
+        ...(object(current?.result) ?? {}),
+        instantlyActivationCampaign: input.campaignId,
+        instantlyActivationCard: card,
+      } as Prisma.InputJsonValue,
+    },
+  });
+  return undefined;
+}
+
 export type MailReplyEffect = Effect & { id: string; runId: string; run: { status: string } };
 
 /** One bounded read enriches the original cards; no duplicate message or send history is written. */

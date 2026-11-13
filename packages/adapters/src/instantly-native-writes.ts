@@ -285,7 +285,7 @@ export const nativeInstantlyWrites = [
     "get_campaign_analytics",
     CampaignIdInput,
     true,
-    "Reads sent, opened and replied counts for one exact campaign.",
+    "Reads sent, opened and replied counts for one exact campaign. These totals lag behind sending; for who has been emailed and who is still queued, read get_campaign.",
   ),
   tool(
     "get_campaign",
@@ -896,6 +896,8 @@ const PICKUP_MINUTES = 60;
 export function queuePace(
   campaign: Record<string, unknown> | undefined,
   count: number,
+  /** When the first of these people was queued; the estimate counts from it, so it holds still. */
+  since?: Date,
   now = new Date(),
 ): string {
   const gap = emailGap(campaign);
@@ -912,14 +914,24 @@ export function queuePace(
     ? "Pacific time"
     : ({ "America/Boise": "Mountain time", "America/Chicago": "Central time (Chicago)" }[zone] ??
       zone);
-  const done = new Date(now.getTime() + (PICKUP_MINUTES + (Math.max(count, 1) - 1) * gap) * 60_000);
-  let clock: ReturnType<typeof wallClock>;
+  const start = since && since.getTime() <= now.getTime() ? since : now;
+  const spread = (Math.max(count, 1) - 1) * gap * 60_000;
+  const done = new Date(start.getTime() + PICKUP_MINUTES * 60_000 + spread);
+  const overdue = done.getTime() < now.getTime();
+  const at = (date: Date) => {
+    const { minutes } = wallClock(date, zone);
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  };
+  let time: string;
+  let queuedAt: string;
   try {
-    clock = wallClock(done, zone);
+    time = at(overdue ? new Date(now.getTime() + spread) : done);
+    queuedAt = at(start);
   } catch {
     return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
   }
-  const time = `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`;
+  if (overdue)
+    return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${shown}`;
   return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${shown} at the latest`;
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
@@ -1189,6 +1201,8 @@ type Person = StagedLead & {
   saved?: Record<typeof OWN_SUBJECT | typeof OWN_BODY, string>;
   /** The provider has emailed this lead (Lead.timestamp_last_contact). */
   contacted?: boolean;
+  /** When this lead joined the campaign (Lead.timestamp_created). */
+  queuedAt?: string;
 };
 type SendPlan =
   /** Activate the campaign once `remove` (never-emailed people nobody named) are taken out. */
@@ -1223,8 +1237,16 @@ function asPerson(lead: Record<string, unknown>): Person[] {
         ? { saved: { [OWN_SUBJECT]: String(subject), [OWN_BODY]: String(body) } }
         : {}),
       ...(lead.timestamp_last_contact ? { contacted: true } : {}),
+      ...(typeof lead.timestamp_created === "string" ? { queuedAt: lead.timestamp_created } : {}),
     },
   ];
+}
+/** When the earliest of these people joined the campaign, if the provider said. */
+function firstQueued(people: Person[]): Date | undefined {
+  const times = people
+    .map((person) => Date.parse(person.queuedAt ?? ""))
+    .filter((time) => Number.isFinite(time));
+  return times.length ? new Date(Math.min(...times)) : undefined;
 }
 
 /** One requested recipient: an exact email, else the one person with that full or first name. */
@@ -1285,16 +1307,16 @@ function planSendNow(campaign: Record<string, unknown> | undefined, leads: Perso
   const window = nextSendWindow(campaign);
   return (!window || window.now) && emailGap(campaign) <= FASTEST_GAP
     ? {
-        refusal: `Already sending as fast as the mail service allows: ${label(queued)} ${queuePace(campaign, queued.length)}. Nothing failed, nothing was changed and nobody is emailed twice; get_campaign shows who has been emailed.`,
+        refusal: `Already sending as fast as the mail service allows: ${label(queued)} ${queuePace(campaign, queued.length, firstQueued(queued))}. Nothing failed, nothing was changed and nobody is emailed twice. Tell the recruiter once, plainly, that this is the fastest the mail service sends and give that time; do not try send_now again. get_campaign shows who has been emailed.`,
       }
     : { send: "now", recipients: queued };
 }
 /** When people queued in a sending campaign get their first email. */
-function queuedWhen(campaign: Record<string, unknown> | undefined, count: number) {
+function queuedWhen(campaign: Record<string, unknown> | undefined, queued: Person[]) {
   const window = nextSendWindow(campaign);
   return window && !window.now
     ? `Their first email goes out ${window.local}.`
-    : `They are ${queuePace(campaign, count)}.`;
+    : `They are ${queuePace(campaign, queued.length, firstQueued(queued))}.`;
 }
 function planRecipients(
   campaign: Record<string, unknown> | undefined,
@@ -1333,7 +1355,7 @@ function planRecipients(
       refusal: [
         emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
         queued.length
-          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued.length)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten.`
+          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten.`
           : "",
         "Nobody new was added, so nothing else was sent.",
       ]
@@ -2577,7 +2599,8 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
   const people = (
     Array.isArray(leads.items) ? (leads.items as Record<string, unknown>[]) : []
   ).flatMap(asPerson);
-  const queued = people.filter((person) => !person.contacted).map((person) => person.email);
+  const waiting = people.filter((person) => !person.contacted);
+  const queued = waiting.map((person) => person.email);
   const window = campaign.status === ACTIVE && queued.length ? nextSendWindow(campaign) : null;
   return {
     recipients: people.map((person) => person.email),
@@ -2590,7 +2613,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
         }
       : window
         ? {
-            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length)}. Tell the recruiter who is emailed and who is still queued with that time; do not send them again.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
+            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still queued with that time, the same time each check; do not send them again.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
           }
         : {}),
   };
