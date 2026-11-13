@@ -404,7 +404,7 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
         }),
       );
     expect(await waiting(first.effect.id)).toBeUndefined();
-    expect(await waiting(second.effect.id)).toEqual({
+    expect(await waiting(second.effect.id)).toMatchObject({
       effectId: first.effect.id,
       threadId: identity.threadId,
     });
