@@ -177,6 +177,8 @@ describe("recruitingNextStepCard", () => {
     expect(`${card.text}${card.options.join("")}`).not.toMatch(/[A-Za-z]/);
     expect(card.options).toHaveLength(3);
     expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
+    expect(recruitingNextStepCard(false, true).options[0]).toBe("Search deeper");
+    expect(recruitingNextStepCard(true, true).options[0]).toBe("深挖一次");
   });
 });
 

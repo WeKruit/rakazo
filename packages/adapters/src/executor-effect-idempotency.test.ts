@@ -6973,7 +6973,9 @@ describe("people searches before the first round", () => {
     },
   );
 
-  it("lets one deeper agent run through when the round is still short, then refuses more", async () => {
+  // 11-13: the deeper search cost about $1 a time, so a short round is recorded first and the
+  // deeper search runs only when the recruiter asks for it on the next-step card.
+  it("runs no deeper agent run before a short round is recorded", async () => {
     const f = fixture("run-first-round-deeper");
     f.thread.activeRecruitingRoleId = "role-1";
     Object.assign(f.prisma, {
@@ -7008,11 +7010,12 @@ describe("people searches before the first round", () => {
 
     await f.run();
 
-    expect(f.results.slice(0, 3)).not.toContainEqual(
+    expect(f.results.slice(0, 2)).not.toContainEqual(
       expect.objectContaining({ error: expect.stringContaining("already returned") }),
     );
-    expect(f.results[3]).toEqual({
-      error: expect.stringContaining("with everyone who fits, even fewer than ten"),
-    });
+    for (const result of f.results.slice(2))
+      expect(result).toEqual({
+        error: expect.stringContaining("with everyone who fits, even fewer than ten"),
+      });
   });
 });
