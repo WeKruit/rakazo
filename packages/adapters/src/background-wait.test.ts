@@ -28,28 +28,51 @@ describe("waitForBackgroundWork", () => {
   });
 
   it("returns when all background work is done, never waiting on its own run", async () => {
-    const result = await waitForBackgroundWork(
-      prisma([research, search, self], [search, self], [self]),
-      { ...base, signal: new AbortController().signal },
-    );
+    const result = await waitForBackgroundWork(prisma([research, self], [research, self], [self]), {
+      ...base,
+      signal: new AbortController().signal,
+    });
     expect(result).toMatchObject({
-      done: [
-        { id: "research-1", kind: "research" },
-        { id: "effect-1", kind: "agent_run" },
-      ],
+      done: [{ id: "research-1", kind: "research" }],
       running: [],
       timedOut: false,
     });
   });
 
+  // 11-13 staging: the deeper search of a short first round was only collected by its own
+  // agent_run call or its follow-up, which waits while the turn is open; the turn waited on it
+  // for 30 minutes and no round was recorded.
+  it("never waits on a people-search agent run, which the agent collects itself", async () => {
+    const only = await waitForBackgroundWork(prisma([search]), {
+      ...base,
+      timeoutSeconds: 1800,
+      signal: new AbortController().signal,
+    });
+    expect(only).toMatchObject({
+      done: [],
+      running: [{ id: "effect-1", kind: "agent_run" }],
+      waitedSeconds: 0,
+      timedOut: false,
+    });
+    expect(only.note).toMatch(/agent_run with its runId/);
+    const mixed = await waitForBackgroundWork(prisma([research, search], [search]), {
+      ...base,
+      signal: new AbortController().signal,
+    });
+    expect(mixed.done).toEqual([{ id: "research-1", kind: "research" }]);
+    expect(mixed.running).toEqual([{ id: "effect-1", kind: "agent_run" }]);
+    expect(mixed.note).toMatch(/agent_run with its runId/);
+  });
+
   it("returns at the first finish in any mode", async () => {
-    const result = await waitForBackgroundWork(prisma([research, search], [search]), {
+    const other = { id: "research-2", kind: "research", status: "running" };
+    const result = await waitForBackgroundWork(prisma([research, other], [other]), {
       ...base,
       mode: "any",
       signal: new AbortController().signal,
     });
     expect(result.done).toEqual([{ id: "research-1", kind: "research" }]);
-    expect(result.running).toEqual([{ id: "effect-1", kind: "agent_run" }]);
+    expect(result.running).toEqual([{ id: "research-2", kind: "research" }]);
   });
 
   it("reports what is still running at the timeout", async () => {
@@ -63,12 +86,12 @@ describe("waitForBackgroundWork", () => {
   });
 
   it("waits only for the named ids and says when nothing is running", async () => {
-    const named = await waitForBackgroundWork(prisma([research, search], [research]), {
+    const named = await waitForBackgroundWork(prisma([research, self], [self]), {
       ...base,
-      ids: ["effect-1"],
+      ids: ["research-1"],
       signal: new AbortController().signal,
     });
-    expect(named.done).toEqual([{ id: "effect-1", kind: "agent_run" }]);
+    expect(named.done).toEqual([{ id: "research-1", kind: "research" }]);
     const idle = await waitForBackgroundWork(prisma([self]), {
       ...base,
       signal: new AbortController().signal,

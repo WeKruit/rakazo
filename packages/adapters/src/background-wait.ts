@@ -18,6 +18,14 @@ export type BackgroundWaitResult = {
   note?: string;
 };
 
+/**
+ * A people-search agent run is collected by its own agent_run call, and its follow-up waits while
+ * this turn is open, so waiting on it here would hold the turn until the timeout with nothing
+ * collected. It is reported, never waited on.
+ */
+const AGENT_RUN_NOTE =
+  "A people-search agent run is not waited on here: collect it by calling agent_run with its runId (each call waits about a minute), as often as it takes, then go on with its people.";
+
 const USER_MESSAGE_NOTE =
   "A new message for you arrived while you waited. Finish this turn now so it is answered; wait again afterwards if the work still matters.";
 
@@ -65,11 +73,21 @@ export async function waitForBackgroundWork(
       (work) => !(work.kind === "run" && work.id === input.selfRunId),
     );
   const wanted = input.ids?.length ? new Set(input.ids) : undefined;
-  const watched = (await list())
+  const busy = (await list())
     .filter((work) => !wanted || wanted.has(work.id))
     .map(({ id, kind }) => ({ id, kind }));
+  const agentRuns = busy.filter((work) => work.kind === "agent_run");
+  const watched = busy.filter((work) => work.kind !== "agent_run");
   const waitedSeconds = () => Math.round((Date.now() - startedAt) / 1000);
   if (!watched.length) {
+    if (agentRuns.length)
+      return {
+        done: [],
+        running: agentRuns,
+        waitedSeconds: 0,
+        timedOut: false,
+        note: AGENT_RUN_NOTE,
+      };
     return {
       done: [],
       running: [],
@@ -89,10 +107,14 @@ export async function waitForBackgroundWork(
       const live = new Set(running.map((work) => work.id));
       return {
         done: watched.filter((work) => !live.has(work.id)),
-        running,
+        running: [...running, ...agentRuns],
         waitedSeconds: waitedSeconds(),
         timedOut: !settled && !userMessage && timedOut,
-        ...(userMessage && !settled ? { userMessage: true, note: USER_MESSAGE_NOTE } : {}),
+        ...(userMessage && !settled
+          ? { userMessage: true, note: USER_MESSAGE_NOTE }
+          : agentRuns.length
+            ? { note: AGENT_RUN_NOTE }
+            : {}),
       };
     }
     await sleep(
