@@ -50,7 +50,11 @@ export function client() {
       // A read can also lose a short-lived conflict (409) while the account is busy; try it again.
       const retry = response && (INFRA.includes(response.status) || response.status === 409);
       if (!read || attempt >= 8 || (response && !retry)) break;
-      await sleep(15_000);
+      // A rate limit lasts longer than a restart: honour Retry-After, else wait a minute.
+      const after = Number(response?.headers.get("retry-after"));
+      await sleep(
+        response?.status === 429 ? (after > 0 ? Math.min(after, 300) * 1000 : 60_000) : 15_000,
+      );
     }
     if (!response) throw new InfraError(`${route}: no response`);
     const body = await response.json().catch(() => ({}));
