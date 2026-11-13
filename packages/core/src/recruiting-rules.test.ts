@@ -388,6 +388,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Strong-rated Korean speakers were left out as \"Korean not verified\" (11-13).",
   },
   {
+    rule: "the hiring company is only a named employer",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "the hiring company is only the employer the JD or the recruiter names, never one guessed from the location or industry",
+    why: "A battery-plant JD named no employer; half the runs guessed the local plant and left out all its staff, so the first round came back with 4 people (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
