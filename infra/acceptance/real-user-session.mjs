@@ -53,7 +53,12 @@ export function client() {
     if (!response) throw new InfraError(`${route}: no response`);
     const body = await response.json().catch(() => ({}));
     if (INFRA.includes(response.status)) throw new InfraError(`${route} ${response.status}`);
-    if (!response.ok) throw new Error(`${route} ${response.status}`);
+    if (!response.ok) {
+      const detail = body?.json?.message ?? body?.message ?? body?.error?.message;
+      throw new Error(
+        `${route} ${response.status}${detail ? `: ${String(detail).slice(0, 160)}` : ""}`,
+      );
+    }
     return body.json;
   };
   return { auth, rpc };
