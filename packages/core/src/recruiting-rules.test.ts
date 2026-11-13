@@ -850,6 +850,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13: the name was asked before the template, on a choice card, then the template ended on a bare 「Best,」.",
   },
   {
+    rule: "Main sends to named people in its own conversation",
+    in: "Main",
+    phrase: "never in a role conversation they are not in",
+    why: "Staging 11-13 send-at-night: the send went to the role team, its card sat in the role conversation the recruiter could not see, and Main kept saying the card still waited after it was confirmed.",
+  },
+  {
     rule: "never a bare sign-off",
     in: "RECRUITER_LANGUAGE",
     phrase: "never leave an email on a bare sign-off with neither a name nor that question",
@@ -1164,7 +1170,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "contacts, drafts and sends go to Outreach",
     in: "Main",
     phrase:
-      "Hand an email draft, a contact lookup or a send to named people or a number of people to Outreach as your last call, in the recruiter's words",
+      "Hand an email draft, a contact lookup or a send to a number of people to Outreach as your last call, in the recruiter's words",
     why: 'Main refused "send to 20" and "find contacts" itself, and rewrote the request.',
   },
   {
