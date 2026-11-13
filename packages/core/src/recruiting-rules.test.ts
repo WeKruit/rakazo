@@ -405,7 +405,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "feedback on a missing requirement makes it visible-only",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "the next round takes only people whose rows show it",
-    why: "After \"no more ones w/o kafka\", the next round still had 5 of 10 with no Kafka shown (11-13).",
+    why: 'After "no more ones w/o kafka", the next round still had 5 of 10 with no Kafka shown (11-13).',
   },
   {
     rule: "no quota talk",
@@ -1319,6 +1319,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "never report a failed internal check or save",
     why: "Outreach told the recruiter draft access was blocked although the send card was ready.",
+  },
+  {
+    rule: "drop people when asked",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "Asked to drop people, drop them in that reply and say who",
+    why: "Asked to drop A and B and replace them, Kruit only said what it would do (11-13).",
   },
   {
     rule: "queued is not sent",
