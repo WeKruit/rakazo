@@ -55,7 +55,9 @@ function harness(
     },
     chatGroupMember: { findFirst: vi.fn(async () => ({ botId: "bot-a" })) },
     message: {
-      findFirst: vi.fn(async () => ({ blocks: sourceBlocks })),
+      findFirst: vi.fn(async (query?: { where?: { blocks?: unknown } }) =>
+        query?.where?.blocks ? null : { blocks: sourceBlocks },
+      ),
       findUnique: vi.fn(async () => existing ?? null),
       findMany: vi.fn(async () => waitingCardMessages),
       create: messageCreate,
@@ -570,12 +572,34 @@ describe("group handoff report back", () => {
     const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
       { blocks: [{ kind: "text", text: "已排队 3 人，周五 9:00 发出。" }] },
     ]);
-    tx.message.findFirst.mockImplementation((async (query?: { where?: { role?: string } }) =>
-      query?.where?.role === "user"
-        ? { blocks: [{ kind: "text", text: question }] }
-        : { blocks: [asked] }) as never);
+    tx.message.findFirst.mockImplementation((async (query?: {
+      where?: { role?: string; blocks?: unknown };
+    }) =>
+      query?.where?.blocks
+        ? null
+        : query?.where?.role === "user"
+          ? { blocks: [{ kind: "text", text: question }] }
+          : { blocks: [asked] }) as never);
     await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
     expect(runCreate.mock.calls.length > 0).toBe(wakes);
+  });
+
+  it("leaves the next step to the recruiter while a card waits on them", async () => {
+    // Staging 11-13: the teammate asked to connect Gmail, and the sender re-handed the send four
+    // times, each answer repeating "connect Gmail first".
+    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "Gmail 尚未连接，请先完成连接卡。" }] },
+    ]);
+    tx.message.findFirst.mockImplementation((async (query?: {
+      where?: { role?: string; blocks?: unknown };
+    }) =>
+      query?.where?.blocks
+        ? { id: "connect-card" }
+        : query?.where?.role === "user"
+          ? { blocks: [{ kind: "text", text: "那你就直接发啊" }] }
+          : { blocks: [asked] }) as never);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    expect(runCreate).not.toHaveBeenCalled();
   });
 
   it("tells the sender a stage that ended with no message or card is not done", async () => {

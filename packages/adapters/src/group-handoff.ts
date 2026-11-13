@@ -304,6 +304,22 @@ async function latestUserMessageAsks(
   return /[?？]\s*$/.test(blocksText(parsed.data).trim());
 }
 
+/** Whether a card in the thread is still waiting for the recruiter's answer. */
+async function cardWaitsOnRecruiter(
+  tx: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<boolean> {
+  const waiting = await tx.message.findFirst({
+    where: {
+      threadId,
+      role: "bot",
+      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+    },
+    select: { id: true },
+  });
+  return Boolean(waiting);
+}
+
 /**
  * Returns a stage handed over with report_back to the member that asked for it, once the stage
  * ends either way, so it can check the result against its brief. Idempotent per run; the result
@@ -376,6 +392,10 @@ export async function reportGroupHandoffOutcome(
       // or handed it back for proof, so one question got two or three answers. An answered
       // question needs nothing more from the sender.
       if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
+      // Staging 11-13: the teammate asked to connect Gmail, the sender re-handed the send four
+      // times and each answer repeated "connect Gmail first". A card waiting on the recruiter
+      // means the next step is theirs, not the sender's.
+      if (posted && (await cardWaitsOnRecruiter(tx, run.threadId))) return undefined;
       const report = mail
         ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
         : outcome.status === "completed" && !posted

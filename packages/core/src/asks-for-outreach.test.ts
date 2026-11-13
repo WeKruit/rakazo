@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asksAboutThesePeople,
+  asksForPeople,
   asksForOutreach,
   asksToSendTo,
   recruitingBotKey,
@@ -53,5 +54,14 @@ describe("asksToSendTo", () => {
     expect(asksToSendTo("找contact")).toBeUndefined();
     expect(asksToSendTo("lets find 50")).toBeUndefined();
     expect(asksToSendTo("找50个类似的人")).toBeUndefined();
+  });
+});
+
+describe("asksForPeople", () => {
+  it("tells a request for people from a question about requirements", () => {
+    for (const text of ["给我看看这些人", "下一页", "show me the candidates", "who is in the list?"])
+      expect(asksForPeople(text)).toBe(true);
+    for (const text of ["现在must-have有哪些", "What are the must-haves now?"])
+      expect(asksForPeople(text)).toBe(false);
   });
 });
