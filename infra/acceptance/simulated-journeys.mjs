@@ -155,4 +155,36 @@ export const JOURNEYS = [
       "Check that the next round does not repeat anyone and reflects your feedback.",
     ],
   },
+  {
+    name: "template-sign-with-my-name",
+    title: "模板署名用我的名字",
+    area: "first message",
+    source: "template-then-send#1 2026-11-13 (learned by --learn, promoted 11-13)",
+    chinese: false,
+    maxTurns: 5,
+    persona: `${US_RECRUITER} You want a first-outreach template that goes out under your own name, and you have no candidates yet.`,
+    facts: () =>
+      "Your name is David Chen. You have no candidates yet. The role is Staff Backend Engineer, Go, payments infrastructure, New York hybrid, base $200k-$250k.",
+    goals: [
+      'Get a first-outreach template and see that it is not signed "Kruit" and has no "[Your name]" placeholder.',
+      "Tell Kruit your name once and get the template back signed David Chen with Hi {{firstName}}, without being asked for candidate details.",
+      "Get the corrected template in one reply, without a repeated version and without a card you cannot answer.",
+    ],
+  },
+  {
+    name: "verify-musthave-evidence-list",
+    title: "逐人核实必备条件并给清单",
+    area: "requirements",
+    source: "us-recruiter-feedback-round#1, 2026-11-13 (learned by --learn, promoted 11-13)",
+    chinese: false,
+    maxTurns: 4,
+    persona: `${US_RECRUITER} You already have three candidates' LinkedIn snippets pasted in and want Kruit to tell you, person by person, who shows the must-have skill and how many years of experience each has.`,
+    facts: () =>
+      "Role: senior data engineer, Seattle hybrid, 6-12 years, Kafka in production is a must-have. Candidate A snippet: '7 years of expertise in Spark, Scala, Kafka'. Candidate B snippet: 'Senior Data Engineer, builds cloud-native data platforms' with no years and no Kafka mentioned. Candidate C snippet: '10 years, Spark Streaming and Kafka pipelines in production'.",
+    goals: [
+      "Paste the three snippets and ask which of them show Kafka in production and how many years each has; expect a per-person list in that same reply.",
+      "Expect Kruit to say plainly 'not shown' for what the snippet does not say, rather than saying it will check or hand it to a team.",
+      "Ask Kruit to drop anyone who does not show Kafka; expect it to say who it drops and what it will do about replacements.",
+    ],
+  },
 ];
