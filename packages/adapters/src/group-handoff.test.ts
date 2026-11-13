@@ -6,6 +6,7 @@ import {
   handoffToGroupBot,
   isQuietStageReport,
   NO_ROLE_HANDOFF,
+  namesRole,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
@@ -621,6 +622,29 @@ describe("group handoff report back", () => {
     );
   });
 
+  it("counts a held-back reply's retry as the stage's result", async () => {
+    // Staging 11-13: Outreach's template was held back for a blank and its retry posted the
+    // fixed one; the report said nothing was posted, so Main had the template written again.
+    const { deps, messageCreate, tx } = harness([asked]);
+    tx.run.findMany.mockResolvedValue([{ id: "run-retry" }]);
+    tx.message.findMany.mockImplementation((async (query?: {
+      where?: { runId?: { in?: string[] } };
+    }) =>
+      query?.where?.runId?.in?.includes("run-retry")
+        ? [{ blocks: [{ kind: "text", text: "Hi {{firstName}}, thanks for your time." }] }]
+        : []) as never);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    const text = (
+      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
+    )[0].data.blocks[0]!.text;
+    expect(text).not.toContain("without posting any result");
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { sourceMessage: { clientNonce: "autocontinue:run-b:decline" } },
+      }),
+    );
+  });
+
   it("tells the sender a stage that ended with no message or card is not done", async () => {
     // Staging: Outreach read a skill and ended silently; the report said its result was above,
     // so Main accepted nothing and the recruiter never got the reply card.
@@ -1028,5 +1052,26 @@ describe("open stage watch", () => {
     await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
     for (const { messageCreate } of [reported, unasked, handedOn, busy])
       expect(messageCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("a role named in a handoff", () => {
+  it("matches the title written with full-width brackets or without its qualifier", () => {
+    // 11-13 staging: "Senior Data Engineer（Seattle）" in a brief missed the role
+    // "Senior Data Engineer (Seattle)", so one person's email went to two teams.
+    expect(namesRole("senior data engineer (seattle) 岗位", "Senior Data Engineer (Seattle)")).toBe(
+      "full",
+    );
+    expect(
+      namesRole(
+        "senior data engineer(seattle)岗位".normalize("NFKC"),
+        "Senior Data Engineer (Seattle)",
+      ),
+    ).toBe("core");
+    expect(namesRole("只发 senior data engineer 的首封", "Senior Data Engineer (Seattle)")).toBe(
+      "core",
+    );
+    expect(namesRole("write to ada", "Senior Data Engineer (Seattle)")).toBeUndefined();
+    expect(namesRole("an ops role", "Ops (NY)")).toBeUndefined();
   });
 });

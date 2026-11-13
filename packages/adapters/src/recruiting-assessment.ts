@@ -211,9 +211,13 @@ export async function executeRecruitingCandidatesTool(
       }
       itemCount = result.items.length;
       succeeded = true;
+      // The page's own roles only: on a large account the full role list is hundreds of rows the
+      // agent re-reads every turn; total and nextCursor still page through the rest.
+      const listed = new Set(result.items.map((item) => item.roleId));
+      const paged = { ...result, roles: result.roles.filter((role) => listed.has(role.id)) };
       return operation === "replies"
         ? {
-            ...result,
+            ...paged,
             note: ONE_OFF_REPLIES_NOTE,
             counts: {
               messages: result.items.reduce(
@@ -242,7 +246,7 @@ export async function executeRecruitingCandidatesTool(
                 ),
             },
           }
-        : result;
+        : paged;
     }
     if (input.operation === "list") {
       const { operation: _operation, roleId: namedRoleId, page, ...query } = input;

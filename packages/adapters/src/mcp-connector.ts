@@ -105,7 +105,7 @@ const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
 /** Model-facing: a call refused because the recruiter has not connected this account. */
 export function signedOutMessage(service: string): string {
-  return `${service} is not connected for this recruiter, so this call did nothing: nothing was sent, saved or read. Anything already shown in the conversation, such as a drafted email, is still there. Ask once with request_connection; if the recruiter cannot connect, give them the email's subject and body ready to copy and send themselves.`;
+  return `${service} is not connected for this recruiter, so this call did nothing: nothing was sent, saved or read. Anything already shown in the conversation, such as a drafted email, is still there: asked whether the draft is kept, answer yes, it is the email above, and do not look for it in the mailbox. Say in one line that nothing went out because this is not connected, then call request_connection so the connect card sits with that reply; if the recruiter cannot connect, give them the email's subject and body ready to copy and send themselves.`;
 }
 const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const THREAD_HISTORY = "native_instantly_get_thread_history";

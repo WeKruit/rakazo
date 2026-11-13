@@ -1143,6 +1143,26 @@ describe("native cross-role recruiting reads", () => {
     await expect(guard()).rejects.toThrow();
   });
 
+  it("returns only the page's roles, not the whole account's role list", async () => {
+    const f = fixture();
+    overview.read.mockResolvedValue({
+      roles: [
+        { id: "role", title: "Engineer" },
+        { id: "other", title: "Designer" },
+      ],
+      items: [{ roleId: "role" }],
+      nextCursor: "role",
+      total: 2,
+    });
+    const result = await executeRecruitingCandidatesTool(
+      { ...f.deps, connector: { execute: vi.fn() } },
+      trusted,
+      { operation: "sequences" },
+      context,
+    );
+    expect(result).toMatchObject({ roles: [{ id: "role" }], nextCursor: "role", total: 2 });
+  });
+
   it("lists a named role's people where no role is linked, never overriding a linked role", async () => {
     const f = fixture();
     db.candidates.mockResolvedValue({ roleId: "selected", items: [], total: 0, nextCursor: null });

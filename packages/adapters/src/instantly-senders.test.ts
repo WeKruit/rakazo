@@ -703,10 +703,15 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   expect(read).toMatchObject({ next: expect.stringContaining("request_connection once") });
   expect(JSON.stringify(read)).not.toContain("Integrations");
   // 11-13 staging: "I have no Gmail" ended on "nothing for you to do".
-  expect(read).toMatchObject({ next: expect.stringContaining("never say there is nothing to do") });
+  expect(read).toMatchObject({ next: expect.stringContaining("Never say there is nothing to do") });
   // 11-13 staging: "can't connect" got "no other way", and "is the draft kept" got "can't confirm".
   expect(read).toMatchObject({ next: expect.stringContaining("ready to copy") });
-  expect(read).toMatchObject({ next: expect.stringContaining("answer yes") });
+  expect(read).toMatchObject({
+    next: expect.stringContaining("the draft is kept, it is the email above"),
+  });
+  // 11-13 staging: the draft was pasted four times and "which mailbox sends" got "Google 邮箱".
+  expect(read).toMatchObject({ next: expect.stringContaining("no mailbox is connected yet") });
+  expect(read).toMatchObject({ next: expect.stringContaining("without the email") });
 });
 
 it("asks no company name until the turn read the sending email", () => {

@@ -26,7 +26,7 @@ import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { blocksText } from "./reply-suggestion.js";
 import { NO_RESPONSE } from "./silent-reply.js";
-import { declinedRunId } from "./turn-end-guard.js";
+import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
@@ -143,15 +143,16 @@ export async function handoffToGroupBot(
       // that role's campaign and threads, which only its own team holds.
       if (groupId.startsWith("recruiting-global-")) {
         // A request steered into a running turn is not its source message; the brief quotes it.
-        const asked =
-          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`.toLowerCase();
+        const asked = roleTitleText(
+          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`,
+        );
         const roles = await tx.recruitingRole.findMany({
           where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
           select: { id: true, title: true },
         });
-        const named = roles.find(
-          (role) => role.title.trim().length > 1 && asked.includes(role.title.trim().toLowerCase()),
-        );
+        const named =
+          roles.find((role) => namesRole(asked, role.title) === "full") ??
+          roles.find((role) => namesRole(asked, role.title) === "core");
         if (named)
           return {
             error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
@@ -273,9 +274,19 @@ export async function handoffToGroupBot(
 }
 
 /** Whether the run left the user anything to see: a message or card, not only steps or a handoff. */
-async function postedResult(tx: Pick<PrismaClient, "message">, runId: string): Promise<boolean> {
+async function postedResult(
+  tx: Pick<PrismaClient, "message" | "run">,
+  runId: string,
+): Promise<boolean> {
+  // A held-back reply's retry posts the stage's result under its own run. Staging 11-13: the
+  // retry posted the template, the report said nothing was posted, and Main had it written twice.
+  const retries = await tx.run.findMany({
+    where: { sourceMessage: { clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${runId}:decline` } },
+    select: { id: true },
+    take: 5,
+  });
   const posted = await tx.message.findMany({
-    where: { runId, role: "bot" },
+    where: { runId: { in: [runId, ...retries.map((retry) => retry.id)] }, role: "bot" },
     select: { blocks: true },
     take: 50,
   });
@@ -818,4 +829,20 @@ export async function watchOpenStages(
     if (report) sent += 1;
   }
   return sent;
+}
+
+/** Lower-case text with full-width punctuation and runs of spaces folded, for title matching. */
+function roleTitleText(text: string): string {
+  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Whether the text names a role: its full title, or the title without a trailing qualifier such
+ * as "(Seattle)", which briefs often write as "Senior Data Engineer（Seattle）" or leave out.
+ */
+export function namesRole(asked: string, title: string): "full" | "core" | undefined {
+  const full = roleTitleText(title).trim();
+  if (full.length > 1 && asked.includes(full)) return "full";
+  const core = full.replace(/\s*\([^)]*\)$/, "").trim();
+  return core.length >= 6 && asked.includes(core) ? "core" : undefined;
 }

@@ -308,8 +308,8 @@ const describeCards = (cards) =>
         .join("\n")
     : "(none)";
 
-async function simulate(journey, turns, view, cards, screen) {
-  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
+async function simulate(journey, turns, view, cards, screen, tag) {
+  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
@@ -318,8 +318,12 @@ async function simulate(journey, turns, view, cards, screen) {
 }
 
 /** The send answer the harness allows: only the internal test inboxes are ever emailed. */
-function guardSend(card, answer, turn) {
+function guardSend(journey, card, answer, turn) {
   if (answer !== "allow") return "deny";
+  if (!journey.sends) {
+    turn.guard = "denied: this journey never sends";
+    return "deny";
+  }
   const outside = card.recipients.filter((address) => !allowedRecipient(address));
   if (card.recipients.length && !outside.length) return "allow";
   turn.guard = `denied: the card names ${outside.join(", ") || "no address"}`;
@@ -344,6 +348,8 @@ async function play(journey, label, owner, mailbox, out) {
   const { rpc } = user;
   const before = await campaigns(rpc);
   const startedAt = Date.now();
+  // A per-play tag, so a journey on a reused account names a role of its own.
+  const tag = new Date(startedAt).toISOString().slice(11, 16).replace(":", "");
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
   const ui = UI
@@ -364,7 +370,7 @@ async function play(journey, label, owner, mailbox, out) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
       const screen = ui ? await ui.view() : null;
-      const move = await simulate(journey, turns, render(chats), cards, screen);
+      const move = await simulate(journey, turns, render(chats), cards, screen, tag);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       const problems = [];
@@ -423,7 +429,7 @@ async function play(journey, label, owner, mailbox, out) {
             : move.action === "approve_send"
               ? "allow"
               : move.text;
-        if (card.send) answer = guardSend(card, answer, turn);
+        if (card.send) answer = guardSend(journey, card, answer, turn);
         // The email on a send card is what goes out: a fill-in left in it is a product failure.
         const fillIn = card.send && card.text.match(PLACEHOLDER);
         if (fillIn) turn.placeholder = fillIn[0];
@@ -437,7 +443,9 @@ async function play(journey, label, owner, mailbox, out) {
           const action = card.actions.find((item) => item.id === value);
           pressed = action
             ? await ui.clickLabel(action.label)
-            : typeof value === "string" && (await ui.answerTyped(value));
+            : // A form card takes the typed text in its field; the API gets the parsed content.
+              typeof answer === "string" &&
+              (await ui.answerTyped(typeof value === "string" ? value : answer));
           if (pressed) pressed = await answered(rpc, card);
           if (!pressed)
             problems.push(
@@ -515,7 +523,7 @@ async function answered(rpc, card) {
 // --- The judge ----------------------------------------------------------------------------------
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
-- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal.
+- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
 - issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, screen wrong, missing control, confusing page, other.
 When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
@@ -742,8 +750,9 @@ for (const journey of JOURNEYS.filter(
   log(`skipping ${journey.name}: set ${missing(journey).join(", ")}`);
 const SAMPLES = Number(option("--samples", "1"));
 const CONCURRENCY = Number(option("--concurrency", "6"));
+// Mailbox samples take turns on the fixture; the batch copy plays once, since each play sends.
 const plays = selected.flatMap((journey) =>
-  Array.from({ length: journey.account ? 1 : SAMPLES }, (_, index) => ({
+  Array.from({ length: journey.account === "batch" ? 1 : SAMPLES }, (_, index) => ({
     journey,
     sample: index + 1,
   })),

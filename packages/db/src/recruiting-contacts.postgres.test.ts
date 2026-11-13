@@ -314,6 +314,58 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     expect(theirs.items.map((item) => item.name)).toEqual(["Ada Lovelace (foreign)"]);
   });
 
+  it("shows a CRM contact without a LinkedIn or email identity with its role and mail", async () => {
+    const server = await prisma.mcpServer.findFirstOrThrow({ where: { userId, spaceId } });
+    const role = await prisma.recruitingCrmRole.findFirstOrThrow({ where: { userId, spaceId } });
+    const crmCandidateId = "33333333-3333-4333-8333-333333333333";
+    const fay = await prisma.recruitingCrmContact.create({
+      data: {
+        spaceId,
+        userId,
+        mcpServerId: server.id,
+        organizationId: "org",
+        crmCandidateId,
+        name: "Fay No-Identity",
+        contactStatus: "new",
+        outreachStatus: "",
+        clientLabel: "Client",
+        roleLabel: "Data Lead",
+        syncedAt: new Date(),
+      },
+    });
+    await prisma.recruitingCrmRoleContact.create({
+      data: { roleId: role.id, contactId: fay.id, syncedAt: new Date() },
+    });
+    await prisma.recruitingCrmMessage.create({
+      data: {
+        spaceId,
+        userId,
+        mcpServerId: server.id,
+        organizationId: "org",
+        crmMessageId: "fay-mail",
+        crmCandidateId,
+        crmRoleId: "crm-role",
+        direction: "received",
+        recipients: [],
+        sentAt: new Date("2026-10-21T00:00:00Z"),
+        syncedAt: new Date(),
+      },
+    });
+    try {
+      const page = await listRecruitingContacts(prisma, actor, {
+        filters: { query: "No-Identity" },
+      });
+      expect(page.items).toHaveLength(1);
+      const person = page.items[0]!;
+      expect(person.personKey).toBe(`crm:${fay.id}`);
+      expect(person.roles.map((item) => item.title)).toEqual(["Data Lead"]);
+      expect(person.lastRepliedAt).toBe("2026-10-21T00:00:00.000Z");
+    } finally {
+      await prisma.recruitingCrmMessage.deleteMany({ where: { crmMessageId: "fay-mail" } });
+      await prisma.recruitingCrmContact.delete({ where: { id: fay.id } });
+    }
+  });
+
   it("narrows text matches before aggregation without changing canonical identity or literal matching", async () => {
     const search = (query: string, owner = actor) =>
       listRecruitingContacts(prisma, owner, { filters: { query }, limit: 8 });

@@ -1380,6 +1380,12 @@ describe("planDeclineRetry", () => {
       "bracketed blanks",
     );
     const zh = "**Subject:** 数据工程师\n\n您好 [候选人姓名]，\n\n我们在招 [职位名称]。";
+    // Staging 11-13: a draft headed 「主题：」 kept "[Your Name]" because only "Subject:" counted.
+    const zhSubject =
+      "**主题：感谢今天的面试**\n\nHi {{firstName}},\n\nThank you for your time.\n\nBest,\n[Your Name]";
+    expect((await planDeclineRetry(human, { ...handed, reply: zhSubject }))?.note).toContain(
+      "bracketed blanks",
+    );
     expect((await planDeclineRetry(human, { ...handed, reply: zh }))?.note).toContain(
       "bracketed blanks",
     );

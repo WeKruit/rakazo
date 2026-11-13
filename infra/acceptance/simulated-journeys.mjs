@@ -13,7 +13,11 @@ const US_RECRUITER = `You are a US agency recruiter who fills engineering roles 
 // Personas by name, for journeys learned from failures (simulated-customer.mjs --learn).
 // Two candidate addresses from the first test inbox: the inbox itself and a plus-alias of it, so
 // test mail stays out of everyone's own inbox (RAKAZO_SIM_RECIPIENTS lists noah-scheduling first).
-const twoInboxes = ([first]) => [first, first.replace("@", "+ada@")];
+// A tag makes both addresses new for each play, so earlier sends don't count as already contacted.
+const twoInboxes = ([first], tag = "") => [
+  first.replace("@", `+noah${tag}@`),
+  first.replace("@", `+ada${tag}@`),
+];
 
 export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER };
 
@@ -30,9 +34,11 @@ export const JOURNEYS = [
     chinese: true,
     maxTurns: 10,
     persona: `${AGENCY_RECRUITER} It is late evening for you. You want the first emails to go out tonight.`,
-    facts: (recipients) =>
-      `The role: Senior Data Engineer for a client in Seattle (hybrid, 3 days in office), 6+ years, Spark and Kafka in production, base $180k–$220k.\nTwo candidates you already found yourself and want emailed now:\n${twoInboxes(
+    // The mailbox fixture keeps earlier plays' roles, so each play names a new one.
+    facts: (recipients, tag) =>
+      `The role: Senior Data Engineer (Seattle, ref ${tag}), a new role for a client in Seattle (hybrid, 3 days in office), 6+ years, Spark and Kafka in production, base $180k–$220k.\nTwo candidates you already found yourself and want emailed now:\n${twoInboxes(
         recipients,
+        tag,
       )
         .map((address, index) => `- ${["Noah Liu", "Ada Chen"][index]} <${address}>`)
         .join("\n")}`,
@@ -64,6 +70,25 @@ export const JOURNEYS = [
       "When the send confirmation card appears, check it lists those people and the email, and approve it.",
       "Ask how many have gone out and when the rest go.",
       "Open the role's Sequence page and check it matches what Kruit said.",
+    ],
+  },
+  {
+    // Needs no mailbox and sends nothing, so it runs whenever the batch copy is given.
+    name: "large-account-pick-people",
+    title: "大账号里找还没联系的人，挑一个职位拿名单和草稿",
+    area: "sending",
+    source:
+      "11-13 batch run on a copy of our account (985 roles): ~100 s a turn, wrong roles' send cards, never gave names or a draft for the asked role",
+    account: "batch",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for months: hundreds of roles, many with people already found.`,
+    facts: () =>
+      "You do not remember the exact role names; ask Kruit. Do not approve any send today: you only want to see who and what would go out.",
+    goals: [
+      "Ask Kruit which of your roles have people who have not been emailed yet, and expect a short list of roles in one reply.",
+      "Pick one role from that list and ask for five of its people who have not been emailed, by name.",
+      "Ask for the first email you would send them, and check it is for that role and those people.",
     ],
   },
   {
