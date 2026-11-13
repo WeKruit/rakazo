@@ -264,6 +264,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Searches without the location returned out-of-area people.",
   },
   {
+    rule: "nobody new fitting never ends empty",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "When nobody new fits, never end on nothing",
+    why: "11-13 staging: after feedback the round came back with no one and a promise not to pad it, though the recruiter asked to loosen and see a few.",
+  },
+  {
+    rule: "the role's saved list is not the new round",
+    in: "Global recruiting overview skill",
+    phrase: "it never answers a request for the new round or new people",
+    why: "11-13 staging: asked for the next round, Kruit listed the role's 232 saved people, earlier round included, as if they were new.",
+  },
+  {
     rule: "every pick meets every hard requirement",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "meets every hard requirement the row can show",
