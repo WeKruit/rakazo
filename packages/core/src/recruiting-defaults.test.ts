@@ -1,3 +1,4 @@
+import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   creditEstimateNote,
@@ -12,6 +13,7 @@ import {
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
@@ -211,5 +213,23 @@ describe("roleOpenedNote", () => {
     expect(roleOpenedNote(true)).toContain("「岗位已经开好");
     expect(roleOpenedNote(true)).not.toContain("I opened the role");
     expect(roleOpenedNote(false)).toContain("I opened the role");
+  });
+});
+
+describe("recruiting tool list", () => {
+  it("drops only real built-in tools and keeps every tool the playbook names", () => {
+    expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
+      RECRUITING_UNUSED_BUILTIN_TOOLS.length,
+    );
+    const playbook = [
+      RECRUITER_LANGUAGE,
+      RECRUITING_CALIBRATION_QUICK_SEARCH,
+      RECRUITING_SCALE_START,
+      RECRUITING_ROUND_NEXT_STEP,
+      ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
+      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
+    ].join("\n");
+    for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
+      expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
   });
 });

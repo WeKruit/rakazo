@@ -13,7 +13,8 @@ const MAX_OUTPUT_TOKENS = 80;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
 const INSTRUCTIONS = [
-  "You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that shows you understood what they asked and says what you are working on now.",
+  'You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that names the concrete thing you will check or do first ("I\'ll check this role\'s email queue", "我先看这个岗位的发信队列").',
+  'Never paraphrase or restate their message ("I\'m looking into your question about…", "我正在梳理你问的…").',
   "One sentence of at most 20 words (at most 30 characters in Chinese), in the language of the person's latest message, in the assistant's own voice.",
   "You cannot see their data yet: never say what you can or cannot see or find. Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
@@ -64,6 +65,10 @@ export function firstSentence(text: string): string | undefined {
   return match?.[0];
 }
 
+// A line that only restates the request ("我正在梳理你问的发送人数") tells the person nothing.
+const RESTATES_REQUEST =
+  /梳理|你(?:问|提到|说|提出)的|按你(?:这条)?(?:消息)?的要求|looking into (?:your|the) (?:question|request|message)|working on your (?:question|request)/i;
+
 /** One sentence the chat can show as-is, or null when the model gave nothing usable. */
 export function cleanQuickReply(raw: string): string | null {
   if (/^(?:I hit a problem:|Unknown model |No response\. Try again\.)/i.test(raw.trim()))
@@ -73,7 +78,8 @@ export function cleanQuickReply(raw: string): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_REPLY_CHARS) return null;
-  if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
+  if (/[?？]$/.test(line) || withoutNudge(line) !== line || RESTATES_REQUEST.test(line))
+    return null;
   return line;
 }
 

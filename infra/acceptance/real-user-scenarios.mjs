@@ -142,6 +142,14 @@ export const SCENARIOS = [
     turns: [{ say: "进度怎么样了？" }],
   },
   {
+    // 11-13: people queued for the 9:00 send window were reported as "0 sent", with a lecture on
+    // names nobody asked for. The answer leads with the actual state.
+    name: "send-count-zh",
+    area: "status",
+    source: "11-13 queued emails reported as none sent, talking in circles",
+    turns: [{ say: "现在发送了多少人呢" }, { say: "你找了这么多人为什么一个邮件都发不出去？" }],
+  },
+  {
     name: "credits-zh",
     area: "status",
     source: "new accounts with starting credits",

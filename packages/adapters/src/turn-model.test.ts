@@ -21,6 +21,17 @@ describe("chooseTurnModel", () => {
       reason: "short_user_message",
     });
   });
+  it.each([
+    "你找了这么多人为什么一个邮件都发不出去?",
+    "现在发送了多少人呢",
+    "why did nothing send?",
+  ])("keeps the configured model for a short why or how-many question (%s)", (userText) => {
+    expect(chooseTurnModel({ ...base, userText })).toEqual({
+      model: base.configured,
+      routed: "configured",
+      reason: "why_question",
+    });
+  });
   it("routes a clarifying answer fast regardless of trigger", () => {
     expect(chooseTurnModel({ ...base, trigger: "resume", answersQuestion: true })).toMatchObject({
       routed: "fast",

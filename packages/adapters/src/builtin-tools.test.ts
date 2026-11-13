@@ -117,12 +117,11 @@ describe("native recruiting approval tool", () => {
       expect(tool?.description).toContain(
         'prefer one recruiting_feedback call with target:"preference"',
       );
-      expect(tool?.description).toContain(
-        "top-level content must be the complete resulting native document",
-      );
-      expect(tool?.description).toContain(
-        "recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary",
-      );
+      // Preferences go through recruiting_feedback; the memory tools no longer carry its schema.
+      expect(tool?.description).not.toContain("recruitingFeedback");
+      expect(
+        (tool!.inputSchema.properties as Record<string, unknown>).recruitingFeedback,
+      ).toBeUndefined();
     }
   });
 });

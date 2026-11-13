@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { cleanQuickReply } from "./quick-reply.js";
 import {
+  AUTOMATIC_CONTINUATION,
   beforeCardQuestion,
   isAgentBrief,
+  NEXT_STEP_LEAD,
   personWrote,
   waitsOnCard,
   withoutAgentBrief,
@@ -100,12 +102,8 @@ describe("one question at a time beside a teammate's card", () => {
 });
 
 describe("the server's continuation nudge in a reply", () => {
-  const nudge = continuationText({
-    step: {
-      label: "Review the first 10 people",
-      prompt: "Read the recruiter's latest message first.",
-    },
-  });
+  // Older conversations still hold the next-step nudge the server used to push.
+  const nudge = `${NEXT_STEP_LEAD} Review the first 10 people. (${AUTOMATIC_CONTINUATION})`;
 
   it("keeps the answer and drops the nudge the model echoed after it", () => {
     const answer = "Aurora-0t1c";

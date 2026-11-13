@@ -159,6 +159,7 @@ import {
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
   RECRUITING_ROUND_NEXT_STEP,
@@ -6580,8 +6581,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           graphical && acceptsImages && !heldForTakeover;
         const pageBrowserAllowed =
           graphical && browser.describe().capabilities.page && !heldForTakeover;
+        // Recruiting crews also drop the general platform tools they never use.
+        const runDisabledBuiltinTools =
+          isRecruitingSpawnKey(bot.spawnKey) || recruitingBotKey(bot)
+            ? [...bot.disabledBuiltinTools, ...RECRUITING_UNUSED_BUILTIN_TOOLS]
+            : bot.disabledBuiltinTools;
         const disabledBuiltinTools = disabledBuiltinToolSet(
-          bot.disabledBuiltinTools,
+          runDisabledBuiltinTools,
         );
         const builtins = [
           ...selectBuiltinToolsForRun({
@@ -6595,7 +6601,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             cloudAgentEnabled: cloudAgentsEnabled(cloudAgent, run.spaceId),
             messagingChannelRun,
             voiceCall,
-            disabledBuiltinTools: bot.disabledBuiltinTools,
+            disabledBuiltinTools: runDisabledBuiltinTools,
           }),
           ...(deps.email &&
           !messagingChannelRun &&
@@ -9970,6 +9976,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             guardedMemory ||
             (name === "recruiting_feedback" && args.target === "preference")
           ) {
+            // The memory tools no longer advertise recruitingFeedback: in a role conversation a
+            // preference goes through recruiting_feedback, and the error says so.
+            if (
+              name !== "recruiting_feedback" &&
+              args.recruitingFeedback === undefined
+            )
+              return {
+                error:
+                  'In a role conversation, save a recruiter preference with recruiting_feedback target "preference" (it writes this memory), not with this tool.',
+              };
             const parsed = RecruitingPreferenceFeedbackSchema.safeParse(
               name === "recruiting_feedback" ? args : args.recruitingFeedback,
             );
