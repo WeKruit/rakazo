@@ -712,6 +712,10 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   // 11-13 staging: the draft was pasted four times and "which mailbox sends" got "Google 邮箱".
   expect(read).toMatchObject({ next: expect.stringContaining("no mailbox is connected yet") });
   expect(read).toMatchObject({ next: expect.stringContaining("without the email") });
+  // 11-13 staging: "I can't sign in to Gmail" got 「我已按原稿发起连接请求」 then "no sender mailbox".
+  expect(read).toMatchObject({
+    next: expect.stringContaining("Never say you started, sent or made a connection request"),
+  });
 });
 
 it("asks no company name until the turn read the sending email", () => {
