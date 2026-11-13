@@ -39,7 +39,8 @@ import {
   stopAll,
   transcripts,
 } from "./real-user-session.mjs";
-import { JOURNEYS } from "./simulated-journeys.mjs";
+import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
+import { closeBrowser, openUi, SEND_BUTTON, STANDING_BUTTON } from "./simulated-ui.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -62,18 +63,40 @@ const MAILBOXES = ["", ..."23456789".split("").map((n) => `_${n}`)]
     process.env[`RAKAZO_MAILBOX_PASSWORD${suffix}`],
   ])
   .filter((pair) => pair.every(Boolean));
+// The staging copy of our own account (account: "batch"), whose every address was rewritten to a
+// plus-alias of an internal test inbox, so a batch send from it reaches only our inbox.
+const BATCH = [process.env.RAKAZO_BATCH_EMAIL, process.env.RAKAZO_BATCH_PASSWORD];
+/** An internal test inbox, or a plus-alias of one (admin1+p1a2b@… reaches admin1@…). */
+const allowedRecipient = (address) =>
+  RECIPIENTS.includes(address) || RECIPIENTS.includes(address.replace(/\+[^@]*@/, "@"));
 /** What a journey needs that this run was not given. */
 const missing = (journey) => [
   ...(journey.account === "mailbox" && !MAILBOXES.length
     ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
     : []),
+  ...(journey.account === "batch" && !BATCH.every(Boolean)
+    ? ["RAKAZO_BATCH_EMAIL", "RAKAZO_BATCH_PASSWORD"]
+    : []),
   ...(journey.sends && !RECIPIENTS.length ? ["RAKAZO_SIM_RECIPIENTS"] : []),
 ];
+// Journeys learned from earlier failures (--learn writes them; --learned <file> plays them too).
+const LEARNED = option("--learned");
+const learned =
+  LEARNED && fs.existsSync(LEARNED)
+    ? JSON.parse(fs.readFileSync(LEARNED, "utf8")).map((journey) => ({
+        ...journey,
+        persona: `${PERSONAS[journey.persona] ?? PERSONAS.AGENCY_RECRUITER} ${journey.situation ?? ""}`,
+        facts: journey.facts ? () => journey.facts : undefined,
+      }))
+    : [];
+const JOURNEYS = [...WRITTEN, ...learned.filter((j) => !WRITTEN.some((w) => w.name === j.name))];
 const named = option("--journeys")?.split(",");
 for (const name of named ?? [])
   if (!JOURNEYS.some((journey) => journey.name === name))
     throw new Error(`no journey ${name}; journeys: ${JOURNEYS.map((j) => j.name).join(", ")}`);
 const PAID = args.includes("--paid");
+const UI = args.includes("--ui");
+const ORIGIN = (process.env.RAKAZO_ORIGIN ?? BASE).replace(/\/$/, "");
 const OUT = option("--out", `simulated-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 fs.mkdirSync(OUT, { recursive: true });
 const started = Date.now();
@@ -259,27 +282,50 @@ async function replyAfter(journey, rpc, since) {
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone). Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
-{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
+{"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card>", "chat": "<optional: the chat to write in, by name; Kruit by default>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
+// With --ui the recruiter works in the browser and can also open pages and press buttons.
+const UI_RULES = `${SIMULATOR_RULES}
+You are using the product in a browser and see the page described under "Your screen". Two more actions:
+- {"action": "look", "page": "home" | "contacts" | "shortlist" | "sequence" | "inbox" | "interview" | "analytics" | "conversation" | "results" | "brief", "chat": "<a role chat's name, for that role's page; leave out for the whole account>"} opens that page, the way you would from the sidebar or a role's tabs.
+- {"action": "click", "text": "<the exact name of a button or link on your screen>"} presses it.
+Check things on the pages yourself the way a recruiter would: when Kruit says something was sent or saved, or tells you where to look, go and look. Approve or deny a send only with approve_send / deny_send.`;
 
-async function simulate(journey, turns, view, cards) {
-  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${
-    cards.length
-      ? cards
-          .map(
-            (card, i) =>
-              `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : card.connect ? " ACCOUNT CONNECTION (a sign-in you cannot do here; say what you would do instead)" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}${card.schema ? `\n    form fields: ${Object.keys(card.schema.properties ?? {}).join(", ")} (type your answer)` : ""}`,
-          )
-          .join("\n")
-      : "(none)"
+/** What the recruiter is told about the open cards. */
+const describeCards = (cards) =>
+  cards.length
+    ? cards
+        .map(
+          (card, i) =>
+            `[${i}] in "${card.chat}"${card.send ? " SEND CONFIRMATION" : card.connect ? " ACCOUNT CONNECTION (a sign-in you cannot do here; say what you would do instead)" : ""}: ${card.text}${card.options.length ? `\n    options: ${card.options.join(" | ")}` : ""}${card.schema ? `\n    form fields: ${Object.keys(card.schema.properties ?? {}).join(", ")} (type your answer)` : ""}`,
+        )
+        .join("\n")
+    : "(none)";
+
+async function simulate(journey, turns, view, cards, screen) {
+  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
+    screen
+      ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
+      : ""
   }\n\nYour moves so far: ${turns.length}. Your next move:`;
-  return parse(await model(SIMULATOR_RULES, prompt, SIMULATOR));
+  return parse(await model(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR));
 }
 
-async function play(journey, label, owner, mailbox) {
+/** The send answer the harness allows: only the internal test inboxes are ever emailed. */
+function guardSend(card, answer, turn) {
+  if (answer !== "allow") return "deny";
+  const outside = card.recipients.filter((address) => !allowedRecipient(address));
+  if (card.recipients.length && !outside.length) return "allow";
+  turn.guard = `denied: the card names ${outside.join(", ") || "no address"}`;
+  return "deny";
+}
+
+async function play(journey, label, owner, mailbox, out) {
   const user = client();
-  if (journey.account === "mailbox") {
-    await user.auth(...mailbox);
+  let credentials = mailbox;
+  if (journey.account === "batch") credentials = BATCH;
+  if (journey.account) {
+    await user.auth(...credentials);
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
   } else {
@@ -287,78 +333,138 @@ async function play(journey, label, owner, mailbox) {
     const password = `Sim-${crypto.randomUUID()}`;
     await owner.rpc("deployment/createAccount", { email, name: "Simulated Recruiter", password });
     await user.auth(email, password);
+    credentials = [email, password];
   }
   const { rpc } = user;
   const before = await campaigns(rpc);
   const startedAt = Date.now();
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
+  const ui = UI
+    ? await openUi({
+        origin: ORIGIN,
+        email: credentials[0],
+        password: credentials[1],
+        chinese: journey.chinese,
+        out,
+      })
+    : null;
+  if (ui) await ui.openChat(kruit.id);
   const turns = [];
+  const chatNamed = async (name) =>
+    (await groupsOf(rpc)).find((group) => group.name === name) ?? kruit;
   try {
     for (let index = 0; index < journey.maxTurns; index += 1) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
-      const move = await simulate(journey, turns, render(chats), cards);
+      const screen = ui ? await ui.view() : null;
+      const move = await simulate(journey, turns, render(chats), cards, screen);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
+      const problems = [];
       if (move.action === "done") {
         log(`${label}: recruiter is done: ${move.goal ?? ""}`);
         turns.push(turn);
         break;
       }
       const card = cards[move.card];
+      let waitForKruit = true;
       if (move.action === "say") {
-        const chat = (await groupsOf(rpc)).find((group) => group.name === move.chat) ?? kruit;
+        const chat = await chatNamed(move.chat);
         log(`${label}: recruiter: ${move.text}`);
-        await send(rpc, chat.id, move.text);
+        let typed = false;
+        if (ui) {
+          await ui.openChat(chat.id);
+          typed = await ui.say(move.text);
+          if (typed) typed = await landed(rpc, chat.id, move.text);
+          if (!typed)
+            problems.push(`could not send "${move.text.slice(0, 40)}" from the chat composer`);
+        }
+        if (!typed) await send(rpc, chat.id, move.text);
+      } else if (ui && move.action === "look") {
+        waitForKruit = false;
+        const chat = move.chat ? await chatNamed(move.chat) : null;
+        log(`${label}: recruiter opens ${move.page}${chat ? ` in ${chat.name}` : ""}`);
+        await ui
+          .openPage(move.page, chat && chat.id !== kruit.id ? chat.id : undefined)
+          .catch((error) => problems.push(`could not open ${move.page}: ${error.message}`));
+        turn.screen = await ui.view(2_500);
+      } else if (ui && move.action === "click") {
+        // A send goes through approve_send, where the harness checks the recipients first.
+        if (SEND_BUTTON.test(move.text ?? "") || STANDING_BUTTON.test(move.text ?? "")) {
+          turn.invalid = "send buttons are pressed only through approve_send";
+          turns.push(turn);
+          continue;
+        }
+        log(`${label}: recruiter presses "${move.text}"`);
+        if (!(await ui.click(move.text)))
+          problems.push(`no button or link "${move.text}" on the page`);
+        await sleep(3_000);
+        // Pressing a card's button or a page's control may start Kruit working; wait only then.
+        waitForKruit = Boolean(await newestBotMessageAfter(rpc, at));
+        turn.screen = await ui.view(2_500);
       } else if (card && ["answer_card", "approve_send", "deny_send"].includes(move.action)) {
+        if (card.connect) {
+          turn.invalid = "a sign-in card cannot be answered by the simulated recruiter";
+          turns.push(turn);
+          continue;
+        }
         let answer =
           move.action === "deny_send"
             ? "deny"
             : move.action === "approve_send"
               ? "allow"
               : move.text;
-        // The harness, not the model, decides what may be emailed: only the internal test inboxes.
-        if (card.send && answer === "allow") {
-          const outside = card.recipients.filter((address) => !RECIPIENTS.includes(address));
-          if (!card.recipients.length || outside.length) {
-            answer = "deny";
-            turn.guard = `denied: the card names ${outside.join(", ") || "no address"}`;
-          }
-        }
-        if (card.send && !["allow", "deny"].includes(answer)) answer = "deny";
+        if (card.send) answer = guardSend(card, answer, turn);
         log(
           `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
-        if (card.connect) {
-          turn.invalid = "a sign-in card cannot be answered by the simulated recruiter";
-          turns.push(turn);
-          continue;
+        const value = card.send ? answer : cardAnswer(card, answer);
+        let pressed = false;
+        if (ui) {
+          await ui.openChat(card.groupId);
+          const action = card.actions.find((item) => item.id === value);
+          pressed = action
+            ? await ui.clickLabel(action.label)
+            : typeof value === "string" && (await ui.answerTyped(value));
+          if (pressed) pressed = await answered(rpc, card);
+          if (!pressed)
+            problems.push(
+              `could not answer the card "${card.text.slice(0, 40)}" on the page${action ? ` (no "${action.label}" button)` : ""}`,
+            );
         }
-        try {
-          await rpc("threads/answer", {
-            groupId: card.groupId,
-            runId: card.runId,
-            messageId: card.messageId,
-            answer: card.send ? answer : cardAnswer(card, answer),
-          });
-        } catch (failure) {
-          // A card that closed meanwhile or refused the answer is one lost move, not a lost journey.
-          if (failure instanceof InfraError) throw failure;
-          turn.invalid = `the card did not take the answer (${failure.message})`;
-          log(`${label}:   ${turn.invalid}`);
-          turns.push(turn);
-          continue;
-        }
+        if (!pressed)
+          try {
+            await rpc("threads/answer", {
+              groupId: card.groupId,
+              runId: card.runId,
+              messageId: card.messageId,
+              answer: value,
+            });
+          } catch (failure) {
+            // A card that closed meanwhile or refused the answer is one lost move, not a lost journey.
+            if (failure instanceof InfraError) throw failure;
+            turn.invalid = `the card did not take the answer (${failure.message})`;
+            log(`${label}:   ${turn.invalid}`);
+            turns.push(turn);
+            continue;
+          }
       } else {
         turn.invalid = `no card ${move.card} to ${move.action}`;
         turns.push(turn);
         continue;
       }
-      turn.firstReplySeconds = await replyAfter(journey, rpc, at);
+      if (problems.length) {
+        turn.ui = problems;
+        for (const problem of problems) log(`${label}:   UI: ${problem}`);
+      }
+      if (waitForKruit) {
+        turn.firstReplySeconds = await replyAfter(journey, rpc, at);
+        log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
+      }
       turn.records = await records(rpc, startedAt, before);
+      if (ui) turn.shot = await ui.shot(`turn-${turn.turn}-${move.action}`);
       turns.push(turn);
-      log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
     }
     return {
       turns,
@@ -373,15 +479,34 @@ async function play(journey, label, owner, mailbox) {
     };
     throw error;
   } finally {
+    await ui?.close();
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
+}
+/** Whether a message typed in the browser reached the chat within 20 seconds. */
+async function landed(rpc, groupId, text) {
+  for (const until = Date.now() + 20_000; Date.now() < until; await sleep(2_000))
+    if (
+      (await messagesOf(rpc, groupId)).some(
+        (message) => message.role === "user" && botText(message).includes(text.slice(0, 30)),
+      )
+    )
+      return true;
+  return false;
+}
+/** Whether a card pressed in the browser closed within 20 seconds. */
+async function answered(rpc, card) {
+  for (const until = Date.now() + 20_000; Date.now() < until; await sleep(2_000))
+    if (!(await cardsOpen(rpc)).some((open) => open.messageId === card.messageId)) return true;
+  return false;
 }
 
 // --- The judge ----------------------------------------------------------------------------------
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, screen wrong, missing control, confusing page, other.
+When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
 {"turns": [{"turn": n, "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "note": "<one line>"}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
 
@@ -389,7 +514,7 @@ async function judge(journey, result) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s\n  records after: ${JSON.stringify(turn.records ?? [])}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\nRecord codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
@@ -414,7 +539,7 @@ async function runOne(journey, sample, owner, mailbox) {
   let verdict;
   let error;
   try {
-    result = await play(journey, label, owner, mailbox);
+    result = await play(journey, label, owner, mailbox, out);
     verdict = await judge(journey, result);
   } catch (caught) {
     error = caught;
@@ -466,12 +591,19 @@ async function runOne(journey, sample, owner, mailbox) {
       : []),
     ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
     "## 每一步",
-    "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 |",
-    "|---|---|---|---|---|---|",
+    "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 | 截图 |",
+    "|---|---|---|---|---|---|---|",
     ...(result?.turns ?? []).map((turn) => {
       const judged = verdict?.turns?.find((item) => item.turn === turn.turn) ?? {};
-      const said = turn.move.text ?? turn.move.action;
-      return `| ${turn.turn} | ${said.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 60)}${turn.guard ? " (拦截)" : ""} | ${turn.firstReplySeconds ?? "-"} s | ${judged.answered === undefined ? "-" : judged.answered ? "是" : "否"} | ${judged.truthful ?? "-"} | ${(judged.issues ?? []).join(", ")} |`;
+      const said =
+        turn.move.action === "look"
+          ? `打开 ${turn.move.page}${turn.move.chat ? `（${turn.move.chat}）` : ""}`
+          : (turn.move.text ?? turn.move.action);
+      const issues = [
+        ...(judged.issues ?? []),
+        ...(turn.ui ?? []).map((problem) => `UI: ${problem}`),
+      ];
+      return `| ${turn.turn} | ${said.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 60)}${turn.guard ? " (拦截)" : ""} | ${turn.firstReplySeconds ?? "-"} s | ${judged.answered === undefined ? "-" : judged.answered ? "是" : "否"} | ${judged.truthful ?? "-"} | ${issues.join(", ").replace(/\|/g, "/")} | ${turn.shot ? `[图](${turn.shot})` : ""} |`;
     }),
     "",
     "## 对话",
@@ -482,6 +614,102 @@ async function runOne(journey, sample, owner, mailbox) {
   fs.writeFileSync(path.join(out, "report.md"), `${report}\n`);
   log(`${label}: ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`);
   return row;
+}
+
+// --- Learning from failures ----------------------------------------------------------------------
+// Every failed journey becomes (1) a failure note for the team that owns that part of Kruit, with
+// the evidence quoted, and (2) when no journey covers it yet, a new permanent journey that
+// reproduces it, so the suite grows from every failure. A model writes both from the report; the
+// pass/fail itself stays with the records and rule checks above, not with this model.
+const OWNERS = {
+  sending: "sending and Send cards",
+  search: "people search and the first ten",
+  requirements: "role requirements and must-haves",
+  "first message": "Kruit's replies (agent instructions)",
+  ui: "web pages",
+};
+const LEARN_RULES = `You turn a failed test of a recruiting assistant (Kruit) into work for the team. You get the journey's report: score, problems, the per-step table and the whole conversation, plus the names and goals of the journeys that already exist. Answer with one JSON object and nothing else:
+{"area": "sending" | "search" | "requirements" | "first message" | "ui", "problem": "<one sentence: what Kruit did wrong, in English>", "evidence": "<Kruit's exact words or the screen text that shows it, at most 200 characters>", "fix": "instructions" | "skill" | "code" | "test", "fixHint": "<one sentence: where the fix most likely belongs>", "newJourney": null | {"name": "<kebab-case, new>", "title": "<Chinese, short>", "area": "...", "source": "<the failed journey and date>", "persona": "AGENCY_RECRUITER" | "US_RECRUITER", "situation": "<one sentence the persona adds>", "chinese": true|false, "maxTurns": 4-8, "facts": "<what the recruiter knows, or empty>", "goals": ["..."]}}
+"fix": "test" means the test itself was wrong (the simulated customer or judge misread something); then newJourney is null. Propose newJourney only when the failure is a distinct behaviour that none of the existing journeys checks; it must need no paid people search and send no email.`;
+
+async function learn(rows) {
+  const failed = rows.filter((row) => !row.pass && !row.infra);
+  if (!failed.length) return;
+  const existing = JOURNEYS.map((j) => `- ${j.name}: ${j.goals.join(" / ")}`).join("\n");
+  const notes = [];
+  for (const row of failed) {
+    const report = fs.readFileSync(
+      path.join(OUT, `${row.scenario}#${row.sample}`, "report.md"),
+      "utf8",
+    );
+    const note = await model(
+      LEARN_RULES,
+      `Existing journeys:\n${existing}\n\nFailed journey ${row.scenario}#${row.sample}:\n${report.slice(0, 30_000)}`,
+      JUDGE,
+    )
+      .then(parse)
+      .catch((error) => ({ area: row.area, problem: `could not summarise: ${error.message}` }));
+    notes.push({ journey: `${row.scenario}#${row.sample}`, score: row.score, ...note });
+  }
+  fs.writeFileSync(path.join(OUT, "failures.json"), JSON.stringify(notes, null, 1));
+  const byArea = Object.groupBy(notes, (note) => note.area ?? "other");
+  fs.writeFileSync(
+    path.join(OUT, "failures.md"),
+    `${[
+      `# 失败要交给谁 · staging ${SHA.slice(0, 8)}`,
+      "",
+      ...Object.entries(byArea).flatMap(([area, items]) => [
+        `## ${OWNERS[area] ?? area}`,
+        ...items.map(
+          (note) =>
+            `- **${note.journey}** (${Math.round(note.score * 10)}/10, fix: ${note.fix ?? "?"}) ${note.problem}\n  > ${String(note.evidence ?? "").replace(/\n/g, " ")}\n  ${note.fixHint ?? ""}`,
+        ),
+        "",
+      ]),
+    ].join("\n")}\n`,
+  );
+  // New permanent journeys go into the learned file the next runs play with --learned.
+  const proposals = notes.map((note) => note.newJourney).filter((j) => j?.name && j.goals?.length);
+  const target = LEARNED ?? path.join(OUT, "learned-journeys.json");
+  const kept = fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, "utf8")) : [];
+  for (const journey of proposals)
+    if (
+      !JOURNEYS.some((j) => j.name === journey.name) &&
+      !kept.some((j) => j.name === journey.name)
+    )
+      kept.push({ ...journey, learnedAt: new Date().toISOString(), sha: SHA.slice(0, 8) });
+  fs.writeFileSync(target, JSON.stringify(kept, null, 1));
+  log(`learned: ${notes.length} failure notes, ${proposals.length} proposed journeys → ${target}`);
+}
+
+/** Marks journeys that passed in the baseline run and fail now: a regression blocks a release. */
+function compareBaseline(rows) {
+  const BASELINE = option("--baseline");
+  if (!BASELINE || !fs.existsSync(BASELINE)) return;
+  const file = fs.statSync(BASELINE).isDirectory()
+    ? path.join(BASELINE, "results.jsonl")
+    : BASELINE;
+  const passedBefore = new Set(
+    fs
+      .readFileSync(file, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.pass)
+      .map((row) => row.scenario),
+  );
+  const regressed = [
+    ...new Set(
+      rows
+        .filter((r) => !r.pass && !r.infra && passedBefore.has(r.scenario))
+        .map((r) => r.scenario),
+    ),
+  ];
+  for (const row of rows) if (regressed.includes(row.scenario)) row.regressed = true;
+  fs.appendFileSync(
+    path.join(OUT, "summary.md"),
+    `\n${regressed.length ? `退步（上次通过，这次不通过）: ${regressed.join(", ")}` : "没有退步"}\n`,
+  );
 }
 
 // Each journey on a free account gets a brand-new account, so journeys run side by side. Journeys
@@ -562,5 +790,8 @@ const summary = [
 ].join("\n");
 fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
 log(`${passed}/${rows.length} journeys pass; scoreboard ${path.join(OUT, "summary.md")}`);
+await closeBrowser();
+if (args.includes("--learn")) await learn(rows);
+compareBaseline(rows);
 const productFailed = rows.some((row) => !row.pass && !row.infra);
 process.exit(productFailed ? 1 : rows.some((row) => row.infra) ? 2 : 0);

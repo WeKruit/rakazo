@@ -10,6 +10,9 @@ const AGENCY_RECRUITER = `You are an agency headhunter in your thirties who plac
 // A US agency recruiter who writes English, quickly and informally, and expects Kruit to keep up.
 const US_RECRUITER = `You are a US agency recruiter who fills engineering roles for startups. You write English, short and informal, sometimes lowercase, sometimes two asks in one message. You expect Kruit to just do things. When it stalls, dodges or makes you repeat yourself you say so directly ("that's not what I asked", "just do it").`;
 
+// Personas by name, for journeys learned from failures (simulated-customer.mjs --learn).
+export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER };
+
 export const JOURNEYS = [
   {
     name: "send-at-night",
@@ -34,6 +37,28 @@ export const JOURNEYS = [
       "Ask how many emails have gone out.",
       "If they have not gone out, ask why, and tell Kruit to send them now.",
       "Ask where you can see the sent emails and any replies.",
+    ],
+  },
+  {
+    name: "batch-send-own-roles",
+    title: "在已有的职位里挑几个人批量发第一封邮件，再去 Sequence 看",
+    area: "sending",
+    source:
+      "11-13 user: batch sends must be tested on a copy of our own account (real roles, people and campaigns), not an empty one; 11-13 customer: sent/queued counts did not match",
+    // A staging copy of our account whose every address is a plus-alias of an internal inbox.
+    account: "batch",
+    sends: true,
+    chinese: true,
+    maxTurns: 10,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for weeks: several roles are open, with people already found for them.`,
+    facts: () =>
+      "You do not remember the exact role names; ask Kruit or look at the pages. Never more than eight people in one send.",
+    goals: [
+      "Ask Kruit which of your roles have people who have not been emailed yet.",
+      "Pick one of those roles and ask Kruit to send the first email to five or six of those people.",
+      "When the send confirmation card appears, check it lists those people and the email, and approve it.",
+      "Ask how many have gone out and when the rest go.",
+      "Open the role's Sequence page and check it matches what Kruit said.",
     ],
   },
   {
