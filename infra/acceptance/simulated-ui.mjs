@@ -106,9 +106,10 @@ export async function openUi({ origin, email, password, chinese, out }) {
     },
     /** Types a message in the open chat's composer and sends it; false when there is none. */
     async say(text) {
+      // The chat composer, not an open card's answer box (also a textarea in a fieldset).
       const composer = page
-        .locator('fieldset[aria-label="Message composer"] textarea, fieldset textarea')
-        .first();
+        .locator('fieldset textarea:not([aria-label="Answer"]):not([aria-label="回答"])')
+        .last();
       if (!(await composer.isVisible().catch(() => false))) return false;
       await composer.fill(text);
       await composer.press("Enter");
