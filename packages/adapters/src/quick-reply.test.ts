@@ -1,6 +1,12 @@
 import type { AgentRunRequest, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import { describe, expect, it, vi } from "vitest";
-import { cleanQuickReply, firstSentence, quickReply, replyLanguage } from "./quick-reply.js";
+import {
+  cleanQuickReply,
+  firstSentence,
+  fixedAck,
+  quickReply,
+  replyLanguage,
+} from "./quick-reply.js";
 
 function runtimeReplying(text: string, seen: AgentRunRequest[] = []): AgentRuntime {
   return {
@@ -137,5 +143,12 @@ describe("replyLanguage", () => {
       replyLanguage("New role from our client Northwind Pay. Please start sourcing"),
     ).toContain("not Chinese");
     expect(replyLanguage("帮我找 USC 的 AI engineer")).toBe("Write the sentence in Chinese.");
+  });
+});
+
+describe("fixedAck", () => {
+  it("answers in the language of the person's message", () => {
+    expect(fixedAck("对了，远程也可以")).toBe("收到，马上处理。");
+    expect(fixedAck("Remote works too")).toBe("Got it, on it.");
   });
 });

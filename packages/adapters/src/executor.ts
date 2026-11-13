@@ -605,7 +605,7 @@ import {
   createCreditGuard,
   retryWhileOutOfCredits,
 } from "./provider-credits.js";
-import { quickReply } from "./quick-reply.js";
+import { fixedAck, quickReply } from "./quick-reply.js";
 import {
   RECRUITING_AGENT_RUN_WAIT_MS,
   runningAgentRunId,
@@ -5550,7 +5550,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (run.trigger === "user" || nativeSources?.currentAnswer) &&
           quickReplyText.trim()
         )
-          void writeQuickReply(quickReplyText)
+          // A card answer gets the fixed line at once; only a new request gets a written one.
+          void (
+            nativeSources?.currentAnswer
+              ? Promise.resolve(fixedAck(quickReplyText))
+              : writeQuickReply(quickReplyText)
+          )
             .then(async (text) => {
               if (!text) return;
               // The card this run asked before the answer is not a reply to it, and a row that
@@ -6324,12 +6329,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const text = human ? blocksText(item.blocks) : "";
             if (!text.trim()) return false;
             started.add(item.messageId);
-            void writeQuickReply(text, item.id)
-              .then(async (line) => {
-                if (!line) return;
-                await publishMessage(deps, run, "bot", [
-                  { kind: "text", text: redactSecrets(line, runSecrets) },
-                ]);
+            const line = fixedAck(text);
+            void publishMessage(deps, run, "bot", [
+              { kind: "text", text: line },
+            ])
+              .then(() => {
                 steeringQuickReplies.set(item.messageId, line);
                 getLogger().info("run.steering_quick_reply", { runId });
               })
