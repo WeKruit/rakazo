@@ -142,6 +142,9 @@ const QUESTION = (requirement: string) =>
 const SHOWN = 0.6;
 const NO_SIGN = 0.25;
 
+/** A person in a search's rows, with the row itself for the deployment's own check. */
+type Person = { candidateKey: string; name?: string; candidate?: Record<string, unknown> };
+
 /** The yes/no judge's answer for one row, when the deployment has no language check of its own. */
 async function askedLanguage(
   judge: TextJudge,
@@ -168,13 +171,15 @@ async function askedLanguage(
 export async function languageSignals(
   judge: TextJudge,
   requirement: string,
-  people: ReadonlyArray<{ candidateKey: string; name?: string }>,
+  people: ReadonlyArray<Person>,
   texts: ReadonlyMap<string, string>,
   signal?: AbortSignal,
 ): Promise<Map<string, LanguageSignal>> {
   const rows = people.flatMap((person) => {
     const profile = texts.get(person.candidateKey);
-    return profile ? [{ id: person.candidateKey, name: person.name, profile }] : [];
+    return profile
+      ? [{ id: person.candidateKey, name: person.name, profile, candidate: person.candidate }]
+      : [];
   });
   if (judge.language) return rows.length ? judge.language(requirement, rows, signal) : new Map();
   const signals = new Map<string, LanguageSignal>();
@@ -234,7 +239,7 @@ export function textLanguageJudge(requirement: string): TextJudge {
 async function fullProfileSignals(
   judge: TextJudge,
   requirement: string,
-  people: ReadonlyArray<{ candidateKey: string; name?: string }>,
+  people: ReadonlyArray<Person>,
   signals: ReadonlyMap<string, LanguageSignal>,
   reader: ProfileReads,
 ): Promise<Map<string, LanguageSignal>> {
@@ -271,6 +276,7 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
     const people = rows.map((row) => ({
       candidateKey: String(row.candidateKey),
       name: typeof row.name === "string" ? row.name : undefined,
+      candidate: { ...row },
     }));
     const texts = profileTexts(result);
     let signals = await languageSignals(judge, requirement, people, texts);

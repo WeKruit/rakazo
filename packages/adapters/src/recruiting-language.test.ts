@@ -115,6 +115,7 @@ describe("required language", () => {
       ["linkedin:/in/wei-test", "Wei Test"],
     ]);
     expect(calls[0]!.rows[0]!.profile).toBe(long);
+    expect(calls[0]!.rows[0]!.candidate).toEqual(rows[0]);
     // Unanswered rows stay, as unclear, after those the check shows.
     expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
       ["Wei Test", "shown"],

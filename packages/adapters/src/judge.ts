@@ -7,11 +7,12 @@ import { credentialDigest } from "./credential-digest.js";
 /** Whether a person's profile shows a role's required language. */
 export type LanguageSignal = "shown" | "unclear" | "no sign";
 
-/** One person's row for the language check: their whole profile text, keyed by id. */
+/** One person's row for the language check: their whole profile text and the search's row. */
 export interface LanguageRow {
   id: string;
   name?: string;
   profile: string;
+  candidate?: Record<string, unknown>;
 }
 
 /** A yes/no question about some text, answered as the probability of yes. */
