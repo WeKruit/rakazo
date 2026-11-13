@@ -6,6 +6,7 @@ import {
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
+  nextSendWindow,
   ownedInstantly,
   ownedInstantlyRest,
   requireReplySendingMailboxReady,
@@ -638,4 +639,86 @@ it("requires positive read-only sender proof and does not echo an unsupported se
     body: { text: "Exact reply" },
   });
   expect(missing.refusal).toBe("sender_unavailable");
+});
+
+describe("nextSendWindow", () => {
+  const weekdays = (timezone: string, from = "09:00", to = "17:00", name = "Weekdays") => ({
+    campaign_schedule: {
+      schedules: [
+        {
+          name,
+          timing: { from, to },
+          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          timezone,
+        },
+      ],
+    },
+  });
+
+  it("is now inside the hours and the next weekday start outside them", () => {
+    const chicago = weekdays("America/Chicago");
+    expect(nextSendWindow(chicago, new Date("2026-11-13T16:00:00Z"))).toEqual({ now: true });
+    // Thursday 22:32 in Chicago, when the first two roles' sends were confirmed.
+    expect(nextSendWindow(chicago, new Date("2026-11-13T04:32:00Z"))).toEqual({
+      now: false,
+      at: "2026-11-13T15:00:00.000Z",
+      local: "Fri 09:00 America/Chicago",
+    });
+    // Friday after hours waits for Monday.
+    expect(nextSendWindow(chicago, new Date("2026-11-14T00:00:00Z"))).toMatchObject({
+      at: "2026-11-16T15:00:00.000Z",
+      local: "Mon 09:00 America/Chicago",
+    });
+  });
+
+  it("keeps the wall-clock start across a daylight-saving change", () => {
+    // Saturday before US clocks fall back (2026-11-01): Monday 09:00 is UTC-6, not UTC-5.
+    expect(
+      nextSendWindow(weekdays("America/Chicago"), new Date("2026-10-31T18:00:00Z")),
+    ).toMatchObject({ at: "2026-11-02T15:00:00.000Z" });
+  });
+
+  it("names Pacific hours in Pacific time and is null without a readable schedule", () => {
+    const pacific = weekdays("America/Boise", "10:00", "18:00", "Weekdays (Pacific)");
+    expect(nextSendWindow(pacific, new Date("2026-11-13T06:30:00Z"))).toMatchObject({
+      local: "Fri 09:00 Pacific time",
+    });
+    expect(nextSendWindow({}, new Date())).toBeNull();
+    expect(nextSendWindow(weekdays("Not/AZone"), new Date())).toBeNull();
+  });
+});
+
+describe("the send card's time", () => {
+  const schedule = {
+    schedules: [
+      {
+        name: "Weekdays",
+        timing: { from: "09:00", to: "17:00" },
+        days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+        timezone: "America/Chicago",
+      },
+    ],
+  };
+  const read = async (tool: string) =>
+    tool === "native_instantly_get_campaign"
+      ? { name: "Role", status: 0, email_list: ["team@x.test"], campaign_schedule: schedule }
+      : { items: [{ id: "l1", email: "ada@x.test", first_name: "Ada" }] };
+
+  it("is now unless the recruiter chose hours that start later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T06:30:00Z"));
+    try {
+      const none = await describeCampaignActivation(read, "c-1", null, { leads: {} });
+      expect(none.schedule).toBe("Now");
+      const chosen = await describeCampaignActivation(read, "c-1", null, {
+        leads: {},
+        sendHours: "weekdays_9_to_5",
+      });
+      expect(chosen.schedule).toBe(
+        "Fri 09:00 America/Chicago (Weekdays 09:00-17:00 America/Chicago)",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

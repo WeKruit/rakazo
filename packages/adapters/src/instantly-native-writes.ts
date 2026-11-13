@@ -58,7 +58,9 @@ const CampaignSetup = {
   send_hours: z
     .enum(["weekdays_9_to_5", "any_time"])
     .optional()
-    .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
+    .describe(
+      "When emails may go out; a campaign sends as soon as the recruiter confirms (any_time) unless they ask for weekdays_9_to_5.",
+    ),
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
@@ -292,7 +294,7 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Emails go out as soon as the recruiter confirms; pass send_hours weekdays_9_to_5 only when the recruiter asks to send in business hours. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -558,7 +560,7 @@ function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
 function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>) {
   return {
     name,
-    campaign_schedule: campaignSchedule(setup.send_hours ?? "weekdays_9_to_5", setup.timezone),
+    campaign_schedule: campaignSchedule(setup.send_hours ?? "any_time", setup.timezone),
     ...(setup.steps ? { sequences: sequences(setup.steps) } : {}),
     email_list: [setup.eaccount],
     // Instantly has no per-lead stop; the campaign flag is the only native stop on reply.
@@ -600,6 +602,8 @@ type RoleBinding = {
   roleEmail?: FirstEmail;
   /** Each person's own first email, by lowercased address. */
   drafts?: Record<string, FirstEmail>;
+  /** Hours the recruiter asked for; without them a confirmed send goes out at once. */
+  sendHours?: "weekdays_9_to_5" | "any_time";
 };
 type StagedLead = {
   email: string;
@@ -742,6 +746,99 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
       .filter(Boolean)
       .join(" ") || null
   );
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const clockMinutes = (value: unknown) => {
+  const hit = typeof value === "string" ? /^(\d{1,2}):(\d{2})$/.exec(value) : null;
+  return hit ? Number(hit[1]) * 60 + Number(hit[2]) : null;
+};
+/** Weekday (0 = Sunday) and minutes past midnight of `at` on the wall clock of `zone`. */
+function wallClock(at: Date, zone: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(at)
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    day: WEEKDAYS.indexOf(String(parts.weekday)),
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+/**
+ * When a sending campaign next emails the people queued in it, from its first sending window:
+ * "now" inside the window, else the window's next start (its weekday and time in its zone).
+ * Null when the schedule cannot be read. A queued person outside the window is not a failure.
+ */
+export function nextSendWindow(
+  campaign: Record<string, unknown> | undefined,
+  now = new Date(),
+): { now: true } | { now: false; at: string; local: string } | null {
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
+  const zone = typeof first?.timezone === "string" ? first.timezone : null;
+  const timing = first?.timing as { from?: unknown; to?: unknown } | undefined;
+  const from = clockMinutes(timing?.from);
+  const to = clockMinutes(timing?.to);
+  const days = first?.days as Record<string, unknown> | undefined;
+  if (!zone || from === null || to === null || !days) return null;
+  let clock: ReturnType<typeof wallClock>;
+  try {
+    clock = wallClock(now, zone);
+  } catch {
+    return null;
+  }
+  const open = (day: number) => days[String(day)] === true;
+  if (open(clock.day) && clock.minutes >= from && clock.minutes < to) return { now: true };
+  for (let ahead = 0; ahead <= 7; ahead++) {
+    // The window's start on that day, corrected once for a daylight-saving change in between.
+    let start = new Date(now.getTime() + ((from - clock.minutes) * 60 + ahead * 86_400) * 1000);
+    const drift = wallClock(start, zone).minutes - from;
+    if (drift) start = new Date(start.getTime() - drift * 60_000);
+    start = new Date(Math.floor(start.getTime() / 60_000) * 60_000);
+    const day = wallClock(start, zone).day;
+    if (start > now && open(day)) {
+      // Pacific hours are stored one hour ahead in Mountain time (see PACIFIC_WEEKDAYS).
+      const pacific = first?.name === PACIFIC_WEEKDAYS;
+      const shownFrom = pacific ? from - 60 : from;
+      const time = `${String(Math.floor(shownFrom / 60)).padStart(2, "0")}:${String(shownFrom % 60).padStart(2, "0")}`;
+      return {
+        now: false,
+        at: start.toISOString(),
+        local: `${WEEKDAYS[day]} ${time} ${pacific ? "Pacific time" : zone}`,
+      };
+    }
+  }
+  return null;
+}
+/**
+ * True when a confirmed send would wait for the campaign's sending hours although the recruiter
+ * never asked for them (older campaigns defaulted to weekdays 9-5): the send widens them first.
+ */
+function waitsForHours(
+  campaign: Record<string, unknown> | undefined,
+  binding: Pick<RoleBinding, "sendHours"> | null | undefined,
+) {
+  const window = nextSendWindow(campaign);
+  return Boolean(window && !window.now && binding?.sendHours !== "weekdays_9_to_5");
+}
+/** The card's send time: now unless the recruiter chose hours that start later. */
+function sendTime(
+  campaign: Record<string, unknown> | undefined,
+  binding: Pick<RoleBinding, "sendHours"> | null | undefined,
+) {
+  if (!campaign) return null;
+  const window = nextSendWindow(campaign);
+  if (!window || waitsForHours(campaign, binding))
+    return window ? "Now" : describeSchedule(campaign);
+  return window.now ? "Now" : `${window.local} (${describeSchedule(campaign)})`;
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
@@ -1114,11 +1211,20 @@ function planRecipients(
   if (status === DRAFT) return { send: "activate", recipients: chosen, remove: others };
   if (status === ACTIVE) {
     const sending = chosen.filter((person) => leads.includes(person));
-    return sending.length
-      ? {
-          refusal: `Already in this campaign, which is sending, so nothing new goes to: ${label(sending)}.`,
-        }
-      : { send: "enroll", recipients: chosen };
+    if (!sending.length) return { send: "enroll", recipients: chosen };
+    const emailed = sending.filter((person) => person.contacted);
+    const queued = sending.filter((person) => !person.contacted);
+    return {
+      refusal: [
+        emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
+        queued.length
+          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. Their first email goes out in its next sending hours; nothing more is needed and nothing failed.`
+          : "",
+        "Nobody new was added, so nothing else was sent.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
   }
   return others.length
     ? {
@@ -1151,7 +1257,10 @@ export async function describeCampaignActivation(
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
   fallbackMailbox: string | null = null,
-  binding: Pick<RoleBinding, "leads" | "staged" | "roleEmail" | "drafts"> | null = null,
+  binding: Pick<
+    RoleBinding,
+    "leads" | "staged" | "roleEmail" | "drafts" | "sendHours"
+  > | null = null,
   wanted?: string[],
 ): Promise<InstantlyActivationDisplay> {
   const types = new Map(
@@ -1245,7 +1354,7 @@ export async function describeCampaignActivation(
     recipients,
     recipientCount: items ? recipients.length : null,
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
-    schedule: describeSchedule(campaign),
+    schedule: sendTime(campaign, binding),
     ...shownEmail,
   };
 }
@@ -1504,13 +1613,20 @@ async function ensureRoleCampaign(
             : {}),
         });
       if (writeSteps) await requireSavedEmail(rest, mappedId);
-      if (writeSteps && templated) {
-        const { subject, body } = input.steps![0]!;
-        existing.binding = { ...existing.binding, roleEmail: { subject, body } };
+      if (input.send_hours || (writeSteps && templated)) {
+        existing.binding = {
+          ...existing.binding,
+          ...(input.send_hours ? { sendHours: input.send_hours } : {}),
+          ...(writeSteps && templated
+            ? { roleEmail: { subject: input.steps![0]!.subject, body: input.steps![0]!.body } }
+            : {}),
+        };
         await prisma.externalEffect.update({
           where: { id: existing.effect.id },
           data: { result: existing.binding as unknown as Prisma.InputJsonValue },
         });
+      }
+      if (writeSteps && templated) {
         for (const lead of await allLeads(rest, mappedId))
           if (lead.id && !existing.binding.drafts?.[lead.email.toLowerCase()])
             await rest("PATCH", `/leads/${lead.id}`, {
@@ -1570,6 +1686,7 @@ async function ensureRoleCampaign(
     eaccount,
     leads: {},
     created: !adopt,
+    ...(input.send_hours ? { sendHours: input.send_hours } : {}),
   };
   if (stale)
     await prisma.externalEffect.update({
@@ -2170,18 +2287,54 @@ async function activateCampaign(
     throw new Error(
       "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
     );
+  // A confirmed send goes out now: hours the recruiter never asked for are widened first. The
+  // provider edits only paused campaigns, so a sending one is paused for it and resumed below.
+  let resume = false;
+  if (waitsForHours(campaign, bound?.binding)) {
+    const zone = (campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] })
+      .schedules?.[0]?.timezone;
+    if (campaign.status === ACTIVE) {
+      await rest("POST", `/campaigns/${campaignId}/pause`);
+      resume = true;
+    }
+    try {
+      await rest("PATCH", `/campaigns/${campaignId}`, {
+        campaign_schedule: campaignSchedule(
+          "any_time",
+          typeof zone === "string" ? zone : "America/Chicago",
+        ),
+      });
+    } catch (error) {
+      if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+      throw error;
+    }
+    campaign = await rest("GET", `/campaigns/${campaignId}`);
+  }
+  const status = resume ? ACTIVE : campaign.status;
   const leads = await allLeads(rest, campaignId);
   const templated = isTemplated(campaign);
   const plan = planSend(
-    campaign.status,
+    status,
     leads,
     stagedPeople(bound?.binding),
     input.recipients,
     templated,
     bound?.binding,
   );
-  if ("refusal" in plan) throw new Error(plan.refusal);
+  if ("refusal" in plan) {
+    if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+    throw new Error(plan.refusal);
+  }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+  // Hours the recruiter asked for: the people wait for them, and the result says until when.
+  const window = nextSendWindow(campaign);
+  const when =
+    window && !window.now
+      ? {
+          firstEmailAt: window.at,
+          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are queued and their first email goes out ${window.local}. Tell the recruiter that time; it is not a failure.`,
+        }
+      : {};
   const save = async (binding: RoleBinding) => {
     if (bound)
       await prisma.externalEffect.update({
@@ -2191,11 +2344,16 @@ async function activateCampaign(
   };
   if (plan.send === "enroll") {
     // Adding a lead to a sending campaign sends to that lead; nobody else is touched.
-    const report = await rest("POST", "/leads/add", {
-      campaign_id: campaignId,
-      skip_if_in_workspace: false,
-      leads: plan.recipients.map((person) => newLead(person, templated && bound?.binding)),
-    });
+    let report: Record<string, unknown>;
+    try {
+      report = await rest("POST", "/leads/add", {
+        campaign_id: campaignId,
+        skip_if_in_workspace: false,
+        leads: plan.recipients.map((person) => newLead(person, templated && bound?.binding)),
+      });
+    } finally {
+      if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+    }
     const sent: string[] = [];
     if (bound) {
       const binding = { ...bound.binding, leads: { ...bound.binding.leads } };
@@ -2223,6 +2381,7 @@ async function activateCampaign(
       campaignId,
       sendingMailbox,
       recipients: sent,
+      ...when,
       notCreatedByProvider: plan.recipients
         .filter((person) => !sent.includes(person.email))
         .map((person) => person.email),
@@ -2264,17 +2423,27 @@ async function activateCampaign(
     campaignId,
     sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
     recipients: plan.recipients.map((person) => person.email),
+    ...when,
   };
 }
 
-/** Lead emails of a campaign (up to 100): who it sends to. */
-async function leadEmails(rest: InstantlyRest, campaignId: string) {
-  const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 100 });
-  return (Array.isArray(leads.items) ? leads.items : []).flatMap((lead) =>
-    typeof (lead as { email?: unknown }).email === "string"
-      ? [(lead as { email: string }).email]
-      : [],
-  );
+/**
+ * Who a campaign sends to (up to 100 leads), split into those it has emailed and those still
+ * queued, with when the queued people's first email goes out.
+ */
+async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
+  const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
+  const people = (
+    Array.isArray(leads.items) ? (leads.items as Record<string, unknown>[]) : []
+  ).flatMap(asPerson);
+  const queued = people.filter((person) => !person.contacted).map((person) => person.email);
+  const window = campaign.status === ACTIVE && queued.length ? nextSendWindow(campaign) : null;
+  return {
+    recipients: people.map((person) => person.email),
+    emailed: people.filter((person) => person.contacted).map((person) => person.email),
+    queued,
+    ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
+  };
 }
 
 function draftDelivery(campaign: Record<string, unknown>) {
@@ -2941,7 +3110,7 @@ export async function runInstantlyWrite(
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),
-        recipients: await leadEmails(rest, String(campaign.id)),
+        ...(await leadDelivery(rest, campaign)),
         campaign_schedule: campaign.campaign_schedule,
         sequences: campaign.sequences,
       };
