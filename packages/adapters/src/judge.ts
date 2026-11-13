@@ -34,8 +34,11 @@ export interface TextJudge {
 const JUDGE_TIMEOUT_MS = 2_000;
 /** A batch is judged in parallel behind the check, so it gets the judge's time and a little more. */
 const LANGUAGE_TIMEOUT_MS = 5_000;
-/** Rows per call, within the subrequests one Worker invocation may make on any plan. */
-const LANGUAGE_BATCH = 40;
+/**
+ * Rows per call. A Worker keeps at most six outgoing requests open at once and queues the rest,
+ * so six rows are judged together and every batch takes one judge call's time.
+ */
+const LANGUAGE_BATCH = 6;
 const LANGUAGE_SIGNALS: readonly unknown[] = ["shown", "unclear", "no sign"];
 
 /**
