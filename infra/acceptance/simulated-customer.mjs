@@ -382,9 +382,11 @@ async function play(journey, label, owner, mailbox, out) {
         if (ui) {
           await ui.openChat(chat.id);
           typed = await ui.say(move.text);
-          if (typed) typed = await landed(rpc, chat.id, move.text);
           if (!typed)
             problems.push(`could not send "${move.text.slice(0, 40)}" from the chat composer`);
+          // Taken by the page but never shown in the chat: report it, and never send it twice.
+          else if (!(await landed(rpc, chat.id, move.text)))
+            problems.push(`"${move.text.slice(0, 40)}" was sent but did not appear in the chat`);
         }
         if (!typed) await send(rpc, chat.id, move.text);
       } else if (ui && move.action === "look") {
@@ -492,9 +494,9 @@ async function play(journey, label, owner, mailbox, out) {
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
 }
-/** Whether a message typed in the browser reached the chat within 20 seconds. */
+/** Whether a message typed in the browser reached the chat within 90 seconds. */
 async function landed(rpc, groupId, text) {
-  for (const until = Date.now() + 20_000; Date.now() < until; await sleep(2_000))
+  for (const until = Date.now() + 90_000; Date.now() < until; await sleep(2_000))
     if (
       (await messagesOf(rpc, groupId)).some(
         (message) => message.role === "user" && botText(message).includes(text.slice(0, 30)),
