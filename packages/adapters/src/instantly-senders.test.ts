@@ -704,6 +704,9 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   expect(JSON.stringify(read)).not.toContain("Integrations");
   // 11-13 staging: "I have no Gmail" ended on "nothing for you to do".
   expect(read).toMatchObject({ next: expect.stringContaining("never say there is nothing to do") });
+  // 11-13 staging: "can't connect" got "no other way", and "is the draft kept" got "can't confirm".
+  expect(read).toMatchObject({ next: expect.stringContaining("ready to copy") });
+  expect(read).toMatchObject({ next: expect.stringContaining("answer yes") });
 });
 
 it("asks no company name until the turn read the sending email", () => {
