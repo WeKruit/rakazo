@@ -832,6 +832,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Repeat requests redid contact lookups and drafts already done.",
   },
   {
+    rule: "named people to email skip the search intake",
+    in: "RECRUITING_INTAKE_FLOW",
+    phrase: "When the recruiter names the people themselves and asks to email them",
+    why: "Staging 11-13: a new role with two named people to email got a search-direction card first.",
+  },
+  {
     rule: "no role team in recruiter chat",
     in: "RECRUITER_LANGUAGE",
     phrase: "Teammates are invisible to the recruiter",
