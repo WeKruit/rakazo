@@ -148,7 +148,7 @@ const ActivateCampaignInput = z.strictObject({
     .boolean()
     .optional()
     .describe(
-      "Send everyone already queued in this sending campaign now instead of at its sending hours (recipients are ignored). Its card lists who is queued and when they would otherwise go out.",
+      "Send everyone already queued in this sending campaign now instead of waiting for its sending hours or the gap between emails (recipients are ignored). Its card lists who is queued.",
     ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
@@ -303,7 +303,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued for later sending hours and the recruiter wants them sent now, pass send_now: its card lists who is queued and when they would otherwise go out.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out within minutes. Never tell the recruiter a queue cannot be sped up; offer send_now.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -875,12 +875,18 @@ function sendTime(
  * one email every `email_gap` minutes (the provider's default is 10), so a confirmed send is
  * queued, not sent, and the recruiter is told until when.
  */
+/** Minutes between two emails from one mailbox; the provider's default is 10. */
+const emailGap = (campaign: Record<string, unknown> | undefined) =>
+  Number(campaign?.email_gap) > 0 ? Number(campaign?.email_gap) : 10;
+/** The shortest gap the provider takes: what a send-now sets so queued people go out at once. */
+const FASTEST_GAP = 1;
+
 export function queuePace(
   campaign: Record<string, unknown> | undefined,
   count: number,
   now = new Date(),
 ): string {
-  const gap = Number(campaign?.email_gap) > 0 ? Number(campaign?.email_gap) : 10;
+  const gap = emailGap(campaign);
   const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
   const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
   const pacific = first?.name === PACIFIC_WEEKDAYS;
@@ -1247,8 +1253,9 @@ function planSend(
     : plan;
 }
 /**
- * Who a send-now emails: everyone in the sending campaign it has not emailed yet, when they wait
- * for its sending hours. Inside them they are already going out, and nothing changes.
+ * Who a send-now emails: everyone in the sending campaign it has not emailed yet. They wait for
+ * its sending hours or for the gap between emails; once neither holds them back there is nothing
+ * left to speed up.
  */
 function planSendNow(campaign: Record<string, unknown> | undefined, leads: Person[]): SendPlan {
   const queued = leads.filter((lead) => !lead.contacted);
@@ -1259,9 +1266,9 @@ function planSendNow(campaign: Record<string, unknown> | undefined, leads: Perso
   if (!queued.length)
     return { refusal: "Everyone in this campaign has already been emailed; nothing was sent." };
   const window = nextSendWindow(campaign);
-  return !window || window.now
+  return (!window || window.now) && emailGap(campaign) <= FASTEST_GAP
     ? {
-        refusal: `Already sending now, nothing to speed up: ${label(queued)} ${queuePace(campaign, queued.length)}. Nothing failed, nothing was changed and nobody is emailed twice; get_campaign shows who has been emailed.`,
+        refusal: `Already sending as fast as the mail service allows: ${label(queued)} ${queuePace(campaign, queued.length)}. Nothing failed, nothing was changed and nobody is emailed twice; get_campaign shows who has been emailed.`,
       }
     : { send: "now", recipients: queued };
 }
@@ -1309,7 +1316,7 @@ function planRecipients(
       refusal: [
         emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
         queued.length
-          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued.length)} Nothing more is needed and nothing failed.`
+          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. ${queuedWhen(campaign, queued.length)} Nothing failed. If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued within minutes.`
           : "",
         "Nobody new was added, so nothing else was sent.",
       ]
@@ -2396,7 +2403,11 @@ async function activateCampaign(
   // paused for it and resumed below.
   let resume = false;
   const window = nextSendWindow(campaign);
-  if (waitsForHours(campaign, bound?.binding) || (plan.send === "now" && window && !window.now)) {
+  const widen =
+    waitsForHours(campaign, bound?.binding) || (plan.send === "now" && window && !window.now);
+  // A send-now also shortens the gap between emails, so the people queued go out within minutes.
+  const hurry = plan.send === "now" && emailGap(campaign) > FASTEST_GAP;
+  if (widen || hurry) {
     const zone = (campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] })
       .schedules?.[0]?.timezone;
     if (campaign.status === ACTIVE) {
@@ -2405,10 +2416,15 @@ async function activateCampaign(
     }
     try {
       await rest("PATCH", `/campaigns/${campaignId}`, {
-        campaign_schedule: campaignSchedule(
-          "any_time",
-          typeof zone === "string" ? zone : "America/Chicago",
-        ),
+        ...(widen
+          ? {
+              campaign_schedule: campaignSchedule(
+                "any_time",
+                typeof zone === "string" ? zone : "America/Chicago",
+              ),
+            }
+          : {}),
+        ...(hurry ? { email_gap: FASTEST_GAP, random_wait_max: FASTEST_GAP } : {}),
       });
     } catch (error) {
       if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
@@ -2553,7 +2569,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
         }
       : window
         ? {
-            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length)}. Tell the recruiter who is emailed and who is still queued with that time; do not send them again.`,
+            next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length)}. Tell the recruiter who is emailed and who is still queued with that time; do not send them again.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued within minutes." : ""}`,
           }
         : {}),
   };

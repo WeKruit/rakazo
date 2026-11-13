@@ -5267,7 +5267,7 @@ describe("local native Instantly campaign and lead tools", () => {
       f.state.campaign.status = 1;
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(
-        /Already queued in this sending campaign, not emailed yet: .*nothing failed/,
+        /Already queued in this sending campaign, not emailed yet: .*Nothing failed\. .*send_now/,
       );
       expect(sends(f)).toEqual([]);
     });
@@ -5393,7 +5393,7 @@ describe("local native Instantly campaign and lead tools", () => {
       }
     });
 
-    it("says people queued inside the sending hours are going out, and a send-now changes nothing", async () => {
+    it("says people queued inside the sending hours are going out, and a send-now sends them within minutes", async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(NIGHT);
       try {
@@ -5415,12 +5415,29 @@ describe("local native Instantly campaign and lead tools", () => {
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
           queuedFirstEmail: "now",
-          next: expect.stringContaining("all 2 have gone out by about 00:50"),
+          next: expect.stringMatching(/all 2 have gone out by about 00:50.*send_now/),
         });
         f.state.requests.length = 0;
-        const events = await f.run("activate_campaign", { send_now: true });
-        expect((events[0] as { message: string }).message).toMatch(
-          /Already sending now, nothing to speed up: .*nobody is emailed twice/,
+        const out = f.result(await f.run("activate_campaign", { send_now: true }));
+        const writes = f.state.requests.filter(
+          (r) => r.method !== "GET" && !r.path.endsWith("/leads/list"),
+        );
+        // Only the gap between emails changes; the hours already allow sending.
+        expect(writes.map((r) => `${r.method} ${r.path}`)).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(writes[1]!.body).toEqual({ email_gap: 1, random_wait_max: 1 });
+        expect(out).toMatchObject({
+          sendingNow: true,
+          recipients: ["abe@x.test", "p0@x.test"],
+          next: expect.stringContaining("all 2 have gone out by about 00:32"),
+        });
+        f.state.requests.length = 0;
+        const again = await f.run("activate_campaign", { send_now: true });
+        expect((again[0] as { message: string }).message).toMatch(
+          /Already sending as fast as the mail service allows: .*nobody is emailed twice/,
         );
         expect(
           f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
