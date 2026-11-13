@@ -7,9 +7,9 @@ import { credentialDigest } from "./credential-digest.js";
 /** Whether a person's profile shows a role's required language. */
 export type LanguageSignal = "shown" | "unclear" | "no sign";
 
-/** One person's row for the language check. */
+/** One person's row for the language check: their whole profile text, keyed by id. */
 export interface LanguageRow {
-  requirement: string;
+  id: string;
   name?: string;
   profile: string;
 }
@@ -22,35 +22,58 @@ export interface TextJudge {
     state: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<number | undefined>;
-  /** The deployment's own language check, when it has one; undefined when it did not answer. */
-  language?(row: LanguageRow, signal?: AbortSignal): Promise<LanguageSignal | undefined>;
+  /** The deployment's own language check, when it has one: a verdict for each row it answered. */
+  language?(
+    requirement: string,
+    rows: readonly LanguageRow[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, LanguageSignal>>;
 }
 
 const JUDGE_TIMEOUT_MS = 2_000;
-/** The language check calls the judge itself, so it gets the judge's time and a little more. */
-const LANGUAGE_TIMEOUT_MS = 3_000;
+/** A batch is judged in parallel behind the check, so it gets the judge's time and a little more. */
+const LANGUAGE_TIMEOUT_MS = 5_000;
+/** Rows per call, within the subrequests one Worker invocation may make on any plan. */
+const LANGUAGE_BATCH = 40;
 const LANGUAGE_SIGNALS: readonly unknown[] = ["shown", "unclear", "no sign"];
 
 /**
- * POSTs one row to the deployment's language check, which answers { verdict }. The judge key is
- * its Bearer token, so the check can ask the same judge without a secret of its own.
+ * POSTs the rows to the deployment's language check in batches; it answers
+ * { verdicts: { [id]: { verdict } } }. The judge key is its Bearer token, so the check can ask the
+ * same judge without a secret of its own. A batch that fails answers for nobody in it.
  */
 function languageCheck(url: string, apiKey: string, fetchImpl: typeof fetch) {
-  return async (row: LanguageRow, signal?: AbortSignal): Promise<LanguageSignal | undefined> => {
-    try {
-      const timeout = AbortSignal.timeout(LANGUAGE_TIMEOUT_MS);
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify(row),
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      });
-      if (!response.ok) return undefined;
-      const verdict = ((await response.json()) as { verdict?: unknown }).verdict;
-      return LANGUAGE_SIGNALS.includes(verdict) ? (verdict as LanguageSignal) : undefined;
-    } catch {
-      return undefined;
-    }
+  return async (
+    requirement: string,
+    rows: readonly LanguageRow[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, LanguageSignal>> => {
+    const signals = new Map<string, LanguageSignal>();
+    const batches: LanguageRow[][] = [];
+    for (let at = 0; at < rows.length; at += LANGUAGE_BATCH)
+      batches.push(rows.slice(at, at + LANGUAGE_BATCH));
+    await Promise.all(
+      batches.map(async (batch) => {
+        try {
+          const timeout = AbortSignal.timeout(LANGUAGE_TIMEOUT_MS);
+          const response = await fetchImpl(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ requirement, rows: batch }),
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+          });
+          if (!response.ok) return;
+          const { verdicts } = (await response.json()) as {
+            verdicts?: Record<string, { verdict?: unknown } | undefined>;
+          };
+          for (const row of batch) {
+            const verdict = verdicts?.[row.id]?.verdict;
+            if (LANGUAGE_SIGNALS.includes(verdict)) signals.set(row.id, verdict as LanguageSignal);
+          }
+        } catch {}
+      }),
+    );
+    return signals;
   };
 }
 
@@ -140,7 +163,9 @@ export class JudgeSettings {
     if (probe === undefined) throw new Error("Could not verify this key");
     if (
       judge.language &&
-      !(await judge.language({ requirement: "Mandarin", profile: "Languages: Mandarin (native)" }))
+      !(
+        await judge.language("Mandarin", [{ id: "probe", profile: "Languages: Mandarin (native)" }])
+      ).size
     )
       throw new Error("Could not verify this language check");
     const stored = await this.secrets.put(JSON.stringify(config), context, {

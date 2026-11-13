@@ -85,6 +85,7 @@ export function plannedLanguageFilters(
   return { filters: stated ? languageFilters([stated]) : [], queriesNameIt: false };
 }
 
+/** The built-in question reads this much of each profile; the deployment's check gets all of it. */
 const PROFILE_TEXT_LIMIT = 4_000;
 
 /**
@@ -99,7 +100,7 @@ export function profileTexts(result: unknown): Map<string, string> {
       for (const entry of value.split(/^(?=Title: )/m)) {
         const url = entry.match(/^URL: (\S+)$/m)?.[1];
         const key = url ? linkedinPersonKey(url) : null;
-        if (key && !texts.has(key)) texts.set(key, entry.slice(0, PROFILE_TEXT_LIMIT));
+        if (key && !texts.has(key)) texts.set(key, entry);
       }
       if (value.trimStart().startsWith("{") || value.trimStart().startsWith("["))
         try {
@@ -117,7 +118,7 @@ export function profileTexts(result: unknown): Map<string, string> {
       (item) => typeof item === "string" && linkedinPersonKey(item),
     );
     const key = link ? linkedinPersonKey(link) : null;
-    if (key && !texts.has(key)) texts.set(key, JSON.stringify(record).slice(0, PROFILE_TEXT_LIMIT));
+    if (key && !texts.has(key)) texts.set(key, JSON.stringify(record));
     for (const nested of Object.values(record)) visit(nested, depth + 1);
   };
   visit(result, 0);
@@ -149,15 +150,20 @@ async function askedLanguage(
   profile: string,
   signal?: AbortSignal,
 ): Promise<LanguageSignal | undefined> {
-  const p = await judge.yes(QUESTION(requirement), { profile: withoutName(profile, name) }, signal);
+  const p = await judge.yes(
+    QUESTION(requirement),
+    { profile: withoutName(profile.slice(0, PROFILE_TEXT_LIMIT), name) },
+    signal,
+  );
   if (p === undefined) return undefined;
   return p >= SHOWN ? "shown" : p < NO_SIGN ? "no sign" : "unclear";
 }
 
 /**
  * Asks the judge about each person's profile text, all at once: the deployment's own language
- * check when it has one, else one yes/no question each. People the judge could not answer for,
- * or with no profile text, are left out; the search result never waits on a failed judge.
+ * check with the rows in batches when it has one, else one yes/no question each. People the
+ * judge could not answer for, or with no profile text, are left out; the search result never
+ * waits on a failed judge.
  */
 export async function languageSignals(
   judge: TextJudge,
@@ -166,15 +172,16 @@ export async function languageSignals(
   texts: ReadonlyMap<string, string>,
   signal?: AbortSignal,
 ): Promise<Map<string, LanguageSignal>> {
+  const rows = people.flatMap((person) => {
+    const profile = texts.get(person.candidateKey);
+    return profile ? [{ id: person.candidateKey, name: person.name, profile }] : [];
+  });
+  if (judge.language) return rows.length ? judge.language(requirement, rows, signal) : new Map();
   const signals = new Map<string, LanguageSignal>();
   await Promise.all(
-    people.map(async (person) => {
-      const text = texts.get(person.candidateKey);
-      if (!text) return;
-      const verdict = judge.language
-        ? await judge.language({ requirement, name: person.name, profile: text }, signal)
-        : await askedLanguage(judge, requirement, person.name ?? "", text, signal);
-      if (verdict) signals.set(person.candidateKey, verdict);
+    rows.map(async (row) => {
+      const verdict = await askedLanguage(judge, requirement, row.name ?? "", row.profile, signal);
+      if (verdict) signals.set(row.id, verdict);
     }),
   );
   return signals;

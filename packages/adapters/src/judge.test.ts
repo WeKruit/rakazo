@@ -31,27 +31,42 @@ describe("typeSafeJudge", () => {
 });
 
 describe("language check", () => {
-  it("posts one row with the judge key and returns its verdict", async () => {
-    const fetchImpl = answer({ verdict: "no sign", p: 0.1 });
+  it("posts the rows in batches with the judge key and returns each verdict", async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const { rows } = JSON.parse(String(init?.body)) as { rows: Array<{ id: string }> };
+      return new Response(
+        JSON.stringify({
+          verdicts: Object.fromEntries(
+            rows.map((row) => [row.id, { verdict: row.id === "r1" ? "maybe" : "no sign" }]),
+          ),
+        }),
+      );
+    }) as unknown as typeof fetch;
     const judge = typeSafeJudge("key", fetchImpl, "https://check.example/");
-    await expect(
-      judge.language?.({ requirement: "Mandarin", name: "Pat", profile: "Engineer" }),
-    ).resolves.toBe("no sign");
+    const rows = Array.from({ length: 45 }, (_, index) => ({
+      id: `r${index}`,
+      name: "Pat",
+      profile: "Engineer",
+    }));
+    const verdicts = await judge.language?.("Mandarin", rows);
+    expect(
+      vi.mocked(fetchImpl).mock.calls.map(([, init]) => JSON.parse(String(init?.body)).rows.length),
+    ).toEqual([40, 5]);
     const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
     expect(url).toBe("https://check.example/");
     expect((init!.headers as Record<string, string>).authorization).toBe("Bearer key");
-    expect(JSON.parse(String(init?.body))).toEqual({
-      requirement: "Mandarin",
-      name: "Pat",
-      profile: "Engineer",
-    });
+    const body = JSON.parse(String(init?.body));
+    expect(body.requirement).toBe("Mandarin");
+    expect(body.rows[0]).toEqual({ id: "r0", name: "Pat", profile: "Engineer" });
+    // An unknown verdict is no verdict.
+    expect(verdicts?.size).toBe(44);
+    expect(verdicts?.get("r1")).toBeUndefined();
     expect(typeSafeJudge("key", fetchImpl).language).toBeUndefined();
-    await expect(
-      typeSafeJudge("key", answer({ verdict: "maybe" }), "https://check.example/").language?.({
-        requirement: "Mandarin",
-        profile: "",
-      }),
-    ).resolves.toBeUndefined();
+    const failed = await typeSafeJudge("key", answer({}, 502), "https://check.example/").language?.(
+      "Mandarin",
+      rows,
+    );
+    expect(failed?.size).toBe(0);
   });
 });
 
@@ -95,14 +110,14 @@ describe("JudgeSettings", () => {
         }),
       },
     };
-    const language = vi.fn(async () => "shown" as const as "shown" | undefined);
+    const language = vi.fn(async () => new Map([["probe", "shown" as const]]));
     const settings = new JudgeSettings(prisma as never, secrets as never, (config) => ({
       yes: async () => 0.9,
       ...(config.languageUrl ? { language } : {}),
     }));
     await expect(settings.save({ provider: "typesafe" }, {} as never)).rejects.toThrow();
     await settings.save({ provider: "typesafe", apiKey: "good" }, {} as never);
-    language.mockResolvedValueOnce(undefined);
+    language.mockResolvedValueOnce(new Map());
     await expect(
       settings.save({ provider: "typesafe", languageUrl: "https://check.example/" }, {} as never),
     ).rejects.toThrow();

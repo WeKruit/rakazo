@@ -14,40 +14,53 @@ const post = (body, authorization = "Bearer key") =>
       body: JSON.stringify(body),
     }),
   );
-const judgeAnswering = (p, calls = []) => {
+/** A judge that answers from the profile text, and records what it was asked. */
+const judgeAnswering = (answer, calls = []) => {
   globalThis.fetch = async (_url, init) => {
     calls.push(init);
-    return new Response(JSON.stringify({ answers: { answer: { noul: p } } }));
+    const p = answer(JSON.parse(init.body).state.profile);
+    return p === undefined
+      ? new Response("", { status: 500 })
+      : new Response(JSON.stringify({ answers: { answer: { noul: p } } }));
   };
   return calls;
 };
 
-test("asks the judge about one row with the name hidden and answers its verdict", async () => {
-  const calls = judgeAnswering(0.8);
+test("judges every row of a batch with the name hidden and the whole profile", async () => {
+  const profile = `Wei Test\n${"Controls work. ".repeat(2_000)}\nLanguages: Mandarin`;
+  const calls = judgeAnswering((text) => (text.includes("Mandarin") ? 0.8 : 0.1));
   const response = await post({
     requirement: "Must speak Mandarin",
-    name: "Wei Test",
-    profile: "Wei Test, Languages: Mandarin",
+    rows: [
+      { id: "a", name: "Wei Test", profile },
+      { id: "b", name: "Joe Sample", profile: "Joe Sample, Technician" },
+    ],
   });
-  expect(await response.json()).toEqual({ verdict: "shown", p: 0.8 });
+  expect(await response.json()).toEqual({
+    verdicts: { a: { verdict: "shown", p: 0.8 }, b: { verdict: "no sign", p: 0.1 } },
+  });
+  expect(calls).toHaveLength(2);
   expect(calls[0].headers.authorization).toBe("Bearer key");
-  const body = JSON.parse(calls[0].body);
-  expect(body.state.profile).toBe("[name], Languages: Mandarin");
-  expect(body.questions.answer.instructions).toMatch(/"Must speak Mandarin"/);
+  const first = JSON.parse(calls[0].body);
+  expect(first.state.profile).toBe(profile.replace("Wei Test", "[name]"));
+  expect(first.questions.answer.instructions).toMatch(/"Must speak Mandarin"/);
 });
 
-test("maps the probability to a verdict and refuses what it cannot judge", async () => {
-  for (const [p, verdict] of [
-    [0.6, "shown"],
-    [0.3, "unclear"],
-    [0.1, "no sign"],
-  ]) {
-    judgeAnswering(p);
-    const response = await post({ requirement: "Mandarin", profile: "x" });
-    expect((await response.json()).verdict).toBe(verdict);
-  }
-  expect((await post({ requirement: "Mandarin", profile: "x" }, "")).status).toBe(401);
-  expect((await post({ profile: "x" })).status).toBe(400);
-  globalThis.fetch = async () => new Response("", { status: 500 });
-  expect((await post({ requirement: "Mandarin", profile: "x" })).status).toBe(502);
+test("maps the probability to a verdict, leaves out rows the judge fails, and refuses bad input", async () => {
+  judgeAnswering((text) => ({ six: 0.6, three: 0.3, one: 0.1 })[text]);
+  const response = await post({
+    requirement: "Mandarin",
+    rows: ["six", "three", "one", "fails"].map((id) => ({ id, profile: id })),
+  });
+  expect(await response.json()).toEqual({
+    verdicts: {
+      six: { verdict: "shown", p: 0.6 },
+      three: { verdict: "unclear", p: 0.3 },
+      one: { verdict: "no sign", p: 0.1 },
+    },
+  });
+  const rows = [{ id: "a", profile: "x" }];
+  expect((await post({ requirement: "Mandarin", rows }, "")).status).toBe(401);
+  expect((await post({ rows })).status).toBe(400);
+  expect((await post({ requirement: "Mandarin", rows: [] })).status).toBe(400);
 });

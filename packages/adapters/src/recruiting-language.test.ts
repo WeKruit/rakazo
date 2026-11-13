@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TextJudge } from "./judge.js";
+import type { LanguageRow, TextJudge } from "./judge.js";
 import {
   languageFilters,
   plannedLanguageFilters,
@@ -88,23 +88,33 @@ describe("required language", () => {
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
-  it("asks the deployment's own language check one row at a time when it has one", async () => {
-    const asked: Array<{ requirement: string; name?: string; profile: string }> = [];
+  it("sends every row, with its whole profile, to the deployment's own check in one call", async () => {
+    const calls: Array<{ requirement: string; rows: readonly LanguageRow[] }> = [];
     const judge: TextJudge = {
       yes: async () => {
         throw new Error("the check decides, not the yes/no question");
       },
-      language: async (row) => {
-        asked.push(row);
-        return row.profile.includes("Mandarin") ? "shown" : undefined;
+      language: async (requirement, batch) => {
+        calls.push({ requirement, rows: batch });
+        return new Map(
+          batch.filter((row) => row.profile.includes("Mandarin")).map((row) => [row.id, "shown"]),
+        );
       },
     };
-    const checked = await withRequiredLanguage({ resolve: async () => judge }, brief, rows, result);
-    expect(asked).toHaveLength(3);
-    expect(asked[0]).toMatchObject({
-      requirement: "Must speak Mandarin and English",
-      name: "Joe Sample",
+    const long = `Title: Joe Sample\nURL: https://www.linkedin.com/in/joe-sample\n${"Maintenance. ".repeat(600)}\n`;
+    const checked = await withRequiredLanguage({ resolve: async () => judge }, brief, rows, {
+      content: [
+        { type: "text", text: listing.replace(/Title: Joe Sample[\s\S]*?(?=Title: Ana)/, long) },
+      ],
     });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.requirement).toBe("Must speak Mandarin and English");
+    expect(calls[0]!.rows.map((row) => [row.id, row.name])).toEqual([
+      ["linkedin:/in/joe-sample", "Joe Sample"],
+      ["linkedin:/in/ana-example", "Ana Example"],
+      ["linkedin:/in/wei-test", "Wei Test"],
+    ]);
+    expect(calls[0]!.rows[0]!.profile).toBe(long);
     // Unanswered rows stay, as unclear, after those the check shows.
     expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
       ["Wei Test", "shown"],
