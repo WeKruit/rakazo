@@ -850,6 +850,24 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13: the name was asked before the template, on a choice card, then the template ended on a bare 「Best,」.",
   },
   {
+    rule: "never a bare sign-off",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "never leave an email on a bare sign-off with neither a name nor that question",
+    why: "Staging 11-13 round 9: a template the recruiter asked for ended on a bare 「Best,」 with no name and no question.",
+  },
+  {
+    rule: "saved only from a tool result",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "tell the recruiter something was saved, sent or started only when a tool result in this conversation shows it",
+    why: "Staging 11-13 round 9: Kruit relayed the role team's 'template was saved' and pointed at an empty Sequence page.",
+  },
+  {
+    rule: "pasted snippets get one line per person",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "answer in that first reply with one line per person",
+    why: "Staging 11-13 round 9: 'A and C show Kafka in production' then 'A does not', followed by a role card.",
+  },
+  {
     rule: "stop asking means search from the saved role",
     in: "RECRUITING_INTAKE_FLOW",
     phrase: "When the recruiter says to stop asking and search",
