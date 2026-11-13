@@ -531,7 +531,7 @@ import {
   SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
-import type { TextJudge } from "./judge.js";
+import type { LanguageSignal, TextJudge } from "./judge.js";
 import type { PageReader } from "./keyless-http-web.js";
 import {
   assertConnectorToolArgs,
@@ -643,6 +643,8 @@ import {
 } from "./recruiting-grading.js";
 import {
   plannedLanguageFilters,
+  requiredLanguage,
+  roundByLanguage,
   statedLanguageRequirement,
   withRequiredLanguage,
 } from "./recruiting-language.js";
@@ -7173,6 +7175,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // recorded round then replaces that message with the final list.
         // show_picks put the first people in chat; the turn owes the recorded ten.
         let firstPicksShown = false;
+        // Each person's language level from this turn's searches: the round lists confirmed and
+        // strong people first and labels everyone below them.
+        const languageLevels = new Map<string, LanguageSignal>();
+        let languageRequirement: string | undefined;
+        const rememberLanguage = (
+          role: unknown,
+          roleId: unknown,
+          rows: unknown,
+          withoutLanguage: number,
+        ) => {
+          const levels: Record<string, number> = { "no sign": withoutLanguage };
+          for (const row of (Array.isArray(rows) ? rows : []) as Array<{
+            candidateKey?: unknown;
+            requiredLanguage?: LanguageSignal;
+          }>) {
+            const level = row.requiredLanguage ?? "unjudged";
+            levels[level] = (levels[level] ?? 0) + 1;
+            if (row.requiredLanguage)
+              languageLevels.set(
+                savedCandidateKeyForm(String(row.candidateKey)),
+                row.requiredLanguage,
+              );
+          }
+          languageRequirement = requiredLanguage(role) ?? languageRequirement;
+          getLogger().info("recruiting.language.levels", { roleId, levels });
+        };
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
         // New people-search agent runs this turn started before its round was recorded.
@@ -8445,6 +8473,38 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.activeRecruitingRoleId,
                 args.candidateKeys,
               ),
+            };
+          }
+          // The round lists people whose language is confirmed or strong first and labels the
+          // rest, whatever order the model picked them in.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            Array.isArray(args.candidateKeys) &&
+            languageRequirement
+          ) {
+            const keys = args.candidateKeys.map(String);
+            const given =
+              args.unverified && typeof args.unverified === "object"
+                ? new Map(
+                    Object.entries(args.unverified as Record<string, unknown>).map(
+                      ([key, note]) => [savedCandidateKeyForm(key), String(note)],
+                    ),
+                  )
+                : new Map<string, string>();
+            const levels = new Map<string, LanguageSignal>();
+            const notes: Record<string, string> = {};
+            for (const key of keys) {
+              const level = languageLevels.get(savedCandidateKeyForm(key));
+              if (level) levels.set(key, level);
+              const note = given.get(savedCandidateKeyForm(key));
+              if (note) notes[key] = note;
+            }
+            const round = roundByLanguage(keys, notes, levels, languageRequirement);
+            args = {
+              ...args,
+              candidateKeys: round.candidateKeys,
+              unverified: round.unverified,
             };
           }
           // The server fills what it knows about the thread's role and names a person the recruiter
@@ -12298,14 +12358,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // A required language is checked on each person's full profile text, which
                   // the short passage rarely holds; those who show it come first.
                   const words = await recruiterWords(deps.prisma, thread.id);
+                  const languageRole = {
+                    revision: role.currentRevision,
+                    query: connectorCall.args?.query,
+                    stated: statedLanguageRequirement(words),
+                  };
                   const checked = Array.isArray(shown)
                     ? await withRequiredLanguage(
                         deps.judge,
-                        {
-                          revision: role.currentRevision,
-                          query: connectorCall.args?.query,
-                          stated: statedLanguageRequirement(words),
-                        },
+                        languageRole,
                         shown,
                         returned,
                         deps.profileReader && firstRoundPending
@@ -12317,14 +12378,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           : undefined,
                       )
                     : { rows: shown, withoutLanguage: 0 };
-                  if (checked.rows !== shown) {
-                    const levels: Record<string, number> = { "no sign": checked.withoutLanguage };
-                    for (const row of checked.rows as Array<{ requiredLanguage?: string }>) {
-                      const level = row.requiredLanguage ?? "unjudged";
-                      levels[level] = (levels[level] ?? 0) + 1;
-                    }
-                    getLogger().info("recruiting.language.levels", { roleId, levels });
-                  }
+                  if (checked.rows !== shown)
+                    rememberLanguage(
+                      languageRole,
+                      roleId,
+                      checked.rows,
+                      checked.withoutLanguage,
+                    );
                   // Licences, clearances and the like are rarely in the row; before the first
                   // pick, lines of the full profile that speak to the must-haves come with it.
                   if (
@@ -13396,28 +13456,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchActor.actor,
                   runId,
                 ).catch(() => []);
+                const languageRole = {
+                  revision: role.currentRevision,
+                  stated: statedLanguageRequirement(
+                    await recruiterWords(deps.prisma, thread.id),
+                  ),
+                };
                 const checked = await withRequiredLanguage(
                   deps.judge,
-                  {
-                    revision: role.currentRevision,
-                    stated: statedLanguageRequirement(
-                      await recruiterWords(deps.prisma, thread.id),
-                    ),
-                  },
+                  languageRole,
                   rows as Array<Record<string, unknown>>,
                   searches.map((search) => search.result),
                 );
                 if (
                   checked.withoutLanguage ||
                   checked.rows.some((row) => row.requiredLanguage)
-                ) {
-                  const levels: Record<string, number> = { "no sign": checked.withoutLanguage };
-                  for (const row of checked.rows as Array<{ requiredLanguage?: string }>) {
-                    const level = row.requiredLanguage ?? "unjudged";
-                    levels[level] = (levels[level] ?? 0) + 1;
-                  }
-                  getLogger().info("recruiting.language.levels", { roleId, levels });
-                }
+                )
+                  rememberLanguage(
+                    languageRole,
+                    roleId,
+                    checked.rows,
+                    checked.withoutLanguage,
+                  );
                 return {
                   ...saved,
                   candidateRows: checked.rows,

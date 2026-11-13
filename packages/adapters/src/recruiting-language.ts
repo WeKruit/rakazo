@@ -192,7 +192,13 @@ export async function languageSignals(
   return signals;
 }
 
-const ORDER: Record<LanguageSignal, number> = { confirmed: 0, strong: 1, possible: 2, unknown: 3, "no sign": 4 };
+const ORDER: Record<LanguageSignal, number> = {
+  confirmed: 0,
+  strong: 1,
+  possible: 2,
+  unknown: 3,
+  "no sign": 4,
+};
 
 /** Rows by language evidence: confirmed, strong, unknown, then no sign; unjudged rows are unknown. */
 export function withLanguageSignals<T extends { candidateKey?: unknown }>(
@@ -301,4 +307,36 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
   } catch {
     return { rows: [...rows], withoutLanguage: 0 };
   }
+}
+
+/**
+ * A round's people by language level, confirmed and strong first, with a "<language> not
+ * confirmed" note for everyone below strong and no language note for anyone confirmed or strong.
+ * People without a known level count as unknown; a round with no known level is unchanged.
+ */
+export function roundByLanguage(
+  candidateKeys: readonly string[],
+  unverified: Readonly<Record<string, string>> | undefined,
+  levels: ReadonlyMap<string, LanguageSignal>,
+  requirement: string,
+): { candidateKeys: string[]; unverified: Record<string, string> | undefined } {
+  const names = languageFilters([requirement]);
+  if (!names.length || !candidateKeys.some((key) => levels.has(key)))
+    return { candidateKeys: [...candidateKeys], unverified: unverified && { ...unverified } };
+  const level = (key: string) => levels.get(key) ?? "unknown";
+  const ordered = candidateKeys
+    .map((key, index) => ({ key, index }))
+    .sort((a, b) => ORDER[level(a.key)] - ORDER[level(b.key)] || a.index - b.index)
+    .map(({ key }) => key);
+  const mentions = new RegExp(`\\b(${names.join("|")})\\b`, "i");
+  const notes: Record<string, string> = {};
+  for (const key of ordered) {
+    const parts = (unverified?.[key] ?? "")
+      .split(/;\s*/)
+      .map((part) => part.trim())
+      .filter((part) => part && !mentions.test(part));
+    if (ORDER[level(key)] > ORDER.strong) parts.unshift(`${names[0]} not confirmed`);
+    if (parts.length) notes[key] = parts.join("; ");
+  }
+  return { candidateKeys: ordered, unverified: Object.keys(notes).length ? notes : undefined };
 }

@@ -394,6 +394,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "A battery-plant JD named no employer; half the runs guessed the local plant and left out all its staff, so the first round came back with 4 people (11-13).",
   },
   {
+    rule: "dropping unconfirmed language is acted on at once",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "When the recruiter says to leave out people whose <language> is not confirmed, act on it in that same turn",
+    why: "A recruiter twice said to drop the people without confirmed Mandarin and twice got only \"checking\" (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
