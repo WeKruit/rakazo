@@ -738,10 +738,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "A Mandarin role ran generic searches and labeled almost every person's language unknown.",
   },
   {
-    rule: "no sign of a required language never makes the ten",
+    rule: "a required language ranks people by evidence instead of leaving them out",
     in: ["RECRUITING_SEARCH_SAVED_NEXT_STEP", "RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP"],
-    phrase: "shows no sign of it never makes the ten",
-    why: "The ten for a Mandarin role were people with no sign of Mandarin.",
+    phrase: "an unknown language never rules someone out",
+    why: "Leaving out everyone without stated evidence cut a Mandarin first round from 54 found to 2; people with evidence still come first.",
   },
   {
     rule: "never guess language or origin from names",

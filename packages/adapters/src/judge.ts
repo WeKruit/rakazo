@@ -5,7 +5,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { credentialDigest } from "./credential-digest.js";
 
 /** Whether a person's profile shows a role's required language. */
-export type LanguageSignal = "shown" | "unclear" | "no sign";
+export type LanguageSignal = "confirmed" | "strong" | "unknown" | "no sign";
 
 /** One person's row for the language check: their whole profile text and the search's row. */
 export interface LanguageRow {
@@ -39,7 +39,19 @@ const LANGUAGE_TIMEOUT_MS = 5_000;
  * so six rows are judged together and every batch takes one judge call's time.
  */
 const LANGUAGE_BATCH = 6;
-const LANGUAGE_SIGNALS: readonly unknown[] = ["shown", "unclear", "no sign"];
+/**
+ * The check's verdicts as the server ranks them. "possible" is weaker evidence and counts as
+ * unknown; "shown" and "unclear" are the earlier names of strong and unknown.
+ */
+const LANGUAGE_VERDICTS: Readonly<Record<string, LanguageSignal>> = {
+  confirmed: "confirmed",
+  strong: "strong",
+  shown: "strong",
+  unknown: "unknown",
+  possible: "unknown",
+  unclear: "unknown",
+  "no sign": "no sign",
+};
 
 /**
  * POSTs the rows to the deployment's language check in batches; it answers
@@ -72,7 +84,8 @@ function languageCheck(url: string, apiKey: string, fetchImpl: typeof fetch) {
           };
           for (const row of batch) {
             const verdict = verdicts?.[row.id]?.verdict;
-            if (LANGUAGE_SIGNALS.includes(verdict)) signals.set(row.id, verdict as LanguageSignal);
+            const signal = typeof verdict === "string" ? LANGUAGE_VERDICTS[verdict] : undefined;
+            if (signal) signals.set(row.id, signal);
           }
         } catch {}
       }),
