@@ -159,6 +159,7 @@ import {
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_UNUSED_BUILTIN_TOOLS,
   RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
   RECRUITING_ROUND_NEXT_STEP,
@@ -260,6 +261,7 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  listRunToolResults,
   loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
@@ -6580,8 +6582,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           graphical && acceptsImages && !heldForTakeover;
         const pageBrowserAllowed =
           graphical && browser.describe().capabilities.page && !heldForTakeover;
+        // Recruiting crews also drop the general platform tools they never use.
+        const runDisabledBuiltinTools =
+          isRecruitingSpawnKey(bot.spawnKey) || recruitingBotKey(bot)
+            ? [...bot.disabledBuiltinTools, ...RECRUITING_UNUSED_BUILTIN_TOOLS]
+            : bot.disabledBuiltinTools;
         const disabledBuiltinTools = disabledBuiltinToolSet(
-          bot.disabledBuiltinTools,
+          runDisabledBuiltinTools,
         );
         const builtins = [
           ...selectBuiltinToolsForRun({
@@ -6595,7 +6602,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             cloudAgentEnabled: cloudAgentsEnabled(cloudAgent, run.spaceId),
             messagingChannelRun,
             voiceCall,
-            disabledBuiltinTools: bot.disabledBuiltinTools,
+            disabledBuiltinTools: runDisabledBuiltinTools,
           }),
           ...(deps.email &&
           !messagingChannelRun &&
@@ -9970,6 +9977,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             guardedMemory ||
             (name === "recruiting_feedback" && args.target === "preference")
           ) {
+            // The memory tools no longer advertise recruitingFeedback: in a role conversation a
+            // preference goes through recruiting_feedback, and the error says so.
+            if (
+              name !== "recruiting_feedback" &&
+              args.recruitingFeedback === undefined
+            )
+              return {
+                error:
+                  'In a role conversation, save a recruiter preference with recruiting_feedback target "preference" (it writes this memory), not with this tool.',
+              };
             const parsed = RecruitingPreferenceFeedbackSchema.safeParse(
               name === "recruiting_feedback" ? args : args.recruitingFeedback,
             );
@@ -13349,11 +13366,63 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
-                return saved &&
-                  typeof saved === "object" &&
-                  !Array.isArray(saved)
-                  ? { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP }
-                  : saved;
+                if (!saved || typeof saved !== "object" || Array.isArray(saved))
+                  return saved;
+                // People saved from the run's searches get the same language check as a
+                // search saved the moment it returns, on the profile text those searches gave.
+                const rows = (saved as { candidateRows?: unknown }).candidateRows;
+                const roleId = (
+                  await deps.prisma.thread.findUnique({
+                    where: { id: thread.id },
+                    select: { activeRecruitingRoleId: true },
+                  })
+                )?.activeRecruitingRoleId;
+                const role =
+                  Array.isArray(rows) && roleId
+                    ? await deps.prisma.recruitingRole.findFirst({
+                        where: {
+                          id: roleId,
+                          spaceId: run.spaceId,
+                          userId: run.userId,
+                          archivedAt: null,
+                        },
+                        select: { currentRevision: { select: { brief: true, criteria: true } } },
+                      })
+                    : null;
+                if (!Array.isArray(rows) || !role)
+                  return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
+                const searches = await listRunToolResults(
+                  deps.prisma,
+                  researchActor.actor,
+                  runId,
+                ).catch(() => []);
+                const checked = await withRequiredLanguage(
+                  deps.judge,
+                  {
+                    revision: role.currentRevision,
+                    stated: statedLanguageRequirement(
+                      await recruiterWords(deps.prisma, thread.id),
+                    ),
+                  },
+                  rows as Array<Record<string, unknown>>,
+                  searches.map((search) => search.result),
+                );
+                if (
+                  checked.withoutLanguage ||
+                  checked.rows.some((row) => row.requiredLanguage)
+                ) {
+                  const levels: Record<string, number> = { "no sign": checked.withoutLanguage };
+                  for (const row of checked.rows as Array<{ requiredLanguage?: string }>) {
+                    const level = row.requiredLanguage ?? "unjudged";
+                    levels[level] = (levels[level] ?? 0) + 1;
+                  }
+                  getLogger().info("recruiting.language.levels", { roleId, levels });
+                }
+                return {
+                  ...saved,
+                  candidateRows: checked.rows,
+                  next: RECRUITING_SEARCH_SAVED_NEXT_STEP,
+                };
               }
               if (researchInput.data.operation === "save_grades") {
                 if (!applied || !claimedEffect) throw new IsolationError();
@@ -16653,7 +16722,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rows = rowsOf(result);
             return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: rows are already checked against each person's full profile, those listed show it or may, and the people with no sign of it are left out. Nobody currently at the hiring company fits. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A row's fullProfile holds lines from that person's full profile about the must-haves, such as a licence or clearance; it is part of the row. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. A required language is the exception: each row's requiredLanguage is the language check's decision on that person's full profile. Take it as given: confirmed or strong means the language requirement is met, never judge the language again from the row's text or mark it unverified, and the people with no sign of it are already left out. Nobody currently at the hiring company fits. Among those who fit, pick by evidence, here and for the rest of the ten: first the people whose rows show every must-have, then those with one unknown, and never take someone with an unknown while a row that shows them all is left out. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
               ? `These searches returned ${plannedNewPeople} new people. Then, in your next step, fill the rest with one people-search agent run: agent_run with effort "low" and a query that starts "Find N more people" (N = ten minus those shown), names the role, the location scope and every hard requirement, and asks for each person's evidence; it takes about half a minute and returns its people as rows. Then record the ten with calibration_round, starting with the people already shown in the same order, then the agent run's people who fit, with no new quick searches, web searches or profile lookups; take rows from the searches below only for places the agent run leaves short (it fails, is refused, or too few of its people fit). If fewer than ten people fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`

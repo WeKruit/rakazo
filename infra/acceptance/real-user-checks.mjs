@@ -21,6 +21,12 @@ const NO_PERMISSION =
 // The work is blocked: the reply must then leave a step the recruiter can take.
 const BLOCKED =
   /无法|不能|没有可用|尚无|还没有|暂时不|没法|\b(?:can['’]t|cannot|unable|isn['’]t (?:ready|set up)|not (?:ready|set up|available)|no (?:sending|sender))\b/i;
+// A line that only restates what the recruiter asked ("我正在梳理你问的发送人数") says nothing.
+const RESTATES =
+  /正在梳理|梳理你(?:问|提到|说)的|\bI(?:['’]m| am) looking into (?:your|the) (?:question|request)\b/i;
+// An unasked lecture on how language is judged, in place of doing the work (11-13).
+const NAME_LECTURE =
+  /(?:不能|不会|无法|不应)[^。！？\n]{0,12}(?:靠|凭|仅凭|根据|按)?(?:姓名|名字)[^。！？\n]{0,10}(?:判断|推断|认定|作为)|(?:姓名|名字)不能(?:证明|作为|代表|判断)|\b(?:can['’]t|cannot|won['’]t|will not) (?:infer|judge|guess|assume)[^.]{0,40}\bfrom (?:a |their )?names?\b/i;
 const CAVEAT =
   /(?:不能|无法)(?:保证|确保|核实|确认|验证)|\b(?:can['’]t|cannot) (?:guarantee|promise)\b/gi;
 // What counts as a next step in words: something to connect or open, a draft, an offer, work
@@ -157,6 +163,8 @@ export function conversationChecks(messages) {
       // People's evidence quotes their profiles, where "S3" is the AWS service.
       ["internal gate code", GATE_CODE, prose(text)],
       ["internal agent brief", AGENT_BRIEF],
+      ["restates the question", RESTATES],
+      ["lectures on judging language by name", NAME_LECTURE],
     ]) {
       const match = (where ?? text).match(pattern);
       if (match) failures.push(`${name}: ${quote(where ?? text, match)}`);

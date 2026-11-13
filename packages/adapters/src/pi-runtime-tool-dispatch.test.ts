@@ -535,18 +535,6 @@ describe("Pi connector tool dispatch", () => {
       /* Exhaust the runtime. */
     }
     expect(executeTool.mock.calls[0]?.slice(0, 2)).toEqual(["remember", args]);
-    expect(fakeAgentState.tools.find((tool) => tool.name === "remember")).toEqual(
-      expect.objectContaining({
-        parameters: expect.objectContaining({
-          properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
-        }),
-      }),
-    );
-    expect(builtinAgentTools.find((tool) => tool.name === "remember")!.inputSchema).toEqual(
-      expect.objectContaining({
-        properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
-      }),
-    );
   });
 
   it("passes a partial memory edit through to the save", async () => {

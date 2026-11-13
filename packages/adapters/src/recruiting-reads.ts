@@ -907,9 +907,17 @@ export async function getRecruitingRoleCampaign(
             openCount: count(lead.email_open_count),
             clickCount: count(lead.email_click_count),
             replyCount: count(lead.email_reply_count),
+            contactedAt:
+              typeof lead.timestamp_last_contact === "string" &&
+              !Number.isNaN(Date.parse(lead.timestamp_last_contact))
+                ? new Date(lead.timestamp_last_contact).toISOString()
+                : null,
           },
         ];
       }),
+      ...(typeof campaign.queuedFirstEmail === "string"
+        ? { queuedFirstEmail: campaign.queuedFirstEmail.slice(0, 100) }
+        : {}),
     };
     if (result.campaign) {
       const snapshot = {

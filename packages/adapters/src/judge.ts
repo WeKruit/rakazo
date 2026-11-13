@@ -5,7 +5,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { credentialDigest } from "./credential-digest.js";
 
 /** Whether a person's profile shows a role's required language. */
-export type LanguageSignal = "confirmed" | "strong" | "unknown" | "no sign";
+export type LanguageSignal = "confirmed" | "strong" | "possible" | "unknown" | "no sign";
 
 /** One person's row for the language check: their whole profile text and the search's row. */
 export interface LanguageRow {

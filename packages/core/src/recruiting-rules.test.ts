@@ -382,6 +382,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "The deeper search re-ran research for the whole round.",
   },
   {
+    rule: "the language check decides the language",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "The level is the language decision: take it as given, never judge the language again",
+    why: "Strong-rated Korean speakers were left out as \"Korean not verified\" (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
@@ -742,12 +748,6 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: ["RECRUITING_SEARCH_SAVED_NEXT_STEP", "RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP"],
     phrase: "an unknown language never rules someone out",
     why: "Leaving out everyone without stated evidence cut a Mandarin first round from 54 found to 2; people with evidence still come first.",
-  },
-  {
-    rule: "never guess language or origin from names",
-    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "Never guess a language, origin or ethnicity from a name",
-    why: "Ranking by name would be national-origin profiling.",
   },
   {
     rule: "a missed requirement means a new search",
