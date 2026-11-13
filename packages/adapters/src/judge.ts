@@ -48,7 +48,7 @@ const LANGUAGE_VERDICTS: Readonly<Record<string, LanguageSignal>> = {
   strong: "strong",
   shown: "strong",
   unknown: "unknown",
-  possible: "unknown",
+  possible: "possible",
   unclear: "unknown",
   "no sign": "no sign",
 };
