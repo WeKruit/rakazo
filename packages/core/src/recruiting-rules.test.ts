@@ -1335,8 +1335,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "drop people when asked",
     in: "RECRUITER_LANGUAGE",
-    phrase: "Asked to drop people, drop them in that reply and say who",
+    phrase: "Asked to drop people, drop them in that reply and say in its text who is dropped",
     why: "Asked to drop A and B and replace them, Kruit only said what it would do (11-13).",
+  },
+  {
+    rule: "a drop is answered before any card",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "say in its text who is dropped and who is left, before any card",
+    why: "Asked who it drops from three pasted profiles, Kruit replied only with a card to open a role (11-13).",
   },
   {
     rule: "queued is not sent",

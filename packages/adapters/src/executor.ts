@@ -1543,7 +1543,23 @@ export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting:
   recruiting ? tools.filter((tool) => tool.name !== "create_poll") : tools;
 
 /** Built-in calls after a handoff that leave the request with the teammate. */
-const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory"]);
+// Waiting for the teammate is not new work: staging 11-13, Main waited for Outreach's template,
+// then posted it again as its own reply.
+const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory", "wait_for_work"]);
+
+/** Whether a call after a handoff means this turn took the request back and must reply itself. */
+export function takesBackHandoff(
+  name: string,
+  args: Record<string, unknown>,
+  connectorReadOnly: boolean | undefined,
+): boolean {
+  return (
+    name !== "handoff_to_bot" &&
+    !AFTER_HANDOFF_QUIET.has(name) &&
+    !connectorReadOnly &&
+    !readsOnly(name, args)
+  );
+}
 export const saysSomething = (
   blocks: readonly MessageBlock[] | null | undefined,
 ) =>
@@ -16043,10 +16059,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // memory note is bookkeeping: the teammate has the request, and it says nothing.
           if (
             handedOff &&
-            name !== "handoff_to_bot" &&
-            !AFTER_HANDOFF_QUIET.has(name) &&
-            !connectorTools.get(name)?.readOnly &&
-            !readsOnly(name, rawArgs as Record<string, unknown>)
+            takesBackHandoff(
+              name,
+              rawArgs as Record<string, unknown>,
+              connectorTools.get(name)?.readOnly,
+            )
           )
             handedOff = false;
           const outOfCredits = credits.refusal(name);
