@@ -71,6 +71,9 @@ describe("quick reply", () => {
     expect(seen[0]?.instructions).toContain(
       "A job description they send is a role they are hiring for",
     );
+    // Staging 11-13: "好，现在发出。" read as sent while the email still needed Gmail connected.
+    expect(seen[0]?.instructions).toContain("never that it is being sent");
+    expect(seen[0]?.instructions).not.toContain("现在发出");
     // Outside recruiting chats the recruiter sentence stays out.
     await quickReply({ ...base, runtime: runtimeReplying("On it.", seen) });
     expect(seen[1]?.instructions).not.toContain("recruiter");

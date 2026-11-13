@@ -1349,13 +1349,15 @@ describe("planDeclineRetry", () => {
     const request = "帮我写一封面试后跟进邮件的模板";
     const retry = await planDeclineRetry(human, { ...input, reply, request });
     expect(retry?.note).toContain("The recruiter is the one writing");
-    const recruiter = reply.replace("[Interviewer’s Name]", "[Candidate Name]");
+    const recruiter = reply
+      .replace("[Interviewer’s Name]", "{{firstName}}")
+      .replace("the [Role Title] position", "the Senior Data Engineer position");
     expect(await planDeclineRetry(human, { ...input, reply: recruiter, request })).toBeUndefined();
   });
 
   it("sends a sequence back when one email was asked for (2026-11-11 staging)", async () => {
     const email = (n: number) =>
-      `**Email ${n}**\n**Subject:** Senior Data Engineer\n\nHi [Candidate Name],\n\nA role.`;
+      `**Email ${n}**\n**Subject:** Senior Data Engineer\n\nHi {{firstName}},\n\nA role.`;
     const reply = [1, 2, 3].map(email).join("\n\n");
     const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
     const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
@@ -1368,18 +1370,23 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
-  it("keeps the blanks in an email about a role that names nobody (2026-11-11 staging)", async () => {
+  it("writes a template with {{firstName}}, never bracketed blanks (2026-11-13 staging)", async () => {
     const reply =
       "**Subject:** Senior Data Engineer opportunity in Seattle\n\nHi [Candidate Name],\n\nA role.";
     const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
     const ask = "Write me a short cold outreach email for a senior data engineer role in Seattle";
+    const handed = { ...input, request: "Draft it", handedIn: true, personRequest: ask };
+    expect((await planDeclineRetry(human, { ...handed, reply }))?.note).toContain(
+      "bracketed blanks",
+    );
+    const zh = "**Subject:** 数据工程师\n\n您好 [候选人姓名]，\n\n我们在招 [职位名称]。";
+    expect((await planDeclineRetry(human, { ...handed, reply: zh }))?.note).toContain(
+      "bracketed blanks",
+    );
     expect(
       await planDeclineRetry(human, {
-        ...input,
-        reply,
-        request: "Draft it",
-        handedIn: true,
-        personRequest: ask,
+        ...handed,
+        reply: reply.replace("[Candidate Name]", "{{firstName}}"),
       }),
     ).toBeUndefined();
     expect(askedTemplate(ask)).toBe(true);

@@ -94,6 +94,15 @@ describe("maintained recruiting defaults", () => {
   });
 });
 
+describe("recruiter language", () => {
+  it("answers a how-to question with steps, not a question card", () => {
+    // Staging 11-13: "what do I do first" got three question cards in a row and no steps.
+    expect(RECRUITER_LANGUAGE).toContain("two to four short numbered steps");
+    expect(RECRUITER_LANGUAGE).toContain("never answer it with a question card");
+    expect(RECRUITER_LANGUAGE).toContain("never a role");
+  });
+});
+
 describe("unfilledPlaceholder", () => {
   it("finds a bracketed blank left in an email", () => {
     expect(unfilledPlaceholder("Hi [Candidate Name],\n\nA role.")).toBe("[Candidate Name]");
