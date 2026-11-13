@@ -467,11 +467,17 @@ export async function returnDelegatedTeamOutcome(
   const found = await openDelegation(deps.prisma, run.threadId);
   if (!found) return;
   const { delegated, root } = found;
+  // Staging 11-13: the role's intake turn sat on its next-step card the whole time, so a check
+  // Kruit delegated finished in the role's chat and never came back. Only a card asked since the
+  // request holds the result.
   const busy = await deps.prisma.run.findFirst({
     where: {
       threadId: run.threadId,
       id: { not: run.id },
-      status: { in: ["queued", "running", "waiting_input"] },
+      OR: [
+        { status: { in: ["queued", "running"] } },
+        { status: "waiting_input", createdAt: { gte: delegated.createdAt } },
+      ],
     },
     select: { id: true },
   });
@@ -533,7 +539,7 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
       blocks: { array_contains: [{ kind: "bot_message_received" }] },
     },
     orderBy: { seq: "desc" },
-    select: { id: true, seq: true, blocks: true },
+    select: { id: true, seq: true, blocks: true, createdAt: true },
   });
   const root = botMessageContext(
     Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],

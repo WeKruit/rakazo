@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { LanguageRow, TextJudge } from "./judge.js";
+import type { LanguageRow, LanguageSignal, TextJudge } from "./judge.js";
 import {
   languageFilters,
   plannedLanguageFilters,
   profileTexts,
   requiredLanguage,
+  roundByLanguage,
   statedLanguageRequirement,
   withoutName,
   withRequiredLanguage,
@@ -228,5 +229,40 @@ describe("required language", () => {
       filters: [],
       queriesNameIt: false,
     });
+  });
+});
+
+describe("roundByLanguage", () => {
+  const levels = new Map<string, LanguageSignal>([
+    ["a", "unknown"],
+    ["b", "confirmed"],
+    ["c", "possible"],
+    ["d", "strong"],
+  ]);
+
+  it("puts confirmed and strong people first and labels everyone below them", () => {
+    // 11-13: six people with unconfirmed Mandarin came before the four whose profiles list it.
+    const round = roundByLanguage(
+      ["a", "b", "c", "d", "e"],
+      {
+        a: "8+ years overall experience",
+        b: "Mandarin speaking (profile language section not shown); Daily Shanghai HQ collaboration",
+        d: "Mandarin speaking",
+      },
+      levels,
+      "Must speak Mandarin to work with the Shanghai HQ",
+    );
+    expect(round.candidateKeys).toEqual(["b", "d", "c", "a", "e"]);
+    expect(round.unverified).toEqual({
+      b: "Daily Shanghai HQ collaboration",
+      c: "Mandarin not confirmed",
+      a: "Mandarin not confirmed; 8+ years overall experience",
+      e: "Mandarin not confirmed",
+    });
+  });
+
+  it("leaves a round alone when no language level is known", () => {
+    const round = roundByLanguage(["x", "y"], { x: "startup experience" }, levels, "Mandarin");
+    expect(round).toEqual({ candidateKeys: ["x", "y"], unverified: { x: "startup experience" } });
   });
 });

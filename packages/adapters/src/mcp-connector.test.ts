@@ -5883,6 +5883,52 @@ describe("Gmail search in a role", () => {
       installLogger(previousLogger);
     }
   });
+  it("offers Gmail send only once Gmail is connected", async () => {
+    // Staging 11-13: with Gmail not connected, the send card still showed and the recruiter was
+    // told that confirming it was enough.
+    const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
+    const assignment = {
+      ...ASSIGNMENT,
+      allowAllTools: false,
+      allowedTools: ["search_threads", "send_message"],
+      server: gmail,
+    };
+    vi.stubGlobal(
+      "fetch",
+      mcpFetch(
+        {
+          failNext: false,
+          initializations: 0,
+          tools: [{ name: "search_threads", inputSchema: { type: "object" } }],
+          callResult: { content: [] },
+        },
+        gmail.endpoint,
+      ),
+    );
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([assignment]),
+        findFirst: vi.fn().mockResolvedValue(assignment),
+      },
+      user: { findUnique: vi.fn().mockResolvedValue({ usageCreditLimit: 10_000 }) },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    try {
+      const tools = await connector.discoverTools({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never);
+      const names = tools.map((tool) => tool.name);
+      expect(names).toContain("mcp__gmail__search_threads");
+      expect(names).not.toContain("mcp__gmail__send_message");
+    } finally {
+      await connector.close();
+    }
+  });
+
   it("adds the role's own mailbox to a Gmail thread search result", async () => {
     const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
     const assignment = { ...ASSIGNMENT, server: gmail };

@@ -24,6 +24,7 @@ import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-em
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import { blocksText } from "./reply-suggestion.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { declinedRunId } from "./turn-end-guard.js";
 
@@ -288,6 +289,21 @@ async function postedResult(tx: Pick<PrismaClient, "message">, runId: string): P
   );
 }
 
+/** Whether the recruiter's latest message in the thread is a question. */
+async function latestUserMessageAsks(
+  tx: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<boolean> {
+  const latest = await tx.message.findFirst({
+    where: { threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    select: { blocks: true },
+  });
+  const parsed = MessageBlock.array().safeParse(latest?.blocks ?? []);
+  if (!parsed.success) return false;
+  return /[?？]\s*$/.test(blocksText(parsed.data).trim());
+}
+
 /**
  * Returns a stage handed over with report_back to the member that asked for it, once the stage
  * ends either way, so it can check the result against its brief. Idempotent per run; the result
@@ -355,9 +371,14 @@ export async function reportGroupHandoffOutcome(
       const hop = nextBotMessageHop(asked.hop);
       if (botMessageHopExhausted(hop)) return undefined;
       const mail = await readMailReplyOutcomeReport(tx, run);
+      const posted = outcome.status === "completed" && !mail && (await postedResult(tx, run.id));
+      // Staging 11-13: a teammate answered the recruiter's question, then the sender restated it
+      // or handed it back for proof, so one question got two or three answers. An answered
+      // question needs nothing more from the sender.
+      if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
       const report = mail
         ? `Stage status: ${outcome.status}. Verified reply-card outcome:\n${mail.text}\nUse this recorded card outcome as the result, even when the last text above was only a progress update.`
-        : outcome.status === "completed" && !(await postedResult(tx, run.id))
+        : outcome.status === "completed" && !posted
           ? `Ended the stage you handed me without posting any result: no message and no card. This is not done. Hand me a correction that restates what this request needs, at most twice; after that, tell the user it did not get done.`
           : outcome.status === "completed"
             ? `Finished the stage you handed me; my result is my last message above, which the user already sees. When it answers what the user asked or does what they asked (a send or booking whose card the recruiter confirmed is done), reply exactly ${NO_RESPONSE}: never ask me to prove it, re-check it or say it again in your words. Hand me a correction only when a concrete part of the request is still undone, naming that part, at most twice; after that, or when I said what blocks it, tell the user only what blocks the rest.`
