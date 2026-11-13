@@ -402,6 +402,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: 'A recruiter twice said to drop the people without confirmed Mandarin and twice got only "checking" (11-13).',
   },
   {
+    rule: "feedback on a missing requirement makes it visible-only",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "the next round takes only people whose rows show it",
+    why: "After \"no more ones w/o kafka\", the next round still had 5 of 10 with no Kafka shown (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
@@ -901,8 +907,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "no variables in a draft",
     in: "Outreach",
-    phrase: "Never {{variables}} in a draft (only a send uses them)",
-    why: "Drafts had {{variables}}; the unscoped rule also blocked the lead variables a send needs.",
+    phrase: "Never {{variables}} in a draft to a person (only a template or a send uses them)",
+    why: "Drafts had {{variables}}; the unscoped rule also blocked the lead variables a send needs, and made a template edit fetch a candidate.",
+  },
+  {
+    rule: "templates are signed by the recruiter",
+    in: "Outreach",
+    phrase: "a template needs no candidate and is signed with the recruiter's name (ask once)",
+    why: "A template written in the recruiter's voice was signed Kruit or [Your name], then an edit asked for a candidate.",
   },
   {
     rule: "drafts need no contact check",
@@ -1123,6 +1135,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "Main",
     phrase: "or as the recruiter named them, even when no role is linked",
     why: "Main asked which role a person was in before handing over an interview the recruiter had fully specified.",
+  },
+  {
+    rule: "answer evidence questions from saved sources in the global conversation",
+    in: "Global recruiting overview skill",
+    phrase: "is answered by you in that same reply from those saved sources, one line per person",
+    why: "Asked which people have production Kafka and for how many years, Main passed it to the role team twice and never gave a list (11-13).",
   },
   {
     rule: "hand a named booking to Scheduling in the global conversation",
