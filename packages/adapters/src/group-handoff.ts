@@ -143,15 +143,16 @@ export async function handoffToGroupBot(
       // that role's campaign and threads, which only its own team holds.
       if (groupId.startsWith("recruiting-global-")) {
         // A request steered into a running turn is not its source message; the brief quotes it.
-        const asked =
-          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`.toLowerCase();
+        const asked = roleTitleText(
+          `${JSON.stringify(activeSource.sourceMessage?.blocks ?? [])}\n${input.message}`,
+        );
         const roles = await tx.recruitingRole.findMany({
           where: { userId: run.userId, spaceId: run.spaceId, archivedAt: null },
           select: { id: true, title: true },
         });
-        const named = roles.find(
-          (role) => role.title.trim().length > 1 && asked.includes(role.title.trim().toLowerCase()),
-        );
+        const named =
+          roles.find((role) => namesRole(asked, role.title) === "full") ??
+          roles.find((role) => namesRole(asked, role.title) === "core");
         if (named)
           return {
             error: `Not handed off: the recruiter named the role "${named.title}", whose email threads and campaign only its team holds. Hand this to that team with delegate_to_role, role_id "${named.id}".`,
@@ -818,4 +819,20 @@ export async function watchOpenStages(
     if (report) sent += 1;
   }
   return sent;
+}
+
+/** Lower-case text with full-width punctuation and runs of spaces folded, for title matching. */
+function roleTitleText(text: string): string {
+  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Whether the text names a role: its full title, or the title without a trailing qualifier such
+ * as "(Seattle)", which briefs often write as "Senior Data Engineer（Seattle）" or leave out.
+ */
+export function namesRole(asked: string, title: string): "full" | "core" | undefined {
+  const full = roleTitleText(title).trim();
+  if (full.length > 1 && asked.includes(full)) return "full";
+  const core = full.replace(/\s*\([^)]*\)$/, "").trim();
+  return core.length >= 6 && asked.includes(core) ? "core" : undefined;
 }

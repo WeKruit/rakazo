@@ -6,6 +6,7 @@ import {
   handoffToGroupBot,
   isQuietStageReport,
   NO_ROLE_HANDOFF,
+  namesRole,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
@@ -1028,5 +1029,26 @@ describe("open stage watch", () => {
     await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
     for (const { messageCreate } of [reported, unasked, handedOn, busy])
       expect(messageCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("a role named in a handoff", () => {
+  it("matches the title written with full-width brackets or without its qualifier", () => {
+    // 11-13 staging: "Senior Data Engineer（Seattle）" in a brief missed the role
+    // "Senior Data Engineer (Seattle)", so one person's email went to two teams.
+    expect(namesRole("senior data engineer (seattle) 岗位", "Senior Data Engineer (Seattle)")).toBe(
+      "full",
+    );
+    expect(
+      namesRole(
+        "senior data engineer(seattle)岗位".normalize("NFKC"),
+        "Senior Data Engineer (Seattle)",
+      ),
+    ).toBe("core");
+    expect(namesRole("只发 senior data engineer 的首封", "Senior Data Engineer (Seattle)")).toBe(
+      "core",
+    );
+    expect(namesRole("write to ada", "Senior Data Engineer (Seattle)")).toBeUndefined();
+    expect(namesRole("an ops role", "Ops (NY)")).toBeUndefined();
   });
 });

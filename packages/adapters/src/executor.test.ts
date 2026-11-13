@@ -3963,6 +3963,7 @@ describe("gmailCardNeedsDraft", () => {
     const ask = "给 Wei Zhang 写封邮件，fintech 那个职位。wei.zhang.test@example.com";
     expect(gmailCardNeedsDraft("gmail", ask, "我先查找现有的 fintech 职位。")).toBe(true);
     expect(gmailCardNeedsDraft("gmail", ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", ask, "**主题：** Go 后端工程师\n\nWei 你好，")).toBe(false);
     expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
     expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
   });

@@ -5402,6 +5402,11 @@ describe("local native Instantly campaign and lead tools", () => {
           recipients: ["abe@x.test"],
           next: expect.stringContaining("queued with the mail service"),
         });
+        // 11-13 staging: a check of the role's other campaign found nobody emailed and took the
+        // queued answer back; the result names this campaign and says 0 means still queued.
+        expect(out).toMatchObject({
+          next: expect.stringContaining(`get_campaign with campaign_id ${CAMPAIGN}`),
+        });
       } finally {
         vi.useRealTimers();
       }

@@ -7095,7 +7095,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args.provider,
               lastRecruiterText,
               [...midTurnUserTexts, assembled].join("\n"),
-            )
+            ) &&
+            // An email already shown earlier in this conversation is not written out again.
+            !(await deps.prisma.message
+              .findMany({
+                where: { threadId: thread.id, role: "bot" },
+                orderBy: { seq: "desc" },
+                take: 12,
+                select: { blocks: true },
+              })
+              .then((messages) => /Subject\s*[:：]|主题\s*[:：]/i.test(JSON.stringify(messages)))
+              .catch(() => false))
           ) {
             gmailDraftAsked = true;
             return { error: GMAIL_DRAFT_FIRST_NOTE };
@@ -21049,7 +21059,7 @@ export function gmailCardNeedsDraft(
   return (
     /gmail/i.test(String(provider ?? "")) &&
     asksForOutreach(recruiterText) &&
-    !/Subject\s*[:：]/i.test(shown)
+    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );
 }
 
