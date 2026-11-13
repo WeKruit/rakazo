@@ -97,7 +97,9 @@ describe("required language", () => {
       language: async (requirement, batch) => {
         calls.push({ requirement, rows: batch });
         return new Map(
-          batch.filter((row) => row.profile.includes("Mandarin")).map((row) => [row.id, "confirmed"]),
+          batch
+            .filter((row) => row.profile.includes("Mandarin"))
+            .map((row) => [row.id, "confirmed"]),
         );
       },
     };
@@ -122,6 +124,24 @@ describe("required language", () => {
       ["Joe Sample", undefined],
       ["Ana Example", undefined],
     ]);
+  });
+
+  it("checks people saved from several searches on the text each search returned", async () => {
+    const [wei, joe, ana] = listing.split(/(?=Title: )/);
+    const checked = await withRequiredLanguage(
+      { resolve: async () => fakeJudge([]) },
+      brief,
+      rows,
+      [
+        { content: [{ type: "text", text: `${joe}${wei}` }] },
+        { content: [{ type: "text", text: ana }] },
+      ],
+    );
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Wei Test", "strong"],
+      ["Ana Example", "unknown"],
+    ]);
+    expect(checked.withoutLanguage).toBe(1);
   });
 
   it("reads the full profile page of people the search text does not show it for", async () => {

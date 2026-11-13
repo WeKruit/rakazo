@@ -68,9 +68,9 @@ describe("language check", () => {
     // An unknown verdict is no verdict.
     expect(verdicts?.size).toBe(12);
     expect(verdicts?.get("r1")).toBeUndefined();
-    // Weaker evidence ranks as unknown; the earlier names still work.
+    // The check's own levels pass through; the earlier names still work.
     expect([2, 3, 4, 5].map((index) => verdicts?.get(`r${index}`))).toEqual([
-      "unknown",
+      "possible",
       "strong",
       "confirmed",
       "no sign",

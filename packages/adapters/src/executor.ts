@@ -260,6 +260,7 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  listRunToolResults,
   loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
@@ -13348,11 +13349,63 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
-                return saved &&
-                  typeof saved === "object" &&
-                  !Array.isArray(saved)
-                  ? { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP }
-                  : saved;
+                if (!saved || typeof saved !== "object" || Array.isArray(saved))
+                  return saved;
+                // People saved from the run's searches get the same language check as a
+                // search saved the moment it returns, on the profile text those searches gave.
+                const rows = (saved as { candidateRows?: unknown }).candidateRows;
+                const roleId = (
+                  await deps.prisma.thread.findUnique({
+                    where: { id: thread.id },
+                    select: { activeRecruitingRoleId: true },
+                  })
+                )?.activeRecruitingRoleId;
+                const role =
+                  Array.isArray(rows) && roleId
+                    ? await deps.prisma.recruitingRole.findFirst({
+                        where: {
+                          id: roleId,
+                          spaceId: run.spaceId,
+                          userId: run.userId,
+                          archivedAt: null,
+                        },
+                        select: { currentRevision: { select: { brief: true, criteria: true } } },
+                      })
+                    : null;
+                if (!Array.isArray(rows) || !role)
+                  return { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP };
+                const searches = await listRunToolResults(
+                  deps.prisma,
+                  researchActor.actor,
+                  runId,
+                ).catch(() => []);
+                const checked = await withRequiredLanguage(
+                  deps.judge,
+                  {
+                    revision: role.currentRevision,
+                    stated: statedLanguageRequirement(
+                      await recruiterWords(deps.prisma, thread.id),
+                    ),
+                  },
+                  rows as Array<Record<string, unknown>>,
+                  searches.map((search) => search.result),
+                );
+                if (
+                  checked.withoutLanguage ||
+                  checked.rows.some((row) => row.requiredLanguage)
+                ) {
+                  const levels: Record<string, number> = { "no sign": checked.withoutLanguage };
+                  for (const row of checked.rows as Array<{ requiredLanguage?: string }>) {
+                    const level = row.requiredLanguage ?? "unjudged";
+                    levels[level] = (levels[level] ?? 0) + 1;
+                  }
+                  getLogger().info("recruiting.language.levels", { roleId, levels });
+                }
+                return {
+                  ...saved,
+                  candidateRows: checked.rows,
+                  next: RECRUITING_SEARCH_SAVED_NEXT_STEP,
+                };
               }
               if (researchInput.data.operation === "save_grades") {
                 if (!applied || !claimedEffect) throw new IsolationError();
