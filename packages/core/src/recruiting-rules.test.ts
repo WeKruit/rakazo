@@ -416,7 +416,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "a later round short of ten is filled by one low agent run",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "when fewer than ten new people fit, or more than half of those that fit leave a hard requirement unshown",
+    phrase: "in a later round send the four quick searches together with one people-search agent run in the same step as parallel calls",
     why: "After feedback the next rounds had 3 and then 7 people because the quick searches mostly returned people already shown (11-13).",
   },
   {
@@ -1413,7 +1413,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "a later round is never weaker than the last",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "or more than half of those that fit leave a hard requirement unshown, so the round would be weaker than the last",
+    phrase: "putting people whose rows show every hard requirement first, with no second set of searches",
     why: "Round two filled ten with nine people whose rows did not show 6+ years or Spark/Kafka, much weaker than round one (11-13).",
   },
   {
