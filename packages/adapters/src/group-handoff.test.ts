@@ -622,6 +622,29 @@ describe("group handoff report back", () => {
     );
   });
 
+  it("counts a held-back reply's retry as the stage's result", async () => {
+    // Staging 11-13: Outreach's template was held back for a blank and its retry posted the
+    // fixed one; the report said nothing was posted, so Main had the template written again.
+    const { deps, messageCreate, tx } = harness([asked]);
+    tx.run.findMany.mockResolvedValue([{ id: "run-retry" }]);
+    tx.message.findMany.mockImplementation((async (query?: {
+      where?: { runId?: { in?: string[] } };
+    }) =>
+      query?.where?.runId?.in?.includes("run-retry")
+        ? [{ blocks: [{ kind: "text", text: "Hi {{firstName}}, thanks for your time." }] }]
+        : []) as never);
+    await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
+    const text = (
+      messageCreate.mock.calls[0] as unknown as [{ data: { blocks: { text: string }[] } }]
+    )[0].data.blocks[0]!.text;
+    expect(text).not.toContain("without posting any result");
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { sourceMessage: { clientNonce: "autocontinue:run-b:decline" } },
+      }),
+    );
+  });
+
   it("tells the sender a stage that ended with no message or card is not done", async () => {
     // Staging: Outreach read a skill and ended silently; the report said its result was above,
     // so Main accepted nothing and the recruiter never got the reply card.
