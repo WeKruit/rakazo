@@ -1809,7 +1809,17 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           ...(options === undefined ? {} : { options }),
           ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-          ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
+          // An over-long planned search keeps its first 300 characters instead of failing the card.
+          ...(raw.plannedSearches === undefined
+            ? {}
+            : {
+                plannedSearches: Array.isArray(raw.plannedSearches)
+                  ? raw.plannedSearches.map((query) => {
+                      const text = String(query).trim();
+                      return text.length > 300 ? text.slice(0, 300).replace(/\s+\S*$/, "") : text;
+                    })
+                  : raw.plannedSearches,
+              }),
         };
       }
       if (tool.name === "request_secret") {
