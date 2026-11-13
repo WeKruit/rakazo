@@ -159,7 +159,7 @@ async function askedLanguage(
     signal,
   );
   if (p === undefined) return undefined;
-  return p >= SHOWN ? "shown" : p < NO_SIGN ? "no sign" : "unclear";
+  return p >= SHOWN ? "strong" : p < NO_SIGN ? "no sign" : "unknown";
 }
 
 /**
@@ -192,9 +192,9 @@ export async function languageSignals(
   return signals;
 }
 
-const ORDER: Record<LanguageSignal, number> = { shown: 0, unclear: 1, "no sign": 2 };
+const ORDER: Record<LanguageSignal, number> = { confirmed: 0, strong: 1, unknown: 2, "no sign": 3 };
 
-/** Rows with the language shown first, then unclear, then no sign; unjudged rows sit with unclear. */
+/** Rows by language evidence: confirmed, strong, unknown, then no sign; unjudged rows are unknown. */
 export function withLanguageSignals<T extends { candidateKey?: unknown }>(
   rows: readonly T[],
   signals: ReadonlyMap<string, LanguageSignal>,
@@ -204,7 +204,7 @@ export function withLanguageSignals<T extends { candidateKey?: unknown }>(
       const value = signals.get(String(row.candidateKey));
       return { row: value ? { ...row, requiredLanguage: value } : { ...row }, index, value };
     })
-    .sort((a, b) => ORDER[a.value ?? "unclear"] - ORDER[b.value ?? "unclear"] || a.index - b.index)
+    .sort((a, b) => ORDER[a.value ?? "unknown"] - ORDER[b.value ?? "unknown"] || a.index - b.index)
     .map((entry) => entry.row);
 }
 
@@ -217,7 +217,7 @@ const LANGUAGE_PLACES: Record<string, RegExp> = {
 
 /**
  * Without the judge, a profile shows the language when its text names it (or, for Mandarin and
- * Cantonese, a place where it is spoken); otherwise it shows no sign of it.
+ * Cantonese, a place where it is spoken); otherwise it is unknown, never left out on text alone.
  */
 export function textLanguageJudge(requirement: string): TextJudge {
   const names = languageFilters([requirement]);
@@ -227,7 +227,7 @@ export function textLanguageJudge(requirement: string): TextJudge {
     async yes(_instructions, state) {
       if (!named) return undefined;
       const profile = String(state.profile ?? "");
-      return named.test(profile) || places.some((place) => place.test(profile)) ? 0.9 : 0.1;
+      return named.test(profile) || places.some((place) => place.test(profile)) ? 0.9 : 0.4;
     },
   };
 }
@@ -243,7 +243,9 @@ async function fullProfileSignals(
   signals: ReadonlyMap<string, LanguageSignal>,
   reader: ProfileReads,
 ): Promise<Map<string, LanguageSignal>> {
-  const pending = people.filter((person) => signals.get(person.candidateKey) !== "shown");
+  const pending = people.filter(
+    (person) => (ORDER[signals.get(person.candidateKey) ?? "unknown"] ?? 2) >= ORDER.unknown,
+  );
   const signal = AbortSignal.timeout(FULL_PROFILE_WAIT_MS);
   const texts = await fullProfilePages(
     pending.map((person) => person.candidateKey),
