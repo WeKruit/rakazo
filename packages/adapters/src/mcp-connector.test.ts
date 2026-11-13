@@ -4423,16 +4423,17 @@ describe("local native Instantly campaign and lead tools", () => {
           campaign_schedule: {
             schedules: [
               {
-                name: "Weekdays",
-                timing: { from: "09:00", to: "17:00" },
+                // A confirmed send goes out at once unless the recruiter asks for hours.
+                name: "Any time",
+                timing: { from: "00:00", to: "23:59" },
                 days: {
-                  "0": false,
+                  "0": true,
                   "1": true,
                   "2": true,
                   "3": true,
                   "4": true,
                   "5": true,
-                  "6": false,
+                  "6": true,
                 },
                 timezone: "America/Chicago",
               },
@@ -4604,7 +4605,7 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
-  it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
+  it("ensure_role_campaign send_hours on a live campaign saves the hours and keeps it sending", async () => {
     const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });
     f.state.campaign.status = 1;
@@ -4612,7 +4613,8 @@ describe("local native Instantly campaign and lead tools", () => {
     const result = f.result(
       await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
     );
-    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    expect(result).toMatchObject({ sendHours: "any_time", resumed: expect.any(String) });
+    expect(result).not.toHaveProperty("paused");
     const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
     expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
     expect(writes[1]).toMatchObject({
@@ -4629,6 +4631,9 @@ describe("local native Instantly campaign and lead tools", () => {
         },
       },
     });
+    // Left paused, it would hold back everyone already approved (the 11-13 queued send).
+    expect(writes[2]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` });
+    expect(writes).toHaveLength(3);
   });
 
   it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
@@ -4905,7 +4910,11 @@ describe("local native Instantly campaign and lead tools", () => {
   it("schedules Pacific weekday hours in Mountain time one hour later", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;
-    await f.run("ensure_role_campaign", { role_id: "role-1", timezone: "America/Los_Angeles" });
+    await f.run("ensure_role_campaign", {
+      role_id: "role-1",
+      timezone: "America/Los_Angeles",
+      send_hours: "weekdays_9_to_5",
+    });
     const created = f.state.requests.find(
       (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
     );
@@ -5253,8 +5262,134 @@ describe("local native Instantly campaign and lead tools", () => {
       const { f } = await roleWithSixteen();
       f.state.campaign.status = 1;
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
-      expect((events[0] as { message: string }).message).toMatch(/Already in this campaign/);
+      expect((events[0] as { message: string }).message).toMatch(
+        /Already queued in this sending campaign, not emailed yet: .*nothing failed/,
+      );
       expect(sends(f)).toEqual([]);
+    });
+
+    // Fri 2026-11-13 00:30 in Chicago: outside weekday 9-5, as when a recruiter confirms at night.
+    const NIGHT = new Date("2026-11-13T06:30:00Z");
+    const WEEKDAYS_9_TO_5 = {
+      schedules: [
+        {
+          name: "Weekdays",
+          timing: { from: "09:00", to: "17:00" },
+          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          timezone: "America/Chicago",
+        },
+      ],
+    };
+
+    it("says a named person already queued in the sending campaign is waiting, not refused", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.campaignLeads[1]!.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      const events = await f.run("activate_campaign", {
+        recipients: ["abe@x.test", f.state.campaignLeads[1]!.email],
+      });
+      const message = (events[0] as { message: string }).message;
+      expect(message).toMatch(/Already emailed by this campaign: /);
+      expect(message).toMatch(/Already queued in this sending campaign, not emailed yet: Abe/);
+      expect(sends(f)).toEqual([]);
+    });
+
+    it("sends a confirmed send at once on an older weekday-hours campaign at night", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.campaign_schedule = WEEKDAYS_9_TO_5;
+        await f.run("add_shortlist_leads", {
+          candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+        });
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+        const calls = f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`);
+        // Paused only to widen the hours, then the named person is added and sending resumes.
+        expect(calls).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          "POST /api/v2/leads/add",
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(JSON.stringify(f.state.campaign.campaign_schedule)).toContain('"name":"Any time"');
+        expect(out).toMatchObject({ sent: true, recipients: ["nick@x.test"] });
+        expect(out).not.toHaveProperty("firstEmailAt");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps business hours the recruiter asked for and says when the first email goes out", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        await f.run("ensure_role_campaign", { send_hours: "weekdays_9_to_5" });
+        f.state.campaign.status = 1;
+        await f.run("add_shortlist_leads", {
+          candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+        });
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+        expect(f.state.requests.some((r) => r.path.endsWith("/pause"))).toBe(false);
+        expect(out).toMatchObject({
+          sent: true,
+          firstEmailAt: "2026-11-13T15:00:00.000Z",
+          next: expect.stringContaining("first email goes out Fri 09:00 America/Chicago"),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends the people queued for later hours now when the recruiter asks", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        await f.run("ensure_role_campaign", { send_hours: "weekdays_9_to_5" });
+        f.state.campaign.status = 1;
+        for (const lead of f.state.campaignLeads.slice(1))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(read).toMatchObject({
+          queued: ["abe@x.test"],
+          queuedFirstEmail: "Fri 09:00 America/Chicago",
+          next: expect.stringContaining("send_now"),
+        });
+        expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { send_now: true }));
+        expect(
+          f.state.requests
+            .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+            .map((r) => `${r.method} ${r.path}`),
+        ).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(out).toMatchObject({ sentNow: true, recipients: ["abe@x.test"] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("refuses a send-now when nobody is queued, touching nothing", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      for (const lead of f.state.campaignLeads)
+        lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      const events = await f.run("activate_campaign", { send_now: true });
+      expect((events[0] as { message: string }).message).toMatch(/already been emailed/);
+      expect(
+        f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
+      ).toEqual([]);
     });
 
     describe("one person's own first email", () => {

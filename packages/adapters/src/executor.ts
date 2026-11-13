@@ -11639,6 +11639,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                               typeof entry === "string",
                           )
                         : undefined,
+                      args.send_now === true,
                     )
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
               // A send card is only for something that would send: an email and its recipients.
