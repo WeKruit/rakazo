@@ -1258,6 +1258,8 @@ model UsageRecord {
   @@index([userId])
   @@index([roleId, createdAt])
   @@index([unit, provider, createdAt])
+  /// Lets deleting a run null its usage rows without scanning the table.
+  @@index([runId])
   @@map("usage_records")
 }
 

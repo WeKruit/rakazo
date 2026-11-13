@@ -127,6 +127,12 @@ describe("greetsByName", () => {
 });
 
 describe("signedAsTeam", () => {
+  it("refuses an email signed as Kruit", () => {
+    // Staging 11-13: a template written "from my voice" was signed "Kruit".
+    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nKruit")).toBe(true);
+    expect(signedAsTeam("Hi {{firstName}},\n\nA role.\n\nBest,\nDavid Chen")).toBe(false);
+  });
+
   it("finds an email signed by a team instead of a person", () => {
     expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
       true,

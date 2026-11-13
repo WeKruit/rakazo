@@ -71,6 +71,9 @@ describe("quick reply", () => {
     expect(seen[0]?.instructions).toContain(
       "A job description they send is a role they are hiring for",
     );
+    // Staging 11-13: "好，现在发出。" read as sent while the email still needed Gmail connected.
+    expect(seen[0]?.instructions).toContain("never that it is being sent");
+    expect(seen[0]?.instructions).not.toContain("现在发出");
     // Outside recruiting chats the recruiter sentence stays out.
     await quickReply({ ...base, runtime: runtimeReplying("On it.", seen) });
     expect(seen[1]?.instructions).not.toContain("recruiter");
@@ -82,6 +85,13 @@ describe("quick reply", () => {
       null,
     );
     expect(seen).toHaveLength(0);
+  });
+
+  it("never says an email is going out", () => {
+    // Staging 11-13: "发吧" got 「好，现在发出。」, then Gmail turned out not to be connected.
+    expect(cleanQuickReply("好，现在发出。")).toBe("好，这就处理。");
+    expect(cleanQuickReply("Sending it now.")).toBe("On it.");
+    expect(cleanQuickReply("我先看这个岗位的发信队列。")).toBe("我先看这个岗位的发信队列。");
   });
 
   it("drops questions, long text and runtime filler", () => {
