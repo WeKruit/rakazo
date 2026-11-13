@@ -1,8 +1,8 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
-  classifyTurnEnd,
   asksHowThingsStand,
+  classifyTurnEnd,
   type TurnEndClass,
   turnEndPromise,
   turnEndStarted,
