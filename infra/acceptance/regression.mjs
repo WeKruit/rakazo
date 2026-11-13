@@ -52,7 +52,6 @@ import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { restartTestApp } from "./restart-test-app.mjs";
 import { checkReviewerGrading } from "./reviewer-grading.mjs";
-import { JOURNEYS } from "./simulated-journeys.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
 import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
 import {
@@ -1493,33 +1492,15 @@ try {
 
   define("simulated", async (failures) => {
     // A simulated recruiter talks to Kruit through whole journeys and a judge scores the
-    // experience (simulated-customer.mjs). The gate plays the journeys that need no paid search;
-    // one that sends needs the mailbox fixture and the internal test inboxes, or it is skipped.
-    for (const journey of JOURNEYS.filter((item) => item.gate)) {
-      const needs = [
-        ...(journey.account === "mailbox"
-          ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
-          : []),
-        ...(journey.sends ? ["RAKAZO_SIM_RECIPIENTS"] : []),
-      ].filter((name) => !process.env[name]);
-      if (needs.length) {
-        log(`simulated: skipping ${journey.name}, set ${needs.join(", ")}`);
-        continue;
-      }
-      const out = path.join(OUT, "simulated", journey.name);
-      const code = await run(`simulated-${journey.name}`, "simulated-customer.mjs", [
-        "--journey",
-        journey.name,
-        "--out",
-        out,
-      ]);
-      if (code === 2)
-        failures.push(
-          `simulated ${journey.name}: the test environment failed, not the product; rerun; see ${out}/report.md`,
-        );
-      else if (code !== 0)
-        failures.push(`simulated ${journey.name} did not pass; see ${out}/report.md`);
-    }
+    // experience (simulated-customer.mjs): the gate's journeys, side by side, none paid. One that
+    // sends is skipped unless the mailbox fixture and the internal test inboxes are set.
+    const out = path.join(OUT, "simulated");
+    const code = await run("simulated", "simulated-customer.mjs", ["--gate", "--out", out]);
+    if (code === 2)
+      failures.push(
+        `simulated: the test environment failed, not the product; rerun; see ${out}/summary.md`,
+      );
+    else if (code !== 0) failures.push(`simulated journeys did not pass; see ${out}/summary.md`);
   });
 
   define("memory", async (failures) => {

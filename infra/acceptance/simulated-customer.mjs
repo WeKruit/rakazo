@@ -8,15 +8,20 @@
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/simulated-customer.mjs --journey send-at-night [--out <dir>]
-//       [--bench <dir>] [--model sonnet] [--judge-model sonnet]
+//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate] [--paid] [--samples 1]
+//       [--concurrency 6] [--out <dir>] [--bench <dir>] [--model sonnet] [--judge-model sonnet]
+// Without --journeys it plays every journey that needs no paid search (with --paid, all of them),
+// side by side, each on its own brand-new account, and writes one scoreboard, <out>/summary.md,
+// with a report per journey beside it. Run it before saying a change to Kruit is done. --gate plays
+// only the release gate's journeys.
 // RAKAZO_SIM_RECIPIENTS lists the internal test inboxes a journey may email (comma separated). A
 // send card is approved only when every address on it is in that list; any other card is denied,
 // so the simulation never emails a real person. Journeys that send need it and an account with a
 // sending mailbox: RAKAZO_MAILBOX_EMAIL/PASSWORD, as in real-user.mjs.
 // The two models are called through RAKAZO_SIM_MODEL_COMMAND, a command that reads a prompt on
 // stdin and prints the reply; by default the Claude Code CLI (`claude -p`).
-// Exit code 0 when the journey passes, 1 when the product failed it, 2 when the environment did.
+// Exit code 0 when every journey passes, 1 when the product failed one, 2 when only the
+// environment did.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -46,25 +51,24 @@ const BASE = (process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
 const { RAKAZO_EMAIL: OWNER_EMAIL, RAKAZO_PASSWORD: OWNER_PASSWORD } = process.env;
 if (!BASE || !OWNER_EMAIL || !OWNER_PASSWORD)
   throw new Error("Set RAKAZO_URL, RAKAZO_EMAIL and RAKAZO_PASSWORD (the deployment owner)");
-const journey = JOURNEYS.find((item) => item.name === option("--journey"));
-if (!journey) throw new Error(`--journey is one of: ${JOURNEYS.map((j) => j.name).join(", ")}`);
 const RECIPIENTS = (process.env.RAKAZO_SIM_RECIPIENTS ?? "")
   .split(",")
   .map((address) => address.trim().toLowerCase())
   .filter(Boolean);
-if (journey.sends && !RECIPIENTS.length)
-  throw new Error(
-    `${journey.name} sends email: set RAKAZO_SIM_RECIPIENTS to internal test inboxes`,
-  );
 const MAILBOX = [process.env.RAKAZO_MAILBOX_EMAIL, process.env.RAKAZO_MAILBOX_PASSWORD];
-if (journey.account === "mailbox" && !MAILBOX.every(Boolean))
-  throw new Error(
-    `${journey.name} needs RAKAZO_MAILBOX_EMAIL/PASSWORD (an account with a mailbox)`,
-  );
-const OUT = option(
-  "--out",
-  `simulated-${journey.name}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
-);
+/** What a journey needs that this run was not given. */
+const missing = (journey) => [
+  ...(journey.account === "mailbox" && !MAILBOX.every(Boolean)
+    ? ["RAKAZO_MAILBOX_EMAIL", "RAKAZO_MAILBOX_PASSWORD"]
+    : []),
+  ...(journey.sends && !RECIPIENTS.length ? ["RAKAZO_SIM_RECIPIENTS"] : []),
+];
+const named = option("--journeys")?.split(",");
+for (const name of named ?? [])
+  if (!JOURNEYS.some((journey) => journey.name === name))
+    throw new Error(`no journey ${name}; journeys: ${JOURNEYS.map((j) => j.name).join(", ")}`);
+const PAID = args.includes("--paid");
+const OUT = option("--out", `simulated-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 fs.mkdirSync(OUT, { recursive: true });
 const started = Date.now();
 const log = (text) =>
@@ -219,7 +223,7 @@ async function newestBotMessageAfter(rpc, since) {
   return newest;
 }
 /** Seconds until Kruit's first visible reply, then waits until the account is quiet. */
-async function replyAfter(rpc, since) {
+async function replyAfter(journey, rpc, since) {
   let first = null;
   for (const until = Date.now() + 3 * 60_000; !first && Date.now() < until; await sleep(2_000))
     first = await newestBotMessageAfter(rpc, since);
@@ -231,7 +235,7 @@ const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant calle
 {"action": "say" | "answer_card" | "approve_send" | "deny_send" | "done", "card": <index of the card for answer_card/approve_send/deny_send>, "text": "<your message, or your typed answer for answer_card>", "goal": "<which goal this move serves>", "feeling": "<one line: how this person feels about Kruit's last reply>"}
 Use "done" when every goal is met, or when you have pushed back twice on the same goal and got nowhere (say which goal in "goal").`;
 
-async function simulate(turns, view, cards) {
+async function simulate(journey, turns, view, cards) {
   const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${
     cards.length
       ? cards
@@ -245,16 +249,14 @@ async function simulate(turns, view, cards) {
   return parse(await model(SIMULATOR_RULES, prompt, SIMULATOR));
 }
 
-async function play() {
-  const owner = client();
+async function play(journey, label, owner) {
   const user = client();
   if (journey.account === "mailbox") {
     await user.auth(...MAILBOX);
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
   } else {
-    await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
-    const email = `kruit-sim-${journey.name}-${Date.now()}@example.com`;
+    const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
     await owner.rpc("deployment/createAccount", { email, name: "Simulated Recruiter", password });
     await user.auth(email, password);
@@ -268,18 +270,18 @@ async function play() {
     for (let index = 0; index < journey.maxTurns; index += 1) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
-      const move = await simulate(turns, render(chats), cards);
+      const move = await simulate(journey, turns, render(chats), cards);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       if (move.action === "done") {
-        log(`recruiter is done: ${move.goal ?? ""}`);
+        log(`${label}: recruiter is done: ${move.goal ?? ""}`);
         turns.push(turn);
         break;
       }
       const card = cards[move.card];
       if (move.action === "say") {
         const chat = (await groupsOf(rpc)).find((group) => group.name === move.chat) ?? kruit;
-        log(`recruiter: ${move.text}`);
+        log(`${label}: recruiter: ${move.text}`);
         await send(rpc, chat.id, move.text);
       } else if (card && ["answer_card", "approve_send", "deny_send"].includes(move.action)) {
         let answer =
@@ -298,7 +300,7 @@ async function play() {
         }
         if (card.send && !["allow", "deny"].includes(answer)) answer = "deny";
         log(
-          `recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
+          `${label}: recruiter ${answer === "allow" ? "approves" : answer === "deny" ? "denies" : `answers "${answer}" on`} "${card.text.slice(0, 60)}"${turn.guard ? ` (${turn.guard})` : ""}`,
         );
         await rpc("threads/answer", {
           groupId: card.groupId,
@@ -311,10 +313,10 @@ async function play() {
         turns.push(turn);
         continue;
       }
-      turn.firstReplySeconds = await replyAfter(rpc, at);
+      turn.firstReplySeconds = await replyAfter(journey, rpc, at);
       turn.records = await records(rpc);
       turns.push(turn);
-      log(`  Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
+      log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
     }
     return {
       turns,
@@ -322,7 +324,7 @@ async function play() {
       records: await records(rpc),
     };
   } finally {
-    await stopAll(rpc).catch((error) => log(`stop failed: ${error.message}`));
+    await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
   }
 }
 
@@ -334,7 +336,7 @@ const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the cust
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
 {"turns": [{"turn": n, "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "note": "<one line>"}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
 
-async function judge(result) {
+async function judge(journey, result) {
   const moves = result.turns
     .map(
       (turn) =>
@@ -352,84 +354,154 @@ const SHA =
     .then((response) => response.headers.get("x-rakazo-revision"))
     .catch(() => null)) ??
   "unknown";
-let result;
-let verdict;
-let error;
-try {
-  result = await play();
-  verdict = await judge(result);
-} catch (caught) {
-  error = caught;
+
+/** Plays one journey, has it judged, and writes its report; returns its scoreboard row. */
+async function runOne(journey, sample, owner) {
+  const label = `${journey.name}#${sample}`;
+  const out = path.join(OUT, label);
+  fs.mkdirSync(out, { recursive: true });
+  const at = Date.now();
+  let result;
+  let verdict;
+  let error;
+  try {
+    result = await play(journey, label, owner);
+    verdict = await judge(journey, result);
+  } catch (caught) {
+    error = caught;
+  }
+  // Rule checks the scripted conversations use apply here too.
+  const checks = visible(result?.chats ?? []).flatMap(({ group, messages }) =>
+    conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
+  );
+  const falseClaims = (verdict?.turns ?? []).filter((turn) => turn.truthful === "no").length;
+  const missed = (verdict?.goals ?? []).filter((goal) => !goal.met);
+  const pass =
+    Boolean(verdict) && verdict.score >= 7 && !falseClaims && !missed.length && !checks.length;
+  const row = {
+    suite: "simulated",
+    scenario: journey.name,
+    area: journey.area,
+    source: journey.source,
+    sample,
+    pass,
+    score: verdict ? verdict.score / 10 : 0,
+    failures: error
+      ? [`${error instanceof InfraError ? "infrastructure" : "error"}: ${error.message}`]
+      : [
+          ...(verdict.score < 7 ? [`score ${verdict.score}/10: ${verdict.verdict}`] : []),
+          ...(falseClaims ? [`${falseClaims} reply(ies) contradict the records`] : []),
+          ...missed.map((goal) => `goal not met: ${goal.goal}`),
+          ...checks,
+        ],
+    sha: SHA,
+    at: new Date(at).toISOString(),
+    seconds: Math.round((Date.now() - at) / 1000),
+    paid: Boolean(journey.paid),
+    ...(verdict ? { verdict: verdict.verdict } : {}),
+    ...(error instanceof InfraError ? { infra: true } : {}),
+  };
+  fs.writeFileSync(
+    path.join(out, "journey.json"),
+    JSON.stringify({ journey: journey.name, result, verdict, checks }, null, 1),
+  );
+  const report = [
+    `# ${journey.title} — ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`,
+    "",
+    verdict?.verdict ?? `出错: ${error?.message}`,
+    "",
+    ...(verdict?.problems?.length ? ["## 问题", ...verdict.problems.map((p) => `- ${p}`), ""] : []),
+    ...(verdict?.goals?.length
+      ? ["## 目标", ...verdict.goals.map((g) => `- ${g.met ? "✓" : "✗"} ${g.goal}：${g.why}`), ""]
+      : []),
+    ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
+    "## 每一步",
+    "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 |",
+    "|---|---|---|---|---|---|",
+    ...(result?.turns ?? []).map((turn) => {
+      const judged = verdict?.turns?.find((item) => item.turn === turn.turn) ?? {};
+      const said = turn.move.text ?? turn.move.action;
+      return `| ${turn.turn} | ${said.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 60)}${turn.guard ? " (拦截)" : ""} | ${turn.firstReplySeconds ?? "-"} s | ${judged.answered === undefined ? "-" : judged.answered ? "是" : "否"} | ${judged.truthful ?? "-"} | ${(judged.issues ?? []).join(", ")} |`;
+    }),
+    "",
+    "## 对话",
+    render(result?.chats ?? []),
+    "",
+    `Staging ${SHA.slice(0, 8)} · ${row.seconds} s`,
+  ].join("\n");
+  fs.writeFileSync(path.join(out, "report.md"), `${report}\n`);
+  log(`${label}: ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`);
+  return row;
 }
-// Rule checks the scripted conversations use apply here too.
-const checks = visible(result?.chats ?? []).flatMap(({ group, messages }) =>
-  conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
+
+// Each journey on a free account gets a brand-new account, so journeys run side by side. Journeys
+// on the one mailbox fixture take turns, or they would read each other's chats.
+const GATE = args.includes("--gate");
+const selected = JOURNEYS.filter(
+  (journey) =>
+    (named ? named.includes(journey.name) : GATE ? journey.gate : !journey.paid || PAID) &&
+    !missing(journey).length,
 );
-const falseClaims = (verdict?.turns ?? []).filter((turn) => turn.truthful === "no").length;
-const missed = (verdict?.goals ?? []).filter((goal) => !goal.met);
-const pass =
-  Boolean(verdict) && verdict.score >= 7 && !falseClaims && !missed.length && !checks.length;
-const row = {
-  suite: "simulated",
-  scenario: journey.name,
-  area: journey.area,
-  source: journey.source,
-  sample: 1,
-  pass,
-  score: verdict ? verdict.score / 10 : 0,
-  failures: error
-    ? [`${error instanceof InfraError ? "infrastructure" : "error"}: ${error.message}`]
-    : [
-        ...(verdict.score < 7 ? [`score ${verdict.score}/10: ${verdict.verdict}`] : []),
-        ...(falseClaims ? [`${falseClaims} reply(ies) contradict the send records`] : []),
-        ...missed.map((goal) => `goal not met: ${goal.goal}`),
-        ...checks,
-      ],
-  sha: SHA,
-  at: new Date(started).toISOString(),
-  seconds: Math.round((Date.now() - started) / 1000),
-  modelUsd: Math.round(usage.usd * 100) / 100,
-  ...(error instanceof InfraError ? { infra: true } : {}),
-};
-fs.writeFileSync(path.join(OUT, "results.jsonl"), `${JSON.stringify(row)}\n`);
-fs.writeFileSync(
-  path.join(OUT, "journey.json"),
-  JSON.stringify({ journey: journey.name, result, verdict, checks }, null, 1),
+for (const journey of JOURNEYS.filter(
+  (item) => (!named || named.includes(item.name)) && missing(item).length,
+))
+  log(`skipping ${journey.name}: set ${missing(journey).join(", ")}`);
+const SAMPLES = Number(option("--samples", "1"));
+const CONCURRENCY = Number(option("--concurrency", "6"));
+const plays = selected.flatMap((journey) =>
+  Array.from({ length: journey.account ? 1 : SAMPLES }, (_, index) => ({
+    journey,
+    sample: index + 1,
+  })),
 );
-const report = [
-  `# ${journey.title} — ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`,
-  "",
-  verdict?.verdict ?? `出错: ${error?.message}`,
-  "",
-  ...(verdict?.problems?.length ? ["## 问题", ...verdict.problems.map((p) => `- ${p}`), ""] : []),
-  ...(verdict?.goals?.length
-    ? ["## 目标", ...verdict.goals.map((g) => `- ${g.met ? "✓" : "✗"} ${g.goal}：${g.why}`), ""]
-    : []),
-  ...(checks.length ? ["## 规则检查", ...checks.map((c) => `- ${c}`), ""] : []),
-  "## 每一步",
-  "| # | 客户 | 首次回复 | 回答了 | 属实 | 问题 |",
-  "|---|---|---|---|---|---|",
-  ...(result?.turns ?? []).map((turn) => {
-    const judged = verdict?.turns?.find((item) => item.turn === turn.turn) ?? {};
-    const said = turn.move.text ?? turn.move.action;
-    return `| ${turn.turn} | ${said.replace(/\|/g, "/").replace(/\n/g, " ").slice(0, 60)}${turn.guard ? " (拦截)" : ""} | ${turn.firstReplySeconds ?? "-"} s | ${judged.answered === undefined ? "-" : judged.answered ? "是" : "否"} | ${judged.truthful ?? "-"} | ${(judged.issues ?? []).join(", ")} |`;
+const owner = client();
+await owner.auth(OWNER_EMAIL, OWNER_PASSWORD);
+let mailboxTurn = Promise.resolve();
+const rows = [];
+let next = 0;
+await Promise.all(
+  Array.from({ length: Math.min(CONCURRENCY, plays.length) }, async () => {
+    while (next < plays.length) {
+      const { journey, sample } = plays[next++];
+      const go = () => runOne(journey, sample, owner);
+      if (journey.account !== "mailbox") rows.push(await go());
+      else {
+        const turn = mailboxTurn.then(go);
+        mailboxTurn = turn.catch(() => undefined);
+        rows.push(await turn);
+      }
+    }
   }),
-  "",
-  "## 对话",
-  render(result?.chats ?? []),
-  "",
-  `Staging ${SHA.slice(0, 8)} · ${row.seconds} s · model cost $${row.modelUsd}`,
-].join("\n");
-fs.writeFileSync(path.join(OUT, "report.md"), `${report}\n`);
+);
+rows.sort(
+  (a, b) =>
+    a.scenario.localeCompare(b.scenario) || String(a.sample).localeCompare(String(b.sample)),
+);
+fs.writeFileSync(
+  path.join(OUT, "results.jsonl"),
+  rows.map((row) => `${JSON.stringify(row)}\n`).join(""),
+);
 const BENCH = option("--bench");
 if (BENCH) {
   fs.mkdirSync(BENCH, { recursive: true });
   fs.appendFileSync(
     path.join(BENCH, `${new Date().toISOString().slice(0, 10)}-${SHA.slice(0, 8)}-simulated.jsonl`),
-    `${JSON.stringify(row)}\n`,
+    rows.map((row) => `${JSON.stringify(row)}\n`).join(""),
   );
 }
-log(
-  `${journey.name}: ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}; report ${path.join(OUT, "report.md")}`,
-);
-process.exit(pass ? 0 : error instanceof InfraError ? 2 : 1);
+// One scoreboard for the whole run.
+const passed = rows.filter((row) => row.pass).length;
+const summary = [
+  `# 模拟客户 ${passed}/${rows.length} 通过 · staging ${SHA.slice(0, 8)} · ${Math.round((Date.now() - started) / 60_000)} 分钟 · 模型 $${usage.usd.toFixed(2)}`,
+  "",
+  "| 旅程 | 分数 | 结果 | 一句话 |",
+  "|---|---|---|---|",
+  ...rows.map(
+    (row) =>
+      `| [${row.scenario}#${row.sample}](${encodeURIComponent(`${row.scenario}#${row.sample}`)}/report.md) | ${row.infra ? "-" : `${Math.round(row.score * 10)}/10`} | ${row.pass ? "通过" : row.infra ? "环境出错" : "不通过"} | ${(row.verdict ?? row.failures[0] ?? "").replace(/\|/g, "/")} |`,
+  ),
+].join("\n");
+fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
+log(`${passed}/${rows.length} journeys pass; scoreboard ${path.join(OUT, "summary.md")}`);
+const productFailed = rows.some((row) => !row.pass && !row.infra);
+process.exit(productFailed ? 1 : rows.some((row) => row.infra) ? 2 : 0);
