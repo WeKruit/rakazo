@@ -419,3 +419,14 @@ test("the 11-13 send-count replies fail on the restated question and the name le
     [],
   );
 });
+
+test("a capabilities list that invites the next message is not a dead end", () => {
+  assert.equal(
+    deadEnd(
+      bot(
+        "我可以帮你搜寻候选人、准备邮件和协调面试。目前还没有选定招聘职位。你可以直接发职位描述、链接或文件，也可以告诉我想先处理哪件事。",
+      ),
+    ),
+    false,
+  );
+});
