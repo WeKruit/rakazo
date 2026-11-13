@@ -5342,7 +5342,7 @@ describe("local native Instantly campaign and lead tools", () => {
           queued: true,
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
-            "it should be out by about 01:30 America/Chicago at the latest",
+            "it should be out by about 01:30 Central time (Chicago) at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
@@ -5468,6 +5468,16 @@ describe("local native Instantly campaign and lead tools", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("asks for the campaign, not the role, when a send has no campaign outside a role", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.activeRoleId = null;
+      const events = await f.run("activate_campaign", { send_now: true });
+      expect((events[0] as { message: string }).message).toMatch(
+        /Pass campaign_id: .*Do not ask the recruiter for the role again/,
+      );
+      expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([]);
     });
 
     it("refuses a send-now when nobody is queued, touching nothing", async () => {

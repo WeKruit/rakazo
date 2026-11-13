@@ -79,9 +79,9 @@ export async function groupsOf(rpc) {
   return groups;
 }
 export const messagesOf = async (rpc, groupId) =>
-  (await rpc("threads/messages", { groupId, includePeerRuns: true })).messages ?? [];
+  (await rpc("threads/messages", { groupId, includePeerRuns: true }))?.messages ?? [];
 export const working = async (rpc, groupId) =>
-  ((await rpc("threads/get", { groupId })).activeRuns ?? []).some(
+  ((await rpc("threads/get", { groupId }))?.activeRuns ?? []).some(
     (run) => run.status !== "waiting_input",
   );
 
