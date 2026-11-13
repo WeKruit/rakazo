@@ -359,20 +359,20 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "show only fitting people in a short pool",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "show only the people who fit, never anyone who fails a requirement",
+    phrase: "never fill the round with people who fail a requirement",
     why: "A short pool was shown with people who fail a requirement.",
   },
   {
-    rule: "a short pool goes to the recruiter",
+    rule: "a short pool gets its round before any deeper search",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "offering to relax that named requirement or to keep searching with a deeper search",
-    why: "A hard-to-fill role silently relaxed a requirement or started paid research.",
+    phrase: "so it never runs before the round: the next-step card offers it",
+    why: "A short round spent about $1 on a deeper search nobody asked for (11-13).",
   },
   {
-    rule: "the deeper search says it costs more",
+    rule: "a short round holds everyone who fits",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "whose option says it takes longer and costs more",
-    why: "The recruiter picked the deeper search without knowing it is slower and paid.",
+    phrase: "record the round with calibration_round with everyone who fits, even fewer than ten",
+    why: "A role with only a few fitting people never got its first round.",
   },
   {
     rule: "top-up only the missing number",
@@ -380,6 +380,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     phrase:
       "run one people-search agent run (agent_run, effort auto) for only the missing number of people",
     why: "The deeper search re-ran research for the whole round.",
+  },
+  {
+    rule: "the language check decides the language",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "The level is the language decision: take it as given, never judge the language again",
+    why: "Strong-rated Korean speakers were left out as \"Korean not verified\" (11-13).",
+  },
+  {
+    rule: "the hiring company is only a named employer",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "the hiring company is only the employer the JD or the recruiter names, never one guessed from the location or industry",
+    why: "A battery-plant JD named no employer; half the runs guessed the local plant and left out all its staff, so the first round came back with 4 people (11-13).",
   },
   {
     rule: "no quota talk",
@@ -738,16 +750,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "A Mandarin role ran generic searches and labeled almost every person's language unknown.",
   },
   {
-    rule: "no sign of a required language never makes the ten",
+    rule: "a required language ranks people by evidence instead of leaving them out",
     in: ["RECRUITING_SEARCH_SAVED_NEXT_STEP", "RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP"],
-    phrase: "shows no sign of it never makes the ten",
-    why: "The ten for a Mandarin role were people with no sign of Mandarin.",
-  },
-  {
-    rule: "never guess language or origin from names",
-    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
-    phrase: "Never guess a language, origin or ethnicity from a name",
-    why: "Ranking by name would be national-origin profiling.",
+    phrase: "an unknown language never rules someone out",
+    why: "Leaving out everyone without stated evidence cut a Mandarin first round from 54 found to 2; people with evidence still come first.",
   },
   {
     rule: "a missed requirement means a new search",

@@ -81,10 +81,13 @@ export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
 export {
+  bindImportedCampaigns,
   describeCampaignActivation,
   EMPTY_ACTIVATION_DISPLAY,
+  historyKey,
   lastUsedMailbox,
   readRoleCampaignBinding,
+  roleCampaignIds,
 } from "./instantly-native-writes.js";
 export { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 export * from "./integration-provider-settings.js";

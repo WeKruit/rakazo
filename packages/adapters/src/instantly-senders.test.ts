@@ -131,8 +131,8 @@ function fixture(limit = 2, senderSelfSetup = true) {
   const fake = {
     externalEffect: effect,
     sendingMailboxAssignment: {
-      findFirst: vi.fn(
-        async ({ where }: any) => assignments.find((row) => row.userId === where.userId) ?? null,
+      findMany: vi.fn(async ({ where }: any) =>
+        assignments.filter((row) => row.userId === where.userId),
       ),
     },
     deploymentSettings: {
@@ -755,6 +755,29 @@ it("records an owner-assigned mailbox as this account's sender on its first read
   expect(f.orders()).toBe(0);
   await ensureSendingIdentity(f.prisma, f.rest, context, "source", { operation: "read" });
   expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(1);
+});
+it("adopts every mailbox the owner assigned, keeping each one's name when none is given", async () => {
+  const f = fixture(2, false);
+  const emails = ["noah@a.test", "liu@b.test", "n.liu@c.test"];
+  for (const email of emails) {
+    f.accounts.set(email, {
+      email,
+      first_name: "Noah",
+      last_name: "Liu",
+      setup_pending: false,
+      status: 1,
+      warmup_status: 1,
+    });
+    f.assignments.push({ email, userId: "owner", displayName: "", createdAt: new Date() });
+  }
+  const read = await ensureSendingIdentity(f.prisma, f.rest, context, "source", {
+    operation: "read",
+  });
+  expect((read as { senders: { email: string; displayName: string }[] }).senders).toEqual(
+    emails.map((email) => expect.objectContaining({ email, displayName: "Noah Liu" })),
+  );
+  expect(f.rows.filter((row) => row.kind === "instantly_sender_account")).toHaveLength(3);
+  expect(f.accounts.get("liu@b.test")?.first_name).toBe("Noah");
 });
 it("never adopts an assigned mailbox another account already holds", async () => {
   const f = fixture(2, false);

@@ -1,11 +1,7 @@
-import type { TextJudge } from "./judge.js";
+import type { LanguageSignal, TextJudge } from "./judge.js";
+import type { ProfileReads } from "./recruiting-full-profile.js";
+import { FULL_PROFILE_WAIT_MS, fullProfilePages } from "./recruiting-full-profile.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
-
-/**
- * A required language is rarely in the short passage a people row carries, so the search's own
- * profile text is read by the yes/no judge and each row says whether that text shows it.
- */
-export type LanguageSignal = "shown" | "unclear" | "no sign";
 
 /** Languages a brief may require, matched in English or Chinese. */
 const LANGUAGE_WORDS =
@@ -89,6 +85,7 @@ export function plannedLanguageFilters(
   return { filters: stated ? languageFilters([stated]) : [], queriesNameIt: false };
 }
 
+/** The built-in question reads this much of each profile; the deployment's check gets all of it. */
 const PROFILE_TEXT_LIMIT = 4_000;
 
 /**
@@ -103,7 +100,7 @@ export function profileTexts(result: unknown): Map<string, string> {
       for (const entry of value.split(/^(?=Title: )/m)) {
         const url = entry.match(/^URL: (\S+)$/m)?.[1];
         const key = url ? linkedinPersonKey(url) : null;
-        if (key && !texts.has(key)) texts.set(key, entry.slice(0, PROFILE_TEXT_LIMIT));
+        if (key && !texts.has(key)) texts.set(key, entry);
       }
       if (value.trimStart().startsWith("{") || value.trimStart().startsWith("["))
         try {
@@ -121,7 +118,7 @@ export function profileTexts(result: unknown): Map<string, string> {
       (item) => typeof item === "string" && linkedinPersonKey(item),
     );
     const key = link ? linkedinPersonKey(link) : null;
-    if (key && !texts.has(key)) texts.set(key, JSON.stringify(record).slice(0, PROFILE_TEXT_LIMIT));
+    if (key && !texts.has(key)) texts.set(key, JSON.stringify(record));
     for (const nested of Object.values(record)) visit(nested, depth + 1);
   };
   visit(result, 0);
@@ -145,37 +142,59 @@ const QUESTION = (requirement: string) =>
 const SHOWN = 0.6;
 const NO_SIGN = 0.25;
 
+/** A person in a search's rows, with the row itself for the deployment's own check. */
+type Person = { candidateKey: string; name?: string; candidate?: Record<string, unknown> };
+
+/** The yes/no judge's answer for one row, when the deployment has no language check of its own. */
+async function askedLanguage(
+  judge: TextJudge,
+  requirement: string,
+  name: string,
+  profile: string,
+  signal?: AbortSignal,
+): Promise<LanguageSignal | undefined> {
+  const p = await judge.yes(
+    QUESTION(requirement),
+    { profile: withoutName(profile.slice(0, PROFILE_TEXT_LIMIT), name) },
+    signal,
+  );
+  if (p === undefined) return undefined;
+  return p >= SHOWN ? "strong" : p < NO_SIGN ? "no sign" : "unknown";
+}
+
 /**
- * Asks the judge about each person's profile text, all at once. People the judge could not answer
- * for, or with no profile text, are left out; the search result never waits on a failed judge.
+ * Asks the judge about each person's profile text, all at once: the deployment's own language
+ * check with the rows in batches when it has one, else one yes/no question each. People the
+ * judge could not answer for, or with no profile text, are left out; the search result never
+ * waits on a failed judge.
  */
 export async function languageSignals(
   judge: TextJudge,
   requirement: string,
-  people: ReadonlyArray<{ candidateKey: string; name?: string }>,
+  people: ReadonlyArray<Person>,
   texts: ReadonlyMap<string, string>,
   signal?: AbortSignal,
 ): Promise<Map<string, LanguageSignal>> {
+  const rows = people.flatMap((person) => {
+    const profile = texts.get(person.candidateKey);
+    return profile
+      ? [{ id: person.candidateKey, name: person.name, profile, candidate: person.candidate }]
+      : [];
+  });
+  if (judge.language) return rows.length ? judge.language(requirement, rows, signal) : new Map();
   const signals = new Map<string, LanguageSignal>();
   await Promise.all(
-    people.map(async (person) => {
-      const text = texts.get(person.candidateKey);
-      if (!text) return;
-      const p = await judge.yes(
-        QUESTION(requirement),
-        { profile: withoutName(text, person.name ?? "") },
-        signal,
-      );
-      if (p === undefined) return;
-      signals.set(person.candidateKey, p >= SHOWN ? "shown" : p < NO_SIGN ? "no sign" : "unclear");
+    rows.map(async (row) => {
+      const verdict = await askedLanguage(judge, requirement, row.name ?? "", row.profile, signal);
+      if (verdict) signals.set(row.id, verdict);
     }),
   );
   return signals;
 }
 
-const ORDER: Record<LanguageSignal, number> = { shown: 0, unclear: 1, "no sign": 2 };
+const ORDER: Record<LanguageSignal, number> = { confirmed: 0, strong: 1, possible: 2, unknown: 3, "no sign": 4 };
 
-/** Rows with the language shown first, then unclear, then no sign; unjudged rows sit with unclear. */
+/** Rows by language evidence: confirmed, strong, unknown, then no sign; unjudged rows are unknown. */
 export function withLanguageSignals<T extends { candidateKey?: unknown }>(
   rows: readonly T[],
   signals: ReadonlyMap<string, LanguageSignal>,
@@ -185,7 +204,7 @@ export function withLanguageSignals<T extends { candidateKey?: unknown }>(
       const value = signals.get(String(row.candidateKey));
       return { row: value ? { ...row, requiredLanguage: value } : { ...row }, index, value };
     })
-    .sort((a, b) => ORDER[a.value ?? "unclear"] - ORDER[b.value ?? "unclear"] || a.index - b.index)
+    .sort((a, b) => ORDER[a.value ?? "unknown"] - ORDER[b.value ?? "unknown"] || a.index - b.index)
     .map((entry) => entry.row);
 }
 
@@ -198,7 +217,7 @@ const LANGUAGE_PLACES: Record<string, RegExp> = {
 
 /**
  * Without the judge, a profile shows the language when its text names it (or, for Mandarin and
- * Cantonese, a place where it is spoken); otherwise it shows no sign of it.
+ * Cantonese, a place where it is spoken); otherwise it is unknown, never left out on text alone.
  */
 export function textLanguageJudge(requirement: string): TextJudge {
   const names = languageFilters([requirement]);
@@ -208,9 +227,34 @@ export function textLanguageJudge(requirement: string): TextJudge {
     async yes(_instructions, state) {
       if (!named) return undefined;
       const profile = String(state.profile ?? "");
-      return named.test(profile) || places.some((place) => place.test(profile)) ? 0.9 : 0.1;
+      return named.test(profile) || places.some((place) => place.test(profile)) ? 0.9 : 0.4;
     },
   };
+}
+
+/**
+ * The search's own text often leaves the language out, so people it does not show it for get
+ * their full profile page read and judged again, in row order, while the turn's reads last.
+ */
+async function fullProfileSignals(
+  judge: TextJudge,
+  requirement: string,
+  people: ReadonlyArray<Person>,
+  signals: ReadonlyMap<string, LanguageSignal>,
+  reader: ProfileReads,
+): Promise<Map<string, LanguageSignal>> {
+  const pending = people.filter(
+    (person) => (ORDER[signals.get(person.candidateKey) ?? "unknown"] ?? 2) >= ORDER.unknown,
+  );
+  const signal = AbortSignal.timeout(FULL_PROFILE_WAIT_MS);
+  const texts = await fullProfilePages(
+    pending.map((person) => person.candidateKey),
+    reader,
+    signal,
+  );
+  if (!texts.size) return new Map();
+  const read = pending.filter((person) => texts.has(person.candidateKey));
+  return languageSignals(judge, requirement, read, texts, signal).catch(() => new Map());
 }
 
 /**
@@ -224,6 +268,7 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
   role: unknown,
   rows: readonly T[],
   result: unknown,
+  reader?: ProfileReads,
 ): Promise<{ rows: Array<T & { requiredLanguage?: LanguageSignal }>; withoutLanguage: number }> {
   try {
     const requirement = requiredLanguage(role);
@@ -233,12 +278,22 @@ export async function withRequiredLanguage<T extends { candidateKey?: unknown; n
     const people = rows.map((row) => ({
       candidateKey: String(row.candidateKey),
       name: typeof row.name === "string" ? row.name : undefined,
+      candidate: { ...row },
     }));
     const texts = profileTexts(result);
     let signals = await languageSignals(judge, requirement, people, texts);
     // A judge that answered for nobody (down or timed out) falls back to the profile text.
     if (!signals.size)
       signals = await languageSignals(textLanguageJudge(requirement), requirement, people, texts);
+    if (reader)
+      for (const [key, value] of await fullProfileSignals(
+        judge,
+        requirement,
+        people,
+        signals,
+        reader,
+      ))
+        signals.set(key, value);
     if (!signals.size) return { rows: [...rows], withoutLanguage: 0 };
     const ordered = withLanguageSignals(rows, signals);
     const kept = ordered.filter((row) => row.requiredLanguage !== "no sign");

@@ -8,6 +8,7 @@ import {
   listSyncedRecruitingUnassignedSequences,
 } from "@rakazo/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { dueRecruitingCrmOwners } from "./recruiting-crm-autosync.js";
 import { recordCrmRoleRead, syncRecruitingCrm } from "./recruiting-crm-sync.js";
 import type { ThreadTarget } from "./thread-target.js";
 
@@ -505,6 +506,73 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       messages: { created: 0, unchanged: 1 },
     });
     expect(await prisma.recruitingCrmContact.count({ where: scoped(actor) })).toBe(3);
+  });
+
+  it("leaves unchanged contacts, links and mail unwritten on a later pass", async () => {
+    await runAll(actor, crm.read);
+    // xmin changes whenever Postgres writes a new row version, even for the same values.
+    const versions = () =>
+      prisma.$queryRaw<{ xmin: string }[]>`
+        SELECT xmin::text FROM recruiting_crm_contacts
+        WHERE "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+        UNION ALL
+        SELECT l.xmin::text FROM recruiting_crm_role_contacts l
+        JOIN recruiting_crm_contacts c ON c.id = l."contactId"
+        WHERE c."userId" = ${actor.userId} AND c."spaceId" = ${actor.spaceId}
+        UNION ALL
+        SELECT xmin::text FROM recruiting_crm_messages
+        WHERE "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+        ORDER BY 1`;
+    const before = await versions();
+    expect(before).toHaveLength(7);
+    expect(await runAll(actor, crm.read)).toMatchObject({
+      contacts: { unchanged: 3, archived: 0 },
+      links: { unchanged: 3, archived: 0 },
+      messages: { unchanged: 1 },
+    });
+    expect(await versions()).toEqual(before);
+    // The role list is still read and stamped.
+    expect(
+      await prisma.recruitingCrmRole.count({
+        where: { ...scoped(actor), syncedAt: { gt: new Date(Date.now() - 60_000) } },
+      }),
+    ).toBe(2);
+  });
+
+  it("reads an owner's CRM again after a day, or a week when it had nothing to copy", async () => {
+    const endpoint = `https://crm-${suffix}.example.test/mcp`;
+    await prisma.mcpServer.update({ where: { id: serverId }, data: { endpoint, enabled: true } });
+    await prisma.member.create({
+      data: { id: `m-${suffix}`, organizationId, userId, role: "member", createdAt: new Date() },
+    });
+    await prisma.spaceMember.create({
+      data: {
+        id: `sm-${suffix}`,
+        spaceId,
+        organizationId,
+        userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const day = 24 * 60 * 60 * 1000;
+    const due = async (inDays: number) =>
+      (await dueRecruitingCrmOwners(prisma, endpoint, new Date(Date.now() + inDays * day))).map(
+        (owner) => owner.userId,
+      );
+    await prisma.recruitingCrmSyncPass.deleteMany({ where: scoped(actor) });
+    expect(await due(0)).toEqual([userId]);
+    await runAll(actor, crm.read, true);
+    expect(await due(0)).toEqual([userId]);
+    await runAll(actor, crm.read);
+    expect(await due(0)).toEqual([]);
+    expect(await due(2)).toEqual([userId]);
+    // An empty CRM: a restart or the hourly check leaves it alone for a week.
+    await prisma.recruitingCrmContact.deleteMany({ where: scoped(actor) });
+    await prisma.recruitingCrmRole.deleteMany({ where: scoped(actor) });
+    expect(await due(2)).toEqual([]);
+    expect(await due(8)).toEqual([userId]);
+    await prisma.mcpServer.update({ where: { id: serverId }, data: { endpoint: null } });
   });
 
   it("archives what left the CRM and restores it when it returns, never deleting", async () => {

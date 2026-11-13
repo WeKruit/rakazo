@@ -1,6 +1,8 @@
 export const DEFAULT_FAST_MODEL = "gpt-6-luna";
 /** A user message at or above this length is treated as real work, not a light turn. */
 export const FAST_TURN_MAX_CHARS = 300;
+const ASKS_WHY_OR_HOW_MANY =
+  /为什么|为啥|怎么回事|怎么会|什么情况|多少|几个|几位|几封|\bwhy\b|how many|how much|what happened|what went wrong/i;
 
 export interface TurnModelInput {
   configured: { provider: string; id: string };
@@ -59,7 +61,9 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   if (input.trigger !== "user" && input.trigger !== "messaging")
     return { ...configured, reason: `trigger:${input.trigger}` };
   if (input.hasAttachments) return { ...configured, reason: "attachments" };
-  // ponytail: length is the whole heuristic; a short "find 50 candidates" still routes fast.
+  // A short "why did nothing send?" or "how many went out?" needs the agent to check and reason,
+  // so it keeps the configured model; other short messages stay on the fast one.
+  if (ASKS_WHY_OR_HOW_MANY.test(input.userText)) return { ...configured, reason: "why_question" };
   if (input.userText.trim().length < FAST_TURN_MAX_CHARS)
     return { ...fast, reason: "short_user_message" };
   return { ...configured, reason: "long_message" };

@@ -1,3 +1,4 @@
+import { disabledBuiltinToolSet } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   creditEstimateNote,
@@ -12,9 +13,12 @@ import {
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
+  roleOpenedNote,
+  signedAsTeam,
 } from "./recruiting-defaults.js";
 
 describe("calibration fast path", () => {
@@ -88,11 +92,28 @@ describe("maintained recruiting defaults", () => {
   });
 });
 
+describe("signedAsTeam", () => {
+  it("finds an email signed by a team instead of a person", () => {
+    expect(signedAsTeam("Hi Noah,\n\nWould you be open to a chat?\n\nBest,\nRecruiting")).toBe(
+      true,
+    );
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nThe Recruiting Team.")).toBe(true);
+    expect(signedAsTeam("Hi Noah,\n\nBest,\nJules Hou")).toBe(false);
+    expect(signedAsTeam("Hi Noah, are you open to recruiting work?")).toBe(false);
+  });
+});
+
 describe("isChineseText", () => {
   // Staging eval 11-11: 「发给 alex.chen.test@example.com」 got English replies.
   it("ignores email addresses and links when reading the language", () => {
     expect(isChineseText("发给 alex.chen.test@example.com")).toBe(true);
     expect(isEnglishText("发给 alex.chen.test@example.com")).toBe(false);
+    // The email body the recruiter dictates is the candidate's language, not theirs.
+    const dictated =
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?";
+    expect(isChineseText(dictated)).toBe(true);
+    expect(isEnglishText(dictated)).toBe(false);
+    expect(isEnglishText('Send Alex "你好，下周有空吗" please, thanks a lot')).toBe(true);
     expect(isChineseText("看看这个 https://www.linkedin.com/in/some-person-name")).toBe(true);
     expect(recruiterLanguageText(["发给 alex.chen.test@example.com", "Write a template"])).toBe(
       "发给 alex.chen.test@example.com",
@@ -158,6 +179,8 @@ describe("recruitingNextStepCard", () => {
     expect(`${card.text}${card.options.join("")}`).not.toMatch(/[A-Za-z]/);
     expect(card.options).toHaveLength(3);
     expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
+    expect(recruitingNextStepCard(false, true).options[0]).toBe("Search deeper");
+    expect(recruitingNextStepCard(true, true).options[0]).toBe("深挖一次");
   });
 });
 
@@ -182,5 +205,31 @@ describe("global recruiting overview", () => {
     // Staging gate 11-11: Kruit handed it to Outreach, which wrote a three-email sequence.
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain("an email or template naming no one you write yourself");
+  });
+});
+
+describe("roleOpenedNote", () => {
+  it("gives its example in the language of the recruiter's newest message", () => {
+    expect(roleOpenedNote(true)).toContain("「岗位已经开好");
+    expect(roleOpenedNote(true)).not.toContain("I opened the role");
+    expect(roleOpenedNote(false)).toContain("I opened the role");
+  });
+});
+
+describe("recruiting tool list", () => {
+  it("drops only real built-in tools and keeps every tool the playbook names", () => {
+    expect(disabledBuiltinToolSet(RECRUITING_UNUSED_BUILTIN_TOOLS).size).toBe(
+      RECRUITING_UNUSED_BUILTIN_TOOLS.length,
+    );
+    const playbook = [
+      RECRUITER_LANGUAGE,
+      RECRUITING_CALIBRATION_QUICK_SEARCH,
+      RECRUITING_SCALE_START,
+      RECRUITING_ROUND_NEXT_STEP,
+      ...RECRUITING_DEFAULT_BOTS.map((bot) => bot.instructions),
+      ...RECRUITING_DEFAULT_SKILLS.map((skill) => skill.body),
+    ].join("\n");
+    for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
+      expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
   });
 });

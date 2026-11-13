@@ -214,6 +214,16 @@ test("one question, a draft with its own question and a quoted line count as one
     ["要现在发吗？"],
   );
 });
+test("an email body the recruiter dictates in English does not make their message English", () => {
+  const failures = conversationChecks([
+    user(
+      "请给 alex.chen.test@example.com 发一封简短的邮件，主题写 Quick chat，正文：Hi Alex, do you have time next week to talk about a backend role?",
+    ),
+    bot("我会只向 Alex 的地址发送这封指定内容的邮件，并提交发送确认。"),
+  ]);
+  assert.deepEqual(failures, []);
+});
+
 test("a Chinese question with an English role title is still Chinese", () => {
   const failures = conversationChecks([
     user("继续吧"),
@@ -318,4 +328,105 @@ test("a factual answer with a caveat is not a dead end", () => {
     !deadEnd(bot("结果会保留来源和证据，资料缺失或无法核实时会标明。覆盖范围取决于公开资料。")),
   );
   assert(deadEnd(bot("现在还不能发送邮件，因为没有可用的发件邮箱。")));
+});
+
+test("a reply that blames a permission or tells the recruiter to open a role fails", () => {
+  for (const reply of [
+    "测试邮件尚未发出。当前权限不支持创建一次性邮件，因此无法提交发送确认；需要开通支持单封邮件发送的权限后才能完成。",
+    "请先打开岗位对话后再查看这位候选人的邮件。",
+    "I don't have permission to send a one-off email from here.",
+  ]) {
+    const failures = conversationChecks([user("帮我给 alex@example.com 发封邮件"), bot(reply)]);
+    assert(
+      failures.some((failure) => failure.startsWith("blames a permission or a missing path")),
+      reply,
+    );
+  }
+  assert(
+    !conversationChecks([
+      user("帮我连 Gmail"),
+      bot("我已经发起 Gmail 授权，请在卡片上连接。"),
+    ]).some((failure) => failure.startsWith("blames a permission")),
+  );
+});
+
+test("a message left unanswered behind an open send card fails", () => {
+  const failures = conversationChecks([
+    user("帮我给 alex@example.com 写封邮件，写好就发"),
+    bot("写好了，确认后发出。", true),
+    user("对了，我现在有几个岗位？"),
+  ]);
+  assert(failures.some((failure) => failure.startsWith('no reply to "对了')));
+  assert.deepEqual(
+    conversationChecks([
+      user("帮我给 alex@example.com 写封邮件，写好就发"),
+      bot("写好了，确认后发出。", true),
+      user("对了，我现在有几个岗位？"),
+      bot("你现在有 2 个岗位。邮件还在等你确认。"),
+    ]),
+    [],
+  );
+});
+
+test("a list of similar role names is not a repeat", () => {
+  assert.deepEqual(
+    conversationChecks([
+      user("对了，我现在有几个岗位？"),
+      bot(
+        "你现在有 4 个岗位：\n- 测试固定 · 发信测试2（后端工程师）\n- 测试固定 · 发信测试3（后端工程师）\n- 测试固定 · 发信测试4（后端工程师）\n- 测试固定 · 发信测试5（后端工程师）",
+      ),
+    ]),
+    [],
+  );
+});
+
+test("the account's own sending address may be shown, another address may not", () => {
+  const failures = conversationChecks([
+    user("请给 alex@example.com 发一封简短的邮件"),
+    bot("这封邮件会从发件地址 liu@sender.test 发出，抄送 boss@company.test。"),
+  ]);
+  assert.deepEqual(
+    failures.filter((failure) => failure.startsWith("shows an address")),
+    ["shows an address the recruiter never gave: boss@company.test"],
+  );
+});
+
+test("the same unverified label under several people in a Chinese round is not a repeat", () => {
+  const person = (n, name) =>
+    `${n}. **[${name}](https://www.linkedin.com/in/${name.toLowerCase()})** · Senior Data Engineer\n   > Built Spark pipelines on AWS.\n   未核实：years of experience`;
+  assert.deepEqual(
+    conversationChecks([
+      user("对了，远程也可以，不一定要在西雅图"),
+      bot(`本轮 10 人：\n\n${person(1, "Ann")}\n${person(2, "Bob")}\n${person(3, "Cy")}`),
+    ]),
+    [],
+  );
+});
+
+test("the 11-13 send-count replies fail on the restated question and the name lecture", () => {
+  const failures = conversationChecks([
+    user("你找了这么多人为什么一个邮件都发不出去？"),
+    bot("我正在梳理你提到的邮件发送问题。"),
+    bot("目前确实一封都没发出。另外，中文能力应以候选人资料中的明确证据为准，不能靠姓名判断。"),
+  ]);
+  assert(failures.some((failure) => failure.startsWith("restates the question")));
+  assert(failures.some((failure) => failure.startsWith("lectures on judging language by name")));
+  assert.deepEqual(
+    conversationChecks([
+      user("现在发送了多少人呢"),
+      bot("已排队 3 人，第一封周五 9:00 芝加哥时间发出。要现在就发吗？"),
+    ]),
+    [],
+  );
+});
+
+test("a capabilities list that invites the next message is not a dead end", () => {
+  assert.equal(
+    deadEnd(
+      bot(
+        "我可以帮你搜寻候选人、准备邮件和协调面试。目前还没有选定招聘职位。你可以直接发职位描述、链接或文件，也可以告诉我想先处理哪件事。",
+      ),
+    ),
+    false,
+  );
 });

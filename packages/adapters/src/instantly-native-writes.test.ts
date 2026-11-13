@@ -6,6 +6,7 @@ import {
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
+  nextSendWindow,
   ownedInstantly,
   ownedInstantlyRest,
   requireReplySendingMailboxReady,
@@ -209,6 +210,16 @@ describe("activation card for one person's own first email", () => {
     expect(display.refusal).toBeUndefined();
   });
 
+  it("names the sending mailbox from get_campaign when no role says it", async () => {
+    const { email_list: _, ...rest } = campaign;
+    const fromTool = async (tool: string) =>
+      tool === "native_instantly_get_campaign"
+        ? { ...rest, sendingMailbox: ["me@x.test"] }
+        : { items: leads };
+    const display = await describeCampaignActivation(fromTool, "c-1", null, null, ["ada@x.test"]);
+    expect(display.mailbox).toBe("me@x.test");
+  });
+
   it("shows the role's email for the people who keep it", async () => {
     const display = await describeCampaignActivation(read, "c-1", null, binding);
     expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
@@ -343,12 +354,25 @@ describe("shared mail account isolation", () => {
       ["POST", "/leads/list", { contacts: ["ada@example.test"] }],
       ["POST", "/leads/list", { campaign: THEIRS }],
       ["POST", "/leads/add", { campaign_id: THEIRS, leads: [] }],
-      ["POST", "/leads/add", { campaign_id: MINE, leads: [], skip_if_in_workspace: true }],
       ["POST", "/leads/update-interest-status", { lead_email: "ada@example.test" }],
       ["GET", "/workspaces/current"],
     ] as const)
       await expect(own(method, path, body)).rejects.toThrow("does not belong to this account");
     expect(rest).toHaveBeenCalledTimes(3);
+  });
+
+  it("adds people to its own campaign without checking the rest of the shared account", async () => {
+    const rest = account();
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set([MINE]),
+      mailboxes: new Set(),
+    });
+    await own("POST", "/leads/add", { campaign_id: MINE, leads: [], skip_if_in_workspace: true });
+    expect(rest).toHaveBeenCalledWith("POST", "/leads/add", {
+      campaign_id: MINE,
+      leads: [],
+      skip_if_in_workspace: false,
+    });
   });
 
   it("never finds another account's campaign by name and owns the one it creates", async () => {
@@ -362,17 +386,22 @@ describe("shared mail account isolation", () => {
     expect(rest).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses a raw campaign create and other accounts' campaigns through the tools", async () => {
+  it("refuses a raw campaign create in a role and other accounts' campaigns", async () => {
     const rest = account();
+    const inRole = {
+      run: {
+        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-1" } })),
+      },
+    };
     await expect(
       runInstantlyWrite(
-        {} as never,
+        inRole as never,
         rest as never,
-        context,
+        { ...(context as object), runId: "run-1" } as never,
         "server",
         "native_instantly_create_campaign",
         {},
-        { campaigns: new Set(), mailboxes: new Set() },
+        { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
       ),
     ).rejects.toThrow("ensure_role_campaign");
     await expect(
@@ -387,6 +416,57 @@ describe("shared mail account isolation", () => {
       ),
     ).rejects.toThrow("does not belong to this account");
     expect(rest).not.toHaveBeenCalled();
+  });
+
+  it("outside a role, creates this account's own campaign for one email to a named address", async () => {
+    const saved = {
+      id: NEW,
+      name: "Test note",
+      sequences: [{ steps: [{ variants: [{ subject: "Test note", body: "<p>Hello</p>" }] }] }],
+    };
+    const rest = vi.fn(async (method: string, path: string, body?: unknown) => {
+      if (method === "GET" && path === "/accounts/me%40ours.test") return { email: "me@ours.test" };
+      if (method === "POST" && path === "/campaigns") {
+        expect(body).toMatchObject({
+          name: "Test note",
+          email_list: ["me@ours.test"],
+          campaign_schedule: { schedules: [{ timing: { from: "00:00", to: "23:59" } }] },
+        });
+        return { id: NEW, name: "Test note" };
+      }
+      if (method === "GET" && path === `/campaigns/${NEW}`) return saved;
+      throw new Error(`unexpected ${method} ${path}`);
+    });
+    const create = vi.fn(async () => ({}));
+    const prisma = {
+      run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: null } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
+      externalEffect: { create },
+    };
+    const result = await runInstantlyWrite(
+      prisma as never,
+      rest as never,
+      { ...(context as object), runId: "run-1" } as never,
+      "server",
+      "native_instantly_create_campaign",
+      {
+        name: "Test note",
+        eaccount: "me@ours.test",
+        steps: [{ subject: "Test note", body: "Hello" }],
+      },
+      { campaigns: new Set(), mailboxes: new Set(["me@ours.test"]) },
+    );
+    expect(result).toMatchObject({ id: NEW, next: expect.stringContaining("activate_campaign") });
+    // Recorded as this account's campaign, so add_leads and activate_campaign may use it.
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "instantly_role_campaign",
+        status: "completed",
+        idempotencyKey: `instantly-direct-campaign:server:${NEW}`,
+        request: { serverId: "server", direct: true },
+        result: expect.objectContaining({ campaignId: NEW, eaccount: "me@ours.test" }),
+      }),
+    });
   });
 
   it("lists and uses only this account's own sending mailboxes", async () => {
@@ -444,6 +524,7 @@ describe("reply sender checks before card creation", () => {
     );
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: { findUnique },
     };
     const rest = vi.fn(async () => ({ email: ORIGINAL.eaccount, status: 1, setup_pending: false }));
@@ -500,6 +581,7 @@ it.each([false, true])(
     const original = { ...ORIGINAL, campaign_id: "campaign-proof" };
     const prisma = {
       run: { findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: "role-proof" } })) },
+      sendingMailboxAssignment: { findMany: vi.fn(async () => []) },
       externalEffect: {
         findMany: vi.fn(async () => []),
         findUnique: vi.fn(async (input: any) =>
@@ -557,4 +639,110 @@ it("requires positive read-only sender proof and does not echo an unsupported se
     body: { text: "Exact reply" },
   });
   expect(missing.refusal).toBe("sender_unavailable");
+});
+
+describe("nextSendWindow", () => {
+  const weekdays = (timezone: string, from = "09:00", to = "17:00", name = "Weekdays") => ({
+    campaign_schedule: {
+      schedules: [
+        {
+          name,
+          timing: { from, to },
+          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          timezone,
+        },
+      ],
+    },
+  });
+
+  it("is now inside the hours and the next weekday start outside them", () => {
+    const chicago = weekdays("America/Chicago");
+    expect(nextSendWindow(chicago, new Date("2026-11-13T16:00:00Z"))).toEqual({ now: true });
+    // Thursday 22:32 in Chicago, when the first two roles' sends were confirmed.
+    expect(nextSendWindow(chicago, new Date("2026-11-13T04:32:00Z"))).toEqual({
+      now: false,
+      at: "2026-11-13T15:00:00.000Z",
+      local: "Fri 09:00 America/Chicago",
+    });
+    // Friday after hours waits for Monday.
+    expect(nextSendWindow(chicago, new Date("2026-11-14T00:00:00Z"))).toMatchObject({
+      at: "2026-11-16T15:00:00.000Z",
+      local: "Mon 09:00 America/Chicago",
+    });
+  });
+
+  it("keeps the wall-clock start across a daylight-saving change", () => {
+    // Saturday before US clocks fall back (2026-11-01): Monday 09:00 is UTC-6, not UTC-5.
+    expect(
+      nextSendWindow(weekdays("America/Chicago"), new Date("2026-10-31T18:00:00Z")),
+    ).toMatchObject({ at: "2026-11-02T15:00:00.000Z" });
+  });
+
+  it("names Pacific hours in Pacific time and is null without a readable schedule", () => {
+    const pacific = weekdays("America/Boise", "10:00", "18:00", "Weekdays (Pacific)");
+    expect(nextSendWindow(pacific, new Date("2026-11-13T06:30:00Z"))).toMatchObject({
+      local: "Fri 09:00 Pacific time",
+    });
+    expect(nextSendWindow({}, new Date())).toBeNull();
+    expect(nextSendWindow(weekdays("Not/AZone"), new Date())).toBeNull();
+  });
+});
+
+describe("the send card's time", () => {
+  const schedule = {
+    schedules: [
+      {
+        name: "Weekdays",
+        timing: { from: "09:00", to: "17:00" },
+        days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+        timezone: "America/Chicago",
+      },
+    ],
+  };
+  const read = async (tool: string) =>
+    tool === "native_instantly_get_campaign"
+      ? { name: "Role", status: 0, email_list: ["team@x.test"], campaign_schedule: schedule }
+      : { items: [{ id: "l1", email: "ada@x.test", first_name: "Ada" }] };
+
+  it("is now unless the recruiter chose hours that start later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-13T06:30:00Z"));
+    try {
+      const none = await describeCampaignActivation(read, "c-1", null, { leads: {} });
+      expect(none.schedule).toBe("Now");
+      const chosen = await describeCampaignActivation(read, "c-1", null, {
+        leads: {},
+        sendHours: "weekdays_9_to_5",
+      });
+      expect(chosen.schedule).toBe(
+        "Fri 09:00 America/Chicago (Weekdays 09:00-17:00 America/Chicago)",
+      );
+      const now = await describeCampaignActivation(
+        async (tool) =>
+          tool === "native_instantly_get_campaign"
+            ? { name: "Role", status: 1, email_list: ["team@x.test"], campaign_schedule: schedule }
+            : {
+                items: [
+                  { id: "l1", email: "ada@x.test", first_name: "Ada" },
+                  {
+                    id: "l2",
+                    email: "bo@x.test",
+                    first_name: "Bo",
+                    timestamp_last_contact: "2026-11-12T15:00:00Z",
+                  },
+                ],
+              },
+        "c-1",
+        null,
+        { leads: {}, sendHours: "weekdays_9_to_5" },
+        undefined,
+        true,
+      );
+      // The send-now card lists only who is still waiting, and when they would have gone out.
+      expect(now.recipients.map((r) => r.email)).toEqual(["ada@x.test"]);
+      expect(now.schedule).toBe("Now, instead of Fri 09:00 America/Chicago");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

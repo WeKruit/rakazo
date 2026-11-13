@@ -907,9 +907,17 @@ export async function getRecruitingRoleCampaign(
             openCount: count(lead.email_open_count),
             clickCount: count(lead.email_click_count),
             replyCount: count(lead.email_reply_count),
+            contactedAt:
+              typeof lead.timestamp_last_contact === "string" &&
+              !Number.isNaN(Date.parse(lead.timestamp_last_contact))
+                ? new Date(lead.timestamp_last_contact).toISOString()
+                : null,
           },
         ];
       }),
+      ...(typeof campaign.queuedFirstEmail === "string"
+        ? { queuedFirstEmail: campaign.queuedFirstEmail.slice(0, 100) }
+        : {}),
     };
     if (result.campaign) {
       const snapshot = {
@@ -1287,6 +1295,8 @@ export async function getRecruitingCorrespondence(
     cursor?: string;
     /** Server-selected owned stored row, never an unverified provider ID from the UI. */
     message?: RecruitingCorrespondence["emails"][number];
+    /** Internal: return every contact in one read instead of one page. */
+    allContacts?: boolean;
     savedReceipts?: {
       /** Worker-only exact receipt selection; the canonical owner/thread fences still apply. */
       effectId?: string;
@@ -1406,23 +1416,20 @@ export async function getRecruitingCorrespondence(
       timer?.mark("mailSavedReadsMs");
       const contactEmails: string[] = [];
       if (workspace && crmReads && view === "interview") {
-        let cursor: string | null = null;
-        do {
-          const saved = await getRecruitingCorrespondence(
-            prisma,
-            actor,
-            target,
-            "contacts",
-            productIdentity,
-            oauth,
-            { limit: 200, ...(cursor ? { cursor } : {}) },
-            crmReads,
-          );
-          // Contacts only pick which calendar events belong to the role. Saved mail is often
-          // incomplete by design (selected Gmail reads), which says nothing about the calendar.
-          output.contacts.push(...saved.contacts);
-          cursor = saved.nextCursor;
-        } while (cursor);
+        // Every contacts read builds the whole list, so take it once rather than page by page.
+        const saved = await getRecruitingCorrespondence(
+          prisma,
+          actor,
+          target,
+          "contacts",
+          productIdentity,
+          oauth,
+          { allContacts: true },
+          crmReads,
+        );
+        // Contacts only pick which calendar events belong to the role. Saved mail is often
+        // incomplete by design (selected Gmail reads), which says nothing about the calendar.
+        output.contacts.push(...saved.contacts);
         if (workspace.crmTarget) {
           const bound = workspace.crmTarget.target;
           try {
@@ -1705,6 +1712,7 @@ export async function getRecruitingCorrespondence(
         output.nextCursor = null;
         return output;
       }
+      if (view === "contacts" && page.allContacts) return output;
       output.nextCursor = rows.length > end ? String(end) : null;
       output.partial ||= output.nextCursor !== null;
       if (view === "contacts") output.contacts = output.contacts.slice(start, end);

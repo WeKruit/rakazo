@@ -13,10 +13,12 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import { AUTOMATIC_CONTINUATION, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
 import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
   candidateVoiceDraft,
+  declinedSentence,
   declineRetry,
   draftVariables,
   questionCard,
@@ -25,6 +27,10 @@ import {
 } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
+
+/** A reply saying the email went out or the interview was booked. */
+const REPORTS_SENT =
+  /已(?:经)?(?:发送|发出|发给|预约|约好)|\b(?:was|were|has been|have been) (?:sent|booked|scheduled)\b|\bsent (?:it|the|your|an?)\b/i;
 
 /**
  * Turns the guard may push: human turns, its own continuations, the research wake that brings
@@ -297,78 +303,23 @@ export function roundPassage(snippet: string | null | undefined): string | undef
 }
 
 const PROMISE_LABEL = "Finish what the last message said it would do";
-const AUTO_NOTE =
-  " (This is an automatic continuation, not the recruiter's words. When quoting, use the recruiter's own messages.)";
+const AUTO_NOTE = ` (${AUTOMATIC_CONTINUATION} When quoting, use the recruiter's own messages.)`;
 
 /**
  * The internal follow-up a pushed turn starts from. A turn that ended on a promise is told so,
  * and the last push before the cap must end on a result or one concrete question, so the
  * recruiter never sees a turn that just stops.
  */
-export function continuationText(input: {
-  step?: { label: string; prompt: string };
-  promise?: string;
-  last?: boolean;
-}) {
+export function continuationText(input: { promise?: string; last?: boolean }) {
   const parts = [
     input.promise
-      ? `Your last message ended with "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
+      ? `${UNDONE_PROMISE_LEAD} "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
       : "",
-    input.step ? `Continue with the next step: ${input.step.label}. ${input.step.prompt}` : "",
     input.last
       ? " This is the last automatic continuation: this turn must deliver a result. If you truly cannot (a tool failed or information is missing), try another way once; if that still fails, use one question card (ask_user) to ask the recruiter for one concrete decision, saying where it is stuck and offering options. Do not just report status, and do not say you will do it later."
       : "",
   ];
   return `${parts.filter(Boolean).join("")}${AUTO_NOTE}`;
-}
-
-/** True when the run was started by a teammate's handoff to this bot. */
-async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
-  if (!run.sourceMessageId || run.trigger !== "follow_up") return false;
-  const source = await deps.prisma.message.findUnique({
-    where: { id: run.sourceMessageId },
-    select: { blocks: true },
-  });
-  const blocks = (source?.blocks ?? []) as MessageBlock[];
-  return blocks.some((block) => block.kind === "handoff" && block.toBotId === run.botId);
-}
-
-/** Effects that move a role through its playbook: brief, searches, rounds, feedback, approvals. */
-const PLAYBOOK_EFFECTS = new Set([
-  "recruiting_role",
-  "recruiting_research",
-  "recruiting_feedback",
-  "recruiting_shortlist",
-  "recruiting_assess",
-  "recruiting_request_approval",
-]);
-
-/**
- * Since the recruiter's last message the role did other work (looked up saved people's profiles,
- * contacts) and nothing in its playbook. That answered what they asked; the role's next step
- * waits for them instead of starting on its own, however the lookups turned out.
- */
-async function answeredOtherRequest(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
-  const asked = await deps.prisma.message.findFirst({
-    where: { threadId: run.threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { createdAt: true },
-  });
-  if (!asked) return false;
-  const effects = await deps.prisma.externalEffect.findMany({
-    where: {
-      spaceId: run.spaceId,
-      run: { threadId: run.threadId },
-      createdAt: { gt: asked.createdAt },
-    },
-    select: { id: true, kind: true },
-  });
-  if (!effects.length || effects.some((effect) => PLAYBOOK_EFFECTS.has(effect.kind))) return false;
-  // A people search saves new people to the role: that is playbook work too.
-  const pages = await deps.prisma.recruitingCandidatePage.count({
-    where: { effectId: { in: effects.map((effect) => effect.id) } },
-  });
-  return pages === 0;
 }
 
 /**
@@ -472,8 +423,8 @@ export async function guardRecruitingTurnEnd(
     if (
       round &&
       !round.approvedAt &&
-      round.candidateKeys.length === 10 &&
-      new Set(round.candidateKeys).size === 10
+      round.candidateKeys.length > 0 &&
+      new Set(round.candidateKeys).size === round.candidateKeys.length
     ) {
       // A presented round waits on the recruiter until they write (panel feedback is a message);
       // later turns cannot reopen the panel, so pushing them only repeats the same reply.
@@ -520,24 +471,16 @@ export async function guardRecruitingTurnEnd(
   const endText = turnEndText(input.blocks);
   // "已开始扩展搜索" with nothing running is a promise too; a running search is checked below.
   const promise = turnEndPromise(endText) ?? turnEndStarted(endText);
-  // A teammate handed this bot one task (an email draft, a deeper search). Finishing that task
-  // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
-  const handedIn = await handedInStage(deps, run);
-  const nextStep =
-    handedIn || (playbook?.step && (await answeredOtherRequest(deps, run)))
-      ? undefined
-      : (playbook?.step ?? undefined);
-  if (!nextStep && !promise) return { action: "ended", classification };
+  // The playbook is a direction, not a script: the agent picks its own next step, so the server
+  // only follows up on work the turn itself said it would do and did not.
+  if (!promise) return { action: "ended", classification };
   // Waiting on a running search is not a stall: its wake brings the results.
   if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {
     getLogger().info("run.autocontinue.waiting_research", { runId: run.id, roleId: input.roleId });
     return { action: "ended", classification };
   }
   const stage = playbook?.stage ?? "intake";
-  const step: { label: string; prompt: string; openClarifications?: number } = nextStep ?? {
-    label: PROMISE_LABEL,
-    prompt: "",
-  };
+  const step = { label: PROMISE_LABEL };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -551,11 +494,7 @@ export async function guardRecruitingTurnEnd(
     select: { clientNonce: true },
   });
   const count = countTrailingAutoContinues(recent) + 1;
-  const reason = promise
-    ? "promise"
-    : step.openClarifications
-      ? "open_clarifications"
-      : "no_deliverable";
+  const reason = "promise";
   if (count > max) {
     getLogger().warn("run.autocontinue.capped", {
       runId: run.id,
@@ -580,11 +519,7 @@ export async function guardRecruitingTurnEnd(
     reason,
     count,
   });
-  const text = continuationText({
-    step: nextStep,
-    promise,
-    last: count === max,
-  });
+  const text = continuationText({ promise, last: count === max });
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
@@ -779,6 +714,10 @@ export async function planDeclineRetry(
     judge?: () => Promise<TextJudge | undefined>;
     /** A question in the reply stays in text: there is nothing to ask on a card (no role yet). */
     noQuestionCard?: boolean;
+    /** The turn answers a card: a send or booking card was already shown and answered. */
+    answersCard?: boolean;
+    /** A send or booking went out this turn (see TurnReportLedger.sent). */
+    sent?: boolean;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -815,9 +754,13 @@ export async function planDeclineRetry(
   const variables = askedTemplate(asked)
     ? (candidateVoiceDraft(input.reply) ?? sequenceForOneEmail(input.reply, asked))
     : draftVariables(input.reply);
-  const reason = input.request.trim()
-    ? retryReason(input.reply, input.request, input.personRequest)
-    : undefined;
+  // After a send went out or its card was answered, a reply that talks about that work ("已发送给
+  // Noah") owes no card; only an actual refusal is retried.
+  const reason = !input.request.trim()
+    ? undefined
+    : input.sent || (input.answersCard && REPORTS_SENT.test(input.reply))
+      ? declinedSentence(input.reply)
+      : retryReason(input.reply, input.request, input.personRequest);
   const declined = input.noQuestionCard && reason?.kind !== "decline" ? undefined : reason;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;

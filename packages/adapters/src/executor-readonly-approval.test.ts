@@ -1472,6 +1472,19 @@ describe("native Instantly activation card", () => {
     expect(f.results[0]).toMatchObject({ error: expect.stringContaining("no recipients") });
   });
 
+  it("refuses a send card that names no campaign outside a role", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { recipients: ["ada@x.test"] }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("Pass campaign_id") });
+  });
+
   it("shows campaign name, status, lead count and sender read before the card", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",

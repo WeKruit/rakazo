@@ -14,16 +14,28 @@ const CONTACT_ADMIN =
 // A request declined outright.
 const DECLINE =
   /(?:我)?(?:无法|不能|没法)(?:为你|帮你|替你)?(?:处理|完成|执行|做到)(?:这个|此)?(?:请求|要求)?|\bI (?:can['’]t|cannot|am unable to) (?:help with|do) (?:that|this)\b/i;
+// Blames a permission or a path the product did not build ("当前权限不支持创建一次性邮件"). The
+// agents work with general tools, so a missing permission is never the answer to a recruiter.
+const NO_PERMISSION =
+  /(?:没有|无|缺少|不支持|需要|开通)[^。！？\n]{0,10}权限|权限(?:不足|不够|不支持|未开通|受限)|(?:先)?(?:打开|进入|切换到)[^。！？\n]{0,6}(?:岗位|职位|角色)(?:对话|页面|会话)?(?:后|再|才)|\b(?:don['’]t|do not|doesn['’]t) have (?:the )?(?:permission|access)\b|\bnot (?:permitted|authorized|allowed) to\b|\bno permission\b|\bopen (?:a|the) role (?:conversation|chat) (?:first|before)\b/i;
 // The work is blocked: the reply must then leave a step the recruiter can take.
 const BLOCKED =
   /无法|不能|没有可用|尚无|还没有|暂时不|没法|\b(?:can['’]t|cannot|unable|isn['’]t (?:ready|set up)|not (?:ready|set up|available)|no (?:sending|sender))\b/i;
+// A line that only restates what the recruiter asked ("我正在梳理你问的发送人数") says nothing.
+const RESTATES =
+  /正在梳理|梳理你(?:问|提到|说)的|\bI(?:['’]m| am) looking into (?:your|the) (?:question|request)\b/i;
+// An unasked lecture on how language is judged, in place of doing the work (11-13).
+const NAME_LECTURE =
+  /(?:不能|不会|无法|不应)[^。！？\n]{0,12}(?:靠|凭|仅凭|根据|按)?(?:姓名|名字)[^。！？\n]{0,10}(?:判断|推断|认定|作为)|(?:姓名|名字)不能(?:证明|作为|代表|判断)|\b(?:can['’]t|cannot|won['’]t|will not) (?:infer|judge|guess|assume)[^.]{0,40}\bfrom (?:a |their )?names?\b/i;
 const CAVEAT =
   /(?:不能|无法)(?:保证|确保|核实|确认|验证)|\b(?:can['’]t|cannot) (?:guarantee|promise)\b/gi;
 // What counts as a next step in words: something to connect or open, a draft, an offer, work
 // that carries on, or what to send so it can.
 const NEXT_STEP =
-  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
+  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|可以直接|告诉我|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const SENDER =
+  /(?:发件(?:地址|邮箱|人)|\b(?:sender|sending (?:address|mailbox)|from)\b)[^@\n]{0,12}?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi;
 // The brief one agent writes for another, shown to the recruiter as if it were a reply.
 export const AGENT_BRIEF = /^\s*(?:\*\*)?(?:Goal|Deliverable|Done when|Context)(?:\*\*)?\s*:/m;
 // The header of a round of people the search returns.
@@ -33,8 +45,13 @@ const GATE_CODE = /\b(?:G[0-2]|S[1-5])\b(?!\.\d)/;
 // Addresses and links say nothing about the language a message is written in. A Chinese
 // sentence often carries English role titles and names ("这份 Senior Data Engineer 职位"), so
 // Chinese characters are weighed against English words, not letters.
+// An email body the recruiter dictates ("正文：Hi Alex, …") or quotes is the candidate's language.
+const DICTATED =
+  /(?:正文|内容|邮件内容|\bbody|\bmessage)\s*[:：][\s\S]*$|“[^”]*”|「[^」]*」|"[^"]*"/gi;
 export const mostlyChinese = (raw) => {
-  const text = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
+  const own = raw.replace(EMAIL, "").replace(/https?:\/\/\S+|linkedin\.com\/[\w/-]+/g, "");
+  const said = own.replace(DICTATED, " ");
+  const text = /[\p{Script=Han}A-Za-z]/u.test(said) ? said : own;
   return (text.match(/\p{Script=Han}/gu)?.length ?? 0) > (text.match(/[A-Za-z]+/g)?.length ?? 0);
 };
 const quote = (text, match) =>
@@ -46,7 +63,12 @@ const prose = (text) =>
   text
     .slice(0, DRAFT.test(text) ? text.search(DRAFT) : undefined)
     .split("\n")
-    .filter((line) => !/linkedin\.com|^\s*\d+\.\s|^\s*>|^\s*Not verified:/i.test(line))
+    .filter(
+      (line) =>
+        !/linkedin\.com|^\s*\d+\.\s|^\s*>|^\s*(?:Not verified|所有人都还未核实|未核实)[:：]/i.test(
+          line,
+        ),
+    )
     .join("\n");
 // Addresses are kept whole; their dots are not sentence ends.
 const sentences = (text) =>
@@ -135,17 +157,22 @@ export function conversationChecks(messages) {
       ["overrides what the recruiter said", OVERRIDE],
       ["sends the recruiter to someone else", CONTACT_ADMIN],
       ["declines the request", DECLINE],
+      ["blames a permission or a missing path", NO_PERMISSION],
       ["supplier name", SUPPLIER],
       ["internal tool name", TOOL_NAME],
       // People's evidence quotes their profiles, where "S3" is the AWS service.
       ["internal gate code", GATE_CODE, prose(text)],
       ["internal agent brief", AGENT_BRIEF],
+      ["restates the question", RESTATES],
+      ["lectures on judging language by name", NAME_LECTURE],
     ]) {
       const match = (where ?? text).match(pattern);
       if (match) failures.push(`${name}: ${quote(where ?? text, match)}`);
     }
+    // The account's own sending mailbox is the product's to show ("发件地址是 liu@…").
+    const senders = [...text.matchAll(SENDER)].map((match) => match[1].toLowerCase());
     for (const address of text.match(EMAIL) ?? [])
-      if (!typed.includes(address.toLowerCase()))
+      if (!typed.includes(address.toLowerCase()) && !senders.includes(address.toLowerCase()))
         failures.push(`shows an address the recruiter never gave: ${address}`);
     // A new round of people starts over: its header and the next-step card come with every round.
     if (ROUND.test(text)) said.length = 0;
@@ -163,7 +190,12 @@ export function conversationChecks(messages) {
       });
     };
     // The same sentence again, in this reply or an earlier one.
-    for (const sentence of sentences(prose(text))) {
+    // A list's items ("- 测试固定 · 发信测试2", "- …3") share their wording by design.
+    const listless = prose(text)
+      .split("\n")
+      .filter((line) => !/^\s*[-*•]\s/.test(line))
+      .join("\n");
+    for (const sentence of sentences(listless)) {
       const again =
         !quotesThem(sentence) && said.find((earlier) => similar(earlier, sentence) >= 0.8);
       if (again) failures.push(`repeats itself: "${sentence.slice(0, 80)}"`);
@@ -187,8 +219,14 @@ export function conversationChecks(messages) {
         `asks ${questions.length} questions at once: ${questions.map((q) => `"${q.slice(0, 60)}"`).join(" ")}`,
       );
   }
-  const last = messages.findLast((message) => message.role !== "user" && message.text.trim());
+  const lastAt = messages.findLastIndex(
+    (message) => message.role !== "user" && message.text.trim(),
+  );
+  const last = messages[lastAt];
+  const lastAsk = messages.findLastIndex((message) => message.role === "user");
   if (!last) failures.push("no reply");
+  // An open card or a running search never holds the recruiter's latest message unanswered.
+  else if (lastAt < lastAsk) failures.push(`no reply to "${messages[lastAsk].text.slice(0, 40)}"`);
   else if (deadEnd(last))
     failures.push(`dead end: "${last.text.slice(-160).replace(/\s+/g, " ")}"`);
   return [...new Set(failures)];

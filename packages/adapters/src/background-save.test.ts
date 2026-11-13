@@ -3,6 +3,7 @@ import {
   FEEDBACK_SAVING,
   ownRoleRevisions,
   preferenceAtCurrentRevision,
+  preferenceInputError,
   revisionConflict,
   saveInBackground,
   savesFeedbackInBackground,
@@ -131,6 +132,11 @@ describe("role saves in the background", () => {
     expect(transientSaveError("Role revision conflict")).toBe(true);
     expect(transientSaveError("connection terminated unexpectedly")).toBe(true);
     expect(transientSaveError("brief.fields[0].key: Required")).toBe(false);
+    expect(
+      transientSaveError(
+        '[{"expected":"number","code":"invalid_type","path":["expectedRoleRevision"],"message":"Invalid input: expected number, received undefined"}]',
+      ),
+    ).toBe(false);
   });
 
   it("moves a revision this run saved on to the newest, and leaves others' revisions alone", () => {
@@ -191,5 +197,26 @@ describe("preference retries", () => {
     expect(
       revisionConflict({ error: "This is a role requirement, not a shared preference." }),
     ).toBe(false);
+  });
+});
+
+describe("preferenceInputError", () => {
+  it("retries only a revision race or a passing outage", () => {
+    const race = { error: "Memory changed", code: "CONFLICT", currentRevision: 2 };
+    expect(preferenceInputError(race, race.error)).toBe(false);
+    expect(preferenceInputError({ error: "connection reset" }, "connection reset")).toBe(false);
+  });
+
+  it("hands any other conflict or refusal back to the agent", () => {
+    const other = { error: "Recruiting conflict", code: "CONFLICT" };
+    expect(revisionConflict(other)).toBe(false);
+    expect(preferenceInputError(other, other.error)).toBe(true);
+    expect(preferenceInputError({ error: "quote must match" }, "quote must match")).toBe(true);
+  });
+
+  it("hands a preference missing its revision back, though the refusal names the revision", () => {
+    const missing =
+      '[{"expected":"number","code":"invalid_type","path":["expectedRevision"],"message":"Invalid input: expected number, received undefined"}]';
+    expect(preferenceInputError({ error: missing }, missing)).toBe(true);
   });
 });

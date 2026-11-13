@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
+import { INSTANTLY_MCP_ENDPOINT, signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -11,6 +12,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
+  adoptAssignedSenders,
   adoptLegacySender,
   confirmedSendingMailbox,
   confirmedSendingMailboxes,
@@ -39,7 +41,8 @@ const Step = z.strictObject({
     .string()
     .min(1)
     .max(20_000)
-    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.'),
+    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.')
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
   delay_days: z
     .number()
     .int()
@@ -55,7 +58,9 @@ const CampaignSetup = {
   send_hours: z
     .enum(["weekdays_9_to_5", "any_time"])
     .optional()
-    .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
+    .describe(
+      "When emails may go out; a campaign sends as soon as the recruiter confirms (any_time) unless they ask for weekdays_9_to_5.",
+    ),
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
@@ -117,6 +122,12 @@ const ActivateCampaignInput = z.strictObject({
   recipients: Recipients.describe(
     "Only these people get the email: each one's email or name as added with add_shortlist_leads. Omit to send to everyone in the campaign.",
   ),
+  send_now: z
+    .boolean()
+    .optional()
+    .describe(
+      "Send everyone already queued in this sending campaign now instead of at its sending hours (recipients are ignored). Its card lists who is queued and when they would otherwise go out.",
+    ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
@@ -126,7 +137,7 @@ const EnsureRoleCampaignInput = z.strictObject({
   steps: CampaignSetup.steps,
   timezone: CampaignSetup.timezone,
   send_hours: CampaignSetup.send_hours.describe(
-    "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
+    "Change when emails may go out; a sending campaign keeps sending in the new hours.",
   ),
   recipients: Recipients.describe(
     "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
@@ -234,7 +245,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
   ),
   tool(
     "add_leads",
@@ -270,7 +281,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued for later sending hours and the recruiter wants them sent now, pass send_now: its card lists who is queued and when they would otherwise go out.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -289,7 +300,7 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Emails go out as soon as the recruiter confirms; pass send_hours weekdays_9_to_5 only when the recruiter asks to send in business hours. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -555,7 +566,7 @@ function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
 function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>) {
   return {
     name,
-    campaign_schedule: campaignSchedule(setup.send_hours ?? "weekdays_9_to_5", setup.timezone),
+    campaign_schedule: campaignSchedule(setup.send_hours ?? "any_time", setup.timezone),
     ...(setup.steps ? { sequences: sequences(setup.steps) } : {}),
     email_list: [setup.eaccount],
     // Instantly has no per-lead stop; the campaign flag is the only native stop on reply.
@@ -597,6 +608,8 @@ type RoleBinding = {
   roleEmail?: FirstEmail;
   /** Each person's own first email, by lowercased address. */
   drafts?: Record<string, FirstEmail>;
+  /** Hours the recruiter asked for; without them a confirmed send goes out at once. */
+  sendHours?: "weekdays_9_to_5" | "any_time";
 };
 type StagedLead = {
   email: string;
@@ -608,6 +621,12 @@ type StagedLead = {
 };
 const bindingKey = (serverId: string, roleId: string) =>
   `instantly-role-campaign:${serverId}:${roleId}`;
+/**
+ * A role's imported campaign: another tool's sequence that keeps emailing and answering the people
+ * it already holds. The role reads and can reply in it, but adds new people to its own campaign.
+ */
+export const historyKey = (serverId: string, roleId: string) =>
+  `${bindingKey(serverId, roleId)}:history`;
 
 /** The recruiting role linked to this run's conversation, if any. */
 async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
@@ -621,7 +640,10 @@ async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
 
 async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId?: string) {
   const id = roleId ?? (await activeRoleId(prisma, context));
-  if (!id) throw new Error("Pass role_id: this conversation has no linked recruiting role");
+  if (!id)
+    throw new Error(
+      "Pass role_id: this conversation has no linked recruiting role. To email someone the recruiter names outside a role, use create_campaign with that email as steps, then add_leads, then activate_campaign with its campaign_id.",
+    );
   const role = await prisma.recruitingRole.findFirst({
     where: { id, spaceId: context.spaceId, userId: context.userId },
     select: { id: true, title: true },
@@ -731,6 +753,101 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
       .join(" ") || null
   );
 }
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const clockMinutes = (value: unknown) => {
+  const hit = typeof value === "string" ? /^(\d{1,2}):(\d{2})$/.exec(value) : null;
+  return hit ? Number(hit[1]) * 60 + Number(hit[2]) : null;
+};
+/** Weekday (0 = Sunday) and minutes past midnight of `at` on the wall clock of `zone`. */
+function wallClock(at: Date, zone: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(at)
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    day: WEEKDAYS.indexOf(String(parts.weekday)),
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+/**
+ * When a sending campaign next emails the people queued in it, from its first sending window:
+ * "now" inside the window, else the window's next start (its weekday and time in its zone).
+ * Null when the schedule cannot be read. A queued person outside the window is not a failure.
+ */
+export function nextSendWindow(
+  campaign: Record<string, unknown> | undefined,
+  now = new Date(),
+): { now: true } | { now: false; at: string; local: string } | null {
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
+  const zone = typeof first?.timezone === "string" ? first.timezone : null;
+  const timing = first?.timing as { from?: unknown; to?: unknown } | undefined;
+  const from = clockMinutes(timing?.from);
+  const to = clockMinutes(timing?.to);
+  const days = first?.days as Record<string, unknown> | undefined;
+  if (!zone || from === null || to === null || !days) return null;
+  let clock: ReturnType<typeof wallClock>;
+  try {
+    clock = wallClock(now, zone);
+  } catch {
+    return null;
+  }
+  const open = (day: number) => days[String(day)] === true;
+  if (open(clock.day) && clock.minutes >= from && clock.minutes < to) return { now: true };
+  for (let ahead = 0; ahead <= 7; ahead++) {
+    // The window's start on that day, corrected once for a daylight-saving change in between.
+    let start = new Date(now.getTime() + ((from - clock.minutes) * 60 + ahead * 86_400) * 1000);
+    const drift = wallClock(start, zone).minutes - from;
+    if (drift) start = new Date(start.getTime() - drift * 60_000);
+    start = new Date(Math.floor(start.getTime() / 60_000) * 60_000);
+    const day = wallClock(start, zone).day;
+    if (start > now && open(day)) {
+      // Pacific hours are stored one hour ahead in Mountain time (see PACIFIC_WEEKDAYS).
+      const pacific = first?.name === PACIFIC_WEEKDAYS;
+      const shownFrom = pacific ? from - 60 : from;
+      const time = `${String(Math.floor(shownFrom / 60)).padStart(2, "0")}:${String(shownFrom % 60).padStart(2, "0")}`;
+      return {
+        now: false,
+        at: start.toISOString(),
+        local: `${WEEKDAYS[day]} ${time} ${pacific ? "Pacific time" : zone}`,
+      };
+    }
+  }
+  return null;
+}
+/**
+ * True when a confirmed send would wait for the campaign's sending hours although the recruiter
+ * never asked for them (older campaigns defaulted to weekdays 9-5): the send widens them first.
+ */
+function waitsForHours(
+  campaign: Record<string, unknown> | undefined,
+  binding: Pick<RoleBinding, "sendHours"> | null | undefined,
+) {
+  const window = nextSendWindow(campaign);
+  return Boolean(window && !window.now && binding?.sendHours !== "weekdays_9_to_5");
+}
+/** The card's send time: now unless the recruiter chose hours that start later. */
+function sendTime(
+  campaign: Record<string, unknown> | undefined,
+  binding: Pick<RoleBinding, "sendHours"> | null | undefined,
+  sendNow = false,
+) {
+  if (!campaign) return null;
+  const window = nextSendWindow(campaign);
+  if (sendNow) return window && !window.now ? `Now, instead of ${window.local}` : "Now";
+  if (!window || waitsForHours(campaign, binding))
+    return window ? "Now" : describeSchedule(campaign);
+  return window.now ? "Now" : `${window.local} (${describeSchedule(campaign)})`;
+}
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
 export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
@@ -822,7 +939,9 @@ export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): 
     else if (route === "/leads/list") own(fields.campaign);
     else if (route === "/leads/add") {
       own(fields.campaign_id);
-      if (fields.skip_if_in_workspace) refuse();
+      // Skipping people already in the shared account would reveal other accounts' leads.
+      if (fields.skip_if_in_workspace)
+        return rest(method, path, { ...fields, skip_if_in_workspace: false });
     } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
     else if (route === "/emails/reply") {
       if (!sender(fields.eaccount)) refuse("mailbox");
@@ -844,6 +963,151 @@ export async function readRoleCampaignBinding(
   const binding = effect.result as Partial<RoleBinding> | null;
   return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
+
+/** The campaigns a role's mail is read from: its own, then the one its imported history used. */
+export async function roleCampaignIds(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+  roleId: string,
+) {
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      idempotencyKey: { in: [bindingKey(serverId, roleId), historyKey(serverId, roleId)] },
+      spaceId,
+      status: "completed",
+    },
+    select: { idempotencyKey: true, result: true },
+  });
+  return effects
+    .toSorted((a, b) => a.idempotencyKey.length - b.idempotencyKey.length)
+    .map((effect) => (effect.result as Partial<RoleBinding> | null)?.campaignId)
+    .filter((id): id is string => typeof id === "string");
+}
+/**
+ * Links each role of an onboarded account to the one campaign its imported mail history came
+ * from, once every mailbox that history used is assigned to (or already sends for) the account,
+ * so the role's Inbox reads new replies from that campaign and the account can reply in it.
+ * The link is the role's history, not its own campaign: the other tool keeps the people it holds,
+ * and people this product adds go to a campaign of its own. A link made before that, which nobody
+ * was added through yet, becomes history. A campaign any role already uses is left alone.
+ * Returns the number of roles linked.
+ */
+export async function bindImportedCampaigns(prisma: PrismaClient, userId: string) {
+  const imports = await prisma.externalEffect.findMany({
+    where: { kind: "recruiting_history_import", status: "completed", run: { userId } },
+    select: { id: true, runId: true, spaceId: true, result: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const roles = new Map<
+    string,
+    { runId: string; spaceId: string; campaigns: Set<string>; mailboxes: Map<string, number> }
+  >();
+  for (const receipt of imports) {
+    const result = (receipt.result ?? {}) as { roleId?: unknown; emails?: unknown };
+    if (typeof result.roleId !== "string" || !Array.isArray(result.emails)) continue;
+    const role = roles.get(result.roleId) ?? {
+      runId: receipt.runId,
+      spaceId: receipt.spaceId,
+      campaigns: new Set<string>(),
+      mailboxes: new Map<string, number>(),
+    };
+    if (role.spaceId !== receipt.spaceId) continue;
+    for (const email of result.emails as { campaignId?: unknown; eaccount?: unknown }[]) {
+      if (typeof email?.campaignId === "string") role.campaigns.add(email.campaignId);
+      if (typeof email?.eaccount === "string" && email.eaccount.includes("@")) {
+        const mailbox = email.eaccount.trim().toLowerCase();
+        role.mailboxes.set(mailbox, (role.mailboxes.get(mailbox) ?? 0) + 1);
+      }
+    }
+    roles.set(result.roleId, role);
+  }
+  if (!roles.size) return 0;
+  const assigned = await prisma.sendingMailboxAssignment.findMany({
+    where: { userId },
+    select: { email: true },
+  });
+  const senders = await prisma.externalEffect.findMany({
+    where: { kind: "instantly_sender_account", status: "completed", run: { userId } },
+    select: { result: true },
+  });
+  const mine = new Set([
+    ...assigned.map((row) => row.email.toLowerCase()),
+    ...senders.flatMap(({ result }) => {
+      const email = (result as { email?: unknown } | null)?.email;
+      return typeof email === "string" ? [email.toLowerCase()] : [];
+    }),
+  ]);
+  let linked = 0;
+  for (const [roleId, history] of roles) {
+    const [campaignId, ...others] = [...history.campaigns];
+    if (!campaignId || others.length || !history.mailboxes.size) continue;
+    if (![...history.mailboxes.keys()].every((mailbox) => mine.has(mailbox))) continue;
+    const role = await prisma.recruitingRole.findFirst({
+      where: { id: roleId, userId, spaceId: history.spaceId, archivedAt: null },
+      select: { title: true },
+    });
+    const servers = await prisma.mcpServer.findMany({
+      where: { userId, spaceId: history.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT, enabled: true },
+      select: { id: true },
+    });
+    if (!role || servers.length !== 1) continue;
+    const serverId = servers[0]!.id;
+    const key = historyKey(serverId, roleId);
+    const earlier = await prisma.externalEffect.findUnique({
+      where: { idempotencyKey: bindingKey(serverId, roleId) },
+      select: { id: true, request: true, result: true },
+    });
+    const earlierRequest = (earlier?.request ?? {}) as { importedHistory?: unknown };
+    const earlierResult = (earlier?.result ?? {}) as Partial<RoleBinding>;
+    if (
+      earlier &&
+      earlierRequest.importedHistory === true &&
+      earlierResult.campaignId === campaignId &&
+      !Object.keys(earlierResult.leads ?? {}).length &&
+      !Object.keys(earlierResult.staged ?? {}).length
+    ) {
+      await prisma.externalEffect.update({
+        where: { id: earlier.id },
+        data: { idempotencyKey: key },
+      });
+      linked++;
+      continue;
+    }
+    const taken = await prisma.externalEffect.findFirst({
+      where: {
+        OR: [
+          { idempotencyKey: key },
+          { kind: "instantly_role_campaign", result: { path: ["campaignId"], equals: campaignId } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (taken) continue;
+    const eaccount = [...history.mailboxes].sort((a, b) => b[1] - a[1])[0]![0];
+    const binding: RoleBinding = {
+      campaignId,
+      campaignName: role.title,
+      eaccount,
+      leads: {},
+      created: false,
+    };
+    await prisma.externalEffect.create({
+      data: {
+        spaceId: history.spaceId,
+        runId: history.runId,
+        kind: "instantly_role_campaign",
+        idempotencyKey: key,
+        status: "completed",
+        request: { roleId, serverId, importedHistory: true },
+        result: binding as unknown as Prisma.InputJsonValue,
+      },
+    });
+    linked++;
+  }
+  return linked;
+}
+
 /** A campaign lead or a staged person, as one send would address them. */
 type Person = StagedLead & {
   id?: string;
@@ -857,6 +1121,8 @@ type SendPlan =
   | { send: "activate"; recipients: Person[]; remove: Person[] }
   /** Add these staged people to the already sending campaign: only they are newly emailed. */
   | { send: "enroll"; recipients: Person[] }
+  /** Open the sending hours so the people already queued in the campaign are emailed now. */
+  | { send: "now"; recipients: Person[] }
   | { refusal: string };
 
 const text = (value: unknown) =>
@@ -913,8 +1179,9 @@ function planSend(
   wanted?: string[],
   templated = false,
   copy: Copy = null,
+  sendNow = false,
 ): SendPlan {
-  const plan = planRecipients(status, leads, staged, wanted);
+  const plan = sendNow ? planSendNow(status, leads) : planRecipients(status, leads, staged, wanted);
   if ("refusal" in plan || !templated) return plan;
   // A templated first email is in each person's variables: nobody goes out without one.
   const blank = plan.recipients.filter((person) =>
@@ -925,6 +1192,17 @@ function planSend(
         refusal: `No first email is saved for ${label(blank)}, so nothing was sent. Save the role's email with ensure_role_campaign steps, or their own with steps and recipients, then call activate_campaign again.`,
       }
     : plan;
+}
+/** Who a send-now emails: everyone in the sending campaign it has not emailed yet. */
+function planSendNow(status: unknown, leads: Person[]): SendPlan {
+  const queued = leads.filter((lead) => !lead.contacted);
+  if (status !== ACTIVE)
+    return {
+      refusal: "This campaign is not sending, so nobody is queued in it; nothing was sent.",
+    };
+  return queued.length
+    ? { send: "now", recipients: queued }
+    : { refusal: "Everyone in this campaign has already been emailed; nothing was sent." };
 }
 function planRecipients(
   status: unknown,
@@ -955,11 +1233,20 @@ function planRecipients(
   if (status === DRAFT) return { send: "activate", recipients: chosen, remove: others };
   if (status === ACTIVE) {
     const sending = chosen.filter((person) => leads.includes(person));
-    return sending.length
-      ? {
-          refusal: `Already in this campaign, which is sending, so nothing new goes to: ${label(sending)}.`,
-        }
-      : { send: "enroll", recipients: chosen };
+    if (!sending.length) return { send: "enroll", recipients: chosen };
+    const emailed = sending.filter((person) => person.contacted);
+    const queued = sending.filter((person) => !person.contacted);
+    return {
+      refusal: [
+        emailed.length ? `Already emailed by this campaign: ${label(emailed)}.` : "",
+        queued.length
+          ? `Already queued in this sending campaign, not emailed yet: ${label(queued)}. Their first email goes out in its next sending hours; nothing more is needed and nothing failed.`
+          : "",
+        "Nobody new was added, so nothing else was sent.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
   }
   return others.length
     ? {
@@ -992,8 +1279,12 @@ export async function describeCampaignActivation(
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
   fallbackMailbox: string | null = null,
-  binding: Pick<RoleBinding, "leads" | "staged" | "roleEmail" | "drafts"> | null = null,
+  binding: Pick<
+    RoleBinding,
+    "leads" | "staged" | "roleEmail" | "drafts" | "sendHours"
+  > | null = null,
   wanted?: string[],
+  sendNow = false,
 ): Promise<InstantlyActivationDisplay> {
   const types = new Map(
     [...Object.values(binding?.leads ?? {}), ...stagedPeople(binding)].flatMap((lead) =>
@@ -1006,13 +1297,26 @@ export async function describeCampaignActivation(
       () => undefined,
     ),
   ]);
-  const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  // get_campaign names the sending mailbox sendingMailbox; the raw provider read calls it email_list.
+  const emails = Array.isArray(campaign?.sendingMailbox)
+    ? campaign.sendingMailbox
+    : Array.isArray(campaign?.email_list)
+      ? campaign.email_list
+      : [];
   const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
   const templated = isTemplated(campaign);
   const people = (items ?? []).flatMap(asPerson);
   const plan =
     campaign && items
-      ? planSend(campaign.status, people, stagedPeople(binding), wanted, templated, binding)
+      ? planSend(
+          campaign.status,
+          people,
+          stagedPeople(binding),
+          wanted,
+          templated,
+          binding,
+          sendNow,
+        )
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
         : { send: "activate" as const, recipients: people, remove: [] };
@@ -1081,7 +1385,7 @@ export async function describeCampaignActivation(
     recipients,
     recipientCount: items ? recipients.length : null,
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
-    schedule: describeSchedule(campaign),
+    schedule: sendTime(campaign, binding, sendNow),
     ...shownEmail,
   };
 }
@@ -1188,7 +1492,11 @@ export async function requireReplySendingMailboxReady(
   const key = bindingKey(serverId, roleId);
   let owned: Partial<RoleBinding> | null = null;
   // Existing native associations have unique keys; never scan unrelated effect history for proof.
-  for (const idempotencyKey of [key, `${key}:campaign:${original.campaign_id}`]) {
+  for (const idempotencyKey of [
+    key,
+    historyKey(serverId, roleId),
+    `${key}:campaign:${original.campaign_id}`,
+  ]) {
     const binding = await prisma.externalEffect.findUnique({
       where: {
         idempotencyKey,
@@ -1335,14 +1643,23 @@ async function ensureRoleCampaign(
             ? { campaign_schedule: campaignSchedule(input.send_hours, input.timezone) }
             : {}),
         });
+      // The people already in it were approved: it resumes as soon as the hours are saved.
+      if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/activate`);
       if (writeSteps) await requireSavedEmail(rest, mappedId);
-      if (writeSteps && templated) {
-        const { subject, body } = input.steps![0]!;
-        existing.binding = { ...existing.binding, roleEmail: { subject, body } };
+      if (input.send_hours || (writeSteps && templated)) {
+        existing.binding = {
+          ...existing.binding,
+          ...(input.send_hours ? { sendHours: input.send_hours } : {}),
+          ...(writeSteps && templated
+            ? { roleEmail: { subject: input.steps![0]!.subject, body: input.steps![0]!.body } }
+            : {}),
+        };
         await prisma.externalEffect.update({
           where: { id: existing.effect.id },
           data: { result: existing.binding as unknown as Prisma.InputJsonValue },
         });
+      }
+      if (writeSteps && templated) {
         for (const lead of await allLeads(rest, mappedId))
           if (lead.id && !existing.binding.drafts?.[lead.email.toLowerCase()])
             await rest("PATCH", `/leads/${lead.id}`, {
@@ -1356,9 +1673,7 @@ async function ensureRoleCampaign(
         stopOnReplyPatched: patched,
         stepsSaved: writeSteps,
         ...(input.send_hours ? { sendHours: input.send_hours } : {}),
-        ...(pausedForHours
-          ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
-          : {}),
+        ...(pausedForHours ? { resumed: "Still sending, now in the new hours" } : {}),
         hasEmail: writeSteps || shown !== null,
         ...(writeSteps ? { next: SHOW_SAVED_STEPS } : {}),
         ...(input.steps && !writeSteps
@@ -1402,6 +1717,7 @@ async function ensureRoleCampaign(
     eaccount,
     leads: {},
     created: !adopt,
+    ...(input.send_hours ? { sendHours: input.send_hours } : {}),
   };
   if (stale)
     await prisma.externalEffect.update({
@@ -1695,11 +2011,15 @@ async function sameTitleCampaigns(
 ) {
   const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`);
   const title = role.title.trim().toLowerCase();
+  // An imported campaign is the other tool's, even for this role: it is read, never adopted.
   const otherRoles = await prisma.externalEffect.findMany({
     where: {
       spaceId: context.spaceId,
       kind: "instantly_role_campaign",
-      NOT: { request: { path: ["roleId"], equals: role.id } },
+      OR: [
+        { NOT: { request: { path: ["roleId"], equals: role.id } } },
+        { request: { path: ["importedHistory"], equals: true } },
+      ],
     },
     select: { result: true },
   });
@@ -1809,7 +2129,28 @@ async function addShortlistLeads(
     (c) => inRole.has(c.candidate_key) && !stopped.has(c.candidate_key),
   );
   const missingEmail = eligible.filter((c) => !c.email);
-  const withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
+  let withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
+  // People the role's imported campaign already holds stay with it: that tool keeps emailing and
+  // answering them, so this campaign never emails them as well.
+  const history = await readBinding(prisma, context, historyKey(serverId, role.id));
+  const earlierCampaign: string[] = [];
+  if (withEmail.length && history?.effect.status === "completed" && history.binding.campaignId) {
+    const listed = await rest("POST", "/leads/list", {
+      campaign: history.binding.campaignId,
+      contacts: withEmail.map((c) => c.email),
+      limit: 100,
+    });
+    const held = new Set(
+      (Array.isArray(listed.items) ? (listed.items as { email?: string | null }[]) : []).flatMap(
+        (lead) => (lead.email ? [lead.email.toLowerCase()] : []),
+      ),
+    );
+    withEmail = withEmail.filter((candidate) => {
+      if (!held.has(candidate.email.toLowerCase())) return true;
+      earlierCampaign.push(candidate.candidate_key);
+      return false;
+    });
+  }
   const leads = { ...binding.leads };
   const already: string[] = [];
   let pending = withEmail;
@@ -1891,6 +2232,13 @@ async function addShortlistLeads(
         }
       : {}),
     alreadyInCampaign: already,
+    ...(earlierCampaign.length
+      ? {
+          inImportedCampaign: earlierCampaign,
+          inImportedCampaignNote:
+            "These people are already in the role's imported campaign, which keeps emailing and answering them; they were not added here.",
+        }
+      : {}),
     skippedMissingEmail: missingEmail.map((c) => c.candidate_key),
     notInRole: notInRole.map((c) => c.candidate_key),
     onHoldOrPassed: onHoldOrPassed.map((c) => c.candidate_key),
@@ -1979,9 +2327,55 @@ async function activateCampaign(
     input.recipients,
     templated,
     bound?.binding,
+    input.send_now === true,
   );
   if ("refusal" in plan) throw new Error(plan.refusal);
+  // A confirmed send goes out now: hours the recruiter never asked for, or any hours on a
+  // send-now, are widened first. The provider edits only paused campaigns, so a sending one is
+  // paused for it and resumed below.
+  let resume = false;
+  const window = nextSendWindow(campaign);
+  if (waitsForHours(campaign, bound?.binding) || (plan.send === "now" && window && !window.now)) {
+    const zone = (campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] })
+      .schedules?.[0]?.timezone;
+    if (campaign.status === ACTIVE) {
+      await rest("POST", `/campaigns/${campaignId}/pause`);
+      resume = true;
+    }
+    try {
+      await rest("PATCH", `/campaigns/${campaignId}`, {
+        campaign_schedule: campaignSchedule(
+          "any_time",
+          typeof zone === "string" ? zone : "America/Chicago",
+        ),
+      });
+    } catch (error) {
+      if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+      throw error;
+    }
+    campaign = await rest("GET", `/campaigns/${campaignId}`);
+  }
+  if (plan.send === "now") {
+    if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+    return {
+      sentNow: true,
+      campaignId,
+      recipients: plan.recipients.map((person) => person.email),
+      ...(resume || !window || window.now
+        ? {}
+        : { next: "The campaign already sends at any time; these people go out shortly." }),
+    };
+  }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+  // Hours the recruiter asked for: the people wait for them, and the result says until when.
+  const later = nextSendWindow(campaign);
+  const when =
+    later && !later.now
+      ? {
+          firstEmailAt: later.at,
+          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are queued and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
+        }
+      : {};
   const save = async (binding: RoleBinding) => {
     if (bound)
       await prisma.externalEffect.update({
@@ -1991,11 +2385,16 @@ async function activateCampaign(
   };
   if (plan.send === "enroll") {
     // Adding a lead to a sending campaign sends to that lead; nobody else is touched.
-    const report = await rest("POST", "/leads/add", {
-      campaign_id: campaignId,
-      skip_if_in_workspace: false,
-      leads: plan.recipients.map((person) => newLead(person, templated && bound?.binding)),
-    });
+    let report: Record<string, unknown>;
+    try {
+      report = await rest("POST", "/leads/add", {
+        campaign_id: campaignId,
+        skip_if_in_workspace: false,
+        leads: plan.recipients.map((person) => newLead(person, templated && bound?.binding)),
+      });
+    } finally {
+      if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
+    }
     const sent: string[] = [];
     if (bound) {
       const binding = { ...bound.binding, leads: { ...bound.binding.leads } };
@@ -2023,6 +2422,7 @@ async function activateCampaign(
       campaignId,
       sendingMailbox,
       recipients: sent,
+      ...when,
       notCreatedByProvider: plan.recipients
         .filter((person) => !sent.includes(person.email))
         .map((person) => person.email),
@@ -2064,17 +2464,32 @@ async function activateCampaign(
     campaignId,
     sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
     recipients: plan.recipients.map((person) => person.email),
+    ...when,
   };
 }
 
-/** Lead emails of a campaign (up to 100): who it sends to. */
-async function leadEmails(rest: InstantlyRest, campaignId: string) {
-  const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 100 });
-  return (Array.isArray(leads.items) ? leads.items : []).flatMap((lead) =>
-    typeof (lead as { email?: unknown }).email === "string"
-      ? [(lead as { email: string }).email]
-      : [],
-  );
+/**
+ * Who a campaign sends to (up to 100 leads), split into those it has emailed and those still
+ * queued, with when the queued people's first email goes out.
+ */
+async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
+  const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
+  const people = (
+    Array.isArray(leads.items) ? (leads.items as Record<string, unknown>[]) : []
+  ).flatMap(asPerson);
+  const queued = people.filter((person) => !person.contacted).map((person) => person.email);
+  const window = campaign.status === ACTIVE && queued.length ? nextSendWindow(campaign) : null;
+  return {
+    recipients: people.map((person) => person.email),
+    emailed: people.filter((person) => person.contacted).map((person) => person.email),
+    queued,
+    ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
+    ...(window && !window.now
+      ? {
+          next: `The queued people are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
+        }
+      : {}),
+  };
 }
 
 function draftDelivery(campaign: Record<string, unknown>) {
@@ -2490,13 +2905,27 @@ export async function runInstantlyWrite(
   /** Set on the shared account: the campaigns and senders this connection owns. */
   owned?: OwnedInstantly,
 ): Promise<unknown> {
-  if (owned && toolName === "native_instantly_create_campaign")
-    throw new IsolationError("Use ensure_role_campaign to create this role's campaign");
+  // On the shared account a role's campaign comes only from ensure_role_campaign; outside a role,
+  // create_campaign makes this account's own campaign for an email to someone the recruiter names.
+  const direct =
+    owned && toolName === "native_instantly_create_campaign"
+      ? !(await activeRoleId(prisma, context))
+      : false;
+  if (owned && toolName === "native_instantly_create_campaign" && !direct)
+    throw new Error("In a role conversation, use ensure_role_campaign for the role's campaign");
+  // Mailboxes the owner assigned become this account's on its first mail call of any kind, so a
+  // reply in a thread one of them already holds works as well as a new send.
+  if (owned && toolName !== "native_instantly_ensure_sender") {
+    const adopted = await adoptAssignedSenders(prisma, accountRest, context, serverId);
+    if (adopted.length)
+      owned = { ...owned, mailboxes: new Set([...owned.mailboxes, ...adopted.map(mailboxKey)]) };
+  }
   if (
     owned &&
     !owned.mailboxes.size &&
     (toolName === "native_instantly_ensure_role_campaign" ||
-      toolName === "native_instantly_add_shortlist_leads")
+      toolName === "native_instantly_add_shortlist_leads" ||
+      direct)
   ) {
     const adopted = await adoptLegacySender(prisma, accountRest, context, serverId);
     if (adopted) owned = { ...owned, mailboxes: new Set([mailboxKey(adopted)]) };
@@ -2648,9 +3077,39 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
-      const campaign = await createCampaign(rest, input);
-      await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
-      return campaign;
+      if (!direct) {
+        const campaign = await createCampaign(rest, input);
+        await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
+        return campaign;
+      }
+      if (!context.runId) throw new IsolationError("A run is required to create a campaign");
+      // An email to someone the recruiter names goes out when they confirm it, not next weekday.
+      const campaign = await createCampaign(rest, {
+        ...input,
+        send_hours: input.send_hours ?? "any_time",
+      });
+      if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
+      await prisma.externalEffect.create({
+        data: {
+          spaceId: context.spaceId,
+          runId: context.runId,
+          kind: "instantly_role_campaign",
+          idempotencyKey: `instantly-direct-campaign:${serverId}:${campaign.id}`,
+          status: "completed",
+          request: { serverId, direct: true },
+          result: {
+            campaignId: campaign.id,
+            campaignName: String(campaign.name ?? input.name),
+            eaccount: input.eaccount,
+            leads: {},
+          },
+        },
+      });
+      if (input.steps) await requireSavedEmail(rest, campaign.id);
+      return {
+        ...campaign,
+        next: "Add the person with add_leads on this campaign_id, then call activate_campaign with this campaign_id and them as recipients; its card is the recruiter's one confirmation.",
+      };
     }
     case "native_instantly_add_leads": {
       const input = AddLeadsInput.parse(args);
@@ -2697,7 +3156,7 @@ export async function runInstantlyWrite(
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),
-        recipients: await leadEmails(rest, String(campaign.id)),
+        ...(await leadDelivery(rest, campaign)),
         campaign_schedule: campaign.campaign_schedule,
         sequences: campaign.sequences,
       };

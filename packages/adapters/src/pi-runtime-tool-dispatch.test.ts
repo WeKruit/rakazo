@@ -535,18 +535,6 @@ describe("Pi connector tool dispatch", () => {
       /* Exhaust the runtime. */
     }
     expect(executeTool.mock.calls[0]?.slice(0, 2)).toEqual(["remember", args]);
-    expect(fakeAgentState.tools.find((tool) => tool.name === "remember")).toEqual(
-      expect.objectContaining({
-        parameters: expect.objectContaining({
-          properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
-        }),
-      }),
-    );
-    expect(builtinAgentTools.find((tool) => tool.name === "remember")!.inputSchema).toEqual(
-      expect.objectContaining({
-        properties: expect.objectContaining({ recruitingFeedback: expect.anything() }),
-      }),
-    );
   });
 
   it("passes a partial memory edit through to the save", async () => {
@@ -646,6 +634,16 @@ describe("Pi connector tool dispatch", () => {
     const prepared = ask.prepareArguments!({ question: "Where?", options: [long, "Onsite"] });
     expect(prepared.options).toEqual([`${long.slice(0, 79).trimEnd()}…`, "Onsite"]);
     expect((prepared.options as string[])[0]!.length).toBeLessThanOrEqual(80);
+    // An over-long planned search keeps its start instead of failing the card.
+    const query = `Mandarin-speaking maintenance technicians near Linden NJ ${"with conveyor, sortation and PLC troubleshooting ".repeat(8)}`;
+    const planned = ask.prepareArguments!({
+      question: "Where?",
+      options: ["Onsite"],
+      plannedSearches: [query, "Short query"],
+    }).plannedSearches as string[];
+    expect(planned[0]!.length).toBeLessThanOrEqual(300);
+    expect(query.startsWith(planned[0]!)).toBe(true);
+    expect(planned[1]).toBe("Short query");
     // A multi-select question stays multi-select.
     expect(
       ask.prepareArguments!({

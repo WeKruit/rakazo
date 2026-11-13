@@ -3874,6 +3874,50 @@ describe("native recruiting feedback effect dispatch", () => {
     });
   });
 
+  it("hands a preference missing its revision back to the agent, which resends and saves it", async () => {
+    const f = fixture("run-feedback-preference-missing-revision");
+    const saved = {
+      status: "saved",
+      feedback,
+      source,
+      workspace: null,
+      document: { id: "doc-1", scope: "bot", path: "MEMORY.md", revision: 1, anchor: "a" },
+    };
+    vi.mocked(executeRecruitingFeedback).mockResolvedValue(saved as never);
+    const { expectedRevision: _, ...withoutRevision } = feedback;
+    f.setCalls([
+      { name: "recruiting_feedback", args: withoutRevision, executionId: "feedback-no-revision" },
+      // The agent's next call, after reading the refusal: the same preference with its revision.
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-resent" },
+    ]);
+
+    await f.run();
+
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("expectedRevision") });
+    expect(f.results[0]).not.toHaveProperty("status", "saving");
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(vi.mocked(executeRecruitingFeedback).mock.calls[0]?.[2]).toMatchObject({
+      expectedRevision: 0,
+      content: feedback.content,
+    });
+    expect(f.results[1]).toMatchObject({ status: "saved" });
+  });
+
+  it("hands a recruiting conflict on a preference back to the agent instead of retrying it", async () => {
+    const f = fixture("run-feedback-preference-recruiting-conflict");
+    const { RecruitingConflictError } = await vi.importActual<typeof DatabaseModule>("@rakazo/db");
+    vi.mocked(executeRecruitingFeedback).mockRejectedValue(new RecruitingConflictError());
+    f.setCalls([
+      { name: "recruiting_feedback", args: feedback, executionId: "feedback-conflict-2" },
+    ]);
+
+    await f.run();
+
+    expect(executeRecruitingFeedback).toHaveBeenCalledOnce();
+    expect(f.results[0]).toMatchObject({ code: "CONFLICT" });
+    expect(f.results[0]).not.toHaveProperty("status", "saving");
+  });
+
   it("returns role feedback as a proposal without applying a role or memory mutation", async () => {
     const f = fixture("run-role-feedback-proposal");
     const proposal = {
@@ -6394,6 +6438,11 @@ describe("native recruiting assessment effect delivery", () => {
     expect(pastedJobTitle(`招一名奥斯汀的高级后端工程师\n${body}`)).toBe("奥斯汀的高级后端工程师");
     expect(pastedJobTitle(`招聘经理\n${body}`)).toBe("招聘经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
+    // A Chinese JD of about 250 characters is a full JD, though under 400 characters long.
+    const chineseJd = `我们要招一名高级后端工程师，地点 Austin, TX，可混合办公。职责：${"负责支付与订单核心服务的设计和稳定性；".repeat(12)}`;
+    expect(chineseJd.length).toBeLessThan(400);
+    expect(pastedJobTitle(chineseJd)).toBe("高级后端工程师");
+    expect(pastedJobTitle("帮我找几个在 Austin 做支付系统的后端工程师，最好会 Go。")).toBeNull();
     expect(
       pastedJobTitle(
         "新岗位：仓库运营经理（亚特兰大 Atlanta，现场办公）。要求：5年以上仓储或配送中心运营管理，带过50人以上的小时工团队。",
@@ -6923,4 +6972,50 @@ describe("people searches before the first round", () => {
       expect(f.results[allowed]).toEqual({ error: expect.stringContaining(refusal) });
     },
   );
+
+  // 11-13: the deeper search cost about $1 a time, so a short round is recorded first and the
+  // deeper search runs only when the recruiter asks for it on the next-step card.
+  it("runs no deeper agent run before a short round is recorded", async () => {
+    const f = fixture("run-first-round-deeper");
+    f.thread.activeRecruitingRoleId = "role-1";
+    Object.assign(f.prisma, {
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+    const tool = (name: string) =>
+      ({
+        name: `mcp__people-search__${name}`,
+        description: name,
+        inputSchema: { type: "object", properties: {} },
+        readOnly: true,
+        route: { connectorId: "people-search", toolName: name },
+      }) as never;
+    f.connector.discoverTools.mockResolvedValue([
+      tool("web_search_advanced_exa"),
+      tool("agent_run"),
+    ]);
+    f.prisma.actionApprovalRule.findMany.mockResolvedValue([
+      { effect: "always_allow", matchKind: "tool", matchValue: "mcp__people-search__agent_run" },
+    ]);
+    f.connector.execute.mockImplementation(async function* () {
+      yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
+    });
+    f.setCalls(
+      ["low", "low", "auto", "auto"].map((effort, n) => ({
+        name: "mcp__people-search__agent_run",
+        args: { effort, query: `Find 6 more Korean-speaking quality engineers, set ${n}` },
+        executionId: `search-${n}`,
+      })),
+    );
+
+    await f.run();
+
+    expect(f.results.slice(0, 2)).not.toContainEqual(
+      expect.objectContaining({ error: expect.stringContaining("already returned") }),
+    );
+    for (const result of f.results.slice(2))
+      expect(result).toEqual({
+        error: expect.stringContaining("with everyone who fits, even fewer than ten"),
+      });
+  });
 });

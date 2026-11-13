@@ -1,6 +1,7 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
 import { isChineseText } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
+import { withoutNudge } from "./silent-reply.js";
 
 // A busy model can take several seconds to start; a late first line still beats silence.
 const TIMEOUT_MS = 8_000;
@@ -12,7 +13,9 @@ const MAX_OUTPUT_TOKENS = 80;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
 const INSTRUCTIONS = [
-  "You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that shows you understood what they asked and says what you are working on now.",
+  'You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that names the concrete thing you will check or do first ("I\'ll check this role\'s email queue", "我先看这个岗位的发信队列").',
+  'When the latest message confirms or approves something (Send, Confirm, Allow, 发送, 确认, 同意), say you are going ahead with it ("好，现在发出。"), never that you will check it.',
+  'Never paraphrase or restate their message ("I\'m looking into your question about…", "我正在梳理你问的…"), and never use the word 梳理.',
   "One sentence of at most 20 words (at most 30 characters in Chinese), in the language of the person's latest message, in the assistant's own voice.",
   "You cannot see their data yet: never say what you can or cannot see or find. Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
@@ -28,6 +31,27 @@ export function replyLanguage(userText: string): string {
   return isChineseText(userText)
     ? "Write the sentence in Chinese."
     : "Write the sentence in the language of the latest message, not Chinese, even if earlier messages were.";
+}
+
+/**
+ * The fixed first line for a message sent while a run works, or for a card answer: sent at once,
+ * with no model call, in the language of the person's message. The run's own answer follows.
+ */
+export function fixedAck(userText: string): string {
+  return isChineseText(userText) ? "收到，马上处理。" : "Got it, on it.";
+}
+
+const LEADING_ACK =
+  /^\s*(?:(?:收到|好的|明白|了解|没问题)(?:了)?[，,：:。！!、\s]*|(?:got it|okay|ok|sure|understood|noted|will do)\b[,.:;!—–\-\s]*)/i;
+
+/**
+ * The run's own line without an opening acknowledgement, once the fixed line already said it.
+ * A line that is only an acknowledgement stays as it is.
+ */
+export function withoutLeadingAck(text: string): string {
+  const rest = text.replace(LEADING_ACK, "");
+  if (!rest.trim() || rest === text) return text;
+  return /^[a-z]/.test(rest) ? rest[0]!.toUpperCase() + rest.slice(1) : rest;
 }
 
 function clip(text: string, max: number): string {
@@ -51,7 +75,7 @@ export function cleanQuickReply(raw: string): string | null {
     .replace(/^["'“”「」]+|["'“”「」]+$/g, "")
     .trim();
   if (!line || line.length > MAX_REPLY_CHARS) return null;
-  if (/[?？]$/.test(line)) return null;
+  if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
   return line;
 }
 

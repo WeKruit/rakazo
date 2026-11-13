@@ -113,16 +113,42 @@ function savedPayload(result: unknown): { code?: unknown; currentRevision?: unkn
   return payload && typeof payload === "object" ? payload : null;
 }
 
-/** A save that lost a revision race, which a retry at the newest revision fixes. */
+/**
+ * A save that lost a revision race, which a retry at the newest revision fixes. Only a conflict
+ * naming the current revision is one: other conflicts (another role is open, the role moved on)
+ * go back to the agent to fix.
+ */
 export function revisionConflict(result: unknown): boolean {
-  return savedPayload(result)?.code === "CONFLICT";
+  const payload = savedPayload(result);
+  return payload?.code === "CONFLICT" && Number.isSafeInteger(payload.currentRevision);
+}
+
+/**
+ * A preference failure only the agent can fix: anything but a revision race or a passing outage.
+ * It goes back to the agent instead of being retried with the same arguments. A race is known
+ * only by its current revision, never by the word "revision" in a refusal.
+ */
+export function preferenceInputError(result: unknown, error: unknown): boolean {
+  return !revisionConflict(result) && !outageError(error);
+}
+
+const OUTAGE = /timed? ?out|temporar|unavailable|deadlock|serializ|ECONN|connection/i;
+/** A schema refusal, which names fields such as expectedRevision but never passes by itself. */
+const INVALID_INPUT = /invalid_type|invalid_value|invalid_union|Invalid input/i;
+
+function errorText(error: unknown): string {
+  return typeof error === "string" ? error : JSON.stringify(error ?? "");
+}
+
+function outageError(error: unknown): boolean {
+  const text = errorText(error);
+  return OUTAGE.test(text) && !INVALID_INPUT.test(text);
 }
 
 /** A failed save that a retry can fix: a revision race or a passing outage, not bad input. */
 export function transientSaveError(error: unknown): boolean {
-  return /conflict|revision|timed? ?out|temporar|unavailable|deadlock|serializ|ECONN|connection/i.test(
-    typeof error === "string" ? error : JSON.stringify(error ?? ""),
-  );
+  const text = errorText(error);
+  return /conflict|revision/i.test(text) ? !INVALID_INPUT.test(text) : outageError(text);
 }
 
 /**

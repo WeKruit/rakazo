@@ -47,6 +47,10 @@ import {
 } from "./recruiting-tools.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
+/** Role sequences are all this read covers; a one-off email's reply lives only in the mailbox. */
+export const ONE_OFF_REPLIES_NOTE =
+  "Covers replies to role email sequences only. For a reply to an email sent outside a role (a one-off email), read the mailbox with search_contact_emails on that person's address before saying there is no reply.";
+
 export type RecruitingAssessmentToolContext = RecruitingRunContext & {
   save?: Omit<RecruitingAssessmentSaveContext, "runId" | "threadId" | "botId">;
   attemptId?: string;
@@ -210,6 +214,7 @@ export async function executeRecruitingCandidatesTool(
       return operation === "replies"
         ? {
             ...result,
+            note: ONE_OFF_REPLIES_NOTE,
             counts: {
               messages: result.items.reduce(
                 (total, item) => total + (item.correspondence?.emails.length ?? 0),

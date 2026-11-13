@@ -118,7 +118,7 @@ import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
-  JudgeProviderConfigSchema,
+  SaveJudgeInputSchema,
 } from "./integration-settings.js";
 import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
@@ -488,6 +488,15 @@ export const appContract = {
             .max(100)
             .regex(/^[^\r\n<>]*$/)
             .default(""),
+        }),
+      )
+      .output(z.object({ userId: Id, mailbox: z.string(), linkedRoles: z.number().int() })),
+    /** The owner takes back a mailbox it assigned that the account has not started using. */
+    unassignSendingMailbox: oc
+      .input(
+        z.object({
+          accountEmail: z.string().trim().email().max(320),
+          mailbox: z.string().trim().email().max(320),
         }),
       )
       .output(z.object({ userId: Id, mailbox: z.string() })),
@@ -1357,7 +1366,7 @@ export const appContract = {
   integrationSetup: {
     get: oc.output(IntegrationSetupStateSchema),
     save: oc.input(IntegrationProviderConfigSchema).output(z.object({ ok: z.literal(true) })),
-    saveJudge: oc.input(JudgeProviderConfigSchema).output(z.object({ ok: z.literal(true) })),
+    saveJudge: oc.input(SaveJudgeInputSchema).output(z.object({ ok: z.literal(true) })),
   },
   connections: {
     catalog: oc

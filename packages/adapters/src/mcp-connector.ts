@@ -21,7 +21,10 @@ import {
   abortableDelay,
   boundDirectApprovalDetails,
   catalogApprovalDetails,
+  GMAIL_SEND_TOOLS,
   recruitingBotKey,
+  signedAsTeam,
+  TEAM_SIGNATURE_NOTE,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -53,8 +56,8 @@ import {
   MailReplySendingError,
   nativeInstantlyWrites,
   ownedInstantly,
-  readRoleCampaignBinding,
   requireReplySendingMailboxReady,
+  roleCampaignIds,
   runInstantlyWrite,
 } from "./instantly-native-writes.js";
 import {
@@ -158,7 +161,9 @@ export async function agentCrmCandidatesArgs(
   bindings: RecruitingCrmTarget[] = [],
 ) {
   if (bindings.length !== 1)
-    throw new IsolationError("Open the CRM role workspace before reading its candidates");
+    throw new IsolationError(
+      "CRM candidates are read one role at a time, in that role's conversation; across roles use recruiting_candidates, and for one role delegate_to_role",
+    );
   const target = bindings[0]!;
   if (
     (args.p_org !== undefined && args.p_org !== target.organizationId) ||
@@ -259,6 +264,10 @@ export function scopedInstantlyCampaign(
   campaigns: readonly string[],
 ): string {
   const selected = args.campaign_id ?? (campaigns.length === 1 ? campaigns[0] : undefined);
+  if (selected === undefined && campaigns.length > 1)
+    throw new IsolationError(
+      `Select an exact campaign of the current recruiting role before reading its email: pass campaign_id, one of ${campaigns.join(", ")}`,
+    );
   if (typeof selected !== "string" || !campaigns.includes(selected))
     throw new IsolationError(
       "Select an exact campaign of the current recruiting role before reading its email",
@@ -278,6 +287,20 @@ function instantlyErrorCode(text: string) {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Model-facing: a scope refusal is about the path a call took, never a permission the recruiter
+ * lacks. "Check the assigned connection and requested scope" read as one, and on 11-12 a one-off
+ * email outside a role ended as "the current permission does not support this email".
+ */
+export const PATH_REFUSAL_NOTE =
+  "This is about this call's path, not a permission the recruiter lacks or can change. Do the request another way now: another of your tools, the teammate who can (handoff_to_bot), or one ask_user question if who or what is unclear. Never tell the recruiter you lack permission, or ask them to open a role, enable access or contact anyone.";
+
+/** What the agent reads when a call is refused for its scope: the server's reason, then the way on. */
+export function scopeRefusal(error: Error): string {
+  const reason = error.message && error.message !== "Resource not found" ? error.message : "";
+  return `${reason ? `${reason.replace(/[.\s]+$/, "")}. ` : ""}${PATH_REFUSAL_NOTE}`;
 }
 
 const NO_OUTREACH_CAMPAIGN_YET = "This account has no outreach campaign yet";
@@ -446,7 +469,13 @@ const GmailSendInput = z.strictObject({
     .length(1)
     .describe("The one person this email is for. Never several people."),
   subject: z.string().trim().min(1).max(500),
-  body: z.string().trim().min(1).max(50_000).describe("Plain-text body."),
+  body: z
+    .string()
+    .trim()
+    .min(1)
+    .max(50_000)
+    .describe("Plain-text body.")
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
   replyThreadId: z
     .string()
     .regex(/^[0-9a-f]{6,64}$/i)
@@ -476,7 +505,7 @@ function localGmailTools(
     {
       name: `mcp__${assignment.server.slug}__${GMAIL_SEND}`,
       description:
-        "Send one plain-text email from the recruiter's own connected Gmail to one person. The recruiter confirms each email on its own card before it goes out. To follow up, pass replyThreadId (the thread id of the earlier email) so it goes as a reply in that thread.",
+        "Send one plain-text email from the recruiter's own connected Gmail to one person, signed as the recruiter (their saved signature or name), never a generic name such as Recruiting Team. The recruiter confirms each email on its own card before it goes out. To follow up, pass replyThreadId (the thread id of the earlier email) so it goes as a reply in that thread.",
       inputSchema: z.toJSONSchema(GmailSendInput, { io: "input" }),
       readOnly: false,
       route: {
@@ -1047,7 +1076,15 @@ export class McpConnector implements ConnectorProvider {
             getLogger().info("discovery.deferred", { server: assignment.server.slug });
             return withCore(localInstantlyTools(assignment, []));
           }
-          reportAllowlistDrift(assignment, listed.tools, context);
+          reportAllowlistDrift(
+            assignment,
+            // Gmail's send names stay allowed for when Google offers them; send_message is served
+            // here meanwhile, so none of them is drift.
+            assignment.server.endpoint === GMAIL_MCP
+              ? [...listed.tools, ...GMAIL_SEND_TOOLS.map((name) => ({ name }))]
+              : listed.tools,
+            context,
+          );
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
               (tool) =>
@@ -1588,7 +1625,10 @@ export class McpConnector implements ConnectorProvider {
       // healthy; closing it would also fail every other call still running on it.
       if (sessionKey && !(error instanceof PeopleSearchRateLimitError) && !context.signal.aborted)
         await this.evict(sessionKey);
-      let message = sanitizeConnectorError(error, secrets);
+      let message =
+        error instanceof IsolationError
+          ? scopeRefusal(error)
+          : sanitizeConnectorError(error, secrets);
       getLogger().warn("mcp.call.failed", {
         server: calledServer?.slug ?? null,
         tool: call.route.toolName,
@@ -1819,9 +1859,11 @@ export class McpConnector implements ConnectorProvider {
           ? ` ${sanitizeConnectorError(error, redactions)}`
           : error instanceof z.ZodError
             ? ` Invalid arguments: ${z.prettifyError(error)}`
-            : error instanceof Error && !(error instanceof IsolationError)
-              ? ` ${sanitizeConnectorError(error, redactions)}`
-              : " Check the current assigned connection and requested scope.";
+            : error instanceof IsolationError
+              ? ` ${scopeRefusal(error)}`
+              : error instanceof Error
+                ? ` ${sanitizeConnectorError(error, redactions)}`
+                : " Check the current assigned connection and requested scope.";
       yield {
         type: "error",
         message:
@@ -1915,9 +1957,11 @@ export class McpConnector implements ConnectorProvider {
       const detail =
         error instanceof z.ZodError
           ? ` Invalid arguments: ${z.prettifyError(error)}`
-          : error instanceof Error && !(error instanceof IsolationError)
-            ? ` ${sanitizeConnectorError(error, redactions)}`
-            : " Check the current assigned connection.";
+          : error instanceof IsolationError
+            ? ` ${scopeRefusal(error)}`
+            : error instanceof Error
+              ? ` ${sanitizeConnectorError(error, redactions)}`
+              : " Check the current assigned connection.";
       yield { type: "error", message: `Email not sent.${detail}` };
     } finally {
       await safeFetch.close().catch(() => undefined);
@@ -1979,9 +2023,11 @@ export class McpConnector implements ConnectorProvider {
       const detail =
         error instanceof z.ZodError
           ? ` Invalid arguments: ${z.prettifyError(error)}`
-          : error instanceof Error && !(error instanceof IsolationError)
-            ? ` ${sanitizeConnectorError(error, redactions)}`
-            : " Check the current assigned connection.";
+          : error instanceof IsolationError
+            ? ` ${scopeRefusal(error)}`
+            : error instanceof Error
+              ? ` ${sanitizeConnectorError(error, redactions)}`
+              : " Check the current assigned connection.";
       yield { type: "error", message: `Contact lookup failed.${detail}` };
     } finally {
       await safeFetch.close().catch(() => undefined);
@@ -2061,7 +2107,9 @@ export class McpConnector implements ConnectorProvider {
       { threadId: run.threadId },
     );
     if (!target || target.mcpServerId !== server.id || target.serverRevision !== server.revision)
-      throw new IsolationError("Open the current CRM role workspace before using CRM tools");
+      throw new IsolationError(
+        "CRM tools work on the role this conversation is linked to; across roles use recruiting_candidates, and for one role delegate_to_role",
+      );
     return target;
   }
 
@@ -2153,20 +2201,23 @@ export class McpConnector implements ConnectorProvider {
       };
     }
     if (run.thread.activeRecruitingRoleId) {
-      const binding = await readRoleCampaignBinding(
+      const campaignIds = await roleCampaignIds(
         this.prisma,
         context.spaceId,
         serverId,
         run.thread.activeRecruitingRoleId,
       );
-      if (!binding) throw new IsolationError("This role has no verified existing email campaign");
+      if (!campaignIds.length)
+        throw new IsolationError("This role has no verified existing email campaign");
       return {
-        campaignIds: [binding.campaignId],
+        campaignIds,
         workspaceKey: JSON.stringify([run.threadId, run.thread.activeRecruitingRoleId, serverId]),
       };
     }
     if (run.thread.groupId?.startsWith("recruiting-crm-"))
-      throw new IsolationError("Open the CRM role workspace before reading its campaign email");
+      throw new IsolationError(
+        "Campaign email is read in its role's conversation; across roles use recruiting_candidates replies, and for one role delegate_to_role",
+      );
     return null;
   }
 

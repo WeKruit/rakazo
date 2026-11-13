@@ -17,9 +17,11 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   NO_EMAIL_HISTORY_YET,
+  PATH_REFUSAL_NOTE,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
   SHARED_MAIL_DISCOVERY_BUDGET_MS,
+  scopeRefusal,
   sharedInstantlyAccount,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
@@ -53,6 +55,28 @@ const ASSIGNMENT = {
   allowedTools: [],
   server: SERVER,
 };
+
+describe("scope refusals", () => {
+  // 11-12: "Check the current assigned connection and requested scope" read as a missing
+  // permission, and a one-off email ended as "the current permission does not support it".
+  it("keeps the server's reason and names the way on, never a permission", () => {
+    const text = scopeRefusal(
+      new IsolationError(
+        "In a role conversation, use ensure_role_campaign for the role's campaign",
+      ),
+    );
+    expect(text).toMatch(
+      /^In a role conversation, use ensure_role_campaign for the role's campaign\. /,
+    );
+    expect(text).toContain("another of your tools, the teammate who can");
+    expect(text).toContain("Never tell the recruiter you lack permission");
+    expect(text).not.toContain("Check the current assigned connection");
+  });
+
+  it("drops the generic not-found reason", () => {
+    expect(scopeRefusal(new IsolationError())).toBe(PATH_REFUSAL_NOTE);
+  });
+});
 
 describe("MCP assignment denial identity", () => {
   it.each(["context", "assignment", "revision"])(
@@ -1601,7 +1625,7 @@ describe("official Autumn task dispatch", () => {
             }),
           },
           recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
-          externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+          $queryRaw: vi.fn().mockResolvedValue([]),
         } as never,
         { load } as never,
         { network: TEST_NETWORK },
@@ -1652,7 +1676,7 @@ it("denies an unowned FullEnrich job before connecting or loading credentials", 
           server: { ...SERVER, endpoint: "https://mcp.fullenrich.com/mcp" },
         }),
       },
-      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
     } as never,
     { load } as never,
     { network: TEST_NETWORK },
@@ -3193,7 +3217,10 @@ describe("MCP connector session cache", () => {
         if (revision === "missing") delete route.resourceRevision;
         const initializations = state.initializations;
         expect(await collect({ ...old, route })).toEqual([
-          { type: "error", message: "MCP server changed; rediscover the tool before trying again" },
+          {
+            type: "error",
+            message: `MCP server changed; rediscover the tool before trying again. ${PATH_REFUSAL_NOTE}`,
+          },
         ]);
         expect(state.initializations).toBe(initializations);
         expect(state.calls).toEqual([]);
@@ -4053,6 +4080,8 @@ describe("local native Instantly campaign and lead tools", () => {
         sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
+      /** The people the role's imported campaign holds. */
+      importedLeads: [] as { id: string; email: string }[],
       /** The role campaign's own leads, as /leads/list returns them for it. */
       campaignLeads: [] as Record<string, unknown>[],
       campaigns: [] as Record<string, unknown>[],
@@ -4100,17 +4129,23 @@ describe("local native Instantly campaign and lead tools", () => {
                 })),
         ),
       },
+      // Saved contact lookup receipts.
+      $queryRaw: vi.fn(async () => state.lookups),
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
-          where.OR
-            ? state.lookups
-            : [...state.effects.values()].filter(
-                (e) =>
+          where.OR && where.kind !== "instantly_role_campaign"
+            ? []
+            : [...state.effects.values()].filter((e) => {
+                const request = e.request as
+                  | { roleId?: string; importedHistory?: boolean }
+                  | undefined;
+                const role = where.OR?.[0]?.NOT?.request?.equals ?? where.NOT?.request?.equals;
+                return (
                   e.kind === where.kind &&
-                  (e.request as { roleId?: string } | undefined)?.roleId !==
-                    where.NOT?.request?.equals,
-              ),
+                  (request?.roleId !== role || (where.OR && request?.importedHistory === true))
+                );
+              }),
         ),
         findFirst: vi.fn(async () => {
           const bound = [...state.effects.values()].filter(
@@ -4187,6 +4222,12 @@ describe("local native Instantly campaign and lead tools", () => {
                 : body.campaign === CAMPAIGN
                   ? state.campaignLeads
                   : [],
+          });
+        if (url.pathname === "/api/v2/leads/list" && body.campaign === "imported")
+          return Response.json({
+            items: state.importedLeads.filter((lead) =>
+              (body.contacts as string[]).some((email) => email.toLowerCase() === lead.email),
+            ),
           });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
@@ -4382,16 +4423,17 @@ describe("local native Instantly campaign and lead tools", () => {
           campaign_schedule: {
             schedules: [
               {
-                name: "Weekdays",
-                timing: { from: "09:00", to: "17:00" },
+                // A confirmed send goes out at once unless the recruiter asks for hours.
+                name: "Any time",
+                timing: { from: "00:00", to: "23:59" },
                 days: {
-                  "0": false,
+                  "0": true,
                   "1": true,
                   "2": true,
                   "3": true,
                   "4": true,
                   "5": true,
-                  "6": false,
+                  "6": true,
                 },
                 timezone: "America/Chicago",
               },
@@ -4563,7 +4605,7 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
-  it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
+  it("ensure_role_campaign send_hours on a live campaign saves the hours and keeps it sending", async () => {
     const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });
     f.state.campaign.status = 1;
@@ -4571,7 +4613,8 @@ describe("local native Instantly campaign and lead tools", () => {
     const result = f.result(
       await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
     );
-    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    expect(result).toMatchObject({ sendHours: "any_time", resumed: expect.any(String) });
+    expect(result).not.toHaveProperty("paused");
     const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
     expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
     expect(writes[1]).toMatchObject({
@@ -4588,6 +4631,9 @@ describe("local native Instantly campaign and lead tools", () => {
         },
       },
     });
+    // Left paused, it would hold back everyone already approved (the 11-13 queued send).
+    expect(writes[2]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` });
+    expect(writes).toHaveLength(3);
   });
 
   it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
@@ -4651,6 +4697,44 @@ describe("local native Instantly campaign and lead tools", () => {
     const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(ensured).toMatchObject({ created: true });
     expect(ensured.campaignId).not.toBe("with-leads");
+  });
+
+  it("gives a role with an imported campaign its own campaign, and leaves the imported campaign's people to it", async () => {
+    const f = fixture();
+    f.state.campaigns = [
+      { id: "imported", name: "Founding Engineer", status: 2, timestamp_created: "2026-10-01" },
+    ];
+    f.state.effects.set(`instantly-role-campaign:${SERVER.id}:role-1:history`, {
+      id: "effect-history",
+      kind: "instantly_role_campaign",
+      status: "completed",
+      spaceId: "w1",
+      idempotencyKey: `instantly-role-campaign:${SERVER.id}:role-1:history`,
+      request: { roleId: "role-1", serverId: SERVER.id, importedHistory: true },
+      result: { campaignId: "imported", eaccount: "team@example.test", leads: {}, created: false },
+    });
+    f.state.importedLeads = [{ id: "lead-old", email: "old@x.test" }];
+    const out = f.result(
+      await f.run("add_shortlist_leads", {
+        role_id: "role-1",
+        candidates: [
+          { candidate_key: "new", email: "new@x.test" },
+          { candidate_key: "old", email: "Old@x.test" },
+        ],
+      }),
+    );
+    expect(out).toMatchObject({
+      campaignId: CAMPAIGN,
+      added: ["new"],
+      inImportedCampaign: ["old"],
+    });
+    expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toMatchObject({
+      campaign_id: CAMPAIGN,
+      leads: [{ email: "new@x.test" }],
+    });
+    expect(f.state.requests.some((r) => r.method === "PATCH" && r.path.includes("imported"))).toBe(
+      false,
+    );
   });
 
   it("repairs an empty mapped campaign to the same-title campaign that has the leads", async () => {
@@ -4826,7 +4910,11 @@ describe("local native Instantly campaign and lead tools", () => {
   it("schedules Pacific weekday hours in Mountain time one hour later", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;
-    await f.run("ensure_role_campaign", { role_id: "role-1", timezone: "America/Los_Angeles" });
+    await f.run("ensure_role_campaign", {
+      role_id: "role-1",
+      timezone: "America/Los_Angeles",
+      send_hours: "weekdays_9_to_5",
+    });
     const created = f.state.requests.find(
       (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
     );
@@ -5174,8 +5262,134 @@ describe("local native Instantly campaign and lead tools", () => {
       const { f } = await roleWithSixteen();
       f.state.campaign.status = 1;
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
-      expect((events[0] as { message: string }).message).toMatch(/Already in this campaign/);
+      expect((events[0] as { message: string }).message).toMatch(
+        /Already queued in this sending campaign, not emailed yet: .*nothing failed/,
+      );
       expect(sends(f)).toEqual([]);
+    });
+
+    // Fri 2026-11-13 00:30 in Chicago: outside weekday 9-5, as when a recruiter confirms at night.
+    const NIGHT = new Date("2026-11-13T06:30:00Z");
+    const WEEKDAYS_9_TO_5 = {
+      schedules: [
+        {
+          name: "Weekdays",
+          timing: { from: "09:00", to: "17:00" },
+          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
+          timezone: "America/Chicago",
+        },
+      ],
+    };
+
+    it("says a named person already queued in the sending campaign is waiting, not refused", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      f.state.campaignLeads[1]!.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      const events = await f.run("activate_campaign", {
+        recipients: ["abe@x.test", f.state.campaignLeads[1]!.email],
+      });
+      const message = (events[0] as { message: string }).message;
+      expect(message).toMatch(/Already emailed by this campaign: /);
+      expect(message).toMatch(/Already queued in this sending campaign, not emailed yet: Abe/);
+      expect(sends(f)).toEqual([]);
+    });
+
+    it("sends a confirmed send at once on an older weekday-hours campaign at night", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.campaign_schedule = WEEKDAYS_9_TO_5;
+        await f.run("add_shortlist_leads", {
+          candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+        });
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+        const calls = f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`);
+        // Paused only to widen the hours, then the named person is added and sending resumes.
+        expect(calls).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          "POST /api/v2/leads/add",
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(JSON.stringify(f.state.campaign.campaign_schedule)).toContain('"name":"Any time"');
+        expect(out).toMatchObject({ sent: true, recipients: ["nick@x.test"] });
+        expect(out).not.toHaveProperty("firstEmailAt");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps business hours the recruiter asked for and says when the first email goes out", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        await f.run("ensure_role_campaign", { send_hours: "weekdays_9_to_5" });
+        f.state.campaign.status = 1;
+        await f.run("add_shortlist_leads", {
+          candidates: [{ candidate_key: "nick", email: "nick@x.test", first_name: "Nick" }],
+        });
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { recipients: ["nick@x.test"] }));
+        expect(f.state.requests.some((r) => r.path.endsWith("/pause"))).toBe(false);
+        expect(out).toMatchObject({
+          sent: true,
+          firstEmailAt: "2026-11-13T15:00:00.000Z",
+          next: expect.stringContaining("first email goes out Fri 09:00 America/Chicago"),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends the people queued for later hours now when the recruiter asks", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        await f.run("ensure_role_campaign", { send_hours: "weekdays_9_to_5" });
+        f.state.campaign.status = 1;
+        for (const lead of f.state.campaignLeads.slice(1))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(read).toMatchObject({
+          queued: ["abe@x.test"],
+          queuedFirstEmail: "Fri 09:00 America/Chicago",
+          next: expect.stringContaining("send_now"),
+        });
+        expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { send_now: true }));
+        expect(
+          f.state.requests
+            .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+            .map((r) => `${r.method} ${r.path}`),
+        ).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(out).toMatchObject({ sentNow: true, recipients: ["abe@x.test"] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("refuses a send-now when nobody is queued, touching nothing", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      for (const lead of f.state.campaignLeads)
+        lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      const events = await f.run("activate_campaign", { send_now: true });
+      expect((events[0] as { message: string }).message).toMatch(/already been emailed/);
+      expect(
+        f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
+      ).toEqual([]);
     });
 
     describe("one person's own first email", () => {
@@ -5625,6 +5839,50 @@ describe("MCP discovery tool-list cache", () => {
 });
 
 describe("Gmail search in a role", () => {
+  it("does not report Gmail's send names as allowlist drift", async () => {
+    // Google's Gmail server offers no send; send_message is served locally, so staging logged a
+    // false "3/9 allowed tools are not offered" on every discovery.
+    const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
+    const assignment = {
+      ...ASSIGNMENT,
+      allowAllTools: false,
+      allowedTools: ["search_threads", "send_message", "reply", "forward", "vanished_tool"],
+      server: gmail,
+    };
+    const state = {
+      failNext: false,
+      initializations: 0,
+      tools: [{ name: "search_threads", inputSchema: { type: "object" } }],
+      callResult: { content: [] },
+    };
+    vi.stubGlobal("fetch", mcpFetch(state, gmail.endpoint));
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([assignment]),
+        findFirst: vi.fn().mockResolvedValue(assignment),
+      },
+      user: { findUnique: vi.fn().mockResolvedValue({ usageCreditLimit: null }) },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const sink = createTestSink();
+    const previousLogger = getLogger();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    try {
+      await connector.discoverTools({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never);
+      const drift = sink.events.filter((event) => event.message.startsWith("mcp allowlist drift"));
+      expect(drift).toHaveLength(1);
+      expect(drift[0]).toMatchObject({ missing: ["vanished_tool"] });
+    } finally {
+      await connector.close();
+      installLogger(previousLogger);
+    }
+  });
   it("adds the role's own mailbox to a Gmail thread search result", async () => {
     const gmail = { ...SERVER, slug: "gmail", endpoint: "https://gmailmcp.googleapis.com/mcp/v1" };
     const assignment = { ...ASSIGNMENT, server: gmail };

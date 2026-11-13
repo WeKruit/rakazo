@@ -822,7 +822,7 @@ async function createRoleInTransaction(
   const thread = await requireThread(tx, actor, input.sourceThreadId);
   if (thread.groupId?.startsWith("recruiting-global-"))
     throw new IsolationError(
-      "Open a role conversation to create a role; Main stays across all roles",
+      "The global conversation stays across all roles; open a new role with start_role",
     );
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);
@@ -867,7 +867,9 @@ async function bindRoleInTransaction(
 ) {
   const thread = await requireThread(tx, actor, input.threadId);
   if (input.roleId && thread.groupId?.startsWith("recruiting-global-"))
-    throw new IsolationError("Open the role conversation; Main stays across all roles");
+    throw new IsolationError(
+      "The global conversation stays across all roles; hand one role's work to its team with delegate_to_role",
+    );
   const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
   if ((thread.activeRecruitingRoleId ?? null) === (role?.id ?? null))
     return role ? roleSnapshot(tx, actor, role) : null;
@@ -5191,7 +5193,7 @@ export async function latestRecruitingCalibrationProfiles(
     orderBy: { round: "desc" },
     select: { candidateKeys: true },
   });
-  if (round?.candidateKeys.length !== 10) return null;
+  if (!round?.candidateKeys.length) return null;
   const profiles = [];
   for (const candidateKey of round.candidateKeys) {
     const occurrence = await prisma.recruitingCandidateOccurrence.findFirst({
@@ -5410,9 +5412,9 @@ async function recruitingApprovalPackage(
       recruitingCalibrationIdentity(profile.linkedinUrl),
     );
     if (
-      unique.size !== 10 ||
+      unique.size !== input.profiles.length ||
       identities.some((identity) => !identity) ||
-      new Set(identities).size !== 10
+      new Set(identities).size !== input.profiles.length
     )
       throw new IsolationError();
     const nativeRefs = input.profiles.flatMap((profile) =>
@@ -7787,10 +7789,16 @@ export async function saveRecruitingCandidateCsvImport(
             observedAt: observedAt.toISOString(),
           },
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
-          candidateRows: candidateRows.map((row) => ({
-            ...row,
-            csvRowIndex: captured.rows[row.rowIndex]!.csvRowIndex,
-          })),
+          candidateRows: candidateRows.map((row) => {
+            const { csvRowIndex, row: cells } = captured.rows[row.rowIndex]!;
+            // The recruiter's own address for the person, read back as a known contact email.
+            const email = typeof cells.email === "string" ? cells.email : undefined;
+            return {
+              ...row,
+              csvRowIndex,
+              ...(email ? { email, linkedinUrl: cells.linkedin_url ?? null } : {}),
+            };
+          }),
           skipped: captured.skipped,
           truncated: captured.truncated,
         }),
@@ -8755,14 +8763,18 @@ export function candidateIndexQuery(
   ),`
       : Prisma.empty
   } profile_fact_pages AS MATERIALIZED (
-    -- Read only newly marked source receipts once per role, using the partial intent index.
+    -- Newly marked source receipts of this role's pages, looked up per page by the partial
+    -- source index. A join or EXISTS hashes every account's receipts instead, reading each
+    -- large result on every list; the LIMIT keeps it a per-page lookup.
     -- Grades can repeat every display field without becoming the source of profile/media facts.
-    SELECT DISTINCT page."effectId" AS "pageId"
-    FROM "external_effects" saving
-    JOIN "recruiting_candidate_pages" page ON page."effectId" = saving.result->>'sourceEffectId'
+    SELECT page."effectId" AS "pageId" FROM "recruiting_candidate_pages" page
+    CROSS JOIN LATERAL (
+      SELECT 1 FROM "external_effects" saving
+      WHERE saving.result->>'sourceEffectId' = page."effectId"
+        AND saving.kind = 'recruiting_research' AND saving.status = 'completed'
+        AND saving.result->>'profileFactsVersion' = '1'
+      LIMIT 1) saved
     WHERE page."roleId" = ${roleId} ${sourceScope}
-      AND saving.kind = 'recruiting_research' AND saving.status = 'completed'
-      AND saving.result->>'profileFactsVersion' = '1'
   ), base AS (
     SELECT c."roleId", c."candidateKey", c."shortlisted",
       to_char(c."shortlistedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "shortlistedAt",

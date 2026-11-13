@@ -46,6 +46,7 @@ import {
   applyTeachingDesktopInput,
   archiveBot,
   assertSafeRemoteUrl,
+  bindImportedCampaigns,
   buildMcpCredentialBlob,
   buildModelConnectPlaintext,
   CHATGPT_OAUTH_PROVIDER,
@@ -1647,6 +1648,33 @@ export function createRouter(deps: RouterDeps) {
             },
             update: { displayName: input.displayName },
           });
+          // Roles whose imported history used only this account's mailboxes get that campaign.
+          const linkedRoles = await bindImportedCampaigns(deps.prisma, user.id);
+          return { userId: user.id, mailbox, linkedRoles };
+        },
+      ),
+      unassignSendingMailbox: authed.deployment.unassignSendingMailbox.handler(
+        async ({ context, input }) => {
+          if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+          const mailbox = input.mailbox.toLowerCase();
+          const user = await deps.prisma.user.findFirst({
+            where: { email: { equals: input.accountEmail, mode: "insensitive" } },
+            select: { id: true },
+          });
+          if (!user) throw new ORPCError("NOT_FOUND", { message: "No account uses that email." });
+          // Once the account sends from it, the mailbox is its sender and stays with it.
+          if (
+            await deps.prisma.externalEffect.findUnique({
+              where: { idempotencyKey: `instantly-sender-mailbox:${mailbox}` },
+              select: { id: true },
+            })
+          )
+            throw new ORPCError("CONFLICT", { message: "That mailbox is already in use." });
+          const removed = await deps.prisma.sendingMailboxAssignment.deleteMany({
+            where: { email: mailbox, userId: user.id },
+          });
+          if (!removed.count)
+            throw new ORPCError("NOT_FOUND", { message: "That mailbox is not assigned to it." });
           return { userId: user.id, mailbox };
         },
       ),

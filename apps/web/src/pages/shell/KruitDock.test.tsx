@@ -196,3 +196,29 @@ it("pops a top-right toast when something newly waits, not for what already wait
   options.action.onClick();
   expect(onOpen).toHaveBeenCalledWith("Open role");
 });
+
+it("pops no toast for what waited before a reload's saved sidebar was replaced", async () => {
+  toastMock.mockClear();
+  host = document.createElement("div");
+  document.body.append(host);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const root = createRoot(host);
+  const show = (groups: Group[], savedCopy: boolean) =>
+    act(async () =>
+      root.render(<KruitDock groups={groups} savedCopy={savedCopy} onOpen={vi.fn()} />),
+    );
+  await show([group(KRUIT), group("Designer")], true);
+  // The server read shows what started waiting while the browser was closed.
+  await show([group(KRUIT), group("Designer", { attention: "approval" })], false);
+  expect(toastMock).not.toHaveBeenCalled();
+  await show(
+    [
+      group(KRUIT),
+      group("Designer", { attention: "approval" }),
+      group("Open role", { attention: "question" }),
+    ],
+    false,
+  );
+  expect(toastMock).toHaveBeenCalledTimes(1);
+  expect(toastMock.mock.calls[0]![0]).toBe("Open role");
+});

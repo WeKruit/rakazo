@@ -72,6 +72,7 @@ import {
   PiAgentRuntime,
   pruneComputerScreenshotContext,
   pruneStalePageStateContext,
+  pruneStaleToolResults,
 } from "./pi-runtime.js";
 
 const computerObserve: ConnectorTool = {
@@ -226,6 +227,38 @@ describe("Pi computer tool dispatch", () => {
       content: [{ type: "text", text: expect.stringContaining("trimmed to save context") }],
     });
     expect(pruneStalePageStateContext(messages, 2).slice(1, 3)).toEqual(messages.slice(1, 3));
+  });
+
+  it("clears old large tool results a batch at a time, keeping errors and skills", () => {
+    const big = (id: string, toolName = "recruiting_candidates") =>
+      pageResult(id, toolName, `rows ${id} ${"x".repeat(5_000)}`);
+    const results = Array.from({ length: 11 }, (_, index) => big(`r${index}`));
+    // 11 large results, keep 6: fewer than a full batch over, so nothing changes yet.
+    expect(pruneStaleToolResults(results)).toBe(results);
+    const messages = [
+      big("skill", "skill_read"),
+      { ...big("err"), isError: true },
+      pageResult("small", "recruiting_candidates", "3 people"),
+      ...results,
+      big("r11"),
+    ];
+    const pruned = pruneStaleToolResults(messages);
+    const cleared = pruned.filter((message) =>
+      JSON.stringify("content" in message ? message.content : "").includes(
+        "cleared to save context",
+      ),
+    );
+    expect(cleared.map((message) => ("toolCallId" in message ? message.toolCallId : ""))).toEqual([
+      "r0",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
+    ]);
+    expect(pruned.slice(0, 3)).toEqual(messages.slice(0, 3));
+    expect(pruned.slice(-6)).toEqual(messages.slice(-6));
+    expect(messages[3]?.content).toEqual(results[0]?.content);
   });
 
   it("returns the same history when nothing is stale", () => {

@@ -145,6 +145,29 @@ describe("lazy tool catalog", () => {
     expect(searchCatalog(entries, { query: "nothing here at all" })).toEqual({ tools: [] });
   });
 
+  it("ranks the tool that matches most of a long query above one matching a single common word", () => {
+    const tool = (name: string, description: string): ConnectorTool => ({
+      name,
+      description,
+      inputSchema: { type: "object" },
+      route: { connectorId: "test", resourceId: "mail", toolName: name, catalogGroup: "mail" },
+    });
+    const entries = catalogEntries([
+      tool("get_email", "Reads one email by id."),
+      tool("list_mailbox_emails", "Lists the emails in one mailbox."),
+      tool(
+        "create_campaign",
+        "Outside a role, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone named.",
+      ),
+    ]);
+    const result = searchCatalog(entries, {
+      group: "mail",
+      query: "send new email to arbitrary recipient compose outbound email outside existing thread",
+    });
+    const names = "tools" in result ? result.tools.map((found) => found.name) : [];
+    expect(names[0]).toBe("create_campaign");
+  });
+
   it("returns an empty catalog as an empty tool list", () => {
     expect(catalogEntries([])).toEqual([]);
     expect(searchCatalog([], { query: "anything" })).toEqual({ tools: [] });

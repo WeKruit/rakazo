@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TextJudge } from "./judge.js";
+import type { LanguageRow, TextJudge } from "./judge.js";
 import {
   languageFilters,
   plannedLanguageFilters,
@@ -81,22 +81,109 @@ describe("required language", () => {
       result,
     );
     expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
-      ["Wei Test", "shown"],
-      ["Ana Example", "unclear"],
+      ["Wei Test", "strong"],
+      ["Ana Example", "unknown"],
     ]);
     expect(checked.withoutLanguage).toBe(1);
     expect(seen.join("\n")).not.toMatch(/Wei|Joe|Ana/);
   });
 
-  it("checks the profile text itself when there is no judge", async () => {
+  it("sends every row, with its whole profile, to the deployment's own check in one call", async () => {
+    const calls: Array<{ requirement: string; rows: readonly LanguageRow[] }> = [];
+    const judge: TextJudge = {
+      yes: async () => {
+        throw new Error("the check decides, not the yes/no question");
+      },
+      language: async (requirement, batch) => {
+        calls.push({ requirement, rows: batch });
+        return new Map(
+          batch
+            .filter((row) => row.profile.includes("Mandarin"))
+            .map((row) => [row.id, "confirmed"]),
+        );
+      },
+    };
+    const long = `Title: Joe Sample\nURL: https://www.linkedin.com/in/joe-sample\n${"Maintenance. ".repeat(600)}\n`;
+    const checked = await withRequiredLanguage({ resolve: async () => judge }, brief, rows, {
+      content: [
+        { type: "text", text: listing.replace(/Title: Joe Sample[\s\S]*?(?=Title: Ana)/, long) },
+      ],
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.requirement).toBe("Must speak Mandarin and English");
+    expect(calls[0]!.rows.map((row) => [row.id, row.name])).toEqual([
+      ["linkedin:/in/joe-sample", "Joe Sample"],
+      ["linkedin:/in/ana-example", "Ana Example"],
+      ["linkedin:/in/wei-test", "Wei Test"],
+    ]);
+    expect(calls[0]!.rows[0]!.profile).toBe(long);
+    expect(calls[0]!.rows[0]!.candidate).toEqual(rows[0]);
+    // Unanswered rows stay, as unknown, after those the check confirms.
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Wei Test", "confirmed"],
+      ["Joe Sample", undefined],
+      ["Ana Example", undefined],
+    ]);
+  });
+
+  it("checks people saved from several searches on the text each search returned", async () => {
+    const [wei, joe, ana] = listing.split(/(?=Title: )/);
+    const checked = await withRequiredLanguage(
+      { resolve: async () => fakeJudge([]) },
+      brief,
+      rows,
+      [
+        { content: [{ type: "text", text: `${joe}${wei}` }] },
+        { content: [{ type: "text", text: ana }] },
+      ],
+    );
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Wei Test", "strong"],
+      ["Ana Example", "unknown"],
+    ]);
+    expect(checked.withoutLanguage).toBe(1);
+  });
+
+  it("reads the full profile page of people the search text does not show it for", async () => {
+    const read: string[] = [];
+    const reads = { left: 1 };
+    const checked = await withRequiredLanguage(
+      { resolve: async () => fakeJudge([]) },
+      brief,
+      rows,
+      result,
+      {
+        reads,
+        read: async (url) => {
+          read.push(url);
+          return { url, title: "", text: "Joe Sample\n## Languages\nMandarin - Professional" };
+        },
+      },
+    );
+    // Row order decides who is read while the reads last; Wei already shows it.
+    expect(read).toEqual(["https://www.linkedin.com/in/joe-sample"]);
+    expect(reads.left).toBe(0);
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Joe Sample", "strong"],
+      ["Wei Test", "strong"],
+      ["Ana Example", "unknown"],
+    ]);
+    expect(checked.withoutLanguage).toBe(0);
+  });
+
+  it("checks the profile text itself when there is no judge, ranking rather than leaving out", async () => {
     const checked = await withRequiredLanguage(
       { resolve: async () => undefined },
       brief,
       rows,
       result,
     );
-    expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test"]);
-    expect(checked.withoutLanguage).toBe(2);
+    expect(checked.rows.map((row) => [row.name, row.requiredLanguage])).toEqual([
+      ["Wei Test", "strong"],
+      ["Joe Sample", "unknown"],
+      ["Ana Example", "unknown"],
+    ]);
+    expect(checked.withoutLanguage).toBe(0);
   });
 
   it("leaves rows unchanged without a requirement, and reads the text when the judge is silent", async () => {
@@ -112,7 +199,7 @@ describe("required language", () => {
       rows,
       result,
     );
-    expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test"]);
+    expect(checked.rows.map((row) => row.name)).toEqual(["Wei Test", "Joe Sample", "Ana Example"]);
   });
 
   it("requires the language on the profile when most planned searches ask for it", () => {

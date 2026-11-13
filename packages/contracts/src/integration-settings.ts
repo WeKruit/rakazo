@@ -25,5 +25,12 @@ export type IntegrationSetupState = z.infer<typeof IntegrationSetupStateSchema>;
 export const JudgeProviderConfigSchema = z.object({
   provider: z.literal("typesafe"),
   apiKey: z.string().trim().min(1).max(16384),
+  /** The deployment's own required-language check: one person's row in, one verdict out. */
+  languageUrl: z.string().url().optional(),
 });
 export type JudgeProviderConfig = z.infer<typeof JudgeProviderConfigSchema>;
+/** Saving without a key keeps the saved one, so the language check can change on its own. */
+export const SaveJudgeInputSchema = JudgeProviderConfigSchema.extend({
+  apiKey: JudgeProviderConfigSchema.shape.apiKey.optional(),
+});
+export type SaveJudgeInput = z.infer<typeof SaveJudgeInputSchema>;

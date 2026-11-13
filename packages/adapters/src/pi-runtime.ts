@@ -543,7 +543,7 @@ export class PiAgentRuntime implements AgentRuntime {
             : async () => apiKey,
           transformContext: async (messages) =>
             pruneComputerScreenshotContext(
-              pruneStalePageStateContext(messages),
+              pruneStaleToolResults(pruneStalePageStateContext(messages)),
               hasBackups
                 ? activeStreamTarget.config.maxImagesPerPrompt
                 : request.model.maxImagesPerPrompt,
@@ -1809,7 +1809,17 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           ...(options === undefined ? {} : { options }),
           ...(raw.multiple === undefined ? {} : { multiple: raw.multiple }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
-          ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
+          // An over-long planned search keeps its first 300 characters instead of failing the card.
+          ...(raw.plannedSearches === undefined
+            ? {}
+            : {
+                plannedSearches: Array.isArray(raw.plannedSearches)
+                  ? raw.plannedSearches.map((query) => {
+                      const text = String(query).trim();
+                      return text.length > 300 ? text.slice(0, 300).replace(/\s+\S*$/, "") : text;
+                    })
+                  : raw.plannedSearches,
+              }),
         };
       }
       if (tool.name === "request_secret") {
@@ -2405,7 +2415,7 @@ async function createSubagent(
         : selectedModel.apiKey,
     transformContext: async (messages) =>
       pruneComputerScreenshotContext(
-        pruneStalePageStateContext(messages),
+        pruneStaleToolResults(pruneStalePageStateContext(messages)),
         requestModel.maxImagesPerPrompt,
       ),
     initialState: {
@@ -2745,6 +2755,55 @@ export function pruneStalePageStateContext(
     };
   }
   return transformed ?? messages;
+}
+
+/** Large results below this size are left alone: clearing them saves too little. */
+const STALE_TOOL_RESULT_MIN_CHARS = 4_000;
+const TOOL_RESULTS_TO_KEEP = 6;
+/** Results are cleared this many at a time, so the cached prompt prefix changes rarely. */
+const TOOL_RESULT_CLEAR_BATCH = 6;
+/** Instructions the run loaded on purpose stay for the whole run. */
+const NEVER_CLEARED_TOOLS = new Set(["skill_read"]);
+
+/**
+ * Context editing for long runs: once a run holds more than TOOL_RESULTS_TO_KEEP large tool
+ * results, the oldest are replaced by a short note, a batch at a time. The call itself stays, so
+ * the model still sees what it did; errors stay whole, so it can still learn from them. Saved
+ * records can be read again with their tool. Deterministic from the history, like the page-state
+ * trim, so the same history always produces the same prompt.
+ */
+export function pruneStaleToolResults(
+  messages: AgentMessage[],
+  keep = TOOL_RESULTS_TO_KEEP,
+  batch = TOOL_RESULT_CLEAR_BATCH,
+): AgentMessage[] {
+  const large: number[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message?.role !== "toolResult") continue;
+    if (PAGE_STATE_TOOL_NAMES.has(message.toolName) || NEVER_CLEARED_TOOLS.has(message.toolName))
+      continue;
+    const returnedError = (message.details as { error?: unknown } | undefined)?.error;
+    if (message.isError || (returnedError !== undefined && returnedError !== null)) continue;
+    if (textLength(message) < STALE_TOOL_RESULT_MIN_CHARS) continue;
+    large.push(index);
+  }
+  const clear = Math.floor(Math.max(0, large.length - keep) / batch) * batch;
+  if (!clear) return messages;
+  const transformed = [...messages];
+  for (const index of large.slice(0, clear)) {
+    const message = transformed[index] as Extract<AgentMessage, { role: "toolResult" }>;
+    transformed[index] = {
+      ...message,
+      content: [
+        {
+          type: "text",
+          text: `[Earlier ${message.toolName} result cleared to save context. What you said about it stands; to use its details again, call the tool again rather than recalling them.]`,
+        },
+      ],
+    };
+  }
+  return transformed;
 }
 
 function textLength(message: Extract<AgentMessage, { role: "toolResult" }>): number {
