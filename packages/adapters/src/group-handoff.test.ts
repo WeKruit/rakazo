@@ -69,6 +69,7 @@ function harness(
       ),
     },
     task: { create: vi.fn(async () => ({ id: "task-b" })) },
+    externalEffect: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
     event: {
       findFirst: vi.fn(async () => ({ seq: 1 })),
       create: vi.fn(async () => ({ seq: 1 })),
@@ -576,6 +577,24 @@ describe("group handoff report back", () => {
         : { blocks: [asked] }) as never);
     await reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" });
     expect(runCreate.mock.calls.length > 0).toBe(wakes);
+  });
+
+  it("does not wake the sender after a send the recruiter confirmed", async () => {
+    // Staging 11-13: Outreach said the confirmed email went out, then the report woke Main,
+    // which listed the account's five roles nobody asked about.
+    const { deps, runCreate, tx } = harness([asked], undefined, undefined, [
+      { blocks: [{ kind: "text", text: "已发给 Noah 和 Ada。" }] },
+    ]);
+    tx.externalEffect.findFirst.mockResolvedValue({ id: "effect-sent" });
+    await expect(
+      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(runCreate).not.toHaveBeenCalled();
+    expect(tx.externalEffect.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "run-b", status: "completed" }),
+      }),
+    );
   });
 
   it("tells the sender a stage that ended with no message or card is not done", async () => {
