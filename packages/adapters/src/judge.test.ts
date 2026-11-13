@@ -43,7 +43,7 @@ describe("language check", () => {
       );
     }) as unknown as typeof fetch;
     const judge = typeSafeJudge("key", fetchImpl, "https://check.example/");
-    const rows = Array.from({ length: 45 }, (_, index) => ({
+    const rows = Array.from({ length: 13 }, (_, index) => ({
       id: `r${index}`,
       name: "Pat",
       profile: "Engineer",
@@ -51,7 +51,7 @@ describe("language check", () => {
     const verdicts = await judge.language?.("Mandarin", rows);
     expect(
       vi.mocked(fetchImpl).mock.calls.map(([, init]) => JSON.parse(String(init?.body)).rows.length),
-    ).toEqual([40, 5]);
+    ).toEqual([6, 6, 1]);
     const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
     expect(url).toBe("https://check.example/");
     expect((init!.headers as Record<string, string>).authorization).toBe("Bearer key");
@@ -59,7 +59,7 @@ describe("language check", () => {
     expect(body.requirement).toBe("Mandarin");
     expect(body.rows[0]).toEqual({ id: "r0", name: "Pat", profile: "Engineer" });
     // An unknown verdict is no verdict.
-    expect(verdicts?.size).toBe(44);
+    expect(verdicts?.size).toBe(12);
     expect(verdicts?.get("r1")).toBeUndefined();
     expect(typeSafeJudge("key", fetchImpl).language).toBeUndefined();
     const failed = await typeSafeJudge("key", answer({}, 502), "https://check.example/").language?.(

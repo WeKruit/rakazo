@@ -1,5 +1,5 @@
 // Cloudflare Worker that decides, for each person in a batch, whether their profile shows a
-// role's required language. The server posts up to 40 rows and waits for every verdict, so
+// role's required language. The server posts six rows at a time and waits for every verdict, so
 // nothing streams:
 //   POST { requirement: string, rows: [{ id, name?, profile: string, candidate?: object }] }
 //   200  { verdicts: { [id]: { verdict: "shown" | "unclear" | "no sign", p?: number } } }
