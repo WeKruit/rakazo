@@ -308,8 +308,8 @@ const describeCards = (cards) =>
         .join("\n")
     : "(none)";
 
-async function simulate(journey, turns, view, cards, screen) {
-  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
+async function simulate(journey, turns, view, cards, screen, tag) {
+  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
@@ -344,6 +344,8 @@ async function play(journey, label, owner, mailbox, out) {
   const { rpc } = user;
   const before = await campaigns(rpc);
   const startedAt = Date.now();
+  // A per-play tag, so a journey on a reused account names a role of its own.
+  const tag = new Date(startedAt).toISOString().slice(11, 16).replace(":", "");
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
   const ui = UI
@@ -364,7 +366,7 @@ async function play(journey, label, owner, mailbox, out) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
       const screen = ui ? await ui.view() : null;
-      const move = await simulate(journey, turns, render(chats), cards, screen);
+      const move = await simulate(journey, turns, render(chats), cards, screen, tag);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       const problems = [];
