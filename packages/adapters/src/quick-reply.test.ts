@@ -87,6 +87,13 @@ describe("quick reply", () => {
     expect(seen).toHaveLength(0);
   });
 
+  it("never says an email is going out", () => {
+    // Staging 11-13: "发吧" got 「好，现在发出。」, then Gmail turned out not to be connected.
+    expect(cleanQuickReply("好，现在发出。")).toBe("好，这就处理。");
+    expect(cleanQuickReply("Sending it now.")).toBe("On it.");
+    expect(cleanQuickReply("我先看这个岗位的发信队列。")).toBe("我先看这个岗位的发信队列。");
+  });
+
   it("drops questions, long text and runtime filler", () => {
     expect(cleanQuickReply("你想招哪个职位？")).toBeNull();
     expect(cleanQuickReply("x".repeat(200))).toBeNull();
