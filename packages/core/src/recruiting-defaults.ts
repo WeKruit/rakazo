@@ -46,6 +46,10 @@ export const RECRUITING_UNUSED_BUILTIN_TOOLS = [
   "spawn_bot",
   "update_bot",
   "archive_bot",
+  // Never called by a recruiting bot in a week of production runs; candidates are graded by
+  // Reviewer, not assessed by the coordinator.
+  "recruiting_assess",
+  "render_view",
 ] as const;
 
 /**
