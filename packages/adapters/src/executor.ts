@@ -605,7 +605,7 @@ import {
   createCreditGuard,
   retryWhileOutOfCredits,
 } from "./provider-credits.js";
-import { fixedAck, quickReply } from "./quick-reply.js";
+import { fixedAck, quickReply, withoutLeadingAck } from "./quick-reply.js";
 import {
   RECRUITING_AGENT_RUN_WAIT_MS,
   runningAgentRunId,
@@ -1546,9 +1546,9 @@ export const saysSomething = (
 
 /** Model-facing: a short reply to a message that arrived mid-run is being sent for the run. */
 export const STEERING_QUICK_REPLY_SENDING =
-  "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again; say only what it changes.";
+  "A short reply that acknowledges this message is being sent to the recruiter for you. Do not acknowledge it again or open with 收到, 好的 or Got it; say only what it changes.";
 export const steeringQuickReplySent = (line: string) =>
-  `You already sent the recruiter this short reply to it: "${line}". Do not repeat it or acknowledge the message again; say only what it changes.`;
+  `You already sent the recruiter this short reply to it: "${line}". Do not repeat it, acknowledge the message again or open with 收到, 好的 or Got it; say only what it changes.`;
 
 export const INTAKE_ASK_FIRST =
   "Not handed off: this role was just opened and the recruiter is waiting for your first question. Ask it yourself now with ask_user, in the recruiter's language, with the four plannedSearches; once nothing is left to ask, the search runs from your answer turn.";
@@ -5165,6 +5165,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
       let steeringWatch: ReturnType<typeof setInterval> | undefined;
       // The short reply already sent for a message that arrived mid-run, by message id.
       const steeringQuickReplies = new Map<string, string>();
+      // A fixed line was sent and the run has not spoken since: the next one is not sent, and the
+      // run's next line drops its own opening acknowledgement.
+      let fixedAckOpen = false;
+      let fixedAckSent = false;
       // Starts the short reply for a message that arrived mid-run, once per message.
       let replyToSteering:
         | ((item: {
@@ -5553,7 +5557,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A card answer gets the fixed line at once; only a new request gets a written one.
           void (
             nativeSources?.currentAnswer
-              ? Promise.resolve(fixedAck(quickReplyText))
+              ? Promise.resolve(
+                  fixedAckOpen ? undefined : fixedAck(quickReplyText),
+                ).then((line) => {
+                  if (line) fixedAckOpen = fixedAckSent = true;
+                  return line;
+                })
               : writeQuickReply(quickReplyText)
           )
             .then(async (text) => {
@@ -6330,6 +6339,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!text.trim()) return false;
             started.add(item.messageId);
             const line = fixedAck(text);
+            // One fixed line until the run speaks: a second message right after gets none.
+            if (fixedAckOpen) {
+              steeringQuickReplies.set(item.messageId, line);
+              return true;
+            }
+            fixedAckOpen = fixedAckSent = true;
             void publishMessage(deps, run, "bot", [
               { kind: "text", text: line },
             ])
@@ -6957,9 +6972,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             currentTextSegment,
           );
           // The server's continuation nudge echoed back is never for the recruiter.
-          const written = withoutNudge(
+          const nudgeless = withoutNudge(
             visible(redactSecrets(extracted.text, runSecrets)),
           ).trim();
+          const written = fixedAckSent
+            ? withoutLeadingAck(nudgeless)
+            : nudgeless;
           // The question card that follows asks the question; the text keeps only what leads up to it.
           const narration =
             hideVendors && nextTool === "ask_user"
@@ -6991,6 +7009,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             discardedMidTurnNarration = true;
             return;
           }
+          fixedAckOpen = false;
           await publishMessage(
             deps,
             run,
@@ -14929,7 +14948,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const rawMessage = visible(
               redactSecrets(String(args.message ?? ""), runSecrets),
             );
-            const text = clampUserProgressMessage(withoutNudge(rawMessage));
+            const unnudged = clampUserProgressMessage(withoutNudge(rawMessage));
+            const text = fixedAckSent ? withoutLeadingAck(unnudged) : unnudged;
             if (!rawMessage.trim())
               return finish({ error: "message is required" });
             if (!text)
@@ -14946,6 +14966,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const truncated = isProgressMessageTruncated(rawMessage);
             await flushProgress();
             await publishMidTurnNarration();
+            fixedAckOpen = false;
             await publishMessage(
               deps,
               run,
