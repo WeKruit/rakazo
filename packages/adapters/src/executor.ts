@@ -11827,7 +11827,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const result = {
                   status: "already_waiting",
                   dispatched: false,
-                  message: `This send's card is already waiting for the recruiter${waitingSend.threadId === thread.id ? " in this conversation" : " in the role's conversation"}, so no second card was made and nothing was sent. Tell the recruiter in one line that it is ready to send there; do not call activate_campaign again until they answer it.`,
+                  message: `This send's card is waiting for the recruiter right now${waitingSend.threadId === thread.id ? " in this conversation" : ` in the ${waitingSend.place ? `"${waitingSend.place}"` : "role's"} conversation`}, so no second card was made and nothing was sent. Tell the recruiter in one line where it is ready to send; do not call activate_campaign again until they answer it. This is true only now: once they answer it the card is gone, so in later replies never say a card is waiting; read get_campaign for who has been emailed or is queued.`,
                 };
                 return (await completeEffect(
                   deps,

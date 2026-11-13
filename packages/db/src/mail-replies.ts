@@ -307,7 +307,7 @@ export async function findSameMailReply(
 export async function findWaitingCampaignSend(
   tx: Prisma.TransactionClient,
   input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
-): Promise<{ effectId: string; threadId: string } | undefined> {
+): Promise<{ effectId: string; threadId: string; place: string | null } | undefined> {
   const card = createHash("sha256").update(stableJsonValue(input.card)).digest("hex");
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
@@ -324,9 +324,28 @@ export async function findWaitingCampaignSend(
       run: { status: { in: LIVE_RUN_STATUSES } },
     },
     orderBy: { createdAt: "desc" },
-    select: { id: true, run: { select: { threadId: true } } },
+    select: {
+      id: true,
+      run: {
+        select: {
+          threadId: true,
+          thread: {
+            select: {
+              group: { select: { name: true } },
+              activeRecruitingRole: { select: { title: true } },
+            },
+          },
+        },
+      },
+    },
   });
-  if (waiting) return { effectId: waiting.id, threadId: waiting.run.threadId };
+  if (waiting)
+    return {
+      effectId: waiting.id,
+      threadId: waiting.run.threadId,
+      place:
+        waiting.run.thread.group?.name ?? waiting.run.thread.activeRecruitingRole?.title ?? null,
+    };
   const current = await tx.externalEffect.findUnique({
     where: { id: input.effectId },
     select: { result: true },
