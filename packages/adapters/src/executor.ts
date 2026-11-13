@@ -149,6 +149,7 @@ import {
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
+  PLACEHOLDER_NOTE,
   POLL_DEFAULT_MINUTES,
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
@@ -200,6 +201,7 @@ import {
   truncatedPlainText,
   unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
+  unfilledPlaceholder,
   userTurnMessageForRun,
   waitingApprovalCards,
   waitingApprovalNote,
@@ -11740,7 +11742,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyActivation?.refusal ??
                 (instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
-                  : instantlyActivation?.recipientCount === 0
+                  : instantlyActivation?.firstEmail &&
+                      unfilledPlaceholder(
+                        `${instantlyActivation.firstEmail.subject}\n${instantlyActivation.firstEmail.body}`,
+                      )
+                    ? `${PLACEHOLDER_NOTE} Save the corrected email with ensure_role_campaign steps, then activate again.`
+                    : instantlyActivation?.recipientCount === 0
                     ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
                     : null);
               if (unsendable) {

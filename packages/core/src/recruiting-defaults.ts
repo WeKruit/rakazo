@@ -317,6 +317,15 @@ export function greetsByName(body: string): boolean {
   return name !== undefined && !/^(?:there|all|everyone|team|folks)$/i.test(name);
 }
 
+/** A fill-in-the-blank left in an email ("[Candidate Name]", "[Your name]"), which would go out as written. */
+export function unfilledPlaceholder(text: string): string | undefined {
+  return /\[[^[\]\n]{0,60}\p{L}[^[\]\n]{0,60}\](?!\()/u.exec(text.replace(/<[^>]+>/g, " "))?.[0];
+}
+
+/** Model-facing: why an email with a fill-in-the-blank is refused. */
+export const PLACEHOLDER_NOTE =
+  "This email still has a fill-in-the-blank in square brackets, which would be sent exactly as written. Put in the real text: {{firstName}} for each person's first name in a campaign, their actual name in a one-person email, and the recruiter's name or the mailbox's display name in the signature.";
+
 /** Model-facing: why a shared email that greets someone by name is refused. */
 export const NAMED_GREETING_NOTE =
   "Greet with {{firstName}} instead of writing a name in: this email goes to everyone added to the campaign, and each person's first name from add_leads fills it in. To email several people, put them all in one campaign so one card confirms them together.";
