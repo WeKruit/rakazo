@@ -477,6 +477,20 @@ describe("account recruiting reads", () => {
       before: "feedback-next",
     });
   });
+  it("skips one role whose conversation now holds another role instead of failing every role", async () => {
+    const { deps } = fixture();
+    const workspace = vi.mocked(db.getRecruitingWorkspace).getMockImplementation()!;
+    vi.mocked(db.getRecruitingWorkspace).mockImplementation(async (prisma, owner, input) =>
+      input.threadId === "thread-b"
+        ? workspace(prisma, owner, { threadId: "thread-c" })
+        : workspace(prisma, owner, input),
+    );
+    const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
+    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
+    await expect(
+      readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
   it("filters shortlist dates before paging instead of hiding rows after the page", async () => {
     const { deps } = fixture();
     await readRecruitingAccountView(deps, actor, {
