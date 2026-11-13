@@ -143,8 +143,17 @@ export async function openUi({ origin, email, password, chinese, out }) {
     },
     /** Types a custom answer into the card's answer box and sends it; false when there is none. */
     async answerTyped(text) {
-      const box = page.getByRole("textbox", { name: /^(Answer|回答|答案)$/ }).last();
-      if (!(await box.isVisible().catch(() => false))) return false;
+      let box = page.getByRole("textbox", { name: /^(Answer|回答|答案)$/ }).last();
+      if (!(await box.isVisible().catch(() => false))) {
+        // A form card names each field by its label; one text field takes the typed answer.
+        const fields = page
+          .locator("form")
+          .filter({ has: page.getByRole("button", { name: /^(Send answer|发送回答)$/ }) })
+          .last()
+          .locator("textarea:visible, input:visible:not([type=checkbox]):not([type=radio])");
+        if ((await fields.count().catch(() => 0)) !== 1) return false;
+        box = fields.first();
+      }
       await box.fill(text);
       const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
       if (!(await send.isEnabled().catch(() => false))) return false;
