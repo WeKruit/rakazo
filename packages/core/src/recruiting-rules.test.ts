@@ -832,6 +832,30 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Repeat requests redid contact lookups and drafts already done.",
   },
   {
+    rule: "named people to email skip the search intake",
+    in: "RECRUITING_INTAKE_FLOW",
+    phrase: "When the recruiter names the people themselves and asks to email them",
+    why: "Staging 11-13: a new role with two named people to email got a search-direction card first.",
+  },
+  {
+    rule: "no role team in recruiter chat",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "Teammates are invisible to the recruiter",
+    why: "Staging 11-13: Kruit told the recruiter 「岗位团队已接手」 and contradicted itself on who sends.",
+  },
+  {
+    rule: "contact-once-found says search then Send card",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "I search first, then a Send card shows the exact emails",
+    why: "Staging 11-13: asked to send the agreed template once people are found, Kruit asked for the template and the location again.",
+  },
+  {
+    rule: "no roles yet is said, not asked",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "never ask which role they mean",
+    why: "Staging 11-13: with no role saved, a progress question got 「你指的是哪个岗位？」.",
+  },
+  {
     rule: "lookup up to the number asked",
     in: "Outreach",
     phrase: "never more without being asked",

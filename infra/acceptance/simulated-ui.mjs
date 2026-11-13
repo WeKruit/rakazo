@@ -138,6 +138,22 @@ export async function openUi({ origin, email, password, chinese, out }) {
           await settle();
           return true;
         }
+        // A multiple-choice card shows its options as checkboxes and sends them with one button.
+        const option = page
+          .locator("label")
+          .filter({ has: page.getByRole("checkbox") })
+          .filter({
+            hasText: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`),
+          })
+          .last();
+        if (await option.isVisible().catch(() => false)) {
+          await option.getByRole("checkbox").first().click();
+          const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
+          if (!(await send.isEnabled().catch(() => false))) return false;
+          await send.click();
+          await settle();
+          return true;
+        }
       }
       return false;
     },
