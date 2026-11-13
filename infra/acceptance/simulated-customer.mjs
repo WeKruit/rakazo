@@ -318,8 +318,12 @@ async function simulate(journey, turns, view, cards, screen, tag) {
 }
 
 /** The send answer the harness allows: only the internal test inboxes are ever emailed. */
-function guardSend(card, answer, turn) {
+function guardSend(journey, card, answer, turn) {
   if (answer !== "allow") return "deny";
+  if (!journey.sends) {
+    turn.guard = "denied: this journey never sends";
+    return "deny";
+  }
   const outside = card.recipients.filter((address) => !allowedRecipient(address));
   if (card.recipients.length && !outside.length) return "allow";
   turn.guard = `denied: the card names ${outside.join(", ") || "no address"}`;
@@ -425,7 +429,7 @@ async function play(journey, label, owner, mailbox, out) {
             : move.action === "approve_send"
               ? "allow"
               : move.text;
-        if (card.send) answer = guardSend(card, answer, turn);
+        if (card.send) answer = guardSend(journey, card, answer, turn);
         // The email on a send card is what goes out: a fill-in left in it is a product failure.
         const fillIn = card.send && card.text.match(PLACEHOLDER);
         if (fillIn) turn.placeholder = fillIn[0];
