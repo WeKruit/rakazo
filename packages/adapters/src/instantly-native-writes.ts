@@ -7,8 +7,10 @@ import {
   greetsByName,
   INSTANTLY_MCP_ENDPOINT,
   NAMED_GREETING_NOTE,
+  PLACEHOLDER_NOTE,
   signedAsTeam,
   TEAM_SIGNATURE_NOTE,
+  unfilledPlaceholder,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
@@ -42,13 +44,18 @@ const API = "https://api.instantly.ai/api/v2";
 const Uuid = z.uuid();
 const Email = z.email().max(254);
 const Step = z.strictObject({
-  subject: z.string().min(1).max(500),
+  subject: z
+    .string()
+    .min(1)
+    .max(500)
+    .refine((subject) => !unfilledPlaceholder(subject), PLACEHOLDER_NOTE),
   body: z
     .string()
     .min(1)
     .max(20_000)
     .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.')
-    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE),
+    .refine((body) => !signedAsTeam(body), TEAM_SIGNATURE_NOTE)
+    .refine((body) => !unfilledPlaceholder(body), PLACEHOLDER_NOTE),
   delay_days: z
     .number()
     .int()
