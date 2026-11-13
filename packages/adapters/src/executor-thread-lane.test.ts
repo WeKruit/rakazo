@@ -180,6 +180,18 @@ describe("thread lanes for automation runs", () => {
     expect(db.prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it("starts a teammate's message without waiting behind background grading", async () => {
+    // Staging 11-13: the recruiter's feedback, delegated to the role's lead, waited two minutes
+    // while the role's grader ran.
+    const db = lane([
+      { id: "grade", botId: "reviewer", trigger: "recruiting_grade", status: "running" },
+      { id: "feedback", botId: "lead", trigger: "bot_message", status: "queued" },
+      { id: "routine", trigger: "routine", status: "queued" },
+    ]);
+    expect(await db.start("feedback")).toBe(true);
+    expect(await db.start("routine")).toBe(false);
+  });
+
   it("ignores runs in other threads", async () => {
     const db = lane([
       { id: "elsewhere", threadId: "thread-2", trigger: "routine", status: "running" },
