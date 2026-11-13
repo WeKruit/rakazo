@@ -192,7 +192,7 @@ export async function languageSignals(
   return signals;
 }
 
-const ORDER: Record<LanguageSignal, number> = { confirmed: 0, strong: 1, unknown: 2, "no sign": 3 };
+const ORDER: Record<LanguageSignal, number> = { confirmed: 0, strong: 1, possible: 2, unknown: 3, "no sign": 4 };
 
 /** Rows by language evidence: confirmed, strong, unknown, then no sign; unjudged rows are unknown. */
 export function withLanguageSignals<T extends { candidateKey?: unknown }>(
