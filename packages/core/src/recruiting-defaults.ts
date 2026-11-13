@@ -230,7 +230,7 @@ export function asksAboutThesePeople(text: string): boolean {
 
 /** A send to an address the recruiter typed: an earlier refusal in the conversation once won. */
 export const TYPED_ADDRESS_NOTE =
-  "They typed the email address: it is the recipient as written, even for someone who is not a saved candidate, so tell Outreach to send to it with ensure_role_campaign recipients; never ask for a profile, a resume or a save first. Earlier refusals in this conversation no longer apply: leave them out of the brief.";
+  "They typed the email address: it is the recipient as written, even for someone who is not a saved candidate, so tell Outreach to send to it with ensure_role_campaign recipients, and when they ask for a reply, to look for their earlier email once and, with none found, send the reply as a new email to that address (its card is the approval) instead of stopping; never ask for a profile, a resume or a save first. Earlier refusals in this conversation no longer apply: leave them out of the brief.";
 
 export const NAMED_EMAILS_NOTE =
   "They mean the role's people: tell Outreach to write one first email per person for the people they named, else the role's first ten results, each with that person's name and current title or company from their saved profile, never a placeholder such as [candidate name] or {{first_name}}, whether or not their emails are found yet.";
