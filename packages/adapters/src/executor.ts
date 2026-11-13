@@ -7179,13 +7179,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // strong people first and labels everyone below them.
         const languageLevels = new Map<string, LanguageSignal>();
         let languageRequirement: string | undefined;
-        const rememberLanguage = (
-          role: unknown,
-          roleId: unknown,
-          rows: unknown,
-          withoutLanguage: number,
-        ) => {
-          const levels: Record<string, number> = { "no sign": withoutLanguage };
+        // Rows carry the level the language check gave them, here or in the turn that planned
+        // the searches.
+        const learnLanguage = (role: unknown, rows: unknown) => {
+          const levels: Record<string, number> = {};
           for (const row of (Array.isArray(rows) ? rows : []) as Array<{
             candidateKey?: unknown;
             requiredLanguage?: LanguageSignal;
@@ -7198,7 +7195,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 row.requiredLanguage,
               );
           }
-          languageRequirement = requiredLanguage(role) ?? languageRequirement;
+          if (languageLevels.size)
+            languageRequirement = requiredLanguage(role) ?? languageRequirement;
+          return levels;
+        };
+        const rememberLanguage = (
+          role: unknown,
+          roleId: unknown,
+          rows: unknown,
+          withoutLanguage: number,
+        ) => {
+          const levels = learnLanguage(role, rows);
+          levels["no sign"] = withoutLanguage;
           getLogger().info("recruiting.language.levels", { roleId, levels });
         };
         // People searches this run sent, so a short round can ask once two sets came back short.
@@ -16736,6 +16744,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const outside = outsideOf(onTime);
           addFresh(inArea(onTime, outside));
+          learnLanguage(planned.data.queries, onTime);
           // The people are already in Results; chat says so at once instead of staying on the
           // last activity until the model's picks.
           if (plannedNewPeople > 0 && !isBackgroundRunTrigger(run.trigger))
@@ -16770,6 +16779,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!rows?.length) return;
               const kept = inArea(rows, outsideOf([...onTime, ...rows]));
               addFresh(kept);
+              learnLanguage(planned.data.queries, kept);
               lateSearchRows.push(
                 `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept.map(compactRow)).slice(0, 8_000)}`,
               );
