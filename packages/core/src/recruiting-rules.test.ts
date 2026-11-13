@@ -382,6 +382,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "The deeper search re-ran research for the whole round.",
   },
   {
+    rule: "the language check decides the language",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: "The level is the language decision: take it as given, never judge the language again",
+    why: "Strong-rated Korean speakers were left out as \"Korean not verified\" (11-13).",
+  },
+  {
     rule: "no quota talk",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "Never tell the recruiter about search quotas",
