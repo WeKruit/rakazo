@@ -12299,6 +12299,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           : undefined,
                       )
                     : { rows: shown, withoutLanguage: 0 };
+                  if (checked.rows !== shown) {
+                    const levels: Record<string, number> = { "no sign": checked.withoutLanguage };
+                    for (const row of checked.rows as Array<{ requiredLanguage?: string }>) {
+                      const level = row.requiredLanguage ?? "unjudged";
+                      levels[level] = (levels[level] ?? 0) + 1;
+                    }
+                    getLogger().info("recruiting.language.levels", { roleId, levels });
+                  }
                   // Licences, clearances and the like are rarely in the row; before the first
                   // pick, lines of the full profile that speak to the must-haves come with it.
                   if (
