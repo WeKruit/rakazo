@@ -506,7 +506,9 @@ export async function readRecruitingAccountView(
     };
     // Roles are independent reads (CRM, mail, calendar). Two at a time keeps a page quick without
     // taking the shared database pool from the rest of the app; a closed page stops reading.
-    const items: RecruitingAccountViewOutput["items"] = new Array(page.length);
+    const items: (RecruitingAccountViewOutput["items"][number] | undefined)[] = new Array(
+      page.length,
+    );
     let next = 0;
     await Promise.all(
       Array.from(
@@ -520,7 +522,15 @@ export async function readRecruitingAccountView(
           while (next < page.length) {
             deps.signal?.throwIfAborted();
             const index = next++;
-            items[index] = await readItem(page[index]!);
+            const row = page[index]!;
+            items[index] = await readItem(row).catch((error: unknown) => {
+              // One role whose conversation moved or was removed must not hide every other
+              // role from an account-wide read; a named role still reports it.
+              if (input.roleId || !(error instanceof ORPCError) || error.code !== "NOT_FOUND")
+                throw error;
+              getLogger().warn("recruiting.role_read.skipped", { "recruiting.role_id": row.id });
+              return undefined;
+            });
           }
         },
       ),
@@ -542,7 +552,7 @@ export async function readRecruitingAccountView(
     return RecruitingAccountViewOutputSchema.parse({
       unassignedReminders,
       roles,
-      items,
+      items: items.filter((item) => item !== undefined),
       nextCursor: rows.length > input.limit ? (page.at(-1)?.id ?? null) : null,
       ...(input.roleId || input.cursor
         ? {}
