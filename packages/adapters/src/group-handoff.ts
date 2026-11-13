@@ -26,7 +26,7 @@ import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { blocksText } from "./reply-suggestion.js";
 import { NO_RESPONSE } from "./silent-reply.js";
-import { declinedRunId } from "./turn-end-guard.js";
+import { AUTOCONTINUE_NONCE_PREFIX, declinedRunId } from "./turn-end-guard.js";
 
 export const NO_ROLE_HANDOFF =
   "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
@@ -274,9 +274,19 @@ export async function handoffToGroupBot(
 }
 
 /** Whether the run left the user anything to see: a message or card, not only steps or a handoff. */
-async function postedResult(tx: Pick<PrismaClient, "message">, runId: string): Promise<boolean> {
+async function postedResult(
+  tx: Pick<PrismaClient, "message" | "run">,
+  runId: string,
+): Promise<boolean> {
+  // A held-back reply's retry posts the stage's result under its own run. Staging 11-13: the
+  // retry posted the template, the report said nothing was posted, and Main had it written twice.
+  const retries = await tx.run.findMany({
+    where: { sourceMessage: { clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${runId}:decline` } },
+    select: { id: true },
+    take: 5,
+  });
   const posted = await tx.message.findMany({
-    where: { runId, role: "bot" },
+    where: { runId: { in: [runId, ...retries.map((retry) => retry.id)] }, role: "bot" },
     select: { blocks: true },
     take: 50,
   });

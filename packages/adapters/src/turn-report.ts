@@ -440,7 +440,7 @@ export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
 export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
-const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i;
+const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
 /** A question to the user about the draft itself, after the draft (not the candidate's "open to a chat?"). */
 const ABOUT_DRAFT =
   /\b(?:draft|emails?|change|edit|send|tweak|adjust|version|tone|shorter|longer)\b|改|发/i;
