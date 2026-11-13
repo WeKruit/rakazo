@@ -489,15 +489,6 @@ export function turnEndStuck(text: string): string | undefined {
 }
 
 /** The final turn's prose, joined. */
-// A recruiter asking how things stand ("现在发送了多少人呢", "why did nothing send?"): answering it
-// is the whole turn, so the playbook's next step must not be pushed over the answer.
-const STATUS_QUESTION_RE =
-  /多少|几个|几位|几封|几人|为什么|为啥|怎么回事|什么情况|进展|进度|状态|发了|发出|发送了|how many|how much|\bwhy\b|\bstatus\b|\bprogress\b|what happened|did (?:it|they|you|the)\b/i;
-
-export function asksHowThingsStand(text: string): boolean {
-  return STATUS_QUESTION_RE.test(text);
-}
-
 export function turnEndText(blocks: readonly TurnEndBlock[]): string {
   return blocks
     .filter((block) => block.kind === "text" && typeof block.text === "string")

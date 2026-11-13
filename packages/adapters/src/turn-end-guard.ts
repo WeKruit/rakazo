@@ -1,7 +1,6 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
-  asksHowThingsStand,
   classifyTurnEnd,
   type TurnEndClass,
   turnEndPromise,
@@ -14,7 +13,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
-import { AUTOMATIC_CONTINUATION, NEXT_STEP_LEAD, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
+import { AUTOMATIC_CONTINUATION, UNDONE_PROMISE_LEAD } from "./silent-reply.js";
 import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
@@ -311,82 +310,16 @@ const AUTO_NOTE = ` (${AUTOMATIC_CONTINUATION} When quoting, use the recruiter's
  * and the last push before the cap must end on a result or one concrete question, so the
  * recruiter never sees a turn that just stops.
  */
-export function continuationText(input: {
-  step?: { label: string; prompt: string };
-  promise?: string;
-  last?: boolean;
-}) {
+export function continuationText(input: { promise?: string; last?: boolean }) {
   const parts = [
     input.promise
       ? `${UNDONE_PROMISE_LEAD} "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
       : "",
-    input.step ? `${NEXT_STEP_LEAD} ${input.step.label}. ${input.step.prompt}` : "",
     input.last
       ? " This is the last automatic continuation: this turn must deliver a result. If you truly cannot (a tool failed or information is missing), try another way once; if that still fails, use one question card (ask_user) to ask the recruiter for one concrete decision, saying where it is stuck and offering options. Do not just report status, and do not say you will do it later."
       : "",
   ];
   return `${parts.filter(Boolean).join("")}${AUTO_NOTE}`;
-}
-
-/** True when the run was started by a teammate's handoff to this bot. */
-async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
-  if (!run.sourceMessageId || run.trigger !== "follow_up") return false;
-  const source = await deps.prisma.message.findUnique({
-    where: { id: run.sourceMessageId },
-    select: { blocks: true },
-  });
-  const blocks = (source?.blocks ?? []) as MessageBlock[];
-  return blocks.some((block) => block.kind === "handoff" && block.toBotId === run.botId);
-}
-
-/** Effects that move a role through its playbook: brief, searches, rounds, feedback, approvals. */
-const PLAYBOOK_EFFECTS = new Set([
-  "recruiting_role",
-  "recruiting_research",
-  "recruiting_feedback",
-  "recruiting_shortlist",
-  "recruiting_assess",
-  "recruiting_request_approval",
-]);
-
-/**
- * Since the recruiter's last message the role did other work (looked up saved people's profiles,
- * contacts) and nothing in its playbook. That answered what they asked; the role's next step
- * waits for them instead of starting on its own, however the lookups turned out.
- */
-async function answeredOtherRequest(
-  deps: TurnEndGuardDeps,
-  run: TurnEndGuardInput["run"],
-  answered: boolean,
-) {
-  const asked = await deps.prisma.message.findFirst({
-    where: { threadId: run.threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { createdAt: true, blocks: true },
-  });
-  if (!asked) return false;
-  // A status question answered in text is done; pushing the playbook step over it ignored what
-  // the recruiter asked ("how many were sent?" got "complete the role details").
-  if (
-    answered &&
-    run.trigger === "user" &&
-    asksHowThingsStand(turnEndText((asked.blocks ?? []) as MessageBlock[]))
-  )
-    return true;
-  const effects = await deps.prisma.externalEffect.findMany({
-    where: {
-      spaceId: run.spaceId,
-      run: { threadId: run.threadId },
-      createdAt: { gt: asked.createdAt },
-    },
-    select: { id: true, kind: true },
-  });
-  if (!effects.length || effects.some((effect) => PLAYBOOK_EFFECTS.has(effect.kind))) return false;
-  // A people search saves new people to the role: that is playbook work too.
-  const pages = await deps.prisma.recruitingCandidatePage.count({
-    where: { effectId: { in: effects.map((effect) => effect.id) } },
-  });
-  return pages === 0;
 }
 
 /**
@@ -538,25 +471,16 @@ export async function guardRecruitingTurnEnd(
   const endText = turnEndText(input.blocks);
   // "已开始扩展搜索" with nothing running is a promise too; a running search is checked below.
   const promise = turnEndPromise(endText) ?? turnEndStarted(endText);
-  // A teammate handed this bot one task (an email draft, a deeper search). Finishing that task
-  // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
-  const handedIn = await handedInStage(deps, run);
-  const nextStep =
-    handedIn ||
-    (playbook?.step && (await answeredOtherRequest(deps, run, Boolean(endText) && !promise)))
-      ? undefined
-      : (playbook?.step ?? undefined);
-  if (!nextStep && !promise) return { action: "ended", classification };
+  // The playbook is a direction, not a script: the agent picks its own next step, so the server
+  // only follows up on work the turn itself said it would do and did not.
+  if (!promise) return { action: "ended", classification };
   // Waiting on a running search is not a stall: its wake brings the results.
   if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {
     getLogger().info("run.autocontinue.waiting_research", { runId: run.id, roleId: input.roleId });
     return { action: "ended", classification };
   }
   const stage = playbook?.stage ?? "intake";
-  const step: { label: string; prompt: string; openClarifications?: number } = nextStep ?? {
-    label: PROMISE_LABEL,
-    prompt: "",
-  };
+  const step = { label: PROMISE_LABEL };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -570,11 +494,7 @@ export async function guardRecruitingTurnEnd(
     select: { clientNonce: true },
   });
   const count = countTrailingAutoContinues(recent) + 1;
-  const reason = promise
-    ? "promise"
-    : step.openClarifications
-      ? "open_clarifications"
-      : "no_deliverable";
+  const reason = "promise";
   if (count > max) {
     getLogger().warn("run.autocontinue.capped", {
       runId: run.id,
@@ -599,11 +519,7 @@ export async function guardRecruitingTurnEnd(
     reason,
     count,
   });
-  const text = continuationText({
-    step: nextStep,
-    promise,
-    last: count === max,
-  });
+  const text = continuationText({ promise, last: count === max });
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,

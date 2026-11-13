@@ -154,14 +154,29 @@ const shownRound = {
 const statusNote: MessageBlock[] = [
   { kind: "text", text: "已将公司暂用名保存为 X。尚未启动搜寻。" },
 ];
+/** A turn that ends saying it will do the work, without doing it. */
+const promiseNote: MessageBlock[] = [{ kind: "text", text: "已保存岗位。我会马上开始搜索。" }];
 
 describe("guardRecruitingTurnEnd", () => {
-  it("injects a continuation when the turn ends with no deliverable", async () => {
+  it("leaves the next step to the agent, and pushes only a promise it did not keep", async () => {
+    const ended = fixture();
+    await expect(
+      guardRecruitingTurnEnd(ended.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: ended.postAssistant,
+        max: 3,
+      }),
+    ).resolves.toEqual({ action: "ended", classification: "none" });
+    expect(ended.sendUserMessage).not.toHaveBeenCalled();
     const f = fixture();
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: f.postAssistant,
@@ -173,7 +188,7 @@ describe("guardRecruitingTurnEnd", () => {
         trigger: "follow_up",
         internal: true,
         clientNonce: "autocontinue:run-1:1",
-        prompt: expect.stringContaining("Continue with the next step: "),
+        prompt: expect.stringContaining("我会马上开始搜索"),
       }),
     );
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
@@ -181,12 +196,12 @@ describe("guardRecruitingTurnEnd", () => {
   });
 
   it.each([
-    [1, 1, "continued"],
-    [9, 9, "continued"],
-    [1, 10, "continued"],
-    [10, 1, "continued"],
+    [1, 1, "ended"],
+    [9, 9, "ended"],
+    [1, 10, "ended"],
+    [10, 1, "ended"],
   ])(
-    "calibration needs ten distinct cumulative candidates (%s writes, %s saved)",
+    "leaves an unfinished calibration to the agent (%s writes, %s saved)",
     async (savedRows, savedCandidates, action) => {
       const f = fixture({
         savedRows: Number(savedRows),
@@ -219,7 +234,7 @@ describe("guardRecruitingTurnEnd", () => {
     expect(f.sendUserMessage).not.toHaveBeenCalled();
   });
 
-  it("still pushes the next step after playbook work since the recruiter's message", async () => {
+  it("does not push the next step after playbook work since the recruiter's message", async () => {
     const f = fixture({ stage: "calibration_10", savedCandidates: 16, profileUpdate: true });
     (
       f.deps.prisma.externalEffect.findMany as unknown as {
@@ -234,16 +249,16 @@ describe("guardRecruitingTurnEnd", () => {
       pendingApproval: false,
       postAssistant: f.postAssistant,
     });
-    expect(result.action).toBe("continued");
+    expect(result.action).toBe("ended");
   });
 
   it.each([
     ["现在发送了多少人呢", "这个岗位目前有 2 位已排入首封邮件，明早 9 点发出。", "ended"],
     ["why did nothing send?", "Both emails are queued for the 9am send window.", "ended"],
-    ["A 和 B 不太行，要会说中文的", "好的，已记下。", "continued"],
+    ["A 和 B 不太行，要会说中文的", "好的，已记下。", "ended"],
     ["现在发送了多少人呢", "我会去查一下。", "continued"],
   ])(
-    "answers a status question without pushing the playbook step (%s)",
+    "ends on the agent's answer and pushes only an unkept promise (%s)",
     async (asked, reply, action) => {
       const f = fixture({ stage: "intake" });
       (
@@ -282,8 +297,8 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: f.postAssistant,
     };
     expect(await guardRecruitingTurnEnd(f.deps, { ...base, blocks: statusNote })).toMatchObject({
-      action: "continued",
-      stage: "feedback",
+      action: "ended",
+      classification: "none",
     });
     expect(
       await guardRecruitingTurnEnd(f.deps, {
@@ -292,7 +307,7 @@ describe("guardRecruitingTurnEnd", () => {
           { kind: "text", text: "- Saved ten profiles\n- Updated stage\n- Ready for feedback?" },
         ],
       }),
-    ).toMatchObject({ action: "continued" });
+    ).toMatchObject({ action: "ended" });
     expect(
       await guardRecruitingTurnEnd(f.deps, {
         ...base,
@@ -540,7 +555,7 @@ describe("guardRecruitingTurnEnd", () => {
       const result = await guardRecruitingTurnEnd(f.deps, {
         run,
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: f.postAssistant,
@@ -642,7 +657,7 @@ describe("guardRecruitingTurnEnd", () => {
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: f.postAssistant,
@@ -656,7 +671,7 @@ describe("guardRecruitingTurnEnd", () => {
     await guardRecruitingTurnEnd(early.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: early.postAssistant,
@@ -672,7 +687,7 @@ describe("guardRecruitingTurnEnd", () => {
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: f.postAssistant,
@@ -681,7 +696,7 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result).toMatchObject({ action: "capped", count: 3 });
     expect(f.sendUserMessage).not.toHaveBeenCalled();
     expect(f.postAssistant).toHaveBeenCalledWith(
-      expect.stringContaining("Complete the role details"),
+      expect.stringContaining("Finish what the last message said it would do"),
     );
   });
 
@@ -690,7 +705,7 @@ describe("guardRecruitingTurnEnd", () => {
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: f.postAssistant,
@@ -729,7 +744,7 @@ describe("guardRecruitingTurnEnd", () => {
       const result = await guardRecruitingTurnEnd(f.deps, {
         run: { ...run, trigger },
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: f.postAssistant,
@@ -820,7 +835,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect.objectContaining({ prompt: expect.not.stringContaining("Wider search") }),
     );
 
-    // The coordinator's own continuation still gets the step.
+    // The coordinator's own continuation is not pushed into the role's next step either.
     const own = fixture({ stage: "scale", savedCandidates: 40 });
     await expect(
       guardRecruitingTurnEnd(own.deps, {
@@ -831,7 +846,7 @@ describe("guardRecruitingTurnEnd", () => {
         pendingApproval: false,
         postAssistant: own.postAssistant,
       }),
-    ).resolves.toMatchObject({ action: "continued", stage: "scale" });
+    ).resolves.toMatchObject({ action: "ended" });
   });
 
   it("does not push while a search round is still running", async () => {
@@ -846,7 +861,7 @@ describe("guardRecruitingTurnEnd", () => {
       guardRecruitingTurnEnd(waiting.deps, {
         run,
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: waiting.postAssistant,
@@ -863,7 +878,7 @@ describe("guardRecruitingTurnEnd", () => {
       const result = await guardRecruitingTurnEnd(f.deps, {
         run,
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: f.postAssistant,
@@ -883,7 +898,7 @@ describe("guardRecruitingTurnEnd", () => {
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
-      blocks: statusNote,
+      blocks: promiseNote,
       handedOff: false,
       pendingApproval: false,
       postAssistant: f.postAssistant,
@@ -891,7 +906,6 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result).toMatchObject({
       action: "continued",
       stage: "feedback",
-      label: "Review the first 10 people",
     });
   });
 
@@ -902,7 +916,7 @@ describe("guardRecruitingTurnEnd", () => {
       const result = await guardRecruitingTurnEnd(f.deps, {
         run,
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: f.postAssistant,
@@ -910,7 +924,6 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result).toMatchObject({
         action: "continued",
         stage: "calibration_10",
-        label: "Show the first 10 people",
       });
     }
   });
@@ -921,7 +934,7 @@ describe("guardRecruitingTurnEnd", () => {
       guardRecruitingTurnEnd(accepted.deps, {
         run,
         roleId: "role-1",
-        blocks: statusNote,
+        blocks: promiseNote,
         handedOff: false,
         pendingApproval: false,
         postAssistant: accepted.postAssistant,
