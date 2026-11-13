@@ -535,7 +535,7 @@ export function askedTemplate(request: string): boolean {
 
 /** Model-facing: a template written as the candidate thanking an interviewer is written again. */
 export const CANDIDATE_VOICE_NOTE =
-  'This template is written as a candidate thanking an interviewer. The recruiter is the one writing, to the candidate: write it again from the recruiter, opening "Hi [Candidate Name]", and show the whole template.';
+  'This template is written as a candidate thanking an interviewer. The recruiter is the one writing, to the candidate: write it again from the recruiter, opening "Hi {{firstName}},", and show the whole template.';
 
 /** A drafted template addressed to the interviewer, as if the candidate were writing. */
 export function candidateVoiceDraft(reply: string): DeclineRetry | undefined {
@@ -565,6 +565,19 @@ export function draftVariables(reply: string): DeclineRetry | undefined {
     /\{\{\s*[\w.]+\s*\}\}|\[(?:your|candidate|recipient|first|last|full|company|name|title|role|recruiter|sender)\b[^\]\n]{0,30}\](?!\()/i,
   )?.[0];
   return variable ? { sentence: variable, note: DRAFT_VARIABLES_NOTE } : undefined;
+}
+
+/** Model-facing: a template with [bracketed] blanks is written again with real details. */
+export const TEMPLATE_BLANKS_NOTE =
+  "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
+
+/** A template the recruiter asked for that still has [bracketed] blanks ("Hi [Candidate Name],"). */
+export function templateBlanks(reply: string): DeclineRetry | undefined {
+  if (!DRAFT_START.test(reply)) return undefined;
+  const blank = reply.match(
+    /\[(?:your|candidate|recipient|first|last|full|company|name|title|role|position|recruiter|sender|interviewer|hiring)\b[^\]\n]{0,30}\](?!\()|\[[^\]\n]{0,10}(?:候选人|姓名|名字|公司|职位|岗位|名称|你的|您的)[^\]\n]{0,10}\]/i,
+  )?.[0];
+  return blank ? { sentence: blank, note: TEMPLATE_BLANKS_NOTE } : undefined;
 }
 
 /**
