@@ -185,9 +185,13 @@ async function records(rpc) {
 const CAMPAIGN_CODES =
   "campaign status: 0 draft, 1 active (sending), 2 paused, 3 completed; person status: 1 active, 2 paused, 3 completed, -1 bounced, -2 unsubscribed; contactedAt null = not emailed yet";
 
+// What the recruiter can read: messages with text, in chats they wrote in or were answered in.
+const visible = (chats) =>
+  chats
+    .map(({ group, messages }) => ({ group, messages: messages.filter((m) => m.text.trim()) }))
+    .filter(({ messages }) => messages.some((m) => m.role === "user"));
 function render(chats) {
-  return chats
-    .filter(({ messages }) => messages.length)
+  return visible(chats)
     .map(
       ({ group, messages }) =>
         `## ${group.name}\n${messages
@@ -358,7 +362,7 @@ try {
   error = caught;
 }
 // Rule checks the scripted conversations use apply here too.
-const checks = (result?.chats ?? []).flatMap(({ group, messages }) =>
+const checks = visible(result?.chats ?? []).flatMap(({ group, messages }) =>
   conversationChecks(messages).map((failure) => `${group.name}: ${failure}`),
 );
 const falseClaims = (verdict?.turns ?? []).filter((turn) => turn.truthful === "no").length;
