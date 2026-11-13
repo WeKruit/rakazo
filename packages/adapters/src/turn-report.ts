@@ -588,7 +588,7 @@ export const TEMPLATE_BLANKS_NOTE =
 export function templateBlanks(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;
   const blank = reply.match(
-    /\[(?:your|candidate|recipient|first|last|full|company|name|title|role|position|recruiter|sender|interviewer|hiring)\b[^\]\n]{0,30}\](?!\()|\[[^\]\n]{0,10}(?:候选人|姓名|名字|公司|职位|岗位|名称|你的|您的)[^\]\n]{0,10}\]/i,
+    /\{\{\s*(?:your|my|sender|recruiter)[\w.]*\s*\}\}|\[(?:your|candidate|recipient|first|last|full|company|name|title|role|position|recruiter|sender|interviewer|hiring)\b[^\]\n]{0,30}\](?!\()|\[[^\]\n]{0,10}(?:候选人|姓名|名字|公司|职位|岗位|名称|你的|您的)[^\]\n]{0,10}\]/i,
   )?.[0];
   return blank ? { sentence: blank, note: TEMPLATE_BLANKS_NOTE } : undefined;
 }
