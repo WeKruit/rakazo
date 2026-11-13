@@ -270,12 +270,6 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "11-13 staging: after feedback the round came back with no one and a promise not to pad it, though the recruiter asked to loosen and see a few.",
   },
   {
-    rule: "the role's saved list is not the new round",
-    in: "Global recruiting overview skill",
-    phrase: "it never answers a request for the new round or new people",
-    why: "11-13 staging: asked for the next round, Kruit listed the role's 232 saved people, earlier round included, as if they were new.",
-  },
-  {
     rule: "every pick meets every hard requirement",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: "meets every hard requirement the row can show",
@@ -1349,6 +1343,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "Asked to drop people, drop them in that reply and say in its text who is dropped",
     why: "Asked to drop A and B and replace them, Kruit only said what it would do (11-13).",
+  },
+  {
+    rule: "round feedback relayed from global stays a round of ten",
+    in: "Global recruiting overview skill",
+    phrase: "a message that turns down people in the round and asks for more like the rest is feedback for the next round of ten",
+    why: "Global Main relayed \"4 and 8 are off, find more like the other 8\" as a request for 150 more; the team scaled and never showed a next round (11-13).",
+  },
+  {
+    rule: "new people leave out the round already shown",
+    in: "Global recruiting overview skill",
+    phrase: "when they ask for the new people, not the ones already shown, first read recruiting_candidates operation round",
+    why: "Asked for the new people, global Main listed the pool's first pages, repeating first-round people and one the recruiter turned down (11-13).",
   },
   {
     rule: "a drop is answered before any card",
