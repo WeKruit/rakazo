@@ -44,6 +44,7 @@ import {
   roleChats,
   send,
   settle,
+  sleep,
   stopAll,
   transcripts,
   waitForText,

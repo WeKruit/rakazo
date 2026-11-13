@@ -289,6 +289,22 @@ async function postedResult(tx: Pick<PrismaClient, "message">, runId: string): P
   );
 }
 
+/** Whether the stage sent an email or reply the recruiter confirmed on its card. */
+async function confirmedSend(
+  tx: Pick<PrismaClient, "externalEffect">,
+  runId: string,
+): Promise<boolean> {
+  const sent = await tx.externalEffect.findFirst({
+    where: {
+      runId,
+      status: "completed",
+      OR: [{ kind: { endsWith: "activate_campaign" } }, { kind: { endsWith: "reply_to_email" } }],
+    },
+    select: { id: true },
+  });
+  return sent !== null;
+}
+
 /** Whether the recruiter's latest message in the thread is a question. */
 async function latestUserMessageAsks(
   tx: Pick<PrismaClient, "message">,
@@ -392,6 +408,9 @@ export async function reportGroupHandoffOutcome(
       // or handed it back for proof, so one question got two or three answers. An answered
       // question needs nothing more from the sender.
       if (posted && (await latestUserMessageAsks(tx, run.threadId))) return undefined;
+      // Staging 11-13: after the recruiter confirmed a send and Outreach said it went out, the
+      // report woke Main, which listed the account's roles unasked. A confirmed send is done.
+      if (posted && (await confirmedSend(tx, run.id))) return undefined;
       // Staging 11-13: the teammate asked to connect Gmail, the sender re-handed the send four
       // times and each answer repeated "connect Gmail first". A card waiting on the recruiter
       // means the next step is theirs, not the sender's.
