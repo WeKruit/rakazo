@@ -308,12 +308,17 @@ const describeCards = (cards) =>
         .join("\n")
     : "(none)";
 
-async function simulate(journey, turns, view, cards, screen, tag) {
+async function simulate(journey, turns, view, cards, screen, tag, since) {
+  // A reused account's pages still show earlier tests; only this session's messages count.
+  const earlier =
+    journey.account && screen
+      ? `\n\nAnything on your screen from before ${new Date(since).toISOString().slice(11, 16)} UTC is an earlier session, not yours: your goals count only from the conversation above.`
+      : "";
   const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
-  }\n\nYour moves so far: ${turns.length}. Your next move:`;
+  }${earlier}\n\nYour moves so far: ${turns.length}. Your next move:`;
   return parse(await model(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR));
 }
 
@@ -370,10 +375,17 @@ async function play(journey, label, owner, mailbox, out) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
       const screen = ui ? await ui.view() : null;
-      const move = await simulate(journey, turns, render(chats), cards, screen, tag);
+      const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
       const problems = [];
+      // Done before asking anything is the recruiter reading an earlier session, not a result.
+      if (move.action === "done" && !turns.some((item) => !item.invalid)) {
+        turn.invalid = "done before the recruiter asked anything";
+        log(`${label}: recruiter tried to finish before asking anything; asking again`);
+        turns.push(turn);
+        continue;
+      }
       if (move.action === "done") {
         log(`${label}: recruiter is done: ${move.goal ?? ""}`);
         turns.push(turn);
