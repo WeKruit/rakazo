@@ -4,6 +4,7 @@ import {
   cleanQuickReply,
   firstSentence,
   fixedAck,
+  inPersonLanguage,
   quickReply,
   replyLanguage,
   withoutLeadingAck,
@@ -85,6 +86,17 @@ describe("quick reply", () => {
       null,
     );
     expect(seen).toHaveLength(0);
+  });
+
+  it("answers in the person's language", () => {
+    // Staging 11-13: a Chinese template request got an English first line.
+    const zh = "写一封首轮外联邮件模板 Staff Backend Engineer, Go, 纽约hybrid";
+    expect(inPersonLanguage("I'll draft a first-outreach email template for this role.", zh)).toBe(
+      "收到，马上处理。",
+    );
+    expect(inPersonLanguage("我先拟一封外联模板。", zh)).toBe("我先拟一封外联模板。");
+    expect(inPersonLanguage("I'll draft it.", "write a template")).toBe("I'll draft it.");
+    expect(inPersonLanguage(null, zh)).toBeNull();
   });
 
   it("never says an email is going out", () => {

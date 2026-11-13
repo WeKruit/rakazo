@@ -1773,6 +1773,20 @@ describe("MCP connector session cache", () => {
         expect(JSON.stringify(failed)).not.toContain("fixture-token");
         expect(state.calls).toEqual(["echo"]);
 
+        // 11-13 staging: Gmail answered "missing authentication credential" for a recruiter
+        // who never connected it; that call did nothing, so it is not an uncertain send.
+        state.callError = new Error(
+          "Error POSTing to endpoint: Request is missing required authentication credential.",
+        );
+        const signedOut = [];
+        for await (const event of connector.execute(call, context)) signedOut.push(event);
+        expect(signedOut).toEqual([
+          {
+            type: "error",
+            message: expect.stringContaining("is not connected for this recruiter"),
+          },
+        ]);
+
         state.callError = undefined;
         const returned = [];
         for await (const event of connector.execute(call, context)) returned.push(event);

@@ -45,6 +45,7 @@ import { calendarEvidenceHash } from "./calendar-approval.js";
 import { readBoundedText } from "./connector-http.js";
 import {
   providerRefusesConnection,
+  providerSignedOut,
   redactConnectorPayload,
   sanitizeConnectorError,
 } from "./connector-safety.js";
@@ -102,6 +103,10 @@ import { createSafeRemoteFetch } from "./remote-mcp.js";
 
 const INSTANTLY_MCP = "https://mcp.instantly.ai/mcp";
 const GMAIL_MCP = "https://gmailmcp.googleapis.com/mcp/v1";
+/** Model-facing: a call refused because the recruiter has not connected this account. */
+export function signedOutMessage(service: string): string {
+  return `${service} is not connected for this recruiter, so this call did nothing: nothing was sent, saved or read. Anything already shown in the conversation, such as a drafted email, is still there. Ask once with request_connection; if the recruiter cannot connect, give them the email's subject and body ready to copy and send themselves.`;
+}
 const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 const THREAD_HISTORY = "native_instantly_get_thread_history";
 const CONTACT_EMAILS = "native_instantly_search_contact_emails";
@@ -1649,10 +1654,13 @@ export class McpConnector implements ConnectorProvider {
         this.refuseConnection(calledServer, context, call.route.toolName);
         message = await this.refusedMessage(call.route.toolName, calledServer.id, context);
       }
+      // The provider answered that this account is not signed in, so the call did nothing.
+      const signedOut = providerSignedOut(message);
+      if (signedOut) message = signedOutMessage(calledServer?.name ?? "This service");
       yield {
         type: "error",
         message,
-        ...(callStarted && !(error instanceof PeopleSearchRateLimitError)
+        ...(callStarted && !signedOut && !(error instanceof PeopleSearchRateLimitError)
           ? { outcome: "uncertain" as const }
           : {}),
       };

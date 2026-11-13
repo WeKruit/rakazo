@@ -58,6 +58,15 @@ const SETUP_ERROR =
 const ACCESS_ERROR =
   /\binsufficient (?:authentication )?(?:permission|scope|privilege)s?\b|\bmissing (?:required )?(?:oauth )?scopes?\b|\b(?:api|service|tool|feature) (?:is )?(?:not enabled|disabled)\b|\baccount (?:is )?(?:suspended|disabled|not activated)\b/i;
 
+/** The provider answered that the call carried no valid sign-in, so it did nothing. */
+const SIGNED_OUT_ERROR =
+  /\bmissing required authentication credential\b|\bUNAUTHENTICATED\b|\binvalid authentication credentials\b/i;
+
+/** Whether a failed call was refused because the account is not signed in to the provider. */
+export function providerSignedOut(text: string): boolean {
+  return SIGNED_OUT_ERROR.test(text);
+}
+
 /**
  * Whether a failed tool call means the provider refuses this connection outright, rather than
  * the call's arguments: then the connection is unusable for now and retrying it wastes the turn.
