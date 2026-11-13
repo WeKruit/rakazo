@@ -5470,6 +5470,43 @@ describe("local native Instantly campaign and lead tools", () => {
       }
     });
 
+    it("keeps the same send-by time on every check, counted from when people were queued", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.email_gap = 10;
+        f.state.campaign.campaign_schedule = {
+          schedules: [
+            {
+              ...WEEKDAYS_9_TO_5.schedules[0],
+              name: "Any time",
+              timing: { from: "00:00", to: "23:59" },
+              days: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((day) => [String(day), true])),
+            },
+          ],
+        };
+        for (const lead of f.state.campaignLeads.slice(2))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        for (const lead of f.state.campaignLeads.slice(0, 2))
+          lead.timestamp_created = "2026-11-13T06:10:00Z";
+        // 11-13 staging: each check counted the hour from the check, so the time kept slipping.
+        const first = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(first).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
+        vi.setSystemTime(new Date(NIGHT.getTime() + 15 * 60_000));
+        const later = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(later).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
+        vi.setSystemTime(new Date(NIGHT.getTime() + 90 * 60_000));
+        const late = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(late).toMatchObject({
+          next: expect.stringMatching(/since 00:10 .*longer than its usual hour; nothing failed/),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("asks for the campaign, not the role, when a send has no campaign outside a role", async () => {
       const { f } = await roleWithSixteen();
       f.state.activeRoleId = null;

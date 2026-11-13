@@ -258,6 +258,7 @@ import {
   findDefaultModelCredential,
   findModelCredential,
   findSameMailReply,
+  findWaitingCampaignSend,
   getRecruitingCrmTarget,
   hasUnclaimedSteering,
   humanMessageInclude,
@@ -11793,6 +11794,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : null);
               if (unsendable) {
                 const result = { error: unsendable };
+                return (await completeEffect(
+                  deps,
+                  applied!.effect.id,
+                  "intended",
+                  result,
+                ))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
+              // One send gets one card: another agent or a status check sending the same
+              // people the same email while its card waits reuses that card.
+              const waitingSend =
+                approvalRoute.toolName ===
+                  "native_instantly_activate_campaign" &&
+                campaignId &&
+                instantlyActivation
+                  ? await deps.prisma.$transaction((tx) =>
+                      findWaitingCampaignSend(tx, {
+                        spaceId: run.spaceId,
+                        effectId: applied!.effect.id,
+                        campaignId: campaignId!,
+                        card: {
+                          sendNow: args.send_now === true,
+                          recipients: instantlyActivation!.recipients,
+                          firstEmail: instantlyActivation!.firstEmail ?? null,
+                        },
+                      }),
+                    )
+                  : undefined;
+              if (waitingSend) {
+                const result = {
+                  status: "already_waiting",
+                  dispatched: false,
+                  message: `This send's card is already waiting for the recruiter${waitingSend.threadId === thread.id ? " in this conversation" : " in the role's conversation"}, so no second card was made and nothing was sent. Tell the recruiter in one line that it is ready to send there; do not call activate_campaign again until they answer it.`,
+                };
                 return (await completeEffect(
                   deps,
                   applied!.effect.id,
