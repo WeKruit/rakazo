@@ -838,6 +838,36 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13: a new role with two named people to email got a search-direction card first.",
   },
   {
+    rule: "an email is written out once per turn",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "an email already shown earlier in this turn (for example in a progress line) is not written out again",
+    why: "Staging 11-13: the template appeared in a progress line and again in the closing reply.",
+  },
+  {
+    rule: "the email comes first, the signature name question after",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "Never ask for the name before showing the email",
+    why: "Staging 11-13: the name was asked before the template, on a choice card, then the template ended on a bare 「Best,」.",
+  },
+  {
+    rule: "stop asking means search from the saved role",
+    in: "RECRUITING_INTAKE_FLOW",
+    phrase: "When the recruiter says to stop asking and search",
+    why: "Staging 11-13: after 「别问了直接搜」 the role asked Seattle-only though the role said Seattle hybrid.",
+  },
+  {
+    rule: "progress lines only say something new",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "A progress line says only something new since the last one",
+    why: "Staging 11-13: repeated status lines while no candidates came back.",
+  },
+  {
+    rule: "a needed role is created, not asked about",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "create it from the details in the conversation at once, with no card asking whether to",
+    why: "Staging 11-13: saving a template to the Sequence page got a card asking whether to create the role first.",
+  },
+  {
     rule: "no role team in recruiter chat",
     in: "RECRUITER_LANGUAGE",
     phrase: "Teammates are invisible to the recruiter",
@@ -1391,6 +1421,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "Global recruiting overview skill",
     phrase: "when they ask whether the next round is ready, read operation round and answer from it",
     why: "Global Main said the new round was not ready 23 s after the role team had shown it (11-13).",
+  },
+  {
+    rule: "round repeats are answered, not handed off",
+    in: "Global recruiting overview skill",
+    phrase: "asked whether a round repeats anyone from an earlier one, answer no yourself in that reply",
+    why: "Asked yes or no whether round 2 repeated round 1, global Main twice handed the check to the team and said it could not confirm (11-13).",
   },
   {
     rule: "a drop is answered before any card",
