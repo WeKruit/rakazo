@@ -33,7 +33,6 @@ import {
   InfraError,
   messagesOf,
   openCards,
-  roleChats,
   send,
   settle,
   sleep,
@@ -164,31 +163,51 @@ async function cardsOpen(rpc) {
       }
   return open;
 }
-// The role's send records: what Kruit's claims about sending are checked against.
-async function records(rpc) {
+// The send records Kruit's claims are checked against: the campaign of every chat this journey
+// wrote in or got replies in, and of every role whose campaign changed since the journey began
+// (a send confirmed in the Kruit chat goes into a role's campaign, new or existing). A reused
+// fixture account's other roles are left out.
+async function campaignOf(rpc, chat) {
+  const campaign = await rpc("recruiting/roleCampaign", { groupId: chat.id }).catch((error) => ({
+    error: error.message,
+  }));
+  return {
+    chat: chat.name,
+    status: campaign.status ?? campaign.error,
+    campaign: campaign.campaign
+      ? {
+          name: campaign.campaign.name,
+          status: campaign.campaign.status,
+          mailbox: campaign.campaign.eaccount,
+          createdAt: campaign.campaign.createdAt ?? null,
+        }
+      : null,
+    sent: campaign.stats?.sent ?? null,
+    queuedFirstEmail: campaign.queuedFirstEmail ?? null,
+    people: (campaign.leads ?? []).map((lead) => ({
+      email: lead.email,
+      status: lead.status,
+      contactedAt: lead.contactedAt ?? null,
+    })),
+  };
+}
+/** Every chat's campaign as it stands, by chat id. */
+async function campaigns(rpc) {
+  const all = new Map();
+  for (const group of await groupsOf(rpc)) all.set(group.id, await campaignOf(rpc, group));
+  return all;
+}
+async function records(rpc, since, before) {
+  const now = await campaigns(rpc);
   const roles = [];
-  for (const role of await roleChats(rpc)) {
-    const campaign = await rpc("recruiting/roleCampaign", { groupId: role.id }).catch((error) => ({
-      error: error.message,
-    }));
-    roles.push({
-      role: role.name,
-      status: campaign.status ?? campaign.error,
-      campaign: campaign.campaign
-        ? {
-            name: campaign.campaign.name,
-            status: campaign.campaign.status,
-            mailbox: campaign.campaign.eaccount,
-          }
-        : null,
-      sent: campaign.stats?.sent ?? null,
-      queuedFirstEmail: campaign.queuedFirstEmail ?? null,
-      people: (campaign.leads ?? []).map((lead) => ({
-        email: lead.email,
-        status: lead.status,
-        contactedAt: lead.contactedAt ?? null,
-      })),
-    });
+  for (const group of await groupsOf(rpc)) {
+    const record = now.get(group.id);
+    if (!record?.campaign) continue;
+    const touched = (await messagesOf(rpc, group.id)).some(
+      (message) => Date.parse(message.createdAt) >= since,
+    );
+    if (touched || JSON.stringify(before.get(group.id)) !== JSON.stringify(record))
+      roles.push(record);
   }
   return roles;
 }
@@ -268,6 +287,7 @@ async function play(journey, label, owner, mailbox) {
     await user.auth(email, password);
   }
   const { rpc } = user;
+  const before = await campaigns(rpc);
   const startedAt = Date.now();
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
@@ -320,14 +340,14 @@ async function play(journey, label, owner, mailbox) {
         continue;
       }
       turn.firstReplySeconds = await replyAfter(journey, rpc, at);
-      turn.records = await records(rpc);
+      turn.records = await records(rpc, startedAt, before);
       turns.push(turn);
       log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
     }
     return {
       turns,
       chats: await transcripts(rpc, startedAt, journey.chinese),
-      records: await records(rpc),
+      records: await records(rpc, startedAt, before),
     };
   } finally {
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
@@ -337,7 +357,7 @@ async function play(journey, label, owner, mailbox) {
 // --- The judge ----------------------------------------------------------------------------------
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
-- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no".
+- truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal.
 - issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, other.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
 {"turns": [{"turn": n, "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "note": "<one line>"}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
