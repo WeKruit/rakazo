@@ -47,14 +47,17 @@ export function client() {
         headers: { "content-type": "application/json", origin: ORIGIN, cookie },
         body: JSON.stringify({ json }),
       }).catch(() => null);
-      if (!read || attempt >= 8 || (response && !INFRA.includes(response.status))) break;
+      // A read can also lose a short-lived conflict (409) while the account is busy; try it again.
+      const retry = response && (INFRA.includes(response.status) || response.status === 409);
+      if (!read || attempt >= 8 || (response && !retry)) break;
       await sleep(15_000);
     }
     if (!response) throw new InfraError(`${route}: no response`);
     const body = await response.json().catch(() => ({}));
     if (INFRA.includes(response.status)) throw new InfraError(`${route} ${response.status}`);
     if (!response.ok) {
-      const detail = body?.json?.message ?? body?.message ?? body?.error?.message;
+      const detail =
+        body?.json?.message ?? body?.message ?? body?.error?.message ?? JSON.stringify(body);
       throw new Error(
         `${route} ${response.status}${detail ? `: ${String(detail).slice(0, 160)}` : ""}`,
       );
