@@ -378,7 +378,7 @@ const RecruitingCalibrationApproval = {
   documentsApprovalEffectId: RecruitingId,
   ruleChanges: z.array(Text).readonly(),
 };
-/** A calibration round shows ten people, or every fitting person a deeper search found when fewer fit. */
+/** A calibration round shows ten people, or every fitting person the searches found when fewer fit. */
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
   z.strictObject({ ...RecruitingApprovalScope, stage: z.literal("brief") }),
