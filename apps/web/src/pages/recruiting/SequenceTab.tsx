@@ -37,6 +37,7 @@ import { rpc } from "../../lib/rpc";
 import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
 import { PersonAvatar } from "./ProfileImage";
+import { SendQueue } from "./SendQueue";
 import { SequenceEditor } from "./SequenceEditor";
 import { SequenceOverview } from "./SequenceOverview";
 import type { SequenceRunFilter } from "./SequenceRuns";
@@ -623,6 +624,7 @@ export function SequenceTab(
           <Trans>Could not read this sequence. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
+      <SendQueue campaign={campaign} onAskChat={props.onAskChat} />
       {currentRows.length || nativeDrafts.data?.campaigns?.length ? (
         <label className="flex max-w-sm items-center gap-3 text-xs">
           <span className="shrink-0">

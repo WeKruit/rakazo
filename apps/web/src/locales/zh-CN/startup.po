@@ -17,6 +17,10 @@ msgstr ""
 msgid " (unread)"
 msgstr "（未读）"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid " and {more} more"
+msgstr " 等 {more} 人"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
@@ -125,6 +129,16 @@ msgstr "{0} 位入选候选人"
 msgid "{0} shortlisted people have no recorded shortlist date."
 msgstr "有 {0} 位入选者没有记录入选日期。"
 
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{0} waiting for their first email"
+msgstr "{0} 人等待发出第一封邮件"
+
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{0} waiting for their first email · goes out {when}"
+msgstr "{0} 人等待发出第一封邮件 · {when} 发出"
+
 #. placeholder {0}: offset + 1
 #. placeholder {1}: offset + rows.length
 #. placeholder {1}: offset + visible.length
@@ -164,6 +178,10 @@ msgstr "{attachmentCount} 个附件"
 msgid "{botName}’s computer"
 msgstr "{botName} 的电脑"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{bounced} bounced"
+msgstr "{bounced} 人退信"
+
 #: src/lib/billing.ts
 msgid "{count} days"
 msgstr "{count} 天"
@@ -183,6 +201,10 @@ msgstr "{count} 年"
 #: src/lib/relative-time.ts
 msgid "{days}d ago"
 msgstr "{days} 天前"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "{emailed} emailed"
+msgstr "已发送 {emailed} 人"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
@@ -4139,6 +4161,14 @@ msgstr "已提供简历"
 msgid "Resume ready"
 msgstr "简历已就绪"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Resume sending"
+msgstr "恢复发送"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Resume sending this role's emails to everyone not emailed yet."
+msgstr "恢复发送这个岗位的邮件，发给所有还没收到的人。"
+
 #. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
 #: src/pages/shell/Composer.tsx
 msgid "Resume: {0}"
@@ -4616,6 +4646,10 @@ msgstr "发送删除验证码"
 msgid "Send feedback"
 msgstr "发送反馈"
 
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Send now"
+msgstr "现在发送"
+
 #: src/pages/recruiting/CrmWorkbench.tsx
 msgid "Send outcome unknown"
 msgstr "发送结果未知"
@@ -4627,6 +4661,10 @@ msgstr "已记录发送"
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "发送重置链接"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Send the queued emails now."
+msgstr "现在就把排队中的邮件发出去。"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Send times are not available yet."
@@ -4645,6 +4683,11 @@ msgstr "未提供发件人"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
 msgstr "发件人不可用"
+
+#. placeholder {0}: waiting.length
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Sending is paused · {0} not emailed yet"
+msgstr "发送已暂停 · {0} 人还没收到"
 
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Sending mailbox"
@@ -5688,6 +5731,10 @@ msgstr "正在等待 API 恢复…"
 #: src/lib/roster-status.ts
 msgid "Waiting in line…"
 msgstr "排队等候…"
+
+#: src/pages/recruiting/SendQueue.tsx
+msgid "Waiting to send"
+msgstr "等待发送"
 
 #: src/pages/Auth.tsx
 msgid "We sent a link to {verifyEmail}."

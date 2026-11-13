@@ -7328,7 +7328,12 @@ describe("role campaign read", () => {
                             status: -1,
                             lt_interest_status: 1,
                           },
-                          { id: "l2", email: "other@example.test", status: 1 },
+                          {
+                            id: "l2",
+                            email: "other@example.test",
+                            status: 1,
+                            timestamp_last_contact: "2026-11-12T15:42:12.991Z",
+                          },
                         ],
                       },
               },
@@ -7407,6 +7412,8 @@ describe("role campaign read", () => {
           openCount: null,
           clickCount: null,
           replyCount: null,
+          // Not emailed yet: the role's Sequence page shows them as waiting.
+          contactedAt: null,
         },
         {
           candidateKey: null,
@@ -7418,6 +7425,7 @@ describe("role campaign read", () => {
           openCount: null,
           clickCount: null,
           replyCount: null,
+          contactedAt: "2026-11-12T15:42:12.991Z",
         },
       ],
     });
