@@ -131,3 +131,29 @@ it("reads only the filtered roles' people instead of the whole account", async (
   ).toBeGreaterThanOrEqual(3);
   expect(page.values).toEqual(expect.arrayContaining(["role-a", "crm:role-b"]));
 });
+
+it("reads a page's CRM contacts by identity, then their links, sequences and mail by id", async () => {
+  const query = vi
+    .fn()
+    .mockResolvedValueOnce([
+      { person_key: "linkedin:/in/ada", total: 3 },
+      { person_key: "em:dee@example.test", total: 3 },
+      { person_key: "crm:contact-1", total: 3 },
+    ])
+    .mockResolvedValue([]);
+  await listRecruitingContacts(
+    { $queryRaw: query } as unknown as PrismaClient,
+    { userId: "owner", spaceId: "space" } as Actor,
+    { sort: "name", limit: 50, filters: {} },
+  );
+  const detail = query.mock.calls[1]![0] as { sql: string; values: unknown[] };
+  expect(detail.sql).toMatch(/matched_crm AS MATERIALIZED/);
+  // Found through the owner + identity index, not by computing every contact's person key.
+  expect(detail.sql).toMatch(/cc\."identityKey" IN \(/);
+  expect(detail.values).toEqual(
+    expect.arrayContaining(["li:linkedin.com/in/ada", "em:dee@example.test", "contact-1"]),
+  );
+  expect(detail.sql).toMatch(/FROM matched_crm k JOIN recruiting_crm_contacts cc/);
+  expect(detail.sql.match(/IN \(SELECT crm_candidate_id FROM matched_crm\)/g)).toHaveLength(2);
+  expect(detail.sql).toMatch(/rc\."contactId" IN \(SELECT id FROM matched_crm\)/);
+});
