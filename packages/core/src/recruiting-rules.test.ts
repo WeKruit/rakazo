@@ -901,8 +901,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "no variables in a draft",
     in: "Outreach",
-    phrase: "Never {{variables}} in a draft (only a send uses them)",
-    why: "Drafts had {{variables}}; the unscoped rule also blocked the lead variables a send needs.",
+    phrase: "Never {{variables}} in a draft to a person (only a template or a send uses them)",
+    why: "Drafts had {{variables}}; the unscoped rule also blocked the lead variables a send needs, and made a template edit fetch a candidate.",
+  },
+  {
+    rule: "templates are signed by the recruiter",
+    in: "Outreach",
+    phrase: "a template needs no candidate and is signed with the recruiter's name (ask once)",
+    why: "A template written in the recruiter's voice was signed Kruit or [Your name], then an edit asked for a candidate.",
   },
   {
     rule: "drafts need no contact check",
