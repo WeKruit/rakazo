@@ -58,6 +58,7 @@ import {
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
   isRecruitingPlaybookStage,
+  linkedinIdentity,
   pendingInputAttention,
   type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
@@ -4395,14 +4396,6 @@ export type RoleCandidatesSources = {
     | { status: "unavailable" }
   >;
 };
-
-/** `linkedin.com/in/<slug>` regardless of scheme, subdomain, case, query or trailing slash. */
-export function linkedinIdentity(url: string | null | undefined): string | null {
-  const text = url?.trim().toLowerCase();
-  if (!text) return null;
-  const profile = /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)?linkedin\.com\/in\/([^/?#\s]+)/.exec(text);
-  return profile ? `linkedin.com/in/${profile[1]}` : text.replace(/[/?#]+$/, "");
-}
 
 const roleCandidatesCursor = {
   /** `a`: Autumn cursor. `o`: CRM offset of the page being shown, `k`: its CRM-only rows shown. */

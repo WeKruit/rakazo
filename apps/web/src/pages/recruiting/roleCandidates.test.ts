@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { linkedinIdentity, mergeRoleCandidates, roleCandidateFit } from "./roleCandidates";
+import { mergeRoleCandidates, roleCandidateFit } from "./roleCandidates";
 
 const entry = (
   key: string,
@@ -15,15 +15,6 @@ const entry = (
 });
 const fit = (value: { score?: string }) =>
   roleCandidateFit(value.score ? [{ label: "Match score", value: value.score }] : []);
-
-it("normalizes LinkedIn profiles across hosts, case, slashes and queries", () => {
-  expect(linkedinIdentity("https://www.linkedin.com/in/Ada-L/?trk=x")).toBe(
-    "linkedin.com/in/ada-l",
-  );
-  expect(linkedinIdentity("uk.linkedin.com/in/ada-l")).toBe("linkedin.com/in/ada-l");
-  expect(linkedinIdentity("not a url")).toBeNull();
-  expect(linkedinIdentity(null)).toBeNull();
-});
 
 it("joins a CRM contact to the same Autumn result by LinkedIn, then by email", () => {
   const rows = mergeRoleCandidates({

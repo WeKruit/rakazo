@@ -1,3 +1,5 @@
+import { linkedinIdentity } from "@rakazo/core";
+
 /**
  * One candidate list per role: Autumn search results and the role's CRM contacts, merged so a
  * person who is both appears once. Pure and display-only; never re-ranks or qualifies anyone.
@@ -24,21 +26,6 @@ export type RoleCandidateRow<A, C> = Omit<RoleCandidateEntry<null>, "value"> & {
   autumn: A | null;
   crm: C | null;
 };
-
-/** Same profile identity for any LinkedIn host, scheme, case, trailing slash or query. */
-export function linkedinIdentity(url: string | null | undefined): string | null {
-  if (!url?.trim()) return null;
-  try {
-    const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url.trim()}`);
-    const host = parsed.hostname
-      .toLowerCase()
-      .replace(/^(?:[a-z]{2,3}\.|www\.)?linkedin\.com$/, "linkedin.com");
-    const path = decodeURIComponent(parsed.pathname).replace(/\/+$/, "").toLowerCase();
-    return path ? `${host}${path}` : null;
-  } catch {
-    return null;
-  }
-}
 
 const emailIdentity = (email: string | null | undefined) => email?.trim().toLowerCase() || null;
 
