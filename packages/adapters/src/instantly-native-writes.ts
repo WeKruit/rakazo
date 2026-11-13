@@ -3,7 +3,13 @@ import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { MailReplyErrorCode } from "@rakazo/contracts";
 import { MailReplyErrorCodeSchema } from "@rakazo/contracts";
-import { INSTANTLY_MCP_ENDPOINT, signedAsTeam, TEAM_SIGNATURE_NOTE } from "@rakazo/core";
+import {
+  greetsByName,
+  INSTANTLY_MCP_ENDPOINT,
+  NAMED_GREETING_NOTE,
+  signedAsTeam,
+  TEAM_SIGNATURE_NOTE,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -62,7 +68,16 @@ const CampaignSetup = {
       "When emails may go out; a campaign sends as soon as the recruiter confirms (any_time) unless they ask for weekdays_9_to_5.",
     ),
 };
-const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
+const CreateCampaignInput = z.strictObject({
+  name: z.string().min(1).max(200),
+  ...CampaignSetup,
+  // Everyone added to a new campaign gets its email, so a name written into the greeting is wrong
+  // for all but one of them (ensure_role_campaign's per-person email keeps its own schema).
+  steps: CampaignSetup.steps.refine(
+    (steps) => !steps?.some((step) => greetsByName(step.body)),
+    NAMED_GREETING_NOTE,
+  ),
+});
 const RoleDraftInput = CreateCampaignInput.extend({ role_id: z.string().min(1).max(100) });
 const CloneRoleDraftInput = z.strictObject({
   client_nonce: z.string().min(1).max(200),
@@ -245,7 +260,7 @@ export const nativeInstantlyWrites = [
     "create_campaign",
     CreateCampaignInput,
     false,
-    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients.",
+    "Creates a draft (not sending) campaign from one of your connected mailboxes with stop-on-reply on. Prefer ensure_role_campaign for a recruiting role. Outside a role conversation, this is how to send a new one-off email (compose and send to any address, not a reply in an existing thread) to someone the recruiter names: pass the email as steps and this account's sending mailbox as eaccount, then add_leads with that person and activate_campaign with the campaign_id and them as recipients. Several people get one campaign with all of them added, so one card confirms them together.",
   ),
   tool(
     "add_leads",
