@@ -122,6 +122,12 @@ const ActivateCampaignInput = z.strictObject({
   recipients: Recipients.describe(
     "Only these people get the email: each one's email or name as added with add_shortlist_leads. Omit to send to everyone in the campaign.",
   ),
+  send_now: z
+    .boolean()
+    .optional()
+    .describe(
+      "Send everyone already queued in this sending campaign now instead of at its sending hours (recipients are ignored). Its card lists who is queued and when they would otherwise go out.",
+    ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
@@ -131,7 +137,7 @@ const EnsureRoleCampaignInput = z.strictObject({
   steps: CampaignSetup.steps,
   timezone: CampaignSetup.timezone,
   send_hours: CampaignSetup.send_hours.describe(
-    "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
+    "Change when emails may go out; a sending campaign keeps sending in the new hours.",
   ),
   recipients: Recipients.describe(
     "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
@@ -275,7 +281,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued for later sending hours and the recruiter wants them sent now, pass send_now: its card lists who is queued and when they would otherwise go out.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -833,9 +839,11 @@ function waitsForHours(
 function sendTime(
   campaign: Record<string, unknown> | undefined,
   binding: Pick<RoleBinding, "sendHours"> | null | undefined,
+  sendNow = false,
 ) {
   if (!campaign) return null;
   const window = nextSendWindow(campaign);
+  if (sendNow) return window && !window.now ? `Now, instead of ${window.local}` : "Now";
   if (!window || waitsForHours(campaign, binding))
     return window ? "Now" : describeSchedule(campaign);
   return window.now ? "Now" : `${window.local} (${describeSchedule(campaign)})`;
@@ -1113,6 +1121,8 @@ type SendPlan =
   | { send: "activate"; recipients: Person[]; remove: Person[] }
   /** Add these staged people to the already sending campaign: only they are newly emailed. */
   | { send: "enroll"; recipients: Person[] }
+  /** Open the sending hours so the people already queued in the campaign are emailed now. */
+  | { send: "now"; recipients: Person[] }
   | { refusal: string };
 
 const text = (value: unknown) =>
@@ -1169,8 +1179,9 @@ function planSend(
   wanted?: string[],
   templated = false,
   copy: Copy = null,
+  sendNow = false,
 ): SendPlan {
-  const plan = planRecipients(status, leads, staged, wanted);
+  const plan = sendNow ? planSendNow(status, leads) : planRecipients(status, leads, staged, wanted);
   if ("refusal" in plan || !templated) return plan;
   // A templated first email is in each person's variables: nobody goes out without one.
   const blank = plan.recipients.filter((person) =>
@@ -1181,6 +1192,17 @@ function planSend(
         refusal: `No first email is saved for ${label(blank)}, so nothing was sent. Save the role's email with ensure_role_campaign steps, or their own with steps and recipients, then call activate_campaign again.`,
       }
     : plan;
+}
+/** Who a send-now emails: everyone in the sending campaign it has not emailed yet. */
+function planSendNow(status: unknown, leads: Person[]): SendPlan {
+  const queued = leads.filter((lead) => !lead.contacted);
+  if (status !== ACTIVE)
+    return {
+      refusal: "This campaign is not sending, so nobody is queued in it; nothing was sent.",
+    };
+  return queued.length
+    ? { send: "now", recipients: queued }
+    : { refusal: "Everyone in this campaign has already been emailed; nothing was sent." };
 }
 function planRecipients(
   status: unknown,
@@ -1262,6 +1284,7 @@ export async function describeCampaignActivation(
     "leads" | "staged" | "roleEmail" | "drafts" | "sendHours"
   > | null = null,
   wanted?: string[],
+  sendNow = false,
 ): Promise<InstantlyActivationDisplay> {
   const types = new Map(
     [...Object.values(binding?.leads ?? {}), ...stagedPeople(binding)].flatMap((lead) =>
@@ -1285,7 +1308,15 @@ export async function describeCampaignActivation(
   const people = (items ?? []).flatMap(asPerson);
   const plan =
     campaign && items
-      ? planSend(campaign.status, people, stagedPeople(binding), wanted, templated, binding)
+      ? planSend(
+          campaign.status,
+          people,
+          stagedPeople(binding),
+          wanted,
+          templated,
+          binding,
+          sendNow,
+        )
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
         : { send: "activate" as const, recipients: people, remove: [] };
@@ -1354,7 +1385,7 @@ export async function describeCampaignActivation(
     recipients,
     recipientCount: items ? recipients.length : null,
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
-    schedule: sendTime(campaign, binding),
+    schedule: sendTime(campaign, binding, sendNow),
     ...shownEmail,
   };
 }
@@ -1612,6 +1643,8 @@ async function ensureRoleCampaign(
             ? { campaign_schedule: campaignSchedule(input.send_hours, input.timezone) }
             : {}),
         });
+      // The people already in it were approved: it resumes as soon as the hours are saved.
+      if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/activate`);
       if (writeSteps) await requireSavedEmail(rest, mappedId);
       if (input.send_hours || (writeSteps && templated)) {
         existing.binding = {
@@ -1640,9 +1673,7 @@ async function ensureRoleCampaign(
         stopOnReplyPatched: patched,
         stepsSaved: writeSteps,
         ...(input.send_hours ? { sendHours: input.send_hours } : {}),
-        ...(pausedForHours
-          ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
-          : {}),
+        ...(pausedForHours ? { resumed: "Still sending, now in the new hours" } : {}),
         hasEmail: writeSteps || shown !== null,
         ...(writeSteps ? { next: SHOW_SAVED_STEPS } : {}),
         ...(input.steps && !writeSteps
@@ -2287,10 +2318,24 @@ async function activateCampaign(
     throw new Error(
       "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
     );
-  // A confirmed send goes out now: hours the recruiter never asked for are widened first. The
-  // provider edits only paused campaigns, so a sending one is paused for it and resumed below.
+  const leads = await allLeads(rest, campaignId);
+  const templated = isTemplated(campaign);
+  const plan = planSend(
+    campaign.status,
+    leads,
+    stagedPeople(bound?.binding),
+    input.recipients,
+    templated,
+    bound?.binding,
+    input.send_now === true,
+  );
+  if ("refusal" in plan) throw new Error(plan.refusal);
+  // A confirmed send goes out now: hours the recruiter never asked for, or any hours on a
+  // send-now, are widened first. The provider edits only paused campaigns, so a sending one is
+  // paused for it and resumed below.
   let resume = false;
-  if (waitsForHours(campaign, bound?.binding)) {
+  const window = nextSendWindow(campaign);
+  if (waitsForHours(campaign, bound?.binding) || (plan.send === "now" && window && !window.now)) {
     const zone = (campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] })
       .schedules?.[0]?.timezone;
     if (campaign.status === ACTIVE) {
@@ -2310,29 +2355,25 @@ async function activateCampaign(
     }
     campaign = await rest("GET", `/campaigns/${campaignId}`);
   }
-  const status = resume ? ACTIVE : campaign.status;
-  const leads = await allLeads(rest, campaignId);
-  const templated = isTemplated(campaign);
-  const plan = planSend(
-    status,
-    leads,
-    stagedPeople(bound?.binding),
-    input.recipients,
-    templated,
-    bound?.binding,
-  );
-  if ("refusal" in plan) {
+  if (plan.send === "now") {
     if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
-    throw new Error(plan.refusal);
+    return {
+      sentNow: true,
+      campaignId,
+      recipients: plan.recipients.map((person) => person.email),
+      ...(resume || !window || window.now
+        ? {}
+        : { next: "The campaign already sends at any time; these people go out shortly." }),
+    };
   }
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
   // Hours the recruiter asked for: the people wait for them, and the result says until when.
-  const window = nextSendWindow(campaign);
+  const later = nextSendWindow(campaign);
   const when =
-    window && !window.now
+    later && !later.now
       ? {
-          firstEmailAt: window.at,
-          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are queued and their first email goes out ${window.local}. Tell the recruiter that time; it is not a failure.`,
+          firstEmailAt: later.at,
+          next: `Outside the sending hours the recruiter chose (${describeSchedule(campaign)}): these people are queued and their first email goes out ${later.local}. Tell the recruiter that time and that activate_campaign send_now can send them now; it is not a failure.`,
         }
       : {};
   const save = async (binding: RoleBinding) => {
@@ -2443,6 +2484,11 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     emailed: people.filter((person) => person.contacted).map((person) => person.email),
     queued,
     ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
+    ...(window && !window.now
+      ? {
+          next: `The queued people are waiting for the sending hours, not failed. Tell the recruiter who and that their first email goes out ${window.local}, and call activate_campaign with send_now so their card offers to send now.`,
+        }
+      : {}),
   };
 }
 

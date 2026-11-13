@@ -717,6 +717,30 @@ describe("the send card's time", () => {
       expect(chosen.schedule).toBe(
         "Fri 09:00 America/Chicago (Weekdays 09:00-17:00 America/Chicago)",
       );
+      const now = await describeCampaignActivation(
+        async (tool) =>
+          tool === "native_instantly_get_campaign"
+            ? { name: "Role", status: 1, email_list: ["team@x.test"], campaign_schedule: schedule }
+            : {
+                items: [
+                  { id: "l1", email: "ada@x.test", first_name: "Ada" },
+                  {
+                    id: "l2",
+                    email: "bo@x.test",
+                    first_name: "Bo",
+                    timestamp_last_contact: "2026-11-12T15:00:00Z",
+                  },
+                ],
+              },
+        "c-1",
+        null,
+        { leads: {}, sendHours: "weekdays_9_to_5" },
+        undefined,
+        true,
+      );
+      // The send-now card lists only who is still waiting, and when they would have gone out.
+      expect(now.recipients.map((r) => r.email)).toEqual(["ada@x.test"]);
+      expect(now.schedule).toBe("Now, instead of Fri 09:00 America/Chicago");
     } finally {
       vi.useRealTimers();
     }

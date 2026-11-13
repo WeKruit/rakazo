@@ -4605,7 +4605,7 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
-  it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
+  it("ensure_role_campaign send_hours on a live campaign saves the hours and keeps it sending", async () => {
     const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });
     f.state.campaign.status = 1;
@@ -4613,7 +4613,8 @@ describe("local native Instantly campaign and lead tools", () => {
     const result = f.result(
       await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
     );
-    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    expect(result).toMatchObject({ sendHours: "any_time", resumed: expect.any(String) });
+    expect(result).not.toHaveProperty("paused");
     const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
     expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
     expect(writes[1]).toMatchObject({
@@ -4630,6 +4631,9 @@ describe("local native Instantly campaign and lead tools", () => {
         },
       },
     });
+    // Left paused, it would hold back everyone already approved (the 11-13 queued send).
+    expect(writes[2]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` });
+    expect(writes).toHaveLength(3);
   });
 
   it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
@@ -5341,6 +5345,51 @@ describe("local native Instantly campaign and lead tools", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("sends the people queued for later hours now when the recruiter asks", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        await f.run("ensure_role_campaign", { send_hours: "weekdays_9_to_5" });
+        f.state.campaign.status = 1;
+        for (const lead of f.state.campaignLeads.slice(1))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
+        expect(read).toMatchObject({
+          queued: ["abe@x.test"],
+          queuedFirstEmail: "Fri 09:00 America/Chicago",
+          next: expect.stringContaining("send_now"),
+        });
+        expect(read.emailed).toHaveLength(f.state.campaignLeads.length - 1);
+        f.state.requests.length = 0;
+        const out = f.result(await f.run("activate_campaign", { send_now: true }));
+        expect(
+          f.state.requests
+            .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+            .map((r) => `${r.method} ${r.path}`),
+        ).toEqual([
+          `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+          `PATCH /api/v2/campaigns/${CAMPAIGN}`,
+          `POST /api/v2/campaigns/${CAMPAIGN}/activate`,
+        ]);
+        expect(out).toMatchObject({ sentNow: true, recipients: ["abe@x.test"] });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("refuses a send-now when nobody is queued, touching nothing", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      for (const lead of f.state.campaignLeads)
+        lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+      const events = await f.run("activate_campaign", { send_now: true });
+      expect((events[0] as { message: string }).message).toMatch(/already been emailed/);
+      expect(
+        f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
+      ).toEqual([]);
     });
 
     describe("one person's own first email", () => {
