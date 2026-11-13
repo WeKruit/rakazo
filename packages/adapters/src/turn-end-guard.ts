@@ -2,6 +2,7 @@ import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
   classifyTurnEnd,
+  asksHowThingsStand,
   type TurnEndClass,
   turnEndPromise,
   turnEndStarted,
@@ -353,13 +354,25 @@ const PLAYBOOK_EFFECTS = new Set([
  * contacts) and nothing in its playbook. That answered what they asked; the role's next step
  * waits for them instead of starting on its own, however the lookups turned out.
  */
-async function answeredOtherRequest(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
+async function answeredOtherRequest(
+  deps: TurnEndGuardDeps,
+  run: TurnEndGuardInput["run"],
+  answered: boolean,
+) {
   const asked = await deps.prisma.message.findFirst({
     where: { threadId: run.threadId, role: "user" },
     orderBy: { seq: "desc" },
-    select: { createdAt: true },
+    select: { createdAt: true, blocks: true },
   });
   if (!asked) return false;
+  // A status question answered in text is done; pushing the playbook step over it ignored what
+  // the recruiter asked ("how many were sent?" got "complete the role details").
+  if (
+    answered &&
+    run.trigger === "user" &&
+    asksHowThingsStand(turnEndText((asked.blocks ?? []) as MessageBlock[]))
+  )
+    return true;
   const effects = await deps.prisma.externalEffect.findMany({
     where: {
       spaceId: run.spaceId,
@@ -529,7 +542,8 @@ export async function guardRecruitingTurnEnd(
   // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
   const handedIn = await handedInStage(deps, run);
   const nextStep =
-    handedIn || (playbook?.step && (await answeredOtherRequest(deps, run)))
+    handedIn ||
+    (playbook?.step && (await answeredOtherRequest(deps, run, Boolean(endText) && !promise)))
       ? undefined
       : (playbook?.step ?? undefined);
   if (!nextStep && !promise) return { action: "ended", classification };

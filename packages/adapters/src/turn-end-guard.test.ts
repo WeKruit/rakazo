@@ -237,6 +237,35 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result.action).toBe("continued");
   });
 
+  it.each([
+    ["现在发送了多少人呢", "这个岗位目前有 2 位已排入首封邮件，明早 9 点发出。", "ended"],
+    ["why did nothing send?", "Both emails are queued for the 9am send window.", "ended"],
+    ["A 和 B 不太行，要会说中文的", "好的，已记下。", "continued"],
+    ["现在发送了多少人呢", "我会去查一下。", "continued"],
+  ])(
+    "answers a status question without pushing the playbook step (%s)",
+    async (asked, reply, action) => {
+      const f = fixture({ stage: "intake" });
+      (
+        f.deps.prisma.message.findFirst as unknown as {
+          mockResolvedValue: (value: unknown) => void;
+        }
+      ).mockResolvedValue({
+        createdAt: new Date("2026-11-13T06:00:00Z"),
+        blocks: [{ kind: "text", text: asked }],
+      });
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run,
+        roleId: "role-1",
+        blocks: [{ kind: "text", text: reply }],
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result.action).toBe(action);
+    },
+  );
+
   it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {
     const f = fixture({
       stage: "feedback",
