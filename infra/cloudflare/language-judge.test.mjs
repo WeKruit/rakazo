@@ -26,7 +26,7 @@ const judgeAnswering = (answer, calls = []) => {
   return calls;
 };
 
-test("judges every row of a batch with the name hidden and the whole profile", async () => {
+test("judges every row of a batch on its whole profile", async () => {
   const profile = `Wei Test\n${"Controls work. ".repeat(2_000)}\nLanguages: Mandarin`;
   const calls = judgeAnswering((text) => (text.includes("Mandarin") ? 0.8 : 0.1));
   const response = await post({
@@ -42,7 +42,7 @@ test("judges every row of a batch with the name hidden and the whole profile", a
   expect(calls).toHaveLength(2);
   expect(calls[0].headers.authorization).toBe("Bearer key");
   const first = JSON.parse(calls[0].body);
-  expect(first.state.profile).toBe(profile.replace("Wei Test", "[name]"));
+  expect(first.state.profile).toBe(profile);
   expect(first.questions.answer.instructions).toMatch(/"Must speak Mandarin"/);
 });
 

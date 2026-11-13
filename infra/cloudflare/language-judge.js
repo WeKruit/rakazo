@@ -13,21 +13,11 @@
 // Edit QUESTION or the bounds here to change the check.
 
 const QUESTION = (requirement) =>
-  `The role requires: "${requirement}". Does this profile text show the person can work in the required language? Count only what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it. The name is hidden on purpose; never guess from names, photos or origin.`;
+  `The role requires: "${requirement}". Does this profile text show the person can work in the required language? Count only what the text states: a Languages entry, posts or other content written in that language, a degree, school or job in a place where it is spoken, or work stated to use it.`;
 
 /** At or above this the profile shows the language; below the lower bound it shows no sign. */
 const SHOWN = 0.6;
 const NO_SIGN = 0.25;
-
-/** The person's name taken out, so the judge reads only what the profile states. */
-function withoutName(text, name) {
-  let out = text;
-  for (const part of [name, ...name.split(/[\s,.()]+/)].filter((item) => item.length > 1)) {
-    const escaped = part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`(?<![\\p{L}])${escaped}(?![\\p{L}])`, "gu"), "[name]");
-  }
-  return out;
-}
 
 /** The judge's probability that one profile shows the language, or undefined when it fails. */
 async function judge(authorization, requirement, row) {
@@ -36,7 +26,7 @@ async function judge(authorization, requirement, row) {
     headers: { "content-type": "application/json", authorization },
     body: JSON.stringify({
       model: "jev-latest",
-      state: { profile: withoutName(row.profile, typeof row.name === "string" ? row.name : "") },
+      state: { profile: row.profile },
       questions: { answer: { type: "noul", instructions: QUESTION(requirement) } },
     }),
   }).catch(() => undefined);
