@@ -6,7 +6,12 @@ import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
-import { findSameMailReply, projectMailReplyCards, publishMailReplyCard } from "./mail-replies.js";
+import {
+  findSameMailReply,
+  findWaitingCampaignSend,
+  projectMailReplyCards,
+  publishMailReplyCard,
+} from "./mail-replies.js";
 import { createThreadMessage } from "./messages.js";
 import { provisionMessagingIdentity } from "./messaging.js";
 
@@ -380,5 +385,43 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
     expect(
       await answerRunInput(prisma, { ...second.input, answer: { ...answer, body: "Another" } }),
     ).toBeTruthy();
+  });
+  it("shows one card per campaign send: a second agent sending the same people finds the first", async () => {
+    const first = await fixture();
+    const second = await fixture(true);
+    await prisma.externalEffect.updateMany({
+      where: { id: { in: [first.effect.id, second.effect.id] } },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    const card = { sendNow: false, recipients: [{ email: "ada@example.test" }], firstEmail: null };
+    const waiting = (effectId: string, shown: unknown = card) =>
+      prisma.$transaction((tx) =>
+        findWaitingCampaignSend(tx, {
+          spaceId: identity.spaceId,
+          effectId,
+          campaignId: "campaign-1",
+          card: shown,
+        }),
+      );
+    expect(await waiting(first.effect.id)).toBeUndefined();
+    expect(await waiting(second.effect.id)).toEqual({
+      effectId: first.effect.id,
+      threadId: identity.threadId,
+    });
+    // A corrected email or other people is a new send with its own card.
+    expect(
+      await waiting(second.effect.id, { ...card, recipients: [{ email: "noah@example.test" }] }),
+    ).toBeUndefined();
+    // Once the first card is answered it no longer holds the send.
+    await prisma.externalEffect.update({
+      where: { id: first.effect.id },
+      data: { status: "approved" },
+    });
+    const third = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: third.effect.id },
+      data: { kind: "mcp__mail__native_instantly_activate_campaign", result: {} },
+    });
+    expect(await waiting(third.effect.id)).toBeUndefined();
   });
 });
