@@ -32,7 +32,7 @@ const CAVEAT =
 // What counts as a next step in words: something to connect or open, a draft, an offer, work
 // that carries on, or what to send so it can.
 const NEXT_STEP =
-  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
+  /连接|接入|绑定|设置|集成|点击|打开|草稿|我先|我会|要不要|是否|可以先|可以直接|告诉我|请(?:发|提供|告诉|补充|上传)|\b(?:connect|set up|integrations?|open|click|draft|meanwhile|carry on|I(?:['’]ll| will)|would you like|want me to|shall I|(?:send|tell|give) me)\b/i;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const SENDER =
   /(?:发件(?:地址|邮箱|人)|\b(?:sender|sending (?:address|mailbox)|from)\b)[^@\n]{0,12}?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi;
