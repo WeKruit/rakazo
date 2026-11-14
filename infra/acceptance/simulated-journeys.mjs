@@ -181,6 +181,97 @@ export const JOURNEYS = [
     ],
   },
   {
+    name: "first-timer-no-gmail",
+    gate: true,
+    title: "新注册、没连 Gmail、不知道该问什么",
+    area: "first message",
+    source:
+      "11-14 user: more customer types, frontend experience included; new signups have no Gmail and do not know what Kruit can do",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You signed up five minutes ago, never connected Gmail, and have no idea what to ask. Your first message is vague ("这个怎么用" or similar).`,
+    facts: () =>
+      "You have one role in mind but have not told Kruit: Senior iOS Engineer, Shanghai, 5+ years, Swift, base 50–70万. Do not answer any question that would start a search; you only want to understand the product today.",
+    goals: [
+      "Send a vague first message and expect a short, concrete answer about what to do first.",
+      "Ask whether you can email candidates without connecting anything, and expect a straight answer.",
+      "Open the Contacts, Sequence and Inbox pages and check they are understandable when empty (not blank, not broken).",
+      "Ask Kruit what the Sequence page is for, and check the answer matches what you saw.",
+    ],
+  },
+  {
+    name: "korean-recruiter-template",
+    gate: true,
+    title: "Korean recruiter: Korean replies and an English template",
+    area: "first message",
+    source: "11-13 Korean first-round failures (#1159); 11-14 user: more customer types",
+    chinese: false,
+    maxTurns: 5,
+    persona:
+      "You are a recruiter at a Seoul agency who writes Korean only, in polite but short messages. You get annoyed if Kruit answers in English or Chinese.",
+    facts: () =>
+      "The role: Senior Backend Engineer (Java, Spring), Seoul, 7+ years, for a US gaming client opening a Seoul office; the candidate email must be in English. You have no candidates yet.",
+    goals: [
+      "Ask in Korean for a first-outreach email template for the role, and expect Kruit to talk to you in Korean.",
+      "Ask for the template in English (for the candidates), and check the explanation around it stays Korean.",
+      "Ask in Korean where you will see replies.",
+    ],
+  },
+  {
+    name: "change-mind-mid-run",
+    gate: true,
+    title: "改主意：Kruit 还在写的时候换要求",
+    area: "first message",
+    source:
+      "11-10 rule: never refuse, steer every mid-run message into the running work; 11-14 user: impatient users",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You send your next message right after the last one, without waiting for Kruit to finish.`,
+    facts: () =>
+      "The role: Staff Frontend Engineer, React, Beijing, base 60–80万. Halfway through you decide the base is actually 70–90万 and the email must mention remote Fridays.",
+    goals: [
+      "Ask for a first-outreach email template for the role.",
+      "Before Kruit finishes, change the base to 70–90万 and add remote Fridays.",
+      "Check the template you end with has the new base and remote Fridays, with no old version left as the final answer.",
+      "Ask Kruit to confirm in one line what changed.",
+    ],
+  },
+  {
+    name: "mobile-first-look",
+    gate: true,
+    mobile: true,
+    title: "手机上：问进度、找候选人和回复在哪",
+    area: "ui",
+    source: "11-14 user: frontend experience, every page, phone width included",
+    chinese: true,
+    maxTurns: 6,
+    persona: `${AGENCY_RECRUITER} You are on your phone between meetings, thumb-typing.`,
+    goals: [
+      "Ask what Kruit can do for you, in one short message.",
+      "Open the Contacts and Inbox pages and check they fit the phone screen and can be read.",
+      "Go back to the chat and ask where replies from candidates will show up; check the answer matches the pages you saw.",
+    ],
+  },
+  {
+    name: "every-page-tour",
+    title: "大账号：每个页面看一遍，问 Kruit 看到的东西对不对",
+    area: "ui",
+    source:
+      "11-14 user: test the whole UI, every page, and find problems; batch runs on a copy of our account",
+    account: "batch",
+    chinese: true,
+    maxTurns: 9,
+    persona: `${AGENCY_RECRUITER} You have used Kruit for months and want to check the numbers on the pages are right.`,
+    facts: () =>
+      "Do not approve any send. You only look and ask. Pick any role you see on the pages.",
+    goals: [
+      "Open Contacts, Shortlist, Sequence, Inbox, Interview and Analytics, one after the other, and note anything blank, stuck, slow or confusing.",
+      "Pick one role you saw and open its Results, Sequence and Inbox tabs.",
+      "Ask Kruit how many people that role has and how many were emailed, and check the answer matches the pages.",
+      "Ask Kruit about one reply you saw in the Inbox (who wrote and what they said), and check it matches.",
+    ],
+  },
+  {
     name: "template-sign-with-my-name",
     title: "模板署名用我的名字",
     area: "first message",

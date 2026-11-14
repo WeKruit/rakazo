@@ -310,13 +310,29 @@ const describeCards = (cards) =>
         .join("\n")
     : "(none)";
 
+// Each play varies how the customer talks, so a fix cannot be tuned to one script: a mood, a way of
+// writing, and freedom to reorder or combine asks the goals do not force into an order.
+const MOODS = [
+  "rushed: between calls, one-line messages",
+  "irritated: had a bad week with tools that do not work",
+  "friendly but vague: half-finished sentences, expects Kruit to fill gaps",
+  "precise: numbers and names, wants exact answers",
+  "distracted: sometimes asks two things at once or changes topic and comes back",
+  "skeptical: double-checks what Kruit says against the pages",
+];
+function variationFor(seed) {
+  const mood = MOODS[seed % MOODS.length];
+  const combine = seed % 2 ? "You may combine two asks in one message." : "One ask per message.";
+  return `Today you are ${mood}. ${combine} Say everything in your own words: never copy the wording of the goals, and do not follow them in the listed order where the order does not matter.`;
+}
+
 async function simulate(journey, turns, view, cards, screen, tag, since) {
   // A reused account's pages still show earlier tests; only this session's messages count.
   const earlier =
     journey.account && screen
       ? `\n\nAnything on your screen from before ${new Date(since).toISOString().slice(11, 16)} UTC is an earlier session, not yours: your goals count only from the conversation above.`
       : "";
-  const prompt = `Who you are:\n${journey.persona}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
+  const prompt = `Who you are:\n${journey.persona}\n${journey.variation ?? ""}\n\nWhat you want, in order:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.facts ? `What you know:\n${journey.facts(RECIPIENTS, tag)}\n\n` : ""}The conversation so far (times are UTC):\n${view || "(nothing yet: you open the conversation)"}\n\nOpen cards you can act on:\n${describeCards(cards)}${
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
@@ -360,6 +376,9 @@ async function play(journey, label, owner, mailbox, out) {
   const before = await campaigns(rpc);
   // A per-play tag, so a journey on a reused account names a role of its own.
   const tag = new Date(startedAt).toISOString().slice(11, 16).replace(":", "");
+  // Plays of one journey started together still talk differently.
+  const seed = [...label].reduce((sum, char) => sum + char.charCodeAt(0), Number(tag));
+  journey = { ...journey, variation: variationFor(seed) };
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
   const ui = UI
@@ -369,6 +388,7 @@ async function play(journey, label, owner, mailbox, out) {
         password: credentials[1],
         chinese: journey.chinese,
         out,
+        mobile: Boolean(journey.mobile),
       })
     : null;
   if (ui) await ui.openChat(kruit.id);
@@ -380,6 +400,10 @@ async function play(journey, label, owner, mailbox, out) {
       const chats = await transcripts(rpc, startedAt, journey.chinese);
       const cards = await cardsOpen(rpc);
       const screen = ui ? await ui.view() : null;
+      // What the page showed after Kruit's reply to the last move, for the judge to check claims.
+      const last = turns.at(-1);
+      if (screen && last && !last.screen)
+        last.screen = { ...screen, text: screen.text.slice(-2500) };
       const move = await simulate(journey, turns, render(chats), cards, screen, tag, startedAt);
       const at = Date.now();
       const turn = { turn: index + 1, at: new Date(at).toISOString(), move };
@@ -502,10 +526,17 @@ async function play(journey, label, owner, mailbox, out) {
       if (ui) turn.shot = await ui.shot(`turn-${turn.turn}-${move.action}`);
       turns.push(turn);
     }
+    // The page after Kruit's last reply, so the judge can check the final claims too.
+    const last = turns.at(-1);
+    if (ui && last && !last.screen) {
+      const seen = await ui.view();
+      last.screen = { ...seen, text: seen.text.slice(-2500) };
+    }
     return {
       turns,
       chats: await transcripts(rpc, startedAt, journey.chinese),
       records: await records(rpc, startedAt, before),
+      variation: journey.variation,
     };
   } catch (error) {
     // Keep what was played so the report still shows the conversation up to the failure.
@@ -541,7 +572,8 @@ async function answered(rpc, card) {
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, screen wrong, missing control, confusing page, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
 {"turns": [{"turn": n, "answered": true|false, "truthful": "yes"|"no"|"unknown", "issues": ["..."], "note": "<one line>"}], "goals": [{"goal": "...", "met": true|false, "why": "..."}], "score": 0-10, "verdict": "...", "problems": ["..."]}`;
@@ -550,7 +582,7 @@ async function judge(journey, result) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\nRecord codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
@@ -564,6 +596,23 @@ const SHA =
     .then((response) => response.headers.get("x-rakazo-revision"))
     .catch(() => null)) ??
   "unknown";
+
+// The bar a recruiter would agree with: 8/10 or better, every goal met, and none of these.
+const PASS_SCORE = 8;
+const BLOCKING = new Set([
+  "false claim",
+  "dead end",
+  "repeat",
+  "refused",
+  "did not act",
+  "asked again",
+  "wrong language",
+  "internal jargon",
+  "screen wrong",
+  "missing control",
+  "blank or stuck",
+  "button did nothing",
+]);
 
 /** Plays one journey, has it judged, and writes its report; returns its scoreboard row. */
 async function runOne(journey, sample, owner, mailbox) {
@@ -592,8 +641,23 @@ async function runOne(journey, sample, owner, mailbox) {
   ];
   const falseClaims = (verdict?.turns ?? []).filter((turn) => turn.truthful === "no").length;
   const missed = (verdict?.goals ?? []).filter((goal) => !goal.met);
+  // One false claim, dead end, repeat or unanswered request fails the play, whatever the score.
+  const blocking = (verdict?.turns ?? []).flatMap((turn) => {
+    const move = result?.turns?.find((item) => item.turn === turn.turn)?.move;
+    return [
+      ...(turn.issues ?? []).filter((issue) => BLOCKING.has(issue)),
+      ...(turn.answered === false && move?.action === "say" ? ["not answered"] : []),
+    ].map((issue) => `step ${turn.turn}: ${issue} — ${turn.note ?? ""}`);
+  });
+  // A play the harness or the environment broke has no verdict: it is "not run", never a score.
+  const notRun = !verdict;
   const pass =
-    Boolean(verdict) && verdict.score >= 7 && !falseClaims && !missed.length && !checks.length;
+    !notRun &&
+    verdict.score >= PASS_SCORE &&
+    !falseClaims &&
+    !missed.length &&
+    !checks.length &&
+    !blocking.length;
   const row = {
     suite: "simulated",
     scenario: journey.name,
@@ -605,8 +669,9 @@ async function runOne(journey, sample, owner, mailbox) {
     failures: error
       ? [`${error instanceof InfraError ? "infrastructure" : "error"}: ${error.message}`]
       : [
-          ...(verdict.score < 7 ? [`score ${verdict.score}/10: ${verdict.verdict}`] : []),
-          ...(falseClaims ? [`${falseClaims} reply(ies) contradict the records`] : []),
+          ...(verdict.score < PASS_SCORE ? [`score ${verdict.score}/10: ${verdict.verdict}`] : []),
+          ...(falseClaims ? [`${falseClaims} reply(ies) contradict the records or the page`] : []),
+          ...blocking,
           ...missed.map((goal) => `goal not met: ${goal.goal}`),
           ...checks,
         ],
@@ -615,15 +680,17 @@ async function runOne(journey, sample, owner, mailbox) {
     seconds: Math.round((Date.now() - at) / 1000),
     paid: Boolean(journey.paid),
     ...(verdict ? { verdict: verdict.verdict } : {}),
-    ...(error instanceof InfraError ? { infra: true } : {}),
+    ...(notRun ? { infra: true, notRun: true } : {}),
   };
   fs.writeFileSync(
     path.join(out, "journey.json"),
     JSON.stringify({ journey: journey.name, result, verdict, checks }, null, 1),
   );
   const report = [
-    `# ${journey.title} — ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`,
+    `# ${journey.title} — ${verdict ? `${verdict.score}/10 ${pass ? "PASS" : "FAIL"}` : "NOT RUN (harness or environment)"}`,
     "",
+    ...(result?.variation ? [`客户这次：${result.variation}`, ""] : []),
+    ...(blocking.length ? ["## 一票否决", ...blocking.map((b) => `- ${b}`), ""] : []),
     verdict?.verdict ?? `出错: ${error?.message}`,
     "",
     ...(verdict?.problems?.length ? ["## 问题", ...verdict.problems.map((p) => `- ${p}`), ""] : []),
@@ -653,7 +720,7 @@ async function runOne(journey, sample, owner, mailbox) {
     `Staging ${SHA.slice(0, 8)} · ${row.seconds} s`,
   ].join("\n");
   fs.writeFileSync(path.join(out, "report.md"), `${report}\n`);
-  log(`${label}: ${verdict ? `${verdict.score}/10` : "not judged"} ${pass ? "PASS" : "FAIL"}`);
+  log(`${label}: ${verdict ? `${verdict.score}/10 ${pass ? "PASS" : "FAIL"}` : "NOT RUN"}`);
   return row;
 }
 

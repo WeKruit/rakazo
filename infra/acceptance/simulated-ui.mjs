@@ -41,10 +41,13 @@ export const ROLE_PAGES = ["conversation", "results", "brief", "sequence", "inbo
 export const SEND_BUTTON = /^(Confirm and send|确认发送|确认并发送|发送|Send)$/i;
 export const STANDING_BUTTON = /(Send when I say send|always|一律|总是|以后都)/i;
 
-export async function openUi({ origin, email, password, chinese, out }) {
+export async function openUi({ origin, email, password, chinese, out, mobile = false }) {
   browser ??= await chromium.launch();
+  // A phone-width journey uses a phone's screen, so layout and touch problems show up too.
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
+    ...(mobile
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+      : { viewport: { width: 1440, height: 900 } }),
     locale: chinese ? "zh-CN" : "en-US",
   });
   for (let attempt = 0; ; attempt += 1) {
@@ -67,13 +70,18 @@ export async function openUi({ origin, email, password, chinese, out }) {
   }, locale);
   const page = await context.newPage();
   let shots = 0;
+  // How long the last page took to show, for the judge (slow or stuck pages are a UX failure).
+  let loadMs = null;
 
   const settle = async () => {
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
     await sleep(1_500);
   };
   const open = async (url) => {
+    const at = Date.now();
     await page.goto(`${origin}${url}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    loadMs = Date.now() - at;
     await settle();
   };
   const buttons = async () =>
@@ -189,11 +197,14 @@ export async function openUi({ origin, email, password, chinese, out }) {
       )
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      return {
+      const seen = {
         url: page.url().replace(origin, ""),
         text: text.length > limit ? `${text.slice(0, limit)}\n…` : text,
         buttons: await buttons(),
+        ...(loadMs === null ? {} : { loadSeconds: Math.round(loadMs / 100) / 10 }),
       };
+      loadMs = null;
+      return seen;
     },
     async shot(label) {
       shots += 1;
