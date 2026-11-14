@@ -121,7 +121,7 @@ export function misaddressedEmail(display: InstantlyActivationDisplay): string |
       : [];
   });
   const wrong = people.flatMap(({ person, first, opening }) => {
-    if (!first || !opening || names(opening, first)) return [];
+    if (!first || !opening) return [];
     const other = people.find(
       (entry) =>
         entry.first &&
@@ -144,4 +144,5 @@ export const sendCard = (display: InstantlyActivationDisplay, sendNow: boolean) 
   // When each was confirmed before is shown beside the card, not part of what is approved.
   recipients: display.recipients.map(({ alreadyEmailedAt: _shown, ...recipient }) => recipient),
   firstEmail: display.firstEmail ?? null,
+  ...(display.takenOut?.length ? { takenOut: display.takenOut } : {}),
 });
