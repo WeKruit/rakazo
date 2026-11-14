@@ -9,6 +9,12 @@ import path from "node:path";
 import { sleep } from "./real-user-session.mjs";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
+/** Clicks, or false when the control never becomes clickable within 10 s. */
+const press = (target) =>
+  target
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
 let browser;
 let catalog;
 /** A card button's label as the Chinese page shows it (from the web app's own catalog). */
@@ -41,10 +47,13 @@ export const ROLE_PAGES = ["conversation", "results", "brief", "sequence", "inbo
 export const SEND_BUTTON = /^(Confirm and send|确认发送|确认并发送|发送|Send)$/i;
 export const STANDING_BUTTON = /(Send when I say send|always|一律|总是|以后都)/i;
 
-export async function openUi({ origin, email, password, chinese, out }) {
+export async function openUi({ origin, email, password, chinese, out, mobile = false }) {
   browser ??= await chromium.launch();
+  // A phone-width journey uses a phone's screen, so layout and touch problems show up too.
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
+    ...(mobile
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+      : { viewport: { width: 1440, height: 900 } }),
     locale: chinese ? "zh-CN" : "en-US",
   });
   for (let attempt = 0; ; attempt += 1) {
@@ -67,14 +76,37 @@ export async function openUi({ origin, email, password, chinese, out }) {
   }, locale);
   const page = await context.newPage();
   let shots = 0;
+  // How long the last page took to show, for the judge (slow or stuck pages are a UX failure).
+  let loadMs = null;
 
+  // The app keeps a live stream open, so the network is never idle: a page has settled when its
+  // text has stopped changing for a second and nothing shows as loading (at most 15 s).
   const settle = async () => {
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    await sleep(1_500);
+    let last = "";
+    let stableSince = Date.now();
+    for (const until = Date.now() + 15_000; Date.now() < until; await sleep(300)) {
+      const text = await page
+        .locator("main")
+        .first()
+        .innerText()
+        .catch(() => "");
+      const busy = await page
+        .locator('[aria-busy="true"]:visible, [role="progressbar"]:visible')
+        .count()
+        .catch(() => 0);
+      const loading = /加载中|Loading…|Loading\.\.\./.test(text);
+      if (text !== last || busy || loading || text.trim().length < 20) {
+        last = text;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= 1_000) return;
+    }
   };
   const open = async (url) => {
+    const at = Date.now();
     await page.goto(`${origin}${url}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await settle();
+    // Time until the page stopped changing, without the second it had to stay still.
+    loadMs = Math.max(0, Date.now() - at - 1_000);
   };
   const buttons = async () =>
     (
@@ -125,7 +157,8 @@ export async function openUi({ origin, email, password, chinese, out }) {
         .or(page.getByRole("link", { name, exact: true }))
         .first();
       if (!(await target.isVisible().catch(() => false))) return false;
-      await target.click();
+      // A control that is covered or never becomes clickable is the page's problem, not a crash.
+      if (!(await press(target))) return false;
       await settle();
       return true;
     },
@@ -134,7 +167,7 @@ export async function openUi({ origin, email, password, chinese, out }) {
       for (const name of [label, inChinese(label)].filter(Boolean)) {
         const target = page.getByRole("button", { name, exact: true }).last();
         if (await target.isVisible().catch(() => false)) {
-          await target.click();
+          if (!(await press(target))) return false;
           await settle();
           return true;
         }
@@ -147,10 +180,10 @@ export async function openUi({ origin, email, password, chinese, out }) {
           })
           .last();
         if (await option.isVisible().catch(() => false)) {
-          await option.getByRole("checkbox").first().click();
+          if (!(await press(option.getByRole("checkbox").first()))) return false;
           const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
           if (!(await send.isEnabled().catch(() => false))) return false;
-          await send.click();
+          if (!(await press(send))) return false;
           await settle();
           return true;
         }
@@ -173,7 +206,7 @@ export async function openUi({ origin, email, password, chinese, out }) {
       await box.fill(text);
       const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
       if (!(await send.isEnabled().catch(() => false))) return false;
-      await send.click();
+      if (!(await press(send))) return false;
       await settle();
       return true;
     },
@@ -189,11 +222,14 @@ export async function openUi({ origin, email, password, chinese, out }) {
       )
         .replace(/\n{3,}/g, "\n\n")
         .trim();
-      return {
+      const seen = {
         url: page.url().replace(origin, ""),
         text: text.length > limit ? `${text.slice(0, limit)}\n…` : text,
         buttons: await buttons(),
+        ...(loadMs === null ? {} : { loadSeconds: Math.round(loadMs / 100) / 10 }),
       };
+      loadMs = null;
+      return seen;
     },
     async shot(label) {
       shots += 1;

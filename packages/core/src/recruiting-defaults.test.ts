@@ -35,7 +35,6 @@ describe("calibration fast path", () => {
   });
 });
 
-// Behavior rules that fixed a real bug are pinned in recruiting-rules.test.ts.
 describe("maintained recruiting defaults", () => {
   // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.
   it.each(RECRUITING_DEFAULT_BOTS)("$name instructions stay within 12,000 characters", (bot) => {
