@@ -392,6 +392,9 @@ function guardSend(journey, card, answer, turn) {
   return "deny";
 }
 
+// Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
+const ACCOUNT_NAME = "Alex Morgan";
+
 async function play(journey, label, owner, mailbox, out) {
   const user = client();
   let credentials = mailbox;
@@ -405,7 +408,7 @@ async function play(journey, label, owner, mailbox, out) {
   } else {
     const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
-    await owner.rpc("deployment/createAccount", { email, name: "Simulated Recruiter", password });
+    await owner.rpc("deployment/createAccount", { email, name: ACCOUNT_NAME, password });
     await user.auth(email, password);
     credentials = [email, password];
   }
@@ -635,7 +638,7 @@ async function judge(journey, result) {
         `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
-  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\nRecord codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
+  const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\n${journey.account ? "" : `The customer signed up as ${ACCOUNT_NAME}, so Kruit has that name.\n\n`}Record codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
   return parse(await model(JUDGE_RULES, prompt, JUDGE));
 }
 
