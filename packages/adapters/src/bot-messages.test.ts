@@ -80,6 +80,9 @@ function deps(
   };
   let transactionAttempts = 0;
   const prisma = {
+    recruitingCandidateOccurrence: {
+      findMany: vi.fn().mockResolvedValue([{ candidateKey: "a" }, { candidateKey: "b" }]),
+    },
     bot: {
       findMany: vi
         .fn()
@@ -92,9 +95,14 @@ function deps(
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findFirst: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn(async (args?: { where?: { trigger?: string } }) =>
+        args?.where?.trigger === "bot_message" ? (options.teamWorking ?? null) : null,
+      ),
     },
-    thread: { findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null) },
+    thread: {
+      findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null),
+      findUnique: vi.fn().mockResolvedValue({ activeRecruitingRoleId: "role-1" }),
+    },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => {
       transactionAttempts += 1;
       if (options.transactionConflictOnce && transactionAttempts === 1) {
@@ -546,8 +554,9 @@ describe("delegating to a role team in another conversation", () => {
     });
     expect(sent).toMatchObject({ ok: true });
     if (!sent.ok) throw new Error("not sent");
-    expect(sent.note).toContain("Sourcer is still working on your earlier request");
-    expect(sent.note).toContain("started 3 min ago");
+    expect(sent.note).toContain(
+      "Sourcer has been working on the recruiter's request for 3 min and has found 2 people so far",
+    );
     expect(sent.note).toContain("never say it has not started");
     expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

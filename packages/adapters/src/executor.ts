@@ -384,7 +384,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
-  teamWorkingFor,
+  teamProgress,
 } from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
@@ -600,6 +600,7 @@ import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js
 import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
+import type { RecruiterListItem } from "./recruiting-assessment.js";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
@@ -6789,6 +6790,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           | undefined;
         let globalListSort: string | undefined;
+        /** The role team's live progress on this conversation's request, for a named role. */
+        const globalTeamProgress = async (roleId: string) => {
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { sourceThreadId: true },
+          });
+          return role
+            ? teamProgress(deps.prisma, {
+                threadId: role.sourceThreadId,
+                returnThreadId: thread.id,
+                roleId,
+              })
+            : null;
+        };
         // A plain list of one role's people in Kruit's conversation. A name or
         // profile lookup finds one person; it is not a list to show.
         const isGlobalRoleList = (args: Record<string, unknown>) =>
@@ -6827,28 +6842,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
           // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
           // the saved pool and the recruiter took it for the round, repeats from round one included.
-          const working = await teamWorkingFor(deps.prisma, {
-            threadId: role.sourceThreadId,
-            returnThreadId: thread.id,
-          });
-          const roundKeys = working
-            ? new Set(
-                (
-                  await deps.prisma.recruitingCalibrationRound.findMany({
-                    where: { roleId: args.roleId },
-                    select: { candidateKeys: true },
-                  })
-                ).flatMap((round) => round.candidateKeys),
-              )
-            : new Set<string>();
-          const shown = items
+          const working = await globalTeamProgress(args.roleId);
+          // One rule from the recruiter's seen record: people they turned down never come back, and
+          // while the team prepares a round, a page never passes off people already seen as new.
+          const shown = (items as Array<RecruiterListItem>)
             .slice(0, size)
             .filter(
-              (item) => typeof item.candidateKey !== "string" || !roundKeys.has(item.candidateKey),
+              (item) =>
+                item.recruiterVerdict !== "not_fit" &&
+                item.decision !== "pass" &&
+                !(working && item.alreadySeen),
             );
           if (!shown.length)
             return {
-              shownInChat: `${working?.bot.name ?? "The team"} is still preparing the next round; everyone on this page was already shown in a round. Tell the recruiter the round is still being prepared and will appear here; never list these people as new.`,
+              ...(working ? { teamWorking: working.note } : {}),
+              shownInChat: working
+                ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
+                : "Nobody on this page is left to show: the recruiter already turned them all down. Say so in one line, or read the next page.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -6882,7 +6892,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...(result as object),
             ...(working
               ? {
-                  roundInProgress: `${working.bot.name} is still preparing the next round. The people listed are saved search results not yet reviewed, with anyone already shown in a round left out; they are not the next round, so never call them the new round.`,
+                  teamWorking: `${working.note} The people listed are saved search results not yet reviewed, leaving out anyone already seen; they are not the next round, so never call them the new round.`,
                 }
               : {}),
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
@@ -12541,8 +12551,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const globalList = isGlobalRoleList(args);
               const callArgs = {
                 ...args,
-                ...(globalList &&
-                (typeof args.limit !== "number" || args.limit > SHOWN_ROLE_PEOPLE)
+                ...(globalList && (typeof args.limit !== "number" || args.limit > SHOWN_ROLE_PEOPLE)
                   ? { limit: SHOWN_ROLE_PEOPLE }
                   : {}),
                 // Page 2 read in another order repeated page 1 (staging 11-14): pages keep one order.
@@ -12567,7 +12576,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               );
               const shown = await showGlobalRolePeople(callArgs, result);
-              return finish(redactConnectorPayload(shown ?? result, runSecrets));
+              // Asked whether the next round is ready, Kruit sees what the team is doing right now.
+              const progress =
+                !shown &&
+                args.operation === "round" &&
+                typeof args.roleId === "string" &&
+                thread.groupId?.startsWith("recruiting-global-")
+                  ? await globalTeamProgress(args.roleId)
+                  : null;
+              return finish(
+                redactConnectorPayload(
+                  shown ??
+                    (progress ? { ...(result as object), teamWorking: progress.note } : result),
+                  runSecrets,
+                ),
+              );
             } catch (error) {
               return finish(roleError(error));
             }
