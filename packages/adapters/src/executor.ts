@@ -17658,6 +17658,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The workspace export can take minutes; the reply is ready now. Publish it as a
           // durable message first, then checkpoint while the run still holds its lease, and
           // finalize without a second copy. Failures still fail the run as before.
+          // The line is the latest reply when only this run's own cards (a role link, its steps)
+          // came after it. Gate b8850911: a role link opened mid-turn left a line and an answer.
+          const lineIsLatestReply = async (lineId: string) => {
+            const recent = await deps.prisma.message.findMany({
+              where: { threadId: thread.id },
+              orderBy: { createdAt: "desc" },
+              take: 6,
+              select: { id: true, runId: true, role: true, blocks: true },
+            });
+            const at = recent.findIndex((message) => message.id === lineId);
+            return (
+              at >= 0 &&
+              recent
+                .slice(0, at)
+                .every(
+                  (message) =>
+                    message.runId === runId &&
+                    message.role === "bot" &&
+                    Array.isArray(message.blocks) &&
+                    (message.blocks as MessageBlock[]).every(
+                      (block) => block.kind === "role_link" || block.kind === "steps",
+                    ),
+                )
+            );
+          };
           let finalBlocks = blocks;
           await Promise.race([
             quickReplyPosted.catch(() => undefined),
@@ -17677,13 +17702,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 block.kind === "steps" ||
                 (block.kind === "ask" && !block.approvalEffectId),
             ) &&
-            (
-              await deps.prisma.message.findFirst({
-                where: { threadId: thread.id },
-                orderBy: { createdAt: "desc" },
-                select: { id: true },
-              })
-            )?.id === quickReplyMessageId
+            (await lineIsLatestReply(quickReplyMessageId))
           ) {
             await deps.prisma.message.update({
               where: { id: quickReplyMessageId },
