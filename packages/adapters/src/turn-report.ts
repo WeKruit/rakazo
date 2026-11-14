@@ -705,19 +705,54 @@ export function declineRetry(input: {
   return { sentence, note: `${lead} ${DECLINE_RETRY_NOTE}${named}` };
 }
 
+// Chinese and Japanese have no spaces: a run of their characters counts by its character pairs.
+const CJK_RUN = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}$/u;
 const words = (text: string) =>
   new Set(
     text
       .toLowerCase()
       .replace(/[*_`#>[\]()]/g, " ")
-      .split(/[^\p{L}\p{N}]+/u)
-      .filter(Boolean),
+      .split(/[^\p{L}\p{N}]+|(?<=\p{Script=Han})(?=[a-z0-9])|(?<=[a-z0-9])(?=\p{Script=Han})/u)
+      .filter(Boolean)
+      .flatMap((word) =>
+        CJK_RUN.test(word)
+          ? Array.from({ length: word.length - 1 }, (_, i) => word.slice(i, i + 2))
+          : [word],
+      ),
   );
 
 /**
  * A final reply that only says again what the turn's last progress update just said (same
  * facts, not much longer) adds a duplicate message, so the update stands as the answer.
  */
+type HistoryRow = { role: string; botId: string | null; blocks: unknown };
+const rowText = (blocks: unknown, kind: string) =>
+  (Array.isArray(blocks) ? blocks : [])
+    .flatMap((block) =>
+      block && typeof block === "object" && block.kind === kind && typeof block.text === "string"
+        ? [block.text]
+        : [],
+    )
+    .join("\n");
+
+/**
+ * This bot's newest reply in the conversation, newest-first rows, when the recruiter has not
+ * written since: a teammate's report relayed after it adds nothing if it only says it again.
+ */
+export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): string | undefined {
+  for (const row of rows) {
+    const relayed =
+      Array.isArray(row.blocks) &&
+      row.blocks.some(
+        (block) => block && typeof block === "object" && block.kind === "bot_message_received",
+      );
+    if (row.role === "user" && !relayed) return undefined;
+    const text = row.botId === botId && row.role !== "user" ? rowText(row.blocks, "text") : "";
+    if (text.trim()) return text;
+  }
+  return undefined;
+}
+
 export function restatesUpdate(reply: string, update: string | undefined): boolean {
   if (!update?.trim() || !reply.trim()) return false;
   if (reply.trim().length > update.trim().length * 1.5) return false;

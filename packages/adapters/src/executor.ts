@@ -686,6 +686,8 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
+  newRoleElsewhere,
+  newRoleNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -797,6 +799,7 @@ import {
   questionStatesWork,
   CLAIMS_CARD_PENDING,
   readsOnly,
+  lastOwnUpdate,
   restatesUpdate,
   TurnReportLedger,
   turnReportText,
@@ -7095,6 +7098,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return (Array.isArray(last?.blocks) ? (last.blocks as MessageBlock[]) : [])
               .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
               .join("\n");
+          } catch {
+            return undefined;
+          }
+        };
+        const lastOwnReplyText = async () => {
+          try {
+            const rows = await deps.prisma.message.findMany({
+              where: { threadId: thread.id, NOT: { runId } },
+              orderBy: { seq: "desc" },
+              take: 8,
+              select: { role: true, botId: true, blocks: true },
+            });
+            return lastOwnUpdate(rows, run.botId);
           } catch {
             return undefined;
           }
@@ -13820,6 +13836,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
+            const otherRef = newRoleElsewhere(lastRecruiterText, target.title);
+            if (otherRef && tools.some((tool) => tool.name === "start_role"))
+              return finish({ error: newRoleNote(otherRef) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
@@ -17265,12 +17284,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The update just sent already said it: no second, near-identical message. A turn that
           // went on in the background may have sent that update before it resumed, so the
           // run's last saved message counts too.
+          // A teammate's report relayed after this bot already said the same adds nothing either.
           if (
-            run.trigger !== "bot_message" &&
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
-            (restatesUpdate(text, midTurnUserTexts.at(-1)) ||
-              restatesUpdate(text, await lastRunMessageText()))
+            (run.trigger === "bot_message"
+              ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
+              : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
+                restatesUpdate(text, await lastRunMessageText()))
           ) {
             text = "";
             blocks = [];

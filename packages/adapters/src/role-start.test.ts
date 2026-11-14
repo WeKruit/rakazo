@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { startRoleFromRecruiterMessage, templateOnlyRequest } from "./role-start.js";
+import {
+  newRoleElsewhere,
+  startRoleFromRecruiterMessage,
+  templateOnlyRequest,
+} from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
   withTransactionRetry: (fn: () => unknown) => fn(),
@@ -47,6 +51,20 @@ describe("templateOnlyRequest", () => {
     ).toBe(false);
     expect(templateOnlyRequest("帮我找人：上海的高级后端，顺便写个邮件模板")).toBe(false);
     expect(templateOnlyRequest("Senior data engineer in Seattle, here is the JD")).toBe(false);
+  });
+});
+
+// send-at-night 11-14: 「新岗位 … ref 0232 … 两个都发」 went to the only saved role, ref 0153.
+describe("newRoleElsewhere", () => {
+  const text = "新岗位 Senior Data Engineer，Seattle，ref 0232，写首封邮件，两个都发";
+  it("names the new role's ref when the target role is another one", () => {
+    expect(newRoleElsewhere(text, "Warehouse Manager (Ref 0153)")).toBe("0232");
+    expect(newRoleElsewhere("New role: data engineer, ref #0232", "Ops lead")).toBe("0232");
+  });
+  it("lets work through to the role it names, or when no new role is named", () => {
+    expect(newRoleElsewhere(text, "Senior Data Engineer Seattle (ref 0232)")).toBeUndefined();
+    expect(newRoleElsewhere("ref 0232 怎么样了", "Warehouse Manager (Ref 0153)")).toBeUndefined();
+    expect(newRoleElsewhere("新岗位 数据工程师 西雅图", "Warehouse Manager")).toBeUndefined();
   });
 });
 
