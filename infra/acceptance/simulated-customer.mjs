@@ -8,7 +8,7 @@
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=<direct backend> RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate | --story "<test in plain words>" | --calibrate <gold dir>] [--paid] [--samples 1]
+//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --mechanism reference,language | --gate | --story "<test in plain words>" | --calibrate <gold dir>] [--paid] [--samples 1]
 //       [--concurrency 6] [--out <dir>] [--bench <dir>] [--model sonnet] [--judge-model sonnet]
 // Without --journeys it plays every journey that needs no paid search (with --paid, all of them),
 // side by side, each on its own brand-new account, and writes one scoreboard, <out>/summary.md,
@@ -122,7 +122,15 @@ const JOURNEYS = [
   ...learned.filter((j) => !WRITTEN.some((w) => w.name === j.name)),
   ...(story ? [story] : []),
 ];
-const named = story ? [story.name] : option("--journeys")?.split(",");
+const mechanisms = option("--mechanism")?.split(",");
+const named = story
+  ? [story.name]
+  : (option("--journeys")?.split(",") ??
+    mechanisms?.flatMap((mechanism) => {
+      const found = JOURNEYS.filter((journey) => journey.mechanisms?.includes(mechanism));
+      if (!found.length) throw new Error(`no journey exercises ${mechanism}`);
+      return found.map((journey) => journey.name);
+    }));
 for (const name of named ?? [])
   if (!JOURNEYS.some((journey) => journey.name === name))
     throw new Error(`no journey ${name}; journeys: ${JOURNEYS.map((j) => j.name).join(", ")}`);
@@ -851,7 +859,7 @@ const OWNERS = {
   ui: "web pages",
 };
 const LEARN_RULES = `You turn a failed test of a recruiting assistant (Kruit) into work for the team. You get the journey's report: score, problems, the per-step table and the whole conversation, plus the names and goals of the journeys that already exist. Answer with one JSON object and nothing else:
-{"area": "sending" | "search" | "requirements" | "first message" | "ui", "problem": "<one sentence: what Kruit did wrong, in English>", "evidence": "<Kruit's exact words or the screen text that shows it, at most 200 characters>", "fix": "instructions" | "skill" | "code" | "test", "fixHint": "<one sentence: where the fix most likely belongs>", "newJourney": null | {"name": "<kebab-case, new>", "title": "<Chinese, short>", "area": "...", "source": "<the failed journey and date>", "persona": "AGENCY_RECRUITER" | "US_RECRUITER", "situation": "<one sentence the persona adds>", "chinese": true|false, "maxTurns": 4-8, "facts": "<what the recruiter knows, or empty>", "goals": ["..."]}}
+{"area": "sending" | "search" | "requirements" | "first message" | "ui", "problem": "<one sentence: what Kruit did wrong, in English>", "evidence": "<Kruit's exact words or the screen text that shows it, at most 200 characters>", "fix": "instructions" | "skill" | "code" | "test", "fixHint": "<one sentence: where the fix most likely belongs>", "newJourney": null | {"name": "<kebab-case, new>", "title": "<Chinese, short>", "area": "...", "source": "<the failed journey and date>", "persona": "AGENCY_RECRUITER" | "US_RECRUITER", "situation": "<one sentence the persona adds>", "chinese": true|false, "maxTurns": 4-8, "facts": "<what the recruiter knows, or empty>", "goals": ["..."], "mechanisms": ["<from: state-claims, reference, language, email-content, filler, long-task, latency, pages>"]}}
 "fix": "test" means the test itself was wrong (the simulated customer or judge misread something); then newJourney is null. Propose newJourney only when the failure is a distinct behaviour that none of the existing journeys checks; it must need no paid people search and send no email.`;
 
 async function learn(rows) {
@@ -1075,6 +1083,7 @@ const blocking = journeyRows.filter((row) => row.blocks && row.status === "不�
 const ranRows = rows.filter((row) => !row.infra);
 const decided = journeyRows.filter((row) => row.status !== "没跑成");
 const rate = (part, whole) => (whole ? `${Math.round((100 * part) / whole)}%` : "-");
+const mechanismsOf = (name) => JOURNEYS.find((journey) => journey.name === name)?.mechanisms ?? [];
 const passLine = (subset) =>
   `pass@1 ${rate(
     ranRows.filter((row) => row.pass && subset.some((item) => item.name === row.scenario)).length,
@@ -1084,6 +1093,12 @@ const summary = [
   `blocking: ${blocking.length ? `yes (${blocking.map((row) => row.name).join(", ")})` : "no"}`,
   "",
   `回归集（卡发布）：${passLine(decided.filter((row) => row.blocks))}；能力集：${passLine(decided.filter((row) => !row.blocks))}`,
+  "",
+  `按机制：${[...new Set(JOURNEYS.flatMap((journey) => journey.mechanisms ?? []))]
+    .map((mechanism) => [mechanism, decided.filter((row) => mechanismsOf(row.name).includes(mechanism))])
+    .filter(([, subset]) => subset.length)
+    .map(([mechanism, subset]) => `${mechanism} ${subset.filter((row) => row.status === "通过").length}/${subset.length}`)
+    .join(" · ")}`,
   "",
   "标准：每次 8 分以上、目标全部达成、没有假话/死路/重复/没回应等一票否决；旅程要每次都通过才算通过；环境出错算没跑成。",
   "",
