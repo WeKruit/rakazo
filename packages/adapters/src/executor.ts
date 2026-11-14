@@ -595,6 +595,7 @@ import {
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
 import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
+import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -15381,6 +15382,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
         const creditsNote = creditsLeft === null ? undefined : creditEstimateNote(creditsLeft);
+        const signingNote = hideVendors
+          ? await recruiterSigningNote(deps.prisma, run.userId).catch(() => undefined)
+          : undefined;
         // Accounts we set up send only through their outreach mailbox; say so when asked.
         const mailboxNote =
           hideVendors &&
@@ -15442,6 +15446,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           awayNote,
           languageNote,
           creditsNote,
+          signingNote,
           mailboxNote,
           sendNowNote,
           !linkRole &&
