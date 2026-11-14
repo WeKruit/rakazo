@@ -180,6 +180,7 @@ export async function messageBot(
         runId: string;
         targetEventSeq: number;
         senderEventSeq: number;
+        working?: { name: string; minutes: number };
       }
     | {
         ok: false;
@@ -308,6 +309,29 @@ export async function messageBot(
               payload: { reason: "superseded" },
             });
         }
+        // Staging 11-14: asked "where are they?" while the team was still searching, Kruit read
+        // the role's status, saw no new round and told the recruiter the search had not started.
+        const working =
+          crossThread && (intent === "request" || intent === "question")
+            ? await tx.run.findFirst({
+                where: {
+                  threadId: targetThreadId,
+                  trigger: "bot_message",
+                  status: { in: ["leased", "running"] },
+                  sourceMessage: {
+                    is: {
+                      blocks: {
+                        array_contains: [
+                          { kind: "bot_message_received", returnThreadId: run.threadId },
+                        ],
+                      },
+                    },
+                  },
+                },
+                orderBy: { createdAt: "asc" },
+                select: { createdAt: true, startedAt: true, bot: { select: { name: true } } },
+              })
+            : null;
         const task = await tx.task.create({
           data: {
             spaceId: run.spaceId,
@@ -354,6 +378,17 @@ export async function messageBot(
           runId: nextRun.id,
           targetEventSeq: inboundEvent.seq,
           senderEventSeq: outboundEvent.seq,
+          working: working
+            ? {
+                name: working.bot.name,
+                minutes: Math.max(
+                  0,
+                  Math.round(
+                    (Date.now() - (working.startedAt ?? working.createdAt).getTime()) / 60_000,
+                  ),
+                ),
+              }
+            : undefined,
         };
       }),
     );
@@ -387,7 +422,9 @@ export async function messageBot(
     botId: target.id,
     name: targetName,
     delivered: message,
-    note: `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
+    note: committed.working
+      ? `${committed.working.name} is still working on your earlier request from this conversation (started ${committed.working.minutes < 1 ? "under a minute" : `${committed.working.minutes} min`} ago); this message reaches the team when that work finishes, and its result comes back here. Tell the recruiter it is still in progress and that you will show the result here when it arrives; never say it has not started or that a new search began.`
+      : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
 }
 
