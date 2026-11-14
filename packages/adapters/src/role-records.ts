@@ -16,6 +16,15 @@ const RUNS_READ = 60;
 export type RoleRecord = {
   requirements?: string;
   savedEmail?: { steps: number; first: string; at: Date };
+  /** The role's campaign as this product recorded it; delivery itself is the provider's to say. */
+  campaign?: { people: number; waiting: number; adopted: boolean; confirmedAt?: Date };
+};
+
+type Binding = {
+  campaignId?: unknown;
+  leads?: Record<string, unknown>;
+  staged?: Record<string, unknown>;
+  created?: unknown;
 };
 
 /** The saved criterion expression, read loosely: atoms, "not" and any list of items. */
@@ -102,5 +111,67 @@ export async function loadRoleRecords(
     };
     records.set(roleId, record);
   }
+  await addCampaigns(prisma, scope, roleIds, records);
   return records;
+}
+
+/**
+ * Each role's campaign and the recruiter's latest confirmed send to it. Staging 11-14
+ * (send-at-night): Kruit twice said "sent at 07:47" while the campaign was paused and nobody was
+ * contacted; the card now says a confirmation is not a delivery.
+ */
+async function addCampaigns(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  scope: { spaceId: string; userId: string },
+  roleIds: readonly string[],
+  records: Map<string, RoleRecord>,
+) {
+  const bindings = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: scope.spaceId,
+      kind: "instantly_role_campaign",
+      status: "completed",
+      run: { userId: scope.userId, spaceId: scope.spaceId },
+      OR: roleIds.map((roleId) => ({ request: { path: ["roleId"], equals: roleId } })),
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { request: true, result: true },
+  });
+  const campaignRole = new Map<string, string>();
+  for (const effect of bindings) {
+    const roleId = (effect.request as { roleId?: unknown } | null)?.roleId;
+    const binding = effect.result as Binding | null;
+    if (typeof roleId !== "string" || typeof binding?.campaignId !== "string") continue;
+    const record = records.get(roleId) ?? {};
+    if (record.campaign) continue;
+    record.campaign = {
+      people: Object.keys(binding.leads ?? {}).length,
+      waiting: Object.keys(binding.staged ?? {}).length,
+      adopted: binding.created !== true,
+    };
+    records.set(roleId, record);
+    campaignRole.set(binding.campaignId, roleId);
+  }
+  if (!campaignRole.size) return;
+  // The same receipts campaign-send-record reads: a completed, error-free activate_campaign.
+  const sends = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: scope.spaceId,
+      status: "completed",
+      kind: { endsWith: "activate_campaign" },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: RUNS_READ,
+    select: { result: true, updatedAt: true },
+  });
+  for (const send of sends) {
+    const text = JSON.stringify(send.result ?? null);
+    if (text.includes('"error"') || text.includes("already_waiting")) continue;
+    // The result may be the tool's wrapped text, so match the campaign id anywhere in it.
+    for (const [campaignId, roleId] of campaignRole) {
+      const campaign = records.get(roleId)?.campaign;
+      if (campaign && !campaign.confirmedAt && text.includes(campaignId))
+        campaign.confirmedAt = send.updatedAt;
+    }
+  }
 }
