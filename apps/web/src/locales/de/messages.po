@@ -6071,6 +6071,10 @@ msgstr "Wird gesendet…"
 msgid "Seniority"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr ""

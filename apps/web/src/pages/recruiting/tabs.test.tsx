@@ -1089,6 +1089,21 @@ it("shows the role's Instantly campaign, its stop-on-reply risk and each lead's 
   expect(ben?.textContent).not.toContain("·");
 });
 
+it("shows a live campaign's sent total and never says nothing was sent", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  roleCampaign.mockResolvedValue({
+    status: "ready",
+    campaign: { id: "c1", name: "Staff Engineer outreach", status: 3, stopOnReply: true },
+    leads: [],
+    stats: { sent: 2, opened: 0, replied: 0 },
+  });
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  expect(view.textContent).toContain("Sent (all time): 2");
+  expect(view.textContent).toContain("Send times are not available yet.");
+  expect(view.textContent).not.toContain("No emails sent yet.");
+});
+
 it("shows no campaign section when the role has no bound campaign", async () => {
   crmData.mockResolvedValue(candidatesPage);
   roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });

@@ -6074,6 +6074,10 @@ msgstr "正在发送…"
 msgid "Seniority"
 msgstr "职级"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr "已发送（累计）：{sentTotal}"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr "发送时间"

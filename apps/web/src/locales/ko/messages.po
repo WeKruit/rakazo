@@ -6071,6 +6071,10 @@ msgstr "보내는 중…"
 msgid "Seniority"
 msgstr ""
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr ""

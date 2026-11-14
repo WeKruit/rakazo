@@ -73,6 +73,9 @@ export function SequenceOverview({
   const observed = sequenceObservations(campaign);
   const ready = campaign?.status === "ready" && campaign.campaign !== null;
   const allTime = period === "all";
+  const sent = ready ? (campaign.stats?.sent ?? null) : null;
+  // Sends are known but not their times: never claim nothing was sent.
+  const sendTimesUnknown = sendDates === null && (overviewCounts !== undefined || (sent ?? 0) > 0);
   const count = (status: number) => {
     if (!ready) return null;
     const found = campaign.leads.filter((lead) => lead.status === status).length;
@@ -219,12 +222,8 @@ export function SequenceOverview({
               <p className="mb-3 break-words text-sm text-muted-foreground">{sendContext}</p>
             ) : null}
             <p className="text-sm text-muted-foreground">
-              {sendDates === null ? (
-                overviewCounts ? (
-                  <Trans>Send times are not available yet.</Trans>
-                ) : (
-                  <Trans>No emails sent yet.</Trans>
-                )
+              {sendTimesUnknown ? (
+                <Trans>Send times are not available yet.</Trans>
               ) : (
                 <Trans>No emails sent yet.</Trans>
               )}
@@ -316,12 +315,8 @@ export function SequenceOverview({
                   {!hasDatedSends ? (
                     <div className="absolute inset-0 flex items-center justify-center px-8">
                       <p className="max-w-sm bg-card/90 p-3 text-center text-xs leading-relaxed text-muted-foreground">
-                        {sendDates === null ? (
-                          overviewCounts ? (
-                            <Trans>Send times are not available yet.</Trans>
-                          ) : (
-                            <Trans>No emails sent yet.</Trans>
-                          )
+                        {sendTimesUnknown ? (
+                          <Trans>Send times are not available yet.</Trans>
                         ) : (
                           <Trans>No emails sent yet.</Trans>
                         )}
