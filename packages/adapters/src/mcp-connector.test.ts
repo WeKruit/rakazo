@@ -4111,6 +4111,8 @@ describe("local native Instantly campaign and lead tools", () => {
       candidates: [] as Record<string, unknown>[],
       /** Whether an added lead shows up in the role campaign's own lead list. */
       addToCampaign: false,
+      /** What the recruiter wrote in the run's conversation. */
+      typed: [] as string[],
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -4120,6 +4122,15 @@ describe("local native Instantly campaign and lead tools", () => {
       mcpServer: {
         findFirst: vi.fn(async () => server),
         findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]),
+      },
+      message: {
+        findMany: vi.fn(async () =>
+          state.typed.map((text) => ({
+            threadId: "thread-1",
+            thread: { spaceId: "w1" },
+            blocks: [{ kind: "text", text }],
+          })),
+        ),
       },
       run: {
         findFirst: vi.fn(async ({ where }) =>
@@ -6016,6 +6027,7 @@ describe("local native Instantly campaign and lead tools", () => {
         f.state.addToCampaign = true;
         f.state.candidates = [];
         f.state.lookups = [];
+        f.state.typed = ["Please email Noah at Noah@X.test about the data role"];
         const note = { subject: "A data role", body: "Hi Noah,\n\nA note just for you." };
         const out = f.result(
           await f.run("ensure_role_campaign", { steps: [note], recipients: ["Noah@X.test"] }),
@@ -6037,6 +6049,28 @@ describe("local native Instantly campaign and lead tools", () => {
         });
         // Nothing goes out until the send card is confirmed.
         expect(f.state.requests.filter((r) => r.path.endsWith("/activate"))).toEqual([]);
+      });
+
+      it("refuses an address nobody wrote, naming the saved one a letter off", async () => {
+        const { f } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        f.state.typed = ["Send Ada the note"];
+        const note = { subject: "A data role", body: "Hi Ada,\n\nA note just for you." };
+        const message = async (recipients: string[]) =>
+          (
+            (await f.run("ensure_role_campaign", { steps: [note], recipients }))[0] as {
+              message: string;
+            }
+          ).message;
+        // The campaign holds abe@x.test; the agent retyped it with two letters swapped.
+        expect(await message(["abe@x.tset"])).toContain(
+          "Nothing was saved: abe@x.tset is not an address anyone wrote in this conversation or a saved email of this role's candidates. If they mean abe@x.test, the closest saved address, use it exactly; otherwise ask the recruiter one question: which person they mean, by full name or email.",
+        );
+        // Two saved addresses as close says nothing about which one they meant.
+        expect(await message(["p@x.test"])).not.toMatch(/closest/);
+        expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([]);
       });
 
       it("still refuses an unknown or ambiguous person with one question, adding nobody", async () => {

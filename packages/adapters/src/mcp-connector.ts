@@ -82,6 +82,7 @@ import {
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
 import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
+import { addressTypedInConversation } from "./named-address.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   lookedUpContacts,
@@ -97,7 +98,7 @@ import {
   SchedulingApprovalEvidenceSchema,
   schedulingPlanHash,
 } from "./recruiting-scheduling.js";
-import { addressTypedInConversation, unresolvedContactEmailError } from "./recruiting-tools.js";
+import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
