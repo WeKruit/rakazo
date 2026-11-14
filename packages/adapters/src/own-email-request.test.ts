@@ -53,5 +53,7 @@ describe("send now before Gmail is connected", () => {
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/no check, tool call or progress line first/);
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/comes back on one Send card/);
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never mention a mailbox draft folder/);
+    // 4e2923f2 sim: 「草稿会留着吗」 got "only a draft, not saved to the mailbox".
+    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/the draft is kept \(say so in those words\)/);
   });
 });

@@ -15367,9 +15367,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? OUTREACH_MAILBOX_ONLY_NOTE
             : undefined;
         // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
+        // Once a Connect Gmail card is in this conversation, every follow-up gets the same answer.
+        const gmailCardShown = messages.some(
+          (message) =>
+            message.role === "bot" &&
+            Array.isArray(message.blocks) &&
+            message.blocks.some(
+              (block) =>
+                (block as { connection?: { name?: unknown } } | null)?.connection?.name === "Gmail",
+            ),
+        );
         const sendNowNote =
           hideVendors &&
-          SEND_NOW_REQUEST.test(lastRecruiterText) &&
+          (SEND_NOW_REQUEST.test(lastRecruiterText) || gmailCardShown) &&
           (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
             ? SEND_NOW_WITHOUT_GMAIL_NOTE
             : undefined;
