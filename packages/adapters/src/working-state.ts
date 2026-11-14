@@ -3,6 +3,8 @@ import type { ReplyLanguage } from "@rakazo/core";
 import { REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
+import type { RoleRecord } from "./role-records.js";
+import { loadRoleRecords } from "./role-records.js";
 import { referredRole } from "./role-reference.js";
 import { isTurnWork, workDoneLabel } from "./turn-report.js";
 
@@ -35,7 +37,7 @@ const HANDOFF_CALLS = 30;
 
 type StatePrisma = Pick<
   PrismaClient,
-  "chatGroup" | "recruitingRole" | "message" | "bot" | "run" | "event"
+  "chatGroup" | "recruitingRole" | "message" | "bot" | "run" | "event" | "externalEffect"
 >;
 
 export type WorkingStateThread = {
@@ -327,6 +329,25 @@ export async function loadWorkingState(
     else lines.push("- Role in focus: none named yet.");
   }
 
+  const cardRoleIds = global
+    ? groups.flatMap((group) =>
+        group.thread?.activeRecruitingRoleId ? [group.thread.activeRecruitingRoleId] : [],
+      )
+    : thread.activeRecruitingRoleId
+      ? [thread.activeRecruitingRoleId]
+      : [];
+  const records = await loadRoleRecords(prisma, scope, cardRoleIds, threadIds).catch(
+    () => new Map<string, RoleRecord>(),
+  );
+  const emailLine = (record: RoleRecord | undefined) =>
+    record?.savedEmail
+      ? `saved email for this role (${record.savedEmail.steps} step${record.savedEmail.steps > 1 ? "s" : ""}, ${ago(record.savedEmail.at, now)}; read it with get_role_draft before writing another): "${record.savedEmail.first}"`
+      : undefined;
+  if (!global && thread.activeRecruitingRoleId) {
+    const saved = emailLine(records.get(thread.activeRecruitingRoleId));
+    if (saved) lines.push(`- This role's ${saved}`);
+  }
+
   const own = receiptLine(receiptsOf(thread.id), now);
   lines.push(
     own
@@ -370,6 +391,11 @@ export async function loadWorkingState(
       for (const block of messages.flatMap((m) => m.blocks as MessageBlock[]))
         if (block.kind === "ask" && block.status === "pending")
           lines.push(`  Waiting on the recruiter: "${flat(block.text, QUESTION_CHARS)}"`);
+      const record = roleId ? records.get(roleId) : undefined;
+      // Written from the recruiter's words with their source: never ask for what is here.
+      if (record?.requirements) lines.push(`  Requirements on record: ${record.requirements}`);
+      const saved = emailLine(record);
+      if (saved) lines.push(`  The ${saved}`);
       const done = receiptLine(receiptsOf(threadId), now);
       if (done) lines.push(`  Done in the last 24 h (tool receipts): ${done}`);
       // The team's newest message is its report, as a worker's report summary.

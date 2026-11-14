@@ -18,11 +18,16 @@ function fakePrisma(input: {
   runs?: Row[];
   completed?: Row[];
   called?: Row[];
+  /** Role rows with their current revision, as the role-records read returns them. */
+  revisions?: Row[];
+  effects?: Row[];
 }) {
   return {
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
     recruitingRole: {
-      findMany: vi.fn(async () => input.roles ?? []),
+      findMany: vi.fn(async ({ where }: { where: { id?: unknown } }) =>
+        where.id ? (input.revisions ?? []) : (input.roles ?? []),
+      ),
       count: vi.fn(async () => 1175),
     },
     message: {
@@ -35,7 +40,12 @@ function fakePrisma(input: {
       ),
     },
     bot: { findMany: vi.fn(async () => [{ id: "bot-sourcer", name: "Sourcer" }]) },
-    run: { findMany: vi.fn(async () => input.runs ?? []) },
+    run: {
+      findMany: vi.fn(async ({ select }: { select: { id?: boolean } }) =>
+        select.id ? [{ id: "run-1" }] : (input.runs ?? []),
+      ),
+    },
+    externalEffect: { findMany: vi.fn(async () => input.effects ?? []) },
     event: {
       findMany: vi.fn(async ({ where }: { where: { type: string } }) =>
         where.type === "agent.tool.completed" ? (input.completed ?? []) : (input.called ?? []),
@@ -155,6 +165,70 @@ describe("loadWorkingState", () => {
       "sent the email (1 min ago), saved people to the role ×2 (latest 2 min ago)",
     );
     expect(card).toContain('Team\'s last report (Sourcer): "[redacted] draft ready"');
+  });
+
+  it("puts each role's requirements and saved email on the card, and a role's own email in its conversation", async () => {
+    const effects = [
+      {
+        request: { roleId: "role-1" },
+        result: {
+          steps: [
+            { subject: "Agent infra at Acme", body: "Hi {{firstName}}, ..." },
+            { subject: "", body: "Following up" },
+          ],
+        },
+        updatedAt: new Date(now - 10 * 60_000),
+      },
+      {
+        request: { roleId: "role-other" },
+        result: { steps: [{ subject: "x", body: "y" }] },
+        updatedAt: new Date(now),
+      },
+    ];
+    const revisions = [
+      {
+        id: "role-1",
+        currentRevision: {
+          criteria: [
+            { priority: "hard", expression: { kind: "atom", statement: "Backend in Go" } },
+            {
+              priority: "soft",
+              expression: {
+                kind: "all",
+                items: [{ kind: "not", item: { kind: "atom", statement: "agency recruiter" } }],
+              },
+            },
+          ],
+          preferences: ["Seattle 3 days onsite"],
+        },
+      },
+    ];
+    const card = (
+      await loadWorkingState(
+        fakePrisma({ groups, roles, revisions, effects }) as never,
+        scope,
+        globalThread,
+        (t) => t,
+        now,
+      )
+    ).text;
+    expect(card).toContain(
+      "  Requirements on record: must: Backend in Go; nice: not agency recruiter; preference: Seattle 3 days onsite",
+    );
+    expect(card).toContain(
+      'saved email for this role (2 steps, 10 min ago; read it with get_role_draft before writing another): "Agent infra at Acme — Hi {{firstName}}, ..."',
+    );
+    expect(card).not.toContain("role-other");
+    const own = (
+      await loadWorkingState(
+        fakePrisma({ revisions, effects }) as never,
+        scope,
+        { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
+        (t) => t,
+        now,
+      )
+    ).text;
+    expect(own).toContain("- This role's saved email for this role (2 steps");
   });
 
   it("keeps the role last handed work in focus until the recruiter names another, and says when nothing was done", async () => {
