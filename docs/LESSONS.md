@@ -23,3 +23,6 @@ that repeats into the existing line instead of adding another.
 - The simulated customer reported every page as 15 s, a "missing" Word attachment and a phone send
   failure; all three were the harness (network idle never comes with a live stream, a filename filter,
   Enter on a touch screen). **Before routing an eval finding, check the harness could have produced it.**
+- Four instruction PRs for one feedback round still left the recruiter seeing nine people while a
+  different ten were recorded: the chat list and the round record checked repeats differently. **Read
+  the run's events before rewording; when two tools judge the same thing, give them one rule.**

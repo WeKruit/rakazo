@@ -262,6 +262,14 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(
       recordRound([...keys("second").slice(0, 8), "spare-0", "spare-1"]),
     ).rejects.toThrow(/2 of these ten were already returned before round 1/);
+    // The picks shown in chat use the same rule, so a list on screen never changes on record.
+    await expect(
+      recruiting.calibrationRoundRepeats(prisma, roleId, [
+        ...keys("second").slice(0, 8),
+        "spare-0",
+        keys("first")[0] ?? "",
+      ]),
+    ).resolves.toEqual({ round: 1, repeats: ["spare-0", keys("first")[0]] });
 
     await savePage(keys("second").slice(8));
     const second = await recordRound(keys("second"));
