@@ -84,7 +84,7 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
   const settle = async () => {
     let last = "";
     let stableSince = Date.now();
-    for (const until = Date.now() + 15_000; Date.now() < until; await sleep(300)) {
+    for (const until = Date.now() + 30_000; Date.now() < until; await sleep(300)) {
       const text = await page
         .locator("main")
         .first()
@@ -94,7 +94,8 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
         .locator('[aria-busy="true"]:visible, [role="progressbar"]:visible')
         .count()
         .catch(() => 0);
-      const loading = /加载中|Loading…|Loading\.\.\./.test(text);
+      // "正在加载邮件序列…", "Loading sequences…": any loading line, not only the bare word.
+      const loading = /加载中|正在加载|\bLoading\b[^\n]*(…|\.\.\.)/.test(text);
       if (text !== last || busy || loading || text.trim().length < 20) {
         last = text;
         stableSince = Date.now();
