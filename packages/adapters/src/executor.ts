@@ -697,6 +697,8 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
+  roleGroupId,
+  roleStartKey,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -14144,8 +14146,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               select: { botId: true },
               orderBy: { createdAt: "asc" },
             });
-            // One role per call, even when the call is retried.
-            const groupId = `${KRUIT_ROLE_GROUP_PREFIX}${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const roleKey = await roleStartKey(deps.prisma, {
+              spaceId: run.spaceId,
+              userId: run.userId,
+              threadId: run.threadId,
+              title,
+              fallback: effectKey,
+            });
+            const groupId = roleGroupId(roleKey);
             const group = await deps.prisma.$transaction((tx) =>
               createGroupInTransaction(
                 tx,
@@ -14172,7 +14180,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const started = await startRoleFromRecruiterMessage(deps, run, {
               threadId: group.thread.id,
               botId: bot.id,
-              deliveryKey: effectKey,
+              deliveryKey: roleKey,
               earlier: request,
             });
             if (!started) {
@@ -14192,7 +14200,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   target_label: `${title} team`,
                   message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
                   intent: "request",
-                  deliveryKey: effectKey,
+                  deliveryKey: roleKey,
                 },
               );
               if (!sent.ok) return finish({ error: sent.error });

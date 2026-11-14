@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { startRoleFromRecruiterMessage, templateOnlyRequest } from "./role-start.js";
+import { roleStartKey, startRoleFromRecruiterMessage, templateOnlyRequest } from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
   withTransactionRetry: (fn: () => unknown) => fn(),
@@ -205,5 +205,56 @@ describe("startRoleFromRecruiterMessage", () => {
       const { deps: d } = deps(source);
       expect(await startRoleFromRecruiterMessage(d as never, run, role)).toBe(false);
     }
+  });
+});
+
+describe("roleStartKey", () => {
+  const asked = {
+    id: "m-recruiter",
+    role: "user",
+    botId: null,
+    clientNonce: null,
+    externalTranscriptFor: null,
+    blocks: [{ kind: "text", text: "新岗位 Senior Data Engineer，西雅图，ref 15351" }],
+  };
+  function prisma(existingName?: string) {
+    return {
+      message: { findMany: vi.fn(async () => [asked]) },
+      chatGroup: {
+        findFirst: vi.fn(async () => (existingName ? { name: existingName } : null)),
+      },
+    };
+  }
+  const where = { spaceId: "s", userId: "u", threadId: "t-global", fallback: "effect-1" };
+
+  it("opens one role per recruiter message, whichever turn asks again (staging 11-14)", async () => {
+    // A follow-up turn opened "Senior Data Engineer — Seattle" beside "Senior Data Engineer
+    // Seattle" from the same message, and both teams emailed the same two people.
+    const first = await roleStartKey(prisma() as never, {
+      ...where,
+      title: "Senior Data Engineer Seattle",
+    });
+    const again = await roleStartKey(prisma("Senior Data Engineer Seattle") as never, {
+      ...where,
+      title: "Senior Data Engineer — Seattle",
+    });
+    expect(first).toBe("m-recruiter");
+    expect(again).toBe(first);
+  });
+
+  it("keeps a second, different role asked for in the same message", async () => {
+    const other = await roleStartKey(prisma("Senior Data Engineer Seattle") as never, {
+      ...where,
+      title: "Product Designer",
+    });
+    expect(other).not.toBe("m-recruiter");
+  });
+
+  it("falls back to the call's own key without a recruiter message", async () => {
+    const none = {
+      message: { findMany: vi.fn(async () => []) },
+      chatGroup: { findFirst: vi.fn(async () => null) },
+    };
+    expect(await roleStartKey(none as never, { ...where, title: "X" })).toBe("effect-1");
   });
 });

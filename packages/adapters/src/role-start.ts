@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
+import type { PrismaClient } from "@rakazo/db";
 import {
   appendEventInTransaction,
   createThreadMessageInTransaction,
@@ -46,6 +48,66 @@ function recruiterBlocks(message: {
   );
 }
 
+/** The recruiter's latest own message in a conversation, with the blocks a role starts from. */
+async function latestRecruiterMessage(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+): Promise<{ id: string; blocks: MessageBlock[] } | undefined> {
+  const recent = await prisma.message.findMany({
+    where: { threadId, role: "user", botId: null },
+    orderBy: { seq: "desc" },
+    take: 10,
+    select: {
+      id: true,
+      role: true,
+      botId: true,
+      clientNonce: true,
+      blocks: true,
+      externalTranscriptFor: { select: { id: true } },
+    },
+  });
+  for (const message of recent) {
+    const blocks = message.externalTranscriptFor ? undefined : recruiterBlocks(message);
+    if (blocks) return { id: message.id, blocks };
+  }
+  return undefined;
+}
+
+/** The id of the role conversation opened under a key. */
+export function roleGroupId(key: string): string {
+  return `role-${createHash("sha256").update(key).digest("hex").slice(0, 24)}`;
+}
+
+/** Title letters and digits only, so "Senior Data Engineer — Seattle" is "Senior Data Engineer Seattle". */
+function titleCore(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/**
+ * The key a new role is opened under: one recruiter message opens one role, so a later turn or
+ * call that asks for it again (a follow-up check, a retry with a reworded title) gets the same
+ * role. Staging 11-14: a follow-up turn opened a second "Senior Data Engineer — Seattle" from the
+ * same message and both teams emailed the same people. A different role asked for in the same
+ * message gets its own key; without a recruiter message the call's own key is used.
+ */
+export async function roleStartKey(
+  prisma: Pick<PrismaClient, "message" | "chatGroup">,
+  input: { spaceId: string; userId: string; threadId: string; title: string; fallback: string },
+): Promise<string> {
+  const asked = await latestRecruiterMessage(prisma, input.threadId);
+  if (!asked) return input.fallback;
+  const opened = await prisma.chatGroup.findFirst({
+    where: { id: roleGroupId(asked.id), spaceId: input.spaceId, userId: input.userId },
+    select: { name: true },
+  });
+  if (!opened) return asked.id;
+  const [a, b] = [titleCore(opened.name), titleCore(input.title)];
+  return a.includes(b) || b.includes(a) ? asked.id : `${asked.id}:${b}`;
+}
+
 /**
  * Start a new role's conversation from the recruiter's own message in the global
  * conversation: the same words appear there as theirs, and the role team's lead takes
@@ -66,21 +128,7 @@ export async function startRoleFromRecruiterMessage(
   if (!run.sourceMessageId) return false;
   // The recruiter's latest message here: a turn resumed by answering a card keeps the
   // card's original message as its source, but the role was asked for in the answer.
-  const recent = await deps.prisma.message.findMany({
-    where: { threadId: run.threadId, role: "user", botId: null },
-    orderBy: { seq: "desc" },
-    take: 10,
-    select: {
-      role: true,
-      botId: true,
-      clientNonce: true,
-      blocks: true,
-      externalTranscriptFor: { select: { id: true } },
-    },
-  });
-  const blocks = recent
-    .map((message) => (message.externalTranscriptFor ? undefined : recruiterBlocks(message)))
-    .find(Boolean);
+  const blocks = (await latestRecruiterMessage(deps.prisma, run.threadId))?.blocks;
   if (!blocks) return false;
   // A JD sent only as a file still starts the role; its team reads the file.
   const text = blocks
