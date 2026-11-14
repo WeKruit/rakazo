@@ -17,7 +17,8 @@ describe("awayRecapNote", () => {
       now,
     });
     expect(note).toContain("2026-11-09");
-    expect(note).toContain("while you were away");
+    // 11-14 staging: a direct question got "你不在时：" before its answer.
+    expect(note).toContain('Answer their message first, without any "while you were away" opener');
   });
 
   it("stays out when the person wrote within a day", async () => {

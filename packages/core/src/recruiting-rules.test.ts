@@ -874,6 +874,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-14 sim: 「请告诉我邮件署名用什么名字。」 sat right under 「Best,」 and read as part of the email.",
   },
   {
+    rule: "a reply draft leaves fill-ins for facts it lacks",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "never write that you will confirm and follow up: put a clear fill-in",
+    why: "Staging 11-14: asked to draft a reply to a shift and parking question, Kruit wrote \"I'm confirming… and I'll follow up\" and a bare \"Best,\".",
+  },
+  {
     rule: "the sign-off question shares the email's message",
     in: "RECRUITER_LANGUAGE",
     phrase: "right after it in the same message (never a separate message or one after a tool call)",
