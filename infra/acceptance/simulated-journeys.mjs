@@ -83,7 +83,7 @@ export const JOURNEYS = [
     maxTurns: 10,
     persona: `${AGENCY_RECRUITER} You have used Kruit for weeks: several roles are open, with people already found for them.`,
     facts: () =>
-      "You do not remember the exact role names; ask Kruit or look at the pages. Never more than eight people in one send. Looking up new email addresses is off on this account, so only people whose email is already saved can be emailed.",
+      "You do not remember the exact role names; ask Kruit or look at the pages. Never more than eight people in one send. Looking up new email addresses is off on this account, so only people whose email is already saved can be emailed. Never pick a role whose name mentions Dyna.",
     goals: [
       "Ask Kruit which of your roles have people with an email already saved who have not been emailed yet (looking up new addresses is off on this test account, so 'no email saved' is true for the rest; Kruit should point you to people who do have one, not stop).",
       "Pick one of those roles and ask Kruit to send the first email to five or six of those people.",
