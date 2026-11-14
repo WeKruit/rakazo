@@ -53,6 +53,11 @@ export function fixedAck(language: ReplyLanguage): string {
   return ON_IT[language];
 }
 
+/** Whether the text is one of the fixed lines, in any language. */
+export function isFixedAck(text: string): boolean {
+  return Object.values(ON_IT).includes(text.trim());
+}
+
 const LEADING_ACK =
   /^\s*(?:(?:收到|好的|明白|了解|没问题|네|알겠습니다|承知しました)(?:了)?[，,：:。！!、\s]*|(?:got it|okay|ok|sure|understood|noted|will do)\b[,.:;!—–\-\s]*)/i;
 
