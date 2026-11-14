@@ -5,6 +5,8 @@ import {
   greetsByName,
   isChineseText,
   isEnglishText,
+  isRecruitingNextStepCard,
+  namesPeopleToEmail,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -15,13 +17,13 @@ import {
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RECRUITING_UNUSED_BUILTIN_TOOLS,
+  recruiterLanguage,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
-  isRecruitingNextStepCard,
-  namesPeopleToEmail,
   recruitingNextStepCard,
   roleOpenedNote,
   signedAsTeam,
+  textLanguage,
   unfilledPlaceholder,
 } from "./recruiting-defaults.js";
 
@@ -178,6 +180,11 @@ describe("isChineseText", () => {
       false,
     );
     expect(isChineseText("")).toBe(false);
+    // Sim 11-14: a Korean recruiter quoting the 收件箱 menu got a Chinese first line.
+    expect(
+      isChineseText("收件箱는 중국어잖아요. 한국어로 말해주세요. 메뉴 이름이 정확히 뭔가요?"),
+    ).toBe(false);
+    expect(isChineseText("受信箱はどこですか")).toBe(false);
   });
 });
 
@@ -189,6 +196,30 @@ describe("isEnglishText", () => {
     expect(
       isEnglishText("测试固定 · Senior Backend Engineer in New York, 6+ years of Go or Java"),
     ).toBe(true);
+  });
+});
+
+describe("textLanguage", () => {
+  it("names the language a message is clearly in", () => {
+    expect(textLanguage("对了，远程也可以")).toBe("zh");
+    expect(textLanguage("New role from our client Northwind Pay. Please start sourcing")).toBe(
+      "en",
+    );
+    // Sim 11-14: an English spec with the recruiter's own Chinese instruction got English lines.
+    expect(
+      textLanguage(
+        "Staff Backend Engineer, Go, payments infra, NY hybrid, 200-250k, series C fintech. 模板用 Hi {{firstName}}，不是发给某个人的",
+      ),
+    ).toBe("zh");
+    // A Korean recruiter quoting a Chinese menu name got Chinese and English lines.
+    expect(textLanguage("收件箱는 중국어잖아요. 한국어로 말해주세요.")).toBe("ko");
+    expect(textLanguage("テンプレートをお願いします")).toBe("ja");
+    expect(textLanguage("Acme Test Co")).toBeUndefined();
+  });
+
+  it("keeps the recruiter's last clear language through short answers", () => {
+    expect(recruiterLanguage(["200-250k", "영어 버전으로 부탁드립니다"])).toBe("ko");
+    expect(recruiterLanguage(["OK"])).toBe("en");
   });
 });
 

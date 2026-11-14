@@ -128,13 +128,12 @@ import {
   hideVendorNames,
   humanizeToolName,
   inferAttachmentMimeType,
+  inOtherLanguage,
   internalMcpWriteEndpoint,
   isApprovalAskBlock,
   isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
-  isChineseText,
-  isEnglishText,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isOpenAskBlock,
@@ -158,6 +157,7 @@ import {
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
   parseSkillMd,
+  peopleFoundText,
   planActionGate,
   pollResultLines,
   promptInvokesSkill,
@@ -171,8 +171,6 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
-  REPLY_IN_CHINESE_NOTE,
-  REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   RUN_EGRESS_PER_MINUTE,
@@ -181,12 +179,14 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
+  recruiterLanguage,
   recruiterLanguageText,
   recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
   redactSecrets,
   renderBotDirectory,
+  replyLanguageNote,
   resolveActionApprovalDetail,
   roleOpenedNote,
   runBudgetExceeded,
@@ -199,6 +199,7 @@ import {
   skillAvailabilityFromTools,
   skillRequirements,
   TYPED_ADDRESS_NOTE,
+  textLanguage,
   toolReadsExternalText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
@@ -5124,6 +5125,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )?.blocks as MessageBlock[] | undefined)
             : undefined);
         const quickReplyText = earlyTurnBlocks ? blocksText(earlyTurnBlocks) : "";
+        // The one language every recruiter-facing line of this turn uses: the newest clear one of
+        // their messages, refined once history loads and moved by a message steered in.
+        let turnLanguage = recruiterLanguage([quickReplyText]);
         let quickReplySaid: string | undefined;
         // Earlier turns, once history is loaded; the first line starts before that.
         let quickReplyEarlier: () => Array<{
@@ -5178,7 +5182,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A card answer gets the fixed line at once; only a new request gets a written one.
           void (
             nativeSources?.currentAnswer
-              ? Promise.resolve(fixedAckOpen ? undefined : fixedAck(quickReplyText)).then(
+              ? Promise.resolve(fixedAckOpen ? undefined : fixedAck(turnLanguage)).then(
                   (line) => {
                     if (line) fixedAckOpen = fixedAckSent = true;
                     return line;
@@ -5887,7 +5891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const text = human ? blocksText(item.blocks) : "";
             if (!text.trim()) return false;
             started.add(item.messageId);
-            const line = fixedAck(text);
+            const line = fixedAck(textLanguage(text) ?? turnLanguage);
             // One fixed line until the run speaks: a second message right after gets none.
             if (fixedAckOpen) {
               steeringQuickReplies.set(item.messageId, line);
@@ -6455,7 +6459,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // A line saying the mailbox is connected, just before the card asking to connect it.
           const narration =
             hideVendors &&
-            (progressInOtherLanguage(written, quickReplyText) ||
+            (progressInOtherLanguage(written, turnLanguage) ||
               (nextTool === "request_connection" && CLAIMS_CONNECTED.test(written)))
               ? ""
               : hideVendors && nextTool === "ask_user"
@@ -6873,7 +6877,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? ` · 1–${shown.length} / ${total}`
                 : "";
           const text = await recruitingRoundListText(deps.prisma, {
-            chinese: isChineseText(lastRecruiterText),
+            chinese: turnLanguage === "zh",
             threadId: role.sourceThreadId,
             spaceId: run.spaceId,
             roleId: args.roleId,
@@ -6950,7 +6954,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.posting = stream.posting
             .then(async () => {
               const text = await recruitingRoundListText(deps.prisma, {
-                chinese: isChineseText(lastRecruiterText),
+                chinese: turnLanguage === "zh",
                 threadId: run.threadId,
                 spaceId: run.spaceId,
                 roleId,
@@ -7138,7 +7142,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!round) return undefined;
           const keys = (round.result as { candidateKeys?: unknown } | null)?.candidateKeys;
           return recruitingNextStepCard(
-            isChineseText(lastRecruiterText),
+            turnLanguage === "zh",
             Array.isArray(keys) && keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
             recruiterTexts.map(requestedPeopleTarget).findLast(Boolean),
           );
@@ -7165,7 +7169,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? (await readRecruitingPlaybookStep(deps.prisma, roleId).catch(() => null))
                 ?.savedCandidates
             : undefined;
-          return turnReportText(work, saved, isChineseText(lastRecruiterText));
+          return turnReportText(work, saved, turnLanguage === "zh");
         };
         /** Text of the last message this run already put in the conversation. */
         const lastRunMessageText = async () => {
@@ -8060,7 +8064,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: `Not shown: ${left} Pick people who fit every requirement.`,
               };
             const text = await recruitingRoundListText(deps.prisma, {
-              chinese: isChineseText(lastRecruiterText),
+              chinese: turnLanguage === "zh",
               threadId: run.threadId,
               spaceId: run.spaceId,
               roleId,
@@ -12326,7 +12330,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
-                    chinese: isChineseText(lastRecruiterText),
+                    chinese: turnLanguage === "zh",
                     threadId: run.threadId,
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
@@ -14009,7 +14013,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .catch(() => null)
               : null;
             if (namedRef && namedRole)
-              return finish({ error: otherRoleNote(namedRef, namedRole.title ?? "", namedRole.id) });
+              return finish({
+                error: otherRoleNote(namedRef, namedRole.title ?? "", namedRole.id),
+              });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
@@ -14143,7 +14149,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish({
               ok: true,
               team: `${title} team`,
-              note: roleOpenedNote(isChineseText(lastRecruiterText)),
+              note: roleOpenedNote(turnLanguage === "zh"),
             });
           }
           if (name === "render_view") {
@@ -15396,13 +15402,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 runId,
                 payload: {
                   // In the recruiter's own language, like every other recruiter-facing line.
-                  text: isChineseText(
-                    (currentTurnMessage?.blocks ?? [])
-                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                      .join("\n"),
-                  )
-                    ? `找到 ${plannedNewPeople} 人`
-                    : `Found ${plannedNewPeople} people`,
+                  text: peopleFoundText(plannedNewPeople, turnLanguage),
                   activity: true,
                 },
               })
@@ -15568,6 +15568,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
         // A message steered into the running turn moves it on to the language that message is in.
         let lastRecruiterText = recruiterLanguageText(recruiterTexts);
+        turnLanguage = recruiterLanguage(recruiterTexts);
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
@@ -15597,13 +15598,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 messageId: currentTurnMessage.id,
               }).catch(() => undefined)
             : undefined;
-        const languageNote = !hideVendors
-          ? undefined
-          : isChineseText(lastRecruiterText)
-            ? REPLY_IN_CHINESE_NOTE
-            : isEnglishText(lastRecruiterText)
-              ? REPLY_IN_ENGLISH_NOTE
-              : undefined;
+        const languageNote = hideVendors ? replyLanguageNote(turnLanguage) : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeSearchNote =
           intake &&
@@ -16506,7 +16501,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     if (
                       hideVendors &&
                       !askLanguageBounced &&
-                      isChineseText(question) !== isChineseText(lastRecruiterText)
+                      inOtherLanguage(question, turnLanguage)
                     ) {
                       askLanguageBounced = true;
                       return { instead: ASK_IN_RECRUITER_LANGUAGE };
@@ -16582,16 +16577,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // Replies follow the language of the recruiter's newest message, also when
                         // it arrives while the turn runs (an English JD, then 「远程也可以」).
                         const steeringLanguageNote = (text: string) => {
-                          if (!hideVendors) return undefined;
-                          if (isChineseText(text)) {
-                            lastRecruiterText = text;
-                            return REPLY_IN_CHINESE_NOTE;
-                          }
-                          if (isEnglishText(text)) {
-                            lastRecruiterText = text;
-                            return REPLY_IN_ENGLISH_NOTE;
-                          }
-                          return undefined;
+                          const language = hideVendors ? textLanguage(text) : undefined;
+                          if (!language) return undefined;
+                          lastRecruiterText = text;
+                          turnLanguage = language;
+                          return replyLanguageNote(language);
                         };
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =

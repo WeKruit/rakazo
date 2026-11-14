@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   cleanQuickReply,
   firstSentence,
-  fixedAck,
   inPersonLanguage,
   progressInOtherLanguage,
   quickReply,
@@ -52,7 +51,7 @@ describe("quick reply", () => {
     expect(seen[0]?.prompt).toContain("帮我写一封面试后的跟进邮件");
     expect(seen[0]?.prompt).toContain("turn 3");
     expect(seen[0]?.prompt).not.toContain("too old");
-    expect(seen[0]?.prompt).toContain("Write the sentence in Chinese.");
+    expect(seen[0]?.prompt).toContain("Write the sentence in Chinese,");
   });
 
   it("reads a JD after a saved email preference as a role to hire for", async () => {
@@ -91,13 +90,14 @@ describe("quick reply", () => {
 
   it("answers in the person's language", () => {
     // Staging 11-13: a Chinese template request got an English first line.
-    const zh = "写一封首轮外联邮件模板 Staff Backend Engineer, Go, 纽约hybrid";
-    expect(inPersonLanguage("I'll draft a first-outreach email template for this role.", zh)).toBe(
-      "收到，马上处理。",
-    );
-    expect(inPersonLanguage("我先拟一封外联模板。", zh)).toBe("我先拟一封外联模板。");
-    expect(inPersonLanguage("I'll draft it.", "write a template")).toBe("I'll draft it.");
-    expect(inPersonLanguage(null, zh)).toBeNull();
+    expect(
+      inPersonLanguage("I'll draft a first-outreach email template for this role.", "zh"),
+    ).toBe("收到，马上处理。");
+    expect(inPersonLanguage("我先拟一封外联模板。", "zh")).toBe("我先拟一封外联模板。");
+    expect(inPersonLanguage("I'll draft it.", "en")).toBe("I'll draft it.");
+    // A Korean recruiter's first line came back in Chinese or English (simulated 2026-11-14).
+    expect(inPersonLanguage("我先看看模板。", "ko")).toBe("네, 바로 처리할게요.");
+    expect(inPersonLanguage(null, "zh")).toBeNull();
   });
 
   it("never says an email is going out", () => {
@@ -162,35 +162,22 @@ describe("quick reply", () => {
 });
 
 describe("replyLanguage", () => {
-  it("follows the latest message, not a Chinese history", () => {
-    expect(
-      replyLanguage("New role from our client Northwind Pay. Please start sourcing"),
-    ).toContain("not Chinese");
-    expect(replyLanguage("帮我找 USC 的 AI engineer")).toBe("Write the sentence in Chinese.");
-  });
-});
-
-describe("fixedAck", () => {
-  it("answers in the language of the person's message", () => {
-    expect(fixedAck("对了，远程也可以")).toBe("收到，马上处理。");
-    expect(fixedAck("Remote works too")).toBe("Got it, on it.");
-    // A Korean recruiter got the English line (simulated korean-recruiter-template, 2026-11-14).
-    expect(fixedAck("영어 버전으로 부탁드립니다")).toBe("네, 바로 처리할게요.");
-    expect(fixedAck("テンプレートをお願いします")).toBe("承知しました。すぐ対応します。");
+  it("follows the turn's language, not a Chinese history", () => {
+    expect(replyLanguage("en")).toContain("in English");
+    expect(replyLanguage("ko")).toContain("in Korean");
   });
 });
 
 describe("progressInOtherLanguage", () => {
   it("drops a one-line progress note that left the person's language (simulated 2026-11-14)", () => {
-    const ask = "base改70-90万，另外加一条每周五可以远程";
     expect(
       progressInOtherLanguage(
         "I’ll revise the template to show a RMB 700,000–900,000 base and that Fridays are remote.",
-        ask,
+        "zh",
       ),
     ).toBe(true);
-    expect(progressInOtherLanguage("我先改模板里的薪资和远程安排。", ask)).toBe(false);
-    expect(progressInOtherLanguage("Hi {{firstName}},\n\nI'm reaching out…", ask)).toBe(false);
+    expect(progressInOtherLanguage("我先改模板里的薪资和远程安排。", "zh")).toBe(false);
+    expect(progressInOtherLanguage("Hi {{firstName}},\n\nI'm reaching out…", "zh")).toBe(false);
   });
 });
 

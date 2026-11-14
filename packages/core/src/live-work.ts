@@ -1,5 +1,5 @@
 import type { BackgroundWorkTiming, MessageBlock } from "@rakazo/contracts";
-import { isChineseText, recruitingBotKey } from "./recruiting-defaults.js";
+import { recruiterLanguage, recruitingBotKey } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
 /**
@@ -1063,16 +1063,17 @@ export const WORK_LABELS_ZH: {
   progress: { thinking: "思考中…", retrying: "重试中…", compacting: "整理上下文…" },
 };
 
-/** Whether the recruiter's own latest message is mostly Chinese. */
+/** Whether the recruiter writes in Chinese: the same decision every reply of a turn follows. */
 export function writesChinese(
   messages: readonly { role?: string; internal?: boolean; blocks: readonly MessageBlock[] }[],
 ): boolean {
-  const latest = messages.findLast((message) => message.role === "user" && !message.internal);
-  const text = latest?.blocks
-    .map((block) => (block.kind === "text" ? block.text : ""))
-    .join("")
-    .trim();
-  return !!text && isChineseText(text);
+  const texts = messages
+    .filter((message) => message.role === "user" && !message.internal)
+    .map((message) =>
+      message.blocks.map((block) => (block.kind === "text" ? block.text : "")).join(""),
+    )
+    .reverse();
+  return recruiterLanguage(texts) === "zh";
 }
 
 /**

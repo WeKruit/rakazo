@@ -1,5 +1,11 @@
 import type { AgentRunModel, AgentRuntime, AgentRuntimeEvent } from "@rakazo/adapter-kit";
-import { isChineseText } from "@rakazo/core";
+import type { ReplyLanguage } from "@rakazo/core";
+import {
+  inOtherLanguage,
+  REPLY_LANGUAGE_NAME,
+  recruiterLanguage,
+  textLanguage,
+} from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { withoutNudge } from "./silent-reply.js";
 
@@ -27,20 +33,23 @@ const INSTRUCTIONS = [
 const RECRUITING_INSTRUCTIONS = `${INSTRUCTIONS} The person is a recruiter. A job description they send is a role they are hiring for: say you are reading its requirements, never that you are applying to it or writing an email or anything else an earlier message asked for.`;
 
 /** Earlier turns in another language must not pull the sentence away from the latest message's. */
-export function replyLanguage(userText: string): string {
-  return isChineseText(userText)
-    ? "Write the sentence in Chinese."
-    : "Write the sentence in the language of the latest message, not Chinese, even if earlier messages were.";
+export function replyLanguage(language: ReplyLanguage): string {
+  return `Write the sentence in ${REPLY_LANGUAGE_NAME[language]}, even if earlier messages were in another language.`;
 }
+
+const ON_IT: Record<ReplyLanguage, string> = {
+  zh: "收到，马上处理。",
+  ko: "네, 바로 처리할게요.",
+  ja: "承知しました。すぐ対応します。",
+  en: "Got it, on it.",
+};
 
 /**
  * The fixed first line for a message sent while a run works, or for a card answer: sent at once,
  * with no model call, in the language of the person's message. The run's own answer follows.
  */
-export function fixedAck(userText: string): string {
-  if (/[\uac00-\ud7af]/.test(userText)) return "네, 바로 처리할게요.";
-  if (/[\u3040-\u30ff]/.test(userText)) return "承知しました。すぐ対応します。";
-  return isChineseText(userText) ? "收到，马上处理。" : "Got it, on it.";
+export function fixedAck(language: ReplyLanguage): string {
+  return ON_IT[language];
 }
 
 const LEADING_ACK =
@@ -75,25 +84,28 @@ const SAYS_SENDING =
  * The line in the person's language: staging 11-13, a Chinese request got "I'll draft a first
  * outreach email template for this role." A line in another language becomes the fixed one.
  */
-export function inPersonLanguage(line: string | null, userText: string): string | null {
-  if (!line || isChineseText(userText) === isChineseText(line)) return line;
-  return fixedAck(userText);
+export function inPersonLanguage(line: string | null, language: ReplyLanguage): string | null {
+  if (!line || !inOtherLanguage(line, language)) return line;
+  return fixedAck(language);
 }
 
 /**
  * A one-line progress note in another language than the person's message: simulated 11-14, a
  * Chinese edit request got "I'll revise the template to show…". It is dropped; the answer follows.
  */
-export function progressInOtherLanguage(line: string, userText: string): boolean {
+export function progressInOtherLanguage(line: string, language: ReplyLanguage): boolean {
   const text = line.trim();
   return (
-    !!text &&
-    !!userText.trim() &&
-    !text.includes("\n") &&
-    text.length <= 2 * MAX_REPLY_CHARS &&
-    isChineseText(userText) !== isChineseText(text)
+    !text.includes("\n") && text.length <= 2 * MAX_REPLY_CHARS && inOtherLanguage(text, language)
   );
 }
+
+const GOING_AHEAD: Record<ReplyLanguage, string> = {
+  zh: "好，这就处理。",
+  ko: "네, 진행할게요.",
+  ja: "はい、進めます。",
+  en: "On it.",
+};
 
 /** One sentence the chat can show as-is, or null when the model gave nothing usable. */
 export function cleanQuickReply(raw: string): string | null {
@@ -107,7 +119,7 @@ export function cleanQuickReply(raw: string): string | null {
   if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
   // Staging 11-13: "发吧" got 「好，现在发出。」 and then no mailbox was connected. A send can
   // still need a connection or a card, so the first line never says it is going out.
-  if (SAYS_SENDING.test(line)) return isChineseText(line) ? "好，这就处理。" : "On it.";
+  if (SAYS_SENDING.test(line)) return GOING_AHEAD[textLanguage(line, 1) ?? "en"];
   return line;
 }
 
@@ -141,19 +153,27 @@ export function quickReply(input: {
       (turn) =>
         `${turn.role === "user" ? "Person" : "Assistant"}: ${clip(turn.text, MAX_EARLIER_CHARS)}`,
     );
+  // A short message with no clear language ("200-250k base 加上") keeps the person's earlier one.
+  const language = recruiterLanguage([
+    input.userText,
+    ...(input.earlier ?? [])
+      .filter((turn) => turn.role === "user")
+      .map((turn) => turn.text)
+      .reverse(),
+  ]);
   const prompt = [
     ...(earlier.length ? ["Earlier in the conversation:", ...earlier, ""] : []),
     "Latest message from the person:",
     clip(input.userText, MAX_USER_CHARS),
     "",
-    replyLanguage(input.userText),
+    replyLanguage(language),
   ].join("\n");
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (text: string) => {
       if (settled) return;
       settled = true;
-      const line = inPersonLanguage(cleanQuickReply(text), input.userText);
+      const line = inPersonLanguage(cleanQuickReply(text), language);
       if (!line)
         getLogger().info("quick_reply.dropped", {
           runId: input.runId,
