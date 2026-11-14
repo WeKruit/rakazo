@@ -7,7 +7,7 @@
 // a journey and a recruiter who pushes back. Journeys live in simulated-journeys.mjs.
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
-//   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
+//   RAKAZO_URL=<direct backend> RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate] [--paid] [--samples 1]
 //       [--concurrency 6] [--out <dir>] [--bench <dir>] [--model sonnet] [--judge-model sonnet]
 // Without --journeys it plays every journey that needs no paid search (with --paid, all of them),
@@ -35,16 +35,19 @@ import {
 } from "./real-user-checks.mjs";
 import {
   activeGroupsOf,
+  changeOrTimeout,
   client,
   groupsOf,
   InfraError,
   messagesOf,
   openCards,
+  requestCount,
   send,
   settle,
   sleep,
   stopAll,
   transcripts,
+  unfollowAll,
   watchFrom,
 } from "./real-user-session.mjs";
 import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
@@ -267,7 +270,7 @@ function render(chats) {
 }
 
 // --- One journey --------------------------------------------------------------------------------
-async function newestBotMessageAfter(rpc, since) {
+async function newestBotMessageAfter(rpc, since, latest = false) {
   let newest = null;
   for (const group of await activeGroupsOf(rpc))
     for (const message of await messagesOf(rpc, group.id))
@@ -276,21 +279,24 @@ async function newestBotMessageAfter(rpc, since) {
         botText(message).trim() &&
         Date.parse(message.createdAt) > since
       )
-        if (!newest || Date.parse(message.createdAt) < Date.parse(newest.createdAt))
+        if (!newest || Date.parse(message.createdAt) < Date.parse(newest.createdAt) !== latest)
           newest = message;
   return newest;
 }
-/** Seconds until Kruit's first visible reply, then waits until the account is quiet. */
 /** Seconds to Kruit's first reply and until it went quiet; quick returns after the first reply. */
 async function replyAfter(journey, rpc, since, quick = false) {
   let first = null;
-  for (const until = Date.now() + 3 * 60_000; !first && Date.now() < until; await sleep(2_000))
+  for (
+    const until = Date.now() + 3 * 60_000;
+    !first && Date.now() < until;
+    await changeOrTimeout(rpc, 15_000)
+  )
     first = await newestBotMessageAfter(rpc, since);
   const firstSeconds = first ? Math.round((Date.parse(first.createdAt) - since) / 1000) : null;
   if (quick) return { firstSeconds, doneSeconds: null };
   await settle(rpc, { quietMs: 25_000, limitMs: journey.waitMs ?? 6 * 60_000 });
   // Quiet for 25 s means the last reply came that long before the wait ended.
-  const latest = await newestBotMessageAfter(rpc, since);
+  const latest = await newestBotMessageAfter(rpc, since, true);
   const doneSeconds = latest ? Math.round((Date.parse(latest.createdAt) - since) / 1000) : null;
   return { firstSeconds, doneSeconds };
 }
@@ -563,11 +569,12 @@ async function play(journey, label, owner, mailbox, out) {
   } finally {
     await ui?.close();
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
+    unfollowAll(rpc);
   }
 }
 /** Whether a message typed in the browser reached the chat within 90 seconds. */
 async function landed(rpc, groupId, text) {
-  for (const until = Date.now() + 90_000; Date.now() < until; await sleep(2_000))
+  for (const until = Date.now() + 90_000; Date.now() < until; await changeOrTimeout(rpc, 10_000))
     if (
       (await messagesOf(rpc, groupId)).some(
         (message) => message.role === "user" && botText(message).includes(text.slice(0, 30)),
@@ -578,7 +585,7 @@ async function landed(rpc, groupId, text) {
 }
 /** Whether a card pressed in the browser closed within 20 seconds. */
 async function answered(rpc, card) {
-  for (const until = Date.now() + 20_000; Date.now() < until; await sleep(2_000))
+  for (const until = Date.now() + 20_000; Date.now() < until; await changeOrTimeout(rpc, 5_000))
     if (!(await cardsOpen(rpc)).some((open) => open.messageId === card.messageId)) return true;
   return false;
 }
@@ -926,7 +933,9 @@ const summary = [
   ),
 ].join("\n");
 fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
-log(`${passed}/${rows.length} journeys pass; scoreboard ${path.join(OUT, "summary.md")}`);
+log(
+  `${passed}/${rows.length} journeys pass; ${requestCount()} API requests; scoreboard ${path.join(OUT, "summary.md")}`,
+);
 await closeBrowser();
 if (args.includes("--learn")) await learn(rows);
 compareBaseline(rows);
