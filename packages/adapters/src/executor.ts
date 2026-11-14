@@ -138,6 +138,7 @@ import {
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isOpenAskBlock,
+  isRecruitingNextStepCard,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -7054,6 +7055,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return recruitingNextStepCard(
             isChineseText(lastRecruiterText),
             Array.isArray(keys) && keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
+            recruiterTexts.map(requestedPeopleTarget).findLast(Boolean),
           );
         };
         // The next-step card stands in for the agent's own question only right after the round
@@ -16289,16 +16291,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       select: { role: true, blocks: true },
                     });
                     // Older rounds asked this card in Chinese; its answer is not an intake answer either.
-                    const nextStep = [
-                      recruitingNextStepCard().text,
-                      recruitingNextStepCard(true).text,
-                      recruitingNextStepCard(false, true).text,
-                      recruitingNextStepCard(true, true).text,
-                      "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
-                    ];
                     const known = answeredAsk(
                       question,
-                      intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
+                      intakeAnswers(messages).filter(({ key }) => !isRecruitingNextStepCard(key)),
                     );
                     if (known && !knownAskBounced.has(known.key)) {
                       knownAskBounced.add(known.key);

@@ -17,6 +17,7 @@ import {
   RECRUITING_UNUSED_BUILTIN_TOOLS,
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
+  isRecruitingNextStepCard,
   recruitingNextStepCard,
   roleOpenedNote,
   signedAsTeam,
@@ -225,6 +226,19 @@ describe("recruitingNextStepCard", () => {
     expect(recruitingNextStepCard().options[0]).toBe("Find 150 similar people");
     expect(recruitingNextStepCard(false, true).options[0]).toBe("Search deeper");
     expect(recruitingNextStepCard(true, true).options[0]).toBe("深挖一次");
+  });
+
+  // Simulated long-search-finishes 11-14: "找20个" got "我去找 150 个类似的人".
+  it("offers the number the recruiter asked for, and is still known as the next-step card", () => {
+    const card = recruitingNextStepCard(true, false, 20);
+    expect(card.options[0]).toBe("一共找 20 个类似的人");
+    expect(card.text).not.toContain("150");
+    expect(recruitingNextStepCard(false, true, 20).options[1]).toBe(
+      "Find 20 similar people in total",
+    );
+    for (const known of [card, recruitingNextStepCard(), recruitingNextStepCard(false, true, 40)])
+      expect(isRecruitingNextStepCard(known.text)).toBe(true);
+    expect(isRecruitingNextStepCard("Should hybrid attendance be required?")).toBe(false);
   });
 });
 
