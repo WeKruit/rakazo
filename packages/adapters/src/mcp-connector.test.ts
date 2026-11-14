@@ -4104,6 +4104,8 @@ describe("local native Instantly campaign and lead tools", () => {
       activeRoleId: null as string | null,
       deleted: false,
       rejectPatch: "",
+      /** The campaign read after an edit fails, as a timed-out request does. */
+      failReadAfterPatch: false,
       lookups: [] as Record<string, unknown>[],
       /** The role's saved candidates, as a role-wide candidate read returns them. */
       candidates: [] as Record<string, unknown>[],
@@ -4209,6 +4211,12 @@ describe("local native Instantly campaign and lead tools", () => {
           if (state.deleted) return new Response("{}", { status: 404 });
           if (request.method === "PATCH" && state.rejectPatch)
             return Response.json({ message: state.rejectPatch }, { status: 400 });
+          if (
+            request.method === "GET" &&
+            state.failReadAfterPatch &&
+            state.requests.some((r) => r.method === "PATCH")
+          )
+            return Response.json({ message: "timed out" }, { status: 400 });
           if (request.method === "PATCH") Object.assign(state.campaign, body);
           return Response.json(state.campaign);
         }
@@ -5435,7 +5443,7 @@ describe("local native Instantly campaign and lead tools", () => {
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
             // The date too: sim 11-14 turned a bare 22:05 into the next day's evening.
-            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 (07:30 UTC, about 60 minutes from now) at the latest",
+            "it should be out within about 60 minutes from now (07:30 UTC; 01:30 Central time (Chicago) on Fri, Nov 13, the sending schedule's zone, not necessarily the recruiter's) at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
@@ -5531,7 +5539,9 @@ describe("local native Instantly campaign and lead tools", () => {
         const read = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(read).toMatchObject({
           queuedFirstEmail: "now",
-          next: expect.stringMatching(/all 2 should be out by about 01:40.*send_now/),
+          next: expect.stringMatching(
+            /all 2 should be out within about \d+ minutes from now \(\d\d:\d\d UTC; 01:40.*send_now/,
+          ),
         });
         f.state.requests.length = 0;
         const out = f.result(await f.run("activate_campaign", { send_now: true }));
@@ -5548,7 +5558,9 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(out).toMatchObject({
           sendingNow: true,
           recipients: ["abe@x.test", "p0@x.test"],
-          next: expect.stringContaining("all 2 should be out by about 01:31"),
+          next: expect.stringMatching(
+            /all 2 should be out within about \d+ minutes from now \(\d\d:\d\d UTC; 01:31/,
+          ),
         });
         f.state.requests.length = 0;
         const again = await f.run("activate_campaign", { send_now: true });
@@ -5558,6 +5570,29 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(
           f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list")),
         ).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends a campaign it paused for a send-now again when a later step fails", async () => {
+      // 11-14 staging: after a confirmed send a campaign stayed paused and nothing went out.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NIGHT);
+      try {
+        const { f } = await roleWithSixteen();
+        f.state.campaign.status = 1;
+        f.state.campaign.email_gap = 10;
+        for (const lead of f.state.campaignLeads.slice(2))
+          lead.timestamp_last_contact = "2026-11-12T15:00:00Z";
+        f.state.requests.length = 0;
+        f.state.failReadAfterPatch = true;
+        await f.run("activate_campaign", { send_now: true });
+        const writes = f.state.requests
+          .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+          .map((r) => `${r.method} ${r.path}`);
+        expect(writes[0]).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/pause`);
+        expect(writes.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
       } finally {
         vi.useRealTimers();
       }
@@ -5586,10 +5621,10 @@ describe("local native Instantly campaign and lead tools", () => {
           lead.timestamp_created = "2026-11-13T06:10:00Z";
         // 11-13 staging: each check counted the hour from the check, so the time kept slipping.
         const first = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(first).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
+        expect(first).toMatchObject({ next: expect.stringContaining("UTC; 01:20") });
         vi.setSystemTime(new Date(NIGHT.getTime() + 15 * 60_000));
         const later = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
-        expect(later).toMatchObject({ next: expect.stringContaining("out by about 01:20") });
+        expect(later).toMatchObject({ next: expect.stringContaining("UTC; 01:20") });
         vi.setSystemTime(new Date(NIGHT.getTime() + 90 * 60_000));
         const late = f.result(await f.run("get_campaign", { campaign_id: CAMPAIGN }));
         expect(late).toMatchObject({

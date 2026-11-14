@@ -431,6 +431,7 @@ const ENROLLABLE = new Set([0, 2]);
 const ACTIVE = 1;
 const DRAFT = 0;
 const COMPLETED = 3;
+const PAUSED = 2;
 async function requireEnrollable(rest: InstantlyRest, campaignId: string) {
   const { status } = await rest("GET", `/campaigns/${campaignId}`);
   await reopenFinished(rest, campaignId, status);
@@ -979,14 +980,16 @@ export function queuePace(
     // UTC and the time left beside it: agents read the conversation's clock in UTC, so a bare
     // local time still ahead was taken as one already passed.
     const left = Math.max(1, Math.round((end.getTime() - now.getTime()) / 60_000));
-    time = `${at(end)} ${shown} on ${on(end)} (${end.toISOString().slice(11, 16)} UTC, about ${left} minutes from now)`;
+    // Minutes from now first: the schedule's zone is the role's, not the recruiter's, so a clock
+    // time there alone (05:23 in Seattle) read as "not tonight" and the send was paused.
+    time = `about ${left} minutes from now (${end.toISOString().slice(11, 16)} UTC; ${at(end)} ${shown} on ${on(end)}, the sending schedule's zone, not necessarily the recruiter's)`;
     queuedAt = at(start);
   } catch {
-    return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
+    return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
     return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}`;
-  return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} at the latest`;
+  return `sending now, not held for a later time: queued with the mail service, the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out within ${time} at the latest`;
 }
 /** One role's campaign record is changed by one call at a time: saves, adds and sends. */
 const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
@@ -2530,6 +2533,7 @@ async function bindingOfCampaign(
  * nobody named, and is activated only after a re-read shows exactly the named people remain; a
  * sending campaign gets only the named staged people added. Nobody else is emailed by this call.
  */
+/** A campaign paused here to be edited for a send is sent again when any later step fails. */
 async function activateCampaign(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -2537,6 +2541,29 @@ async function activateCampaign(
   serverId: string,
   input: z.output<typeof ActivateCampaignInput>,
   confirmedSenderRequired = false,
+) {
+  let paused: string | undefined;
+  const tracked: InstantlyRest = async (method, path, body) => {
+    const result = await rest(method, path, body);
+    if (method === "POST" && path.endsWith("/pause")) paused = path.slice(0, -"/pause".length);
+    if (method === "POST" && path.endsWith("/activate")) paused = undefined;
+    return result;
+  };
+  try {
+    return await sendCampaign(prisma, tracked, context, serverId, input, confirmedSenderRequired);
+  } catch (error) {
+    if (paused) await rest("POST", `${paused}/activate`);
+    throw error;
+  }
+}
+
+async function sendCampaign(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  input: z.output<typeof ActivateCampaignInput>,
+  confirmedSenderRequired: boolean,
 ) {
   if (!input.campaign_id && !(await activeRoleId(prisma, context)))
     throw new Error(
@@ -2738,6 +2765,9 @@ async function activateCampaign(
  * Who a campaign sends to (up to 100 leads), split into those it has emailed and those still
  * queued, with when the queued people's first email goes out.
  */
+/** A paused campaign emails nobody until it is activated again, which only activate_campaign does. */
+const PAUSED_NEXT =
+  "Paused: nobody still queued is emailed while it stays paused. When the recruiter wants them sent, call activate_campaign (with send_now to send at once); its card resumes it. Never say it will be sent until that call has gone through.";
 async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknown>) {
   const leads = await rest("POST", "/leads/list", { campaign: String(campaign.id), limit: 100 });
   const people = (
@@ -2760,7 +2790,9 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
         ? {
             next: `The queued people are going out now, not failed: they are ${queuePace(campaign, queued.length, firstQueued(waiting))}. Tell the recruiter who is emailed and who is still queued with that time, the same time each check; do not send them again.${emailGap(campaign) > FASTEST_GAP ? " If the recruiter wants them sooner, call activate_campaign with send_now: its card sends everyone queued one a minute instead of one every ten." : ""}`,
           }
-        : {}),
+        : campaign.status === PAUSED && queued.length
+          ? { next: PAUSED_NEXT }
+          : {}),
   };
 }
 
@@ -3460,7 +3492,10 @@ export async function runInstantlyWrite(
       );
     }
     case "native_instantly_pause_campaign":
-      return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
+      return {
+        ...(await rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`)),
+        next: PAUSED_NEXT,
+      };
     case "native_instantly_get_email": {
       const input = EmailIdInput.parse(args);
       const original = await readEmail(rest, input.id);
