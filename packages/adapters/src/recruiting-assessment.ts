@@ -28,6 +28,7 @@ import {
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingContacts,
+  readRecruiterSeen,
   readRecruitingCalibrationRound,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
@@ -90,6 +91,15 @@ async function requireRecruitingRun(
 
 /** People per numbered page of a candidate list read. */
 const PAGE_SIZE = 10;
+
+/** The fields of a listed person that say what the recruiter already saw of them. */
+export type RecruiterListItem = {
+  candidateKey?: unknown;
+  shownInRound?: number;
+  alreadySeen?: boolean;
+  recruiterVerdict?: "good_example" | "not_fit";
+  decision?: string | null;
+};
 
 export async function executeRecruitingCandidatesTool(
   deps: {
@@ -327,15 +337,43 @@ export async function executeRecruitingCandidatesTool(
           ...result,
           next: "No saved person matched this query. To list the role's people, call again without query.",
         };
-      if (!enriched.length) return result;
       const emails = new Map(enriched.map(({ item, email }) => [item, email]));
+      // Every list carries what the recruiter already saw of each person, from the one record.
+      const seen = await readRecruiterSeen(deps.prisma, trusted.actor, {
+        roleId: listRoleId,
+        candidateKeys: result.items.map((item) => item.candidateKey),
+      });
+      const anySeen = [...seen.people.values()].some(
+        (person) => person.round !== undefined || person.seenBeforeLatestRound || person.verdict,
+      );
+      if (!enriched.length && !anySeen && !seen.latestRound) return result;
       return {
         ...result,
+        ...(seen.latestRound
+          ? {
+              latestRound: {
+                round: seen.latestRound.round,
+                recordedAt: seen.latestRound.recordedAt.toISOString(),
+                people: seen.latestRound.people,
+                accepted: seen.latestRound.accepted,
+              },
+            }
+          : {}),
         items: result.items.map((item) => {
           const email = emails.get(item);
-          return email
-            ? { ...item, email: { address: email.address, type: email.type, status: email.status } }
-            : item;
+          const person = seen.people.get(item.candidateKey);
+          return {
+            ...item,
+            ...(email
+              ? { email: { address: email.address, type: email.type, status: email.status } }
+              : {}),
+            ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
+            // A later round may not show them: shown in a round or returned before the latest one.
+            ...(person && (person.round !== undefined || person.seenBeforeLatestRound)
+              ? { alreadySeen: true }
+              : {}),
+            ...(person?.verdict ? { recruiterVerdict: person.verdict } : {}),
+          };
         }),
       };
     }
