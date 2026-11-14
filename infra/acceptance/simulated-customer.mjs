@@ -8,7 +8,7 @@
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=<direct backend> RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate] [--paid] [--samples 1]
+//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate | --story "<test in plain words>"] [--paid] [--samples 1]
 //       [--concurrency 6] [--out <dir>] [--bench <dir>] [--model sonnet] [--judge-model sonnet]
 // Without --journeys it plays every journey that needs no paid search (with --paid, all of them),
 // side by side, each on its own brand-new account, and writes one scoreboard, <out>/summary.md,
@@ -24,6 +24,7 @@
 // environment did.
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -103,8 +104,25 @@ const learned =
         facts: journey.facts ? () => journey.facts : undefined,
       }))
     : [];
-const JOURNEYS = [...WRITTEN, ...learned.filter((j) => !WRITTEN.some((w) => w.name === j.name))];
-const named = option("--journeys")?.split(",");
+// A test in plain words, no code: --story "新用户，要给一个候选人发邮件，发不出去就问怎么办"
+// plays that story as our usual impatient customer, in the story's language, judged the same way.
+const STORY = option("--story");
+const story = STORY && {
+  name: `story-${createHash("sha256").update(STORY).digest("hex").slice(0, 8)}`,
+  title: STORY.slice(0, 60),
+  area: "first message",
+  source: "--story",
+  chinese: /\p{Script=Han}/u.test(STORY),
+  maxTurns: Number(option("--turns", "8")),
+  persona: /\p{Script=Han}/u.test(STORY) ? PERSONAS.AGENCY_RECRUITER : PERSONAS.US_RECRUITER,
+  goals: [STORY],
+};
+const JOURNEYS = [
+  ...WRITTEN,
+  ...learned.filter((j) => !WRITTEN.some((w) => w.name === j.name)),
+  ...(story ? [story] : []),
+];
+const named = story ? [story.name] : option("--journeys")?.split(",");
 for (const name of named ?? [])
   if (!JOURNEYS.some((journey) => journey.name === name))
     throw new Error(`no journey ${name}; journeys: ${JOURNEYS.map((j) => j.name).join(", ")}`);
