@@ -49,3 +49,4 @@ that repeats into the existing line instead of adding another.
   repeating it; the next gate still showed every turn as a line and then an answer saying it
   again. **Two writers of one reply repeat each other: make them one message (the answer takes
   the line's place) instead of instructing one about the other.**
+- A judge summary said a wrong-name email "was queued"; it had read a card the customer denied, and the report relayed it to the user as sent. Before reporting a send fault, read the transcript and the records for which card was approved; the judge ties send claims to the approved card and the records only.
