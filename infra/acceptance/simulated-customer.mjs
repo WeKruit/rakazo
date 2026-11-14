@@ -127,7 +127,10 @@ const named = story
   ? [story.name]
   : (option("--journeys")?.split(",") ??
     mechanisms?.flatMap((mechanism) => {
-      const found = JOURNEYS.filter((journey) => journey.mechanisms?.includes(mechanism));
+      // A replay never spends money unless asked: paid journeys join only with --paid.
+      const found = JOURNEYS.filter(
+        (journey) => journey.mechanisms?.includes(mechanism) && (!journey.paid || args.includes("--paid")),
+      );
       if (!found.length) throw new Error(`no journey exercises ${mechanism}`);
       return found.map((journey) => journey.name);
     }));
