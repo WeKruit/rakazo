@@ -1,4 +1,5 @@
 import type { ConnectorTool } from "@rakazo/adapter-kit";
+import type { Receipts } from "./claim-receipts.js";
 
 /**
  * Turn-end invariants every agent's human-facing turn keeps, enforced by the server from the
@@ -255,6 +256,9 @@ const MEMORY_SAVE_TOOLS = new Set([
   "save_group_memory",
 ]);
 
+/** Tools that hand work to a teammate or role; their answer is that teammate's own report. */
+const DELEGATION_TOOLS = new Set(["delegate_to_role", "handoff_to_bot", "start_role"]);
+
 export class TurnReportLedger {
   private readonly entries: Entry[] = [];
   private readonly settled = new Map<string, ToolSettlement>();
@@ -341,6 +345,26 @@ export class TurnReportLedger {
         entry.kind === "tool" && MEMORY_SAVE_TOOLS.has(entry.name),
     );
     return saves.length > 0 && saves.every((entry) => this.settled.get(entry.id)?.ok === false);
+  }
+
+  /** What this attempt's tools did and returned, for checking what a reply claims. */
+  receipts(): Receipts {
+    const work = new Set<TurnWork | "memory">();
+    const results: string[] = [];
+    let delegated = false;
+    let read = false;
+    for (const entry of this.entries) {
+      if (entry.kind !== "tool") continue;
+      const settled = this.settled.get(entry.id);
+      if (settled?.ok !== true) continue;
+      const done = this.workOf(entry);
+      if (done) work.add(done);
+      else read = true;
+      if (MEMORY_SAVE_TOOLS.has(entry.name)) work.add("memory");
+      if (DELEGATION_TOOLS.has(entry.name)) delegated = true;
+      results.push(JSON.stringify(settled.result ?? null).slice(0, 20_000));
+    }
+    return { work, delegated, read, results: results.join("\n") };
   }
 
   /** Any consequential work in this attempt. */
