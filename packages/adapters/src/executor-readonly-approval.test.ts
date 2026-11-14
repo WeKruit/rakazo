@@ -1517,6 +1517,37 @@ describe("native Instantly activation card", () => {
     expect(f.effects[0]?.status).toBe("intended");
   });
 
+  it("sends an approved card only while it still shows what would go out", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    const effect = f.effects[0]!;
+    const shown = (effect.result as { instantlyActivationCard?: string }).instantlyActivationCard;
+    expect(shown).toMatch(/^[0-9a-f]{64}$/);
+    // Sim 11-14: after this card was shown, a second card re-saved everyone's email.
+    effect.status = "approved";
+    effect.result = { instantlyActivationCard: "0".repeat(64) };
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.results.at(-1)).toMatchObject({
+      error: expect.stringContaining("changed after this card was shown"),
+      dispatched: false,
+    });
+    const sent = () =>
+      f.execute.mock.calls.filter(
+        (call) => call[0].route?.toolName === "native_instantly_activate_campaign",
+      );
+    expect(sent()).toEqual([]);
+    effect.result = { instantlyActivationCard: shown };
+    await f.run();
+    expect(sent()).toHaveLength(1);
+  });
+
   it("resolves the role's bound campaign when campaign_id is omitted", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
