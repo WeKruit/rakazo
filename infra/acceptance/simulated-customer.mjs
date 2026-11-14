@@ -960,8 +960,21 @@ const journeyRows = Object.entries(Object.groupBy(rows, (row) => row.scenario)).
   },
 );
 const blocking = journeyRows.filter((row) => row.blocks && row.status === "不通过");
+// pass@1: share of plays that ran and passed. pass^k: share of journeys whose every play passed,
+// the reliability a customer feels (tau-bench); regression journeys gate releases, capability
+// journeys track progress on what does not work yet.
+const ranRows = rows.filter((row) => !row.infra);
+const decided = journeyRows.filter((row) => row.status !== "没跑成");
+const rate = (part, whole) => (whole ? `${Math.round((100 * part) / whole)}%` : "-");
+const passLine = (subset) =>
+  `pass@1 ${rate(
+    ranRows.filter((row) => row.pass && subset.some((item) => item.name === row.scenario)).length,
+    ranRows.filter((row) => subset.some((item) => item.name === row.scenario)).length,
+  )} · pass^k ${rate(subset.filter((row) => row.status === "通过").length, subset.length)}`;
 const summary = [
   `blocking: ${blocking.length ? `yes (${blocking.map((row) => row.name).join(", ")})` : "no"}`,
+  "",
+  `回归集（卡发布）：${passLine(decided.filter((row) => row.blocks))}；能力集：${passLine(decided.filter((row) => !row.blocks))}`,
   "",
   "标准：每次 8 分以上、目标全部达成、没有假话/死路/重复/没回应等一票否决；旅程要每次都通过才算通过；环境出错算没跑成。",
   "",
