@@ -160,3 +160,89 @@ async function verdictFacets(
   );
   return rows.map((row) => ({ ...row, people: Number(row.people) }));
 }
+
+export type RecruiterSeenPerson = {
+  /** The calibration round that showed this person. */
+  round?: number;
+  /** Returned before the latest round was recorded, so a later round may not show them. */
+  seenBeforeLatestRound: boolean;
+  /** The recruiter's latest verdict on this person for this role. */
+  verdict?: "good_example" | "not_fit";
+};
+export type RecruiterSeen = {
+  latestRound: { round: number; recordedAt: Date; people: number; accepted: boolean } | null;
+  people: Map<string, RecruiterSeenPerson>;
+};
+
+/**
+ * What the recruiter has already seen on one role, from the one record every reply and list
+ * reads: which round showed each person, who was returned before the latest round, and their
+ * latest verdict. The round guard uses the same rule, so a list never shows someone a round
+ * would refuse as a repeat.
+ */
+export async function readRecruiterSeen(
+  prisma: Pick<PrismaClient, "$queryRaw" | "recruitingCalibrationRound" | "recruitingCandidateOccurrence">,
+  actor: Actor,
+  input: { roleId: string; candidateKeys: readonly string[] },
+): Promise<RecruiterSeen> {
+  const roleId = input.roleId;
+  const keys = [...new Set(input.candidateKeys)];
+  const rounds = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId, role: { spaceId: actor.spaceId, userId: actor.userId } },
+    orderBy: { round: "desc" },
+    select: { round: true, createdAt: true, candidateKeys: true, approvedAt: true },
+  });
+  const latest = rounds[0];
+  const people = new Map<string, RecruiterSeenPerson>(
+    keys.map((key) => [key, { seenBeforeLatestRound: false }]),
+  );
+  if (!keys.length) return { latestRound: null, people };
+  for (const round of [...rounds].reverse())
+    for (const key of round.candidateKeys) {
+      const person = people.get(key);
+      if (person && person.round === undefined) person.round = round.round;
+    }
+  if (latest) {
+    const pages = await prisma.recruitingCandidateOccurrence.findMany({
+      where: { roleId, candidateKey: { in: keys }, page: { observedAt: { lte: latest.createdAt } } },
+      select: { candidateKey: true },
+    });
+    for (const row of pages) people.get(row.candidateKey)!.seenBeforeLatestRound = true;
+  }
+  const verdicts = await prisma.$queryRaw<{ person: string; fit: "good_example" | "not_fit" }[]>(
+    Prisma.sql`
+      WITH roles AS (
+        SELECT id FROM recruiting_roles
+        WHERE id = ${roleId} AND "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId}
+      ), ${latestVerdictsSql(actor)}
+      SELECT person, fit FROM latest WHERE person IN (${Prisma.join(keys)})`,
+  );
+  for (const row of verdicts) {
+    const person = people.get(row.person);
+    if (person) person.verdict = row.fit;
+  }
+  return {
+    latestRound: latest
+      ? {
+          round: latest.round,
+          recordedAt: latest.createdAt,
+          people: latest.candidateKeys.length,
+          accepted: latest.approvedAt !== null,
+        }
+      : null,
+    people,
+  };
+}
+
+/** How many people a role's search has saved since a moment, for live progress while it runs. */
+export async function countRecruitingPeopleFoundSince(
+  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
+  input: { roleId: string; since: Date },
+): Promise<number> {
+  const rows = await prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId: input.roleId, page: { observedAt: { gte: input.since } } },
+    distinct: ["candidateKey"],
+    select: { candidateKey: true },
+  });
+  return rows.length;
+}

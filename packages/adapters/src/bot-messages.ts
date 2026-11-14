@@ -12,6 +12,7 @@ import {
 import {
   appendEventInTransaction,
   cancelRunsInTransaction,
+  countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
   type PrismaClient,
   withTransactionRetry,
@@ -180,7 +181,7 @@ export async function messageBot(
         runId: string;
         targetEventSeq: number;
         senderEventSeq: number;
-        working?: { name: string; minutes: number };
+        working: boolean;
       }
     | {
         ok: false;
@@ -361,17 +362,7 @@ export async function messageBot(
           runId: nextRun.id,
           targetEventSeq: inboundEvent.seq,
           senderEventSeq: outboundEvent.seq,
-          working: working
-            ? {
-                name: working.bot.name,
-                minutes: Math.max(
-                  0,
-                  Math.round(
-                    (Date.now() - (working.startedAt ?? working.createdAt).getTime()) / 60_000,
-                  ),
-                ),
-              }
-            : undefined,
+          working: Boolean(working),
         };
       }),
     );
@@ -400,13 +391,19 @@ export async function messageBot(
     // The queued run is durable; the job reconciler repairs a missed wake.
     getLogger().error("bot message enqueue", error);
   });
+  const progress = committed.working
+    ? await teamProgress(deps.prisma, {
+        threadId: targetThreadId,
+        returnThreadId: run.threadId,
+      }).catch(() => null)
+    : null;
   return {
     ok: true as const,
     botId: target.id,
     name: targetName,
     delivered: message,
-    note: committed.working
-      ? `${committed.working.name} is still working on your earlier request from this conversation (started ${committed.working.minutes < 1 ? "under a minute" : `${committed.working.minutes} min`} ago); this message reaches the team when that work finishes, and its result comes back here. Tell the recruiter it is still in progress and that you will show the result here when it arrives; never say it has not started or that a new search began.`
+    note: progress
+      ? `${progress.note} This message reaches the team when that work finishes; never say a new search began.`
       : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
 }
@@ -434,6 +431,38 @@ export function teamWorkingFor(
     orderBy: { createdAt: "asc" },
     select: { createdAt: true, startedAt: true, bot: { select: { name: true } } },
   });
+}
+
+/**
+ * What the role team is doing on a request from the given conversation, with live numbers, so a
+ * "where are they?" is answered with progress instead of "still in progress".
+ */
+export async function teamProgress(
+  prisma: Pick<PrismaClient, "run" | "thread" | "recruitingCandidateOccurrence">,
+  input: { threadId: string; returnThreadId: string; roleId?: string },
+): Promise<{ name: string; minutes: number; peopleFound: number; note: string } | null> {
+  const working = await teamWorkingFor(prisma, input);
+  if (!working) return null;
+  const since = working.startedAt ?? working.createdAt;
+  const roleId =
+    input.roleId ??
+    (
+      await prisma.thread.findUnique({
+        where: { id: input.threadId },
+        select: { activeRecruitingRoleId: true },
+      })
+    )?.activeRecruitingRoleId;
+  const peopleFound = roleId
+    ? await countRecruitingPeopleFoundSince(prisma, { roleId, since })
+    : 0;
+  const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
+  const started = minutes < 1 ? "under a minute" : `${minutes} min`;
+  return {
+    name: working.bot.name,
+    minutes,
+    peopleFound,
+    note: `${working.bot.name} has been working on the recruiter's request for ${started} and has found ${peopleFound} ${peopleFound === 1 ? "person" : "people"} so far; the next round comes back here when it is picked. Give the recruiter these numbers; never say it has not started.`,
+  };
 }
 
 /** Return a delegated run's terminal outcome unless it already sent one explicitly. */

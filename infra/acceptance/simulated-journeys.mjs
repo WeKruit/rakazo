@@ -25,9 +25,21 @@ const twoInboxes = ([first], tag = "") => [
 
 export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER, IMPATIENT };
 
+// Each journey names the agent mechanisms it exercises. A fix is for a mechanism, not a transcript:
+// `--mechanism <name>` replays every journey of that kind, in varied wordings, so a patch that only
+// fixes the one reported conversation still fails.
+//   state-claims   what Kruit says was saved, sent, found or counted matches the records
+//   reference      Kruit resolves the role, people and ask from what was already said
+//   language       every line in the recruiter's language
+//   email-content  emails and templates are ready to send (signed, no fill-ins or questions)
+//   filler         no empty "I'll check" lines or duplicates
+//   long-task      a long job finishes with its result
+//   latency        first reply and result arrive in time
+//   pages          each page shows the right state and a next step
 export const JOURNEYS = [
   {
     name: "send-at-night",
+    mechanisms: ["state-claims", "reference"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     title: "晚上确认发送，问发出去几个、为什么没发、现在发",
@@ -58,6 +70,7 @@ export const JOURNEYS = [
   },
   {
     name: "batch-send-own-roles",
+    mechanisms: ["state-claims"],
     title: "在已有的职位里挑几个人批量发第一封邮件，再去 Sequence 看",
     area: "sending",
     source:
@@ -81,6 +94,7 @@ export const JOURNEYS = [
   {
     // Needs no mailbox and sends nothing, so it runs whenever the batch copy is given.
     name: "large-account-pick-people",
+    mechanisms: ["reference", "latency"],
     title: "大账号里找还没联系的人，挑一个职位拿名单和草稿",
     area: "sending",
     source:
@@ -99,6 +113,7 @@ export const JOURNEYS = [
   },
   {
     name: "language-must-have",
+    mechanisms: ["reference", "long-task"],
     // Answering the role's first question starts the first-ten search, so it is paid.
     paid: true,
     title: "坚持候选人必须会说中文",
@@ -118,6 +133,7 @@ export const JOURNEYS = [
   },
   {
     name: "one-off-email",
+    mechanisms: ["email-content", "state-claims", "latency"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     gate: true,
@@ -138,6 +154,7 @@ export const JOURNEYS = [
   },
   {
     name: "progress-and-where",
+    mechanisms: ["state-claims", "filler"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     gate: true,
@@ -156,6 +173,7 @@ export const JOURNEYS = [
   },
   {
     name: "template-then-send",
+    mechanisms: ["email-content", "reference"],
     title: "先要模板，再要发",
     area: "sending",
     source:
@@ -173,6 +191,7 @@ export const JOURNEYS = [
   },
   {
     name: "us-recruiter-feedback-round",
+    mechanisms: ["reference", "long-task"],
     title: "English recruiter: first ten, then feedback on some of them",
     area: "search",
     source:
@@ -192,6 +211,7 @@ export const JOURNEYS = [
   },
   {
     name: "first-timer-no-gmail",
+    mechanisms: ["state-claims", "pages"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     gate: true,
@@ -213,6 +233,7 @@ export const JOURNEYS = [
   },
   {
     name: "korean-recruiter-template",
+    mechanisms: ["language", "email-content"],
     gate: true,
     title: "Korean recruiter: Korean replies and an English template",
     area: "first message",
@@ -230,6 +251,7 @@ export const JOURNEYS = [
   },
   {
     name: "change-mind-mid-run",
+    mechanisms: ["reference", "language", "email-content"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     gate: true,
@@ -253,6 +275,7 @@ export const JOURNEYS = [
   },
   {
     name: "mobile-first-look",
+    mechanisms: ["pages", "filler"],
     gate: true,
     mobile: true,
     title: "手机上：问进度、找候选人和回复在哪",
@@ -269,6 +292,7 @@ export const JOURNEYS = [
   },
   {
     name: "every-page-tour",
+    mechanisms: ["pages", "state-claims"],
     title: "大账号：每个页面看一遍，问 Kruit 看到的东西对不对",
     area: "ui",
     source:
@@ -288,6 +312,7 @@ export const JOURNEYS = [
   },
   {
     name: "schedule-interview",
+    mechanisms: ["state-claims", "reference"],
     title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
     area: "sending",
     source:
@@ -308,6 +333,7 @@ export const JOURNEYS = [
   },
   {
     name: "feedback-on-some-people",
+    mechanisms: ["reference", "long-task"],
     paid: true,
     title: "对几个人给反馈，看下一轮真的改了",
     area: "search",
@@ -329,6 +355,7 @@ export const JOURNEYS = [
   },
   {
     name: "long-search-finishes",
+    mechanisms: ["long-task", "state-claims"],
     paid: true,
     title: "长任务：找一批人，中途不停，做完告诉我",
     area: "search",
@@ -348,6 +375,7 @@ export const JOURNEYS = [
   },
   {
     name: "template-sign-with-my-name",
+    mechanisms: ["email-content"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     title: "模板署名用我的名字",
@@ -366,6 +394,7 @@ export const JOURNEYS = [
   },
   {
     name: "verify-musthave-evidence-list",
+    mechanisms: ["reference", "state-claims"],
     title: "逐人核实必备条件并给清单",
     area: "requirements",
     source: "us-recruiter-feedback-round#1, 2026-11-13 (learned by --learn, promoted 11-13)",
