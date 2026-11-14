@@ -476,7 +476,6 @@ import {
 } from "./computer-tools.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
-import { isRolelessHomeTeam, loadCrossRoleDigest } from "./cross-role-digest.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
@@ -832,6 +831,8 @@ import {
   workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
+import type { WorkingState } from "./working-state.js";
+import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
 
 /** Built-in tools that reach the outside network for the run. */
 const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_navigate"]);
@@ -4143,12 +4144,14 @@ async function chatGone(prisma: Pick<PrismaClient, "thread">, threadId: string):
 export async function appendToolCompletionAudit(
   deps: { events: Pick<ThreadEvents, "append"> },
   target: { spaceId: string; threadId: string; botId: string; runId: string },
-  completion: AgentToolCompletion,
+  completion: AgentToolCompletion & { work?: TurnWork | undefined },
   secrets: string[] = [],
   onPayload?: (payload: Record<string, unknown>) => void,
 ): Promise<void> {
   try {
     const payload = toolCompletionAuditPayload(completion, secrets);
+    // The durable receipt later turns and the router read as working state.
+    if (completion.work && payload.outcome === "succeeded") payload.work = completion.work;
     onPayload?.(payload);
     await deps.events.append({
       spaceId: target.spaceId,
@@ -5495,25 +5498,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : Promise.resolve(undefined),
         );
         const lateNotes = lateNote(preferenceNotePromise);
-        // The global agent sees what each role team did lately. It never holds up the turn:
-        // it joins the first step if already read, otherwise the next one.
-        const crossRoleNotes = lateNote(
-          !messagingChannelRun && thread.groupId?.startsWith("recruiting-global-")
+        // What the agents know this turn, from records only (the router's ticket cards): the
+        // recruiter's language, the role in focus, each role team's state and the tools' receipts.
+        // It never holds up the turn: it joins the first step if already read, else the next one.
+        const workingState: Promise<WorkingState | undefined> =
+          !messagingChannelRun &&
+          (thread.groupId?.startsWith("recruiting-global-") || thread.activeRecruitingRoleId)
             ? ownTime(
-                "crossRoleDigest",
-                loadCrossRoleDigest(
+                "workingState",
+                loadWorkingState(
                   deps.prisma,
                   { spaceId: run.spaceId, userId: run.userId },
+                  {
+                    id: thread.id,
+                    groupId: thread.groupId,
+                    activeRecruitingRoleId: thread.activeRecruitingRoleId,
+                  },
                   (text) => redactSecrets(text, runSecrets),
                 ).catch((error) => {
-                  getLogger().warn("cross-role digest failed", {
-                    error: String(error),
-                  });
+                  getLogger().warn("working state failed", { error: String(error) });
                   return undefined;
                 }),
               )
-            : Promise.resolve(undefined),
-        );
+            : Promise.resolve(undefined);
+        const workingStateNotes = lateNote(workingState.then((state) => state?.text));
         const memoryContextPromise = ownTime(
           "memoryContext",
           messagingChannelRun
@@ -15560,7 +15568,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
         // A message steered into the running turn moves it on to the language that message is in.
         let lastRecruiterText = recruiterLanguageText(recruiterTexts);
-        turnLanguage = recruiterLanguage(recruiterTexts);
+        turnLanguage = recruiterTexts.some((text) => textLanguage(text))
+          ? recruiterLanguage(recruiterTexts)
+          : // A role conversation opened by a handoff holds only Kruit's brief: the recruiter's
+            // own language comes from their messages anywhere in the account.
+            ((await workingState)?.language ?? recruiterLanguage(recruiterTexts));
         // The account's saved roles, read once a turn picks a role, for what the recruiter names.
         let savedRoleList: Promise<SavedRole[]> | undefined;
         const savedRoles = () =>
@@ -15761,7 +15773,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The judge's preference nudge never holds up the turn: it joins now only if already
           // back, otherwise at the run's next model step.
           preferenceNote: lateNotes.takeReady(),
-          crossRoleDigest: crossRoleNotes.takeReady(),
+          workingState: workingStateNotes.takeReady(),
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -16552,7 +16564,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         botId: bot.id,
                         runId,
                       },
-                      withConnectorReadOnly(completion),
+                      {
+                        ...withConnectorReadOnly(completion),
+                        work: turnReport.workFor(completion.executionId),
+                      },
                       runSecrets,
                       completeRunStep,
                     );
@@ -16561,7 +16576,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ? undefined
                     : () =>
                         lateNotes.withNotice(
-                          crossRoleNotes.withNotice(contextWatch?.claimNotice()),
+                          workingStateNotes.withNotice(contextWatch?.claimNotice()),
                         ),
                   claimSteering: scripted
                     ? undefined
@@ -18707,12 +18722,12 @@ export function userTurnContext(parts: {
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
   preferenceNote?: string | undefined;
-  crossRoleDigest?: string | undefined;
+  workingState?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
     parts.redactedRecruitingContext ?? parts.redactedMemoryContext,
-    parts.crossRoleDigest,
+    parts.workingState,
     parts.redactedScratchpadContext,
     parts.redactedTicketContext,
     parts.stoppedRunNotice,
