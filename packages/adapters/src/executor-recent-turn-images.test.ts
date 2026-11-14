@@ -687,6 +687,29 @@ describe("quick reply", () => {
     );
   });
 
+  // Gate 27c0fd0c: a first line, a note before a step and the answer said one thing three times.
+  it("keeps the first line, the note before a step and the answer in one message", async () => {
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Gmail is needed to send.",
+      finalText: "No. Connect Gmail first, then each email waits for your OK.",
+      quickReplies: true,
+      events: [
+        { type: "text", text: "Without Gmail I can't send yet; let me check the connection." },
+        { type: "tool", name: "shell_exec", args: { command: "t1" }, executionId: "t1" },
+      ],
+    });
+    const texts = prisma.message.create.mock.calls.filter(([args]) =>
+      JSON.stringify((args as { data: { blocks: unknown } }).data.blocks).includes('"text"'),
+    );
+    expect(texts).toHaveLength(1);
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { blocks: [{ kind: "text", text: expect.stringContaining("Without Gmail") }] },
+      }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
   // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
   // showed for 18 s.
   it("shows the fixed first line when the written one is unusable", async () => {
