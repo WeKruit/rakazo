@@ -885,6 +885,8 @@ const emailGap = (campaign: Record<string, unknown> | undefined) =>
   Number(campaign?.email_gap) > 0 ? Number(campaign?.email_gap) : 10;
 /** The shortest gap the provider takes: what a send-now sets so queued people go out at once. */
 const FASTEST_GAP = 1;
+/** A send to at most this many people goes out at the fastest gap from the start. */
+const FEW_RECIPIENTS = 10;
 /**
  * Minutes the provider can take to start emailing a campaign it just activated or whose hours
  * just opened (observed up to about an hour, often a few minutes).
@@ -2498,11 +2500,17 @@ async function activateCampaign(
   const window = nextSendWindow(campaign);
   const widen =
     waitsForHours(campaign, bound?.binding) || (plan.send === "now" && window && !window.now);
-  // A send-now also shortens the gap between emails to a minute, so the people queued go out together.
-  const hurry = plan.send === "now" && emailGap(campaign) > FASTEST_GAP;
+  // A send-now, or starting a campaign for a few people, shortens the gap between emails to a
+  // minute so they go out together instead of one every ten minutes. A campaign already sending
+  // is not paused just for that: pausing can restart the provider's pickup for everyone queued.
+  const hurry =
+    emailGap(campaign) > FASTEST_GAP &&
+    (plan.send === "now" ||
+      (campaign.status !== ACTIVE && plan.recipients.length <= FEW_RECIPIENTS));
   if (widen || hurry) {
-    const zone = (campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] })
-      .schedules?.[0]?.timezone;
+    const zone = (
+      campaign.campaign_schedule as { schedules?: { timezone?: unknown }[] } | undefined
+    )?.schedules?.[0]?.timezone;
     if (campaign.status === ACTIVE) {
       await rest("POST", `/campaigns/${campaignId}/pause`);
       resume = true;
