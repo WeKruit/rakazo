@@ -161,7 +161,7 @@ const ActivateCampaignInput = z.strictObject({
     .boolean()
     .optional()
     .describe(
-      "true only when the recruiter asked to email again people this account already sent a first email from another campaign; their card shows when.",
+      "true only when the recruiter asked to email again people the recruiter already confirmed a first email to from another campaign; their card shows when.",
     ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
@@ -429,8 +429,18 @@ export function instantlyRest(
 const ENROLLABLE = new Set([0, 2]);
 const ACTIVE = 1;
 const DRAFT = 0;
+const COMPLETED = 3;
 async function requireEnrollable(rest: InstantlyRest, campaignId: string) {
-  return enrollable((await rest("GET", `/campaigns/${campaignId}`)).status);
+  const { status } = await rest("GET", `/campaigns/${campaignId}`);
+  await reopenFinished(rest, campaignId, status);
+}
+/**
+ * A campaign that finished sending is not sending, so it takes new people once paused (which
+ * emails nobody); everyone it already emailed has no step left. Others must be draft or paused.
+ */
+async function reopenFinished(rest: InstantlyRest, campaignId: string, status: unknown) {
+  if (status === COMPLETED) await rest("POST", `/campaigns/${campaignId}/pause`);
+  else enrollable(status);
 }
 function enrollable(status: unknown) {
   if (!ENROLLABLE.has(status as number))
@@ -494,6 +504,11 @@ function sequences(steps: z.output<typeof Step>[]) {
       })),
     },
   ];
+}
+function stepCount(campaign: Record<string, unknown> | undefined) {
+  const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
+  const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
+  return Array.isArray(steps) ? steps.length : 0;
 }
 /** The first step's first variant, or null when the campaign has no email with visible text yet. */
 function firstEmail(campaign: Record<string, unknown> | undefined) {
@@ -1382,7 +1397,11 @@ function planRecipients(
     return {
       refusal: `Not in this campaign, or more than one person matches: ${unmatched.join(", ")}. Add each person with add_shortlist_leads, then call activate_campaign again with their emails as recipients.`,
     };
-  const others = leads.filter((lead) => !chosen.includes(lead));
+  // Resuming emails only people with a step left: not those a one-email campaign already emailed.
+  const single = stepCount(campaign) <= 1;
+  const others = leads.filter(
+    (lead) => !chosen.includes(lead) && !(status !== DRAFT && single && lead.contacted),
+  );
   if (status === DRAFT) return { send: "activate", recipients: chosen, remove: others };
   if (status === ACTIVE) {
     const sending = chosen.filter((person) => leads.includes(person));
@@ -2415,7 +2434,7 @@ async function addShortlistLeads(
       ready.push(candidate_key);
     }
   else if (pending.length) {
-    enrollable(status);
+    await reopenFinished(rest, binding.campaignId, status);
     report = await rest("POST", "/leads/add", {
       campaign_id: binding.campaignId,
       skip_if_in_workspace: false,
