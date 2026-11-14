@@ -72,13 +72,6 @@ export const OWN_EMAIL_REQUEST =
 /** A recruiter telling us to send an email now, or asking what sending or the draft needs. */
 export const SEND_NOW_REQUEST =
   /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send|草稿还在|草稿在吗|draft (?:still|kept|saved)|still have the draft|连哪|连什么|点了|能发|发得出|can (?:you|it) send|(?:不连|没连|不用|不接)\s*gmail|without (?:connecting )?gmail/i;
-/**
- * A progress line saying the mailbox is connected, written just before the connect card: sim
- * 11-14 「邮箱已连接，草稿会保留」 then the Connect Gmail card.
- */
-export const CLAIMS_CONNECTED =
-  /(?:已|已经)连(?:接|上)|(?<!\b(?:once|after|when|if|until)\s+(?:your\s+|the\s+)?)\b(?:gmail|mailbox|email)\s+(?:is|'s)\s+(?:now\s+|already\s+)?connected\b/i;
-
 /** Once a Connect Gmail card is in the conversation, every follow-up gets the send-now answer. */
 export function showsGmailCard(messages: readonly { role: string; blocks: unknown }[]): boolean {
   return messages.some(

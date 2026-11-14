@@ -1,3 +1,5 @@
+import type { Receipts } from "./claim-receipts.js";
+import { unbackedClaim, unbackedClaimNote } from "./claim-receipts.js";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
@@ -720,6 +722,8 @@ export async function planDeclineRetry(
     answersCard?: boolean;
     /** A send or booking went out this turn (see TurnReportLedger.sent). */
     sent?: boolean;
+    /** What this turn's tools did and returned (see TurnReportLedger.receipts). */
+    receipts?: Receipts;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -750,6 +754,15 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: MEMORY_SAVE_FAILED_NOTE };
+  // Anything the reply says was saved, sent, connected, booked or created needs this turn's result.
+  const claim =
+    input.receipts && !input.blocks.some((block) => CARD_KINDS.has(block.kind))
+      ? unbackedClaim(input.reply, input.receipts, {
+          question: /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request),
+        })
+      : undefined;
+  if (claim && (await recentContinues()) < 1)
+    return { sentence: claim.sentence, note: unbackedClaimNote(claim) };
   // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
   // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;

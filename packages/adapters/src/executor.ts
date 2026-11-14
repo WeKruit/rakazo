@@ -519,7 +519,6 @@ import {
 } from "./instantly-reply.js";
 import {
   asksSenderCompanyName,
-  CLAIMS_CONNECTED,
   isSenderRead,
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
@@ -693,10 +692,6 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
-  newRoleElsewhere,
-  newRoleNote,
-  otherRefNamed,
-  otherRoleNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -801,6 +796,9 @@ import {
   turnRequestText,
   unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
+import { unbackedClaim } from "./claim-receipts.js";
+import { newRoleNote, otherRoleNote, referredRole, savedRoleNote } from "./role-reference.js";
+import type { SavedRole } from "./role-reference.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
 import {
@@ -6460,7 +6458,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const narration =
             hideVendors &&
             (progressInOtherLanguage(written, turnLanguage) ||
-              (nextTool === "request_connection" && CLAIMS_CONNECTED.test(written)))
+              unbackedClaim(written, turnReport.receipts()) !== undefined)
               ? ""
               : hideVendors && nextTool === "ask_user"
                 ? beforeCardQuestion(written)
@@ -13994,28 +13992,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
-            const otherRef = newRoleElsewhere(lastRecruiterText, target.title);
-            if (otherRef && tools.some((tool) => tool.name === "start_role"))
-              return finish({ error: newRoleNote(otherRef) });
-            // The recruiter's latest messages name another saved role by its ref.
-            const namedRef = otherRefNamed(recruiterTexts, target.title);
-            const namedRole = namedRef
-              ? await deps.prisma.recruitingRole
-                  .findFirst({
-                    where: {
-                      spaceId: run.spaceId,
-                      userId: run.userId,
-                      archivedAt: null,
-                      title: { contains: namedRef, mode: "insensitive" },
-                    },
-                    select: { id: true, title: true },
-                  })
-                  .catch(() => null)
-              : null;
-            if (namedRef && namedRole)
-              return finish({
-                error: otherRoleNote(namedRef, namedRole.title ?? "", namedRole.id),
-              });
+            // The role the recruiter's own words name decides where the work goes; a second try
+            // at the same role after this note goes through.
+            const reference =
+              hideVendors && !roleReferenceOverruled.has(target.threadId)
+                ? referredRole(recruiterTexts, await savedRoles())
+                : undefined;
+            if (reference) roleReferenceOverruled.add(target.threadId);
+            if (reference?.kind === "new" && tools.some((tool) => tool.name === "start_role"))
+              return finish({ error: newRoleNote(reference.ref) });
+            if (reference?.kind === "saved" && !(await roleIsTarget(reference.role.id, target)))
+              return finish({ error: otherRoleNote(reference) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
@@ -14084,6 +14071,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             if (templateOnlyRequest(lastRecruiterText))
               return finish({ error: TEMPLATE_NOT_ROLE_NOTE });
+            const savedReference = hideVendors
+              ? referredRole(recruiterTexts, await savedRoles())
+              : undefined;
+            if (savedReference?.kind === "saved" && savedReference.by.startsWith("ref "))
+              return finish({ error: savedRoleNote(savedReference) });
             const team = await deps.prisma.chatGroupMember.findMany({
               where: { groupId: thread.groupId },
               select: { botId: true },
@@ -15569,6 +15561,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A message steered into the running turn moves it on to the language that message is in.
         let lastRecruiterText = recruiterLanguageText(recruiterTexts);
         turnLanguage = recruiterLanguage(recruiterTexts);
+        // The account's saved roles, read once a turn picks a role, for what the recruiter names.
+        let savedRoleList: Promise<SavedRole[]> | undefined;
+        const savedRoles = () =>
+          (savedRoleList ??= deps.prisma.recruitingRole
+            .findMany({
+              where: { spaceId: run.spaceId, userId: run.userId, archivedAt: null },
+              select: { id: true, title: true },
+              orderBy: { id: "desc" },
+              take: 500,
+            })
+            .catch(() => []));
+        const roleIsTarget = async (roleId: string, target: { threadId: string }) =>
+          (
+            await deps.prisma.recruitingRole
+              .findFirst({ where: { id: roleId, sourceThreadId: target.threadId }, select: { id: true } })
+              .catch(() => ({ id: roleId }))
+          ) !== null ||
+          (
+            await deps.prisma.thread
+              .findUnique({ where: { id: target.threadId }, select: { activeRecruitingRoleId: true } })
+              .catch(() => null)
+          )?.activeRecruitingRoleId === roleId;
+        const roleReferenceOverruled = new Set<string>();
         const creditsLeft = hideVendors
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
@@ -17378,6 +17393,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   noQuestionCard: noRoleYet(),
                   answersCard: Boolean(nativeSources?.currentAnswer),
                   sent: turnReport.sent(),
+                  receipts: turnReport.receipts(),
                   ...(handedIn
                     ? {
                         personRequest: turnRequestText(
