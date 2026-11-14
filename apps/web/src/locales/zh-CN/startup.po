@@ -2178,6 +2178,10 @@ msgstr "按已存联系人筛选"
 msgid "Filter by saved contact…"
 msgstr "按已存联系人筛选…"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "让 Kruit 帮你找候选人"
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -3073,6 +3077,7 @@ msgstr "没有匹配的助手"
 msgid "No breakdown"
 msgstr "不分组"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"

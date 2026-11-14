@@ -2900,6 +2900,10 @@ msgstr "Filtres"
 msgid "Find {0}'s full work history and education and save it to their profile."
 msgstr ""
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
+msgstr ""
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr ""

@@ -2900,6 +2900,10 @@ msgstr "筛选"
 msgid "Find {0}'s full work history and education and save it to their profile."
 msgstr "查找 {0} 的完整工作经历和教育背景，并保存到他们的档案。"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
+msgstr "让 Kruit 帮你找候选人"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr "查找邮箱"

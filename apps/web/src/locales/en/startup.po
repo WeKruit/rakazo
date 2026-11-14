@@ -2178,6 +2178,10 @@ msgstr "Filter by saved contact"
 msgid "Filter by saved contact…"
 msgstr "Filter by saved contact…"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "Find candidates with Kruit"
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -3073,6 +3077,7 @@ msgstr "No bots match"
 msgid "No breakdown"
 msgstr "No breakdown"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
