@@ -313,6 +313,30 @@ describe("loadWorkingState", () => {
     );
   });
 
+  it("keeps the role named earlier in this conversation in focus through short follow-ups", async () => {
+    const state = await loadWorkingState(
+      fakePrisma({
+        groups,
+        roles,
+        recruiter: [
+          text("重试"),
+          text("发了吗"),
+          text("为什么还没发？现在就发"),
+          text("发出去了吗？几封了"),
+          text("新岗位 Agent Engineer ref 0153，首封邮件今晚发给 Noah 和 Ada"),
+        ],
+        account: [text("Payments Go Engineer ref 0303: Noah and Ada were sent")],
+      }) as never,
+      scope,
+      globalThread,
+      (t) => t,
+      now,
+    );
+    expect(state.text).toContain(
+      '- Role in focus: "Agent Engineer Ref 0153" (roleId role-1), the role the recruiter last named in this conversation (ref 0153)',
+    );
+  });
+
   it("keeps the role last handed work in focus until the recruiter names another, and says when nothing was done", async () => {
     const state = await loadWorkingState(
       fakePrisma({
