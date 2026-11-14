@@ -33,6 +33,8 @@ function deps(
     transactionConflictOnce?: boolean;
     /** What a scoped lookup of another conversation returns. */
     addressedThread?: unknown;
+    /** The role team's turn still working on an earlier request from the same conversation. */
+    teamWorking?: unknown;
   } = {},
 ) {
   const enqueue = vi.fn().mockResolvedValue(undefined);
@@ -47,9 +49,14 @@ function deps(
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([{ id: "thread" }]),
     run: {
-      findFirst: vi
-        .fn()
-        .mockResolvedValue(options.senderRunning === false ? null : { id: "run-1" }),
+      findFirst: vi.fn(async (args: { where: { trigger?: string } }) =>
+        // The team's earlier turn for this conversation; otherwise the sender's own run.
+        args.where.trigger === "bot_message"
+          ? (options.teamWorking ?? null)
+          : options.senderRunning === false
+            ? null
+            : { id: "run-1" },
+      ),
       findUnique: vi.fn().mockResolvedValue({ status: "running" }),
       create: vi.fn().mockResolvedValue({ id: "run-2" }),
       findMany: vi.fn().mockResolvedValue([]),
@@ -518,6 +525,50 @@ describe("delegating to a role team in another conversation", () => {
       }),
     );
     expect(harness.tx.run.create).toHaveBeenCalled();
+  });
+
+  it("tells Kruit the team is still on its earlier request instead of a fresh start", async () => {
+    // Staging 11-14: asked "where are they?" mid-search, Kruit read the role status, saw no new
+    // round and told the recruiter three times that the search had not started.
+    const harness = deps({
+      bots: mainBot,
+      addressedThread: { id: "thread-role" },
+      teamWorking: {
+        createdAt: new Date(Date.now() - 5 * 60_000),
+        startedAt: new Date(Date.now() - 3 * 60_000),
+        bot: { name: "Sourcer" },
+      },
+    });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Where are the new people?",
+    });
+    expect(sent).toMatchObject({ ok: true });
+    if (!sent.ok) throw new Error("not sent");
+    expect(sent.note).toContain("Sourcer is still working on your earlier request");
+    expect(sent.note).toContain("started 3 min ago");
+    expect(sent.note).toContain("never say it has not started");
+    expect(harness.tx.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadId: "thread-role",
+          trigger: "bot_message",
+          status: { in: ["leased", "running"] },
+        }),
+      }),
+    );
+  });
+
+  it("says nothing about earlier work when the team is idle", async () => {
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-role" } });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Find more like the rest",
+    });
+    if (!sent.ok) throw new Error("not sent");
+    expect(sent.note).toMatch(/^Sent to /);
   });
 
   it("never replaces a request inside the same conversation", async () => {

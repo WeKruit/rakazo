@@ -1617,7 +1617,8 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     roleId: RecruitingId.optional(),
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
-  z.strictObject({ operation: z.literal("round") }),
+  // As for list: a role conversation always reads its own role.
+  z.strictObject({ operation: z.literal("round"), roleId: RecruitingId.optional() }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("replies") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("roles") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
