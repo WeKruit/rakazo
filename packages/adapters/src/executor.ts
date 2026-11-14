@@ -6494,6 +6494,49 @@ export function createRunExecutor(deps: ExecutorDeps) {
           pendingProgress = "";
           lastProgressAt = Date.now();
         };
+        // The run's reply so far (its first line, then the progress that replaced it) is the latest
+        // reply when only this run's own cards (a role link, its steps) came after it. Gate
+        // b8850911: a role link opened mid-turn left a line and an answer.
+        const lineIsLatestReply = async (lineId: string) => {
+          const recent = await deps.prisma.message.findMany({
+            where: { threadId: thread.id },
+            orderBy: { createdAt: "desc" },
+            take: 6,
+            select: { id: true, runId: true, role: true, blocks: true },
+          });
+          const at = recent.findIndex((message) => message.id === lineId);
+          return (
+            at >= 0 &&
+            recent
+              .slice(0, at)
+              .every(
+                (message) =>
+                  message.runId === runId &&
+                  message.role === "bot" &&
+                  Array.isArray(message.blocks) &&
+                  (message.blocks as MessageBlock[]).every(
+                    (block) => block.kind === "role_link" || block.kind === "steps",
+                  ),
+              )
+          );
+        };
+        /** Writes the run's newest reply into its earlier one, so the person reads one message. */
+        const replaceLatestReply = async (blocks: MessageBlock[]) => {
+          if (!quickReplyMessageId || !(await lineIsLatestReply(quickReplyMessageId))) return false;
+          await deps.prisma.message.update({
+            where: { id: quickReplyMessageId },
+            data: { blocks: blocks as Prisma.InputJsonValue },
+          });
+          await deps.events.append({
+            spaceId: run.spaceId,
+            threadId: thread.id,
+            botId: bot.id,
+            runId,
+            type: "thread.message.updated",
+            payload: { messageId: quickReplyMessageId, role: "bot", blocks },
+          });
+          return true;
+        };
         const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
           // The server's continuation nudge echoed back is never for the recruiter.
@@ -6539,14 +6582,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return;
           }
           fixedAckOpen = false;
-          await publishMessage(
-            deps,
-            run,
-            "bot",
-            [{ kind: "text", text: narration }],
-            undefined,
-            userProgressClientNonce(run.id, midTurnProgressCount++),
-          );
+          // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
+          // times. The note takes the line's place, and the answer takes the note's.
+          if (!(await replaceLatestReply([{ kind: "text", text: narration }])))
+            quickReplyMessageId = (
+              await publishMessage(
+                deps,
+                run,
+                "bot",
+                [{ kind: "text", text: narration }],
+                undefined,
+                userProgressClientNonce(run.id, midTurnProgressCount++),
+              )
+            )?.id;
           midTurnUserTexts.push(narration);
           publishedMidTurnUserMessage = true;
         };
@@ -17667,7 +17715,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Simulated 11-14: a first line, then the answer saying the same again. When the line
           // is still the newest message, the answer takes its place.
           if (
-            quickReplyMessageId &&
             // Gate b19c9913: an answer that read records first carries its steps row as well.
             // Gate 2a73ed94: one that ends in a question card takes its place too.
             blocks.some((block) => block.kind === "text" || block.kind === "ask") &&
@@ -17677,26 +17724,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 block.kind === "steps" ||
                 (block.kind === "ask" && !block.approvalEffectId),
             ) &&
-            (
-              await deps.prisma.message.findFirst({
-                where: { threadId: thread.id },
-                orderBy: { createdAt: "desc" },
-                select: { id: true },
-              })
-            )?.id === quickReplyMessageId
+            (await replaceLatestReply(blocks))
           ) {
-            await deps.prisma.message.update({
-              where: { id: quickReplyMessageId },
-              data: { blocks: blocks as Prisma.InputJsonValue },
-            });
-            await deps.events.append({
-              spaceId: run.spaceId,
-              threadId: thread.id,
-              botId: bot.id,
-              runId,
-              type: "thread.message.updated",
-              payload: { messageId: quickReplyMessageId, role: "bot", blocks },
-            });
             finalBlocks = [];
           }
           if (workspaceCheckpoint.pending && finalBlocks.length > 0) {
