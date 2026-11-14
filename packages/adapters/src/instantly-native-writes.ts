@@ -17,6 +17,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
+import { ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
 import { confirmedSends } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
@@ -2665,6 +2666,7 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
     recipients: people.map((person) => person.email),
     emailed: people.filter((person) => person.contacted).map((person) => person.email),
     queued,
+    ...(isTemplated(campaign) ? { firstEmails: ownFirstEmails(people) } : {}),
     ...(window ? { queuedFirstEmail: window.now ? "now" : window.local } : {}),
     ...(window && !window.now
       ? {
@@ -3348,7 +3350,9 @@ export async function runInstantlyWrite(
           ? await confirmedSends(prisma, context, String(campaign.id)).catch(() => ({}))
           : {}),
         campaign_schedule: campaign.campaign_schedule,
-        sequences: campaign.sequences,
+        sequences: isTemplated(campaign)
+          ? ownEmailSequences(campaign.sequences)
+          : campaign.sequences,
       };
     }
     case "native_instantly_update_lead_interest":
