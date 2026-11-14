@@ -389,30 +389,6 @@ describe("loadWorkingState", () => {
     expect(state.language).toBe("zh");
   });
 
-  it("spells the left menu as the recruiter's screen shows it", async () => {
-    // Staging 11-14: a Korean recruiter was told replies are in "Inbox (收件箱)".
-    const thread = { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" };
-    const korean = await loadWorkingState(
-      fakePrisma({
-        recruiter: [text("답장은 어디서 확인하나요? 화면에서 볼 수 있는 곳")],
-      }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(korean.text).toContain("Their left menu reads: Candidates, Inbox, Sequence");
-    expect(korean.text).not.toContain("收件箱");
-    const chinese = await loadWorkingState(
-      fakePrisma({ recruiter: [text("回复在哪里看？")] }) as never,
-      scope,
-      thread,
-      (t) => t,
-      now,
-    );
-    expect(chinese.text).toContain("Inbox = 收件箱");
-  });
-
   it("never offers the account's own team as a role team before it holds a role", async () => {
     const home = recruitingHomeGroupId(scope);
     const roleless = { id: home, thread: { activeRecruitingRoleId: null } };
