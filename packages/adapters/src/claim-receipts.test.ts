@@ -54,4 +54,11 @@ describe("unbackedClaim", () => {
     expect(unbackedClaim("1 sent, Ada queued.", read, { question: true })?.count).toBe(1);
     expect(unbackedClaim("2 sent, none waiting.", read, { question: true })).toBeUndefined();
   });
+
+  // Sim 11-14 send-at-night: a role's ref read as a count sent Kruit to open the role again.
+  it("never takes a ref or id for a count", () => {
+    expect(claimsIn("Ref 15351 的岗位对话已开好")[0]?.count).toBeUndefined();
+    expect(claimsIn("The role for ref 1535 is created.")[0]?.count).toBeUndefined();
+    expect(claimsIn("已发出 2 封。")[0]?.count).toBe(2);
+  });
 });

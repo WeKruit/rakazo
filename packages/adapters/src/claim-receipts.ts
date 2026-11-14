@@ -91,11 +91,17 @@ const clauses = (text: string) =>
     .map((clause) => clause.trim())
     .filter(Boolean);
 
-/** The number a clause attaches to its claim ("2 sent", "存了 10 人"), if any. */
+/**
+ * The number a clause attaches to its claim ("2 sent", "存了 10 人"), if any. A role's ref or any
+ * other id is not a count: sim 11-14, "Ref 15351 的岗位对话已开好" was held as "no result has 1535".
+ */
 function claimedCount(clause: string): number | undefined {
   const match =
-    /(\d{1,4})\s*(?:个|位|人|封|名|people|persons?|candidates?|emails?|leads?|profiles?)?/i.exec(
-      clause.replace(/\d{1,2}:\d{2}|\b\d{4}-\d{2}-\d{2}\b|\{\{[^}]*\}\}/g, " "),
+    /(?<![\d.])(\d{1,4})(?![\d.])\s*(?:个|位|人|封|名|people|persons?|candidates?|emails?|leads?|profiles?)?/i.exec(
+      clause.replace(
+        /\d{1,2}:\d{2}|\b\d{4}-\d{2}-\d{2}\b|\{\{[^}]*\}\}|(?:\bref|\bid|#|编号)\s*[:：#]?\s*\d+/gi,
+        " ",
+      ),
     );
   return match ? Number(match[1]) : undefined;
 }
@@ -140,5 +146,5 @@ export function unbackedClaim(
 
 /** Model-facing: the one retry of a reply that states something no tool did this turn. */
 export function unbackedClaimNote(claim: Claim): string {
-  return `Your reply says "${claim.sentence.slice(0, 200)}", but no tool result this turn shows that${claim.count === undefined ? "" : ` (no result has ${claim.count})`}. Do it now with the tool for it, or read the current record and say exactly what it shows (names and counts from that result). Never describe anything as handed over, saved, sent, queued, connected, booked or created without the result that did it.`;
+  return `Your reply says "${claim.sentence.slice(0, 200)}", but no tool result this turn shows that${claim.count === undefined ? "" : ` (no result has ${claim.count})`}. Read the current record first and say exactly what it shows (names and counts from that result); an earlier step may already have done it, and what the record shows done is never done again. Only when the record shows it not done, do it now with the tool for it. Never describe anything as handed over, saved, sent, queued, connected, booked or created without the result that did it.`;
 }
