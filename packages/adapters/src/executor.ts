@@ -138,6 +138,7 @@ import {
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isOpenAskBlock,
+  isRecruitingNextStepCard,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -1609,7 +1610,7 @@ export function requestTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -7055,6 +7056,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return recruitingNextStepCard(
             isChineseText(lastRecruiterText),
             Array.isArray(keys) && keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
+            recruiterTexts.map(requestedPeopleTarget).findLast(Boolean),
           );
         };
         // The next-step card stands in for the agent's own question only right after the round
@@ -16297,16 +16299,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       select: { role: true, blocks: true },
                     });
                     // Older rounds asked this card in Chinese; its answer is not an intake answer either.
-                    const nextStep = [
-                      recruitingNextStepCard().text,
-                      recruitingNextStepCard(true).text,
-                      recruitingNextStepCard(false, true).text,
-                      recruitingNextStepCard(true, true).text,
-                      "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
-                    ];
                     const known = answeredAsk(
                       question,
-                      intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
+                      intakeAnswers(messages).filter(({ key }) => !isRecruitingNextStepCard(key)),
                     );
                     if (known && !knownAskBounced.has(known.key)) {
                       knownAskBounced.add(known.key);

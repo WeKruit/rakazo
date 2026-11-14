@@ -132,26 +132,48 @@ export const RECRUITING_ROUND_NEXT_STEP = `The round's people are already listed
  * search, so any other question there is replaced by this one. It follows the recruiter's language.
  * A round short of ten offers the deeper search first: it costs more, so it runs only when asked.
  */
-export function recruitingNextStepCard(chinese = false, short = false) {
+export function recruitingNextStepCard(chinese = false, short = false, target?: number) {
+  // The number the recruiter asked for, as a total; 150 when they named none.
+  const find = target
+    ? chinese
+      ? `一共找 ${target} 个类似的人`
+      : `Find ${target} similar people in total`
+    : chinese
+      ? "找 150 个类似的人"
+      : "Find 150 similar people";
+  const findText = target
+    ? chinese
+      ? `凑满 ${target} 个类似的人`
+      : `find similar people up to ${target} in total`
+    : chinese
+      ? "去找 150 个类似的人"
+      : "find 150 similar people";
   if (short)
     return chinese
       ? {
-          text: "合格的人不到十个。要不要再深挖一次？会多花几分钟和一些额度。这些人方向对的话，也可以直接去找 150 个类似的人。",
-          options: ["深挖一次", "找 150 个类似的人", "再找一轮"],
+          text: `合格的人不到十个。要不要再深挖一次？会多花几分钟和一些额度。这些人方向对的话，也可以直接${findText}。`,
+          options: ["深挖一次", find, "再找一轮"],
         }
       : {
-          text: "Fewer than ten fit. Search deeper for more? It takes a few more minutes and uses more credits. If these people look right, I can find 150 similar people instead.",
-          options: ["Search deeper", "Find 150 similar people", "Run another round"],
+          text: `Fewer than ten fit. Search deeper for more? It takes a few more minutes and uses more credits. If these people look right, I can ${findText} instead.`,
+          options: ["Search deeper", find, "Run another round"],
         };
   return chinese
     ? {
-        text: "下一步怎么做？这些人方向对的话，我去找 150 个类似的人；不对的话告诉我哪几个不对，我再找一轮。",
-        options: ["找 150 个类似的人", "起草外联邮件", "再找一轮"],
+        text: `下一步怎么做？这些人方向对的话，我${findText}；不对的话告诉我哪几个不对，我再找一轮。`,
+        options: [find, "起草外联邮件", "再找一轮"],
       }
     : {
-        text: "What's next? I'd find 150 similar people if these people look right; otherwise tell me who is off and I'll run another round.",
-        options: ["Find 150 similar people", "Draft the outreach emails", "Run another round"],
+        text: `What's next? I'd ${findText} if these people look right; otherwise tell me who is off and I'll run another round.`,
+        options: [find, "Draft the outreach emails", "Run another round"],
       };
+}
+
+/** Any version of the next-step card, whatever number it offers: its answer is not an intake answer. */
+export function isRecruitingNextStepCard(text: string): boolean {
+  return /^(?:下一步怎么做？|What's next\?|合格的人不到十个。|Fewer than ten fit\.)/.test(
+    text.trim(),
+  );
 }
 
 export const RECRUITING_SCALE_START = `The recruiter accepts a calibration round when they press the round panel's accept control, pick the find-more option on the next-step card, or ask in their own words to find more or similar people, to scale up or to go ahead without confirming (for example "find 100", "widen the search", "just search", "no need to confirm"). That request is the acceptance: record it right away with recruiting_feedback target "round" operation "approve" and their exact words, never ask them to confirm the round again, and never request a separate ten-profile approval card for a round recorded with calibration_round. Feedback about individual people alone is not acceptance, and neither is a message that turns down anyone in the round or changes who to look for, even when it also says to find more of a kind (for example "A and B aren't a fit, find more people who have led a team of 50"): that is feedback for the next round of ten, also when it reaches you as a handoff from the recruiter's global conversation: judge it by the recruiter's quoted words, never by a number or "similar people" the brief adds. Acceptance carries no correction. A note sent with or right after the scale request that conflicts with a confirmed requirement (for example a preferred area far from an on-site location) never holds the scale: scale with the confirmed brief first, then ask that one question. Once a round is accepted, in the same turn and without a progress message: (1) scale with the people search yourself toward the target (100 unless the recruiter named a number; a number with Results already holding at least that many means that many more, so the target is the current total plus it, unless they say total; a request for more without a number (for example "more", "再来点") when Results already hold 100 or more is a new goal: ask one question on how many more, with options such as 50 more and 100 more plus a custom answer, then search toward the current total plus the answer; state the target, never the calibration size): waves of four differently worded web_search_advanced_exa people searches (category "people", numResults 25, enableHighlights true, highlightsMaxCharacters 300; title variants, core-duty wording, nearby cities, peer companies, folding in every round's feedback) issued as parallel calls in one step (each search saves itself to Results as it returns), never reading or ranking the people between waves, until the role holds the target (each search returns peopleInResults, the role's total, already counting the people saved before this request) or a wave adds fewer than five new people; for a target above 200 use numResults 100; (2) tell the recruiter in two or three lines with message_user: how many people are in Results and whether a deeper search continues toward the target; (3) only when the people search stopped short of the target, end the turn with exactly one handoff, last (your reply after it is not shown): hand the missing number to Sourcer, who continues with people-search agent runs, with the confirmed brief, every round's feedback, the accepted round as positive examples and everyone already returned excluded. When Results already hold the target, there is no deeper search and no handoff. Draft outreach email only when the recruiter asks for it; scaling never starts an email draft or an outreach handoff on its own. A target the search cannot fill is reported honestly with the count found, never a reason to stop early.`;
