@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** Messages this run posted after its first line, newest first, such as a role link. */
+    cardsAfterLine?: Array<{ runId: string; blocks: object[] }>;
     /** A message the run reads mid-turn, before the watch sees it unread. */
     claimed?: { id: string; messageId: string; text: string };
     /** Messages sent while the run works that it has not read yet. */
@@ -254,12 +256,33 @@ async function runWithModel(
     message: {
       // The run's own replies so far: none until the model writes one.
       findMany: vi.fn(
-        async (args: { where?: { threadId?: string; runId?: string; role?: string } }) =>
-          args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-            ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-            : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-              ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-              : [],
+        async (args: {
+          where?: { threadId?: string; runId?: string; role?: string };
+          orderBy?: object;
+          select?: { runId?: boolean };
+          take?: number;
+        }) =>
+          args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
+            ? // The thread's newest messages: what came after the first line, then the line.
+              [
+                ...(options.cardsAfterLine ?? []).map((card, index) => ({
+                  id: `card-${index}`,
+                  role: "bot",
+                  ...card,
+                })),
+                ...(
+                  await Promise.all(
+                    prisma.message.create.mock.results.map((result) => result.value),
+                  )
+                )
+                  .map((message) => ({ runId: "run-1", role: "bot", ...message }))
+                  .reverse(),
+              ]
+            : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+              ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+              : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+                ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
@@ -271,7 +294,9 @@ async function runWithModel(
         async (args?: { where?: { role?: string; id?: string }; orderBy?: object }) =>
           args?.orderBy && !args.where?.role && !args.where?.id
             ? // The thread's newest message: the last one this run posted.
-              (prisma.message.create.mock.results.at(-1)?.value ?? null)
+              options.cardsAfterLine?.length
+              ? { id: "card-0", ...options.cardsAfterLine[0] }
+              : (prisma.message.create.mock.results.at(-1)?.value ?? null)
             : args?.where?.role === "user" || args?.where?.id
               ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
                   (message: { role: string; id?: string }) =>
@@ -630,6 +655,36 @@ describe("quick reply", () => {
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  // Gate b8850911: a role link opened mid-turn came between the first line and the answer.
+  it("puts the answer in place of the first line after the run's own role link", async () => {
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Remote works too.",
+      finalText: "Remote works too. The role team has it.",
+      quickReplies: true,
+      cardsAfterLine: [
+        { runId: "run-1", blocks: [{ kind: "role_link", groupId: "g", title: "R" }] },
+      ],
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "published-final" } }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  it("posts the answer after a message someone else wrote since the first line", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Remote works too.",
+      finalText: "Remote works too. The role team has it.",
+      quickReplies: true,
+      cardsAfterLine: [{ runId: "run-2", blocks: [{ kind: "text", text: "Hi" }] }],
+    });
+    expect(finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        blocks: expect.arrayContaining([expect.objectContaining({ kind: "text" })]),
+      }),
+    );
   });
 
   // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
