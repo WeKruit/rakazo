@@ -28,3 +28,6 @@ that repeats into the existing line instead of adding another.
 - Four instruction PRs for one feedback round still left the recruiter seeing nine people while a
   different ten were recorded: the chat list and the round record checked repeats differently. **Read
   the run's events before rewording; when two tools judge the same thing, give them one rule.**
+- After a pooler failover a worker's database sessions went half-open and twenty jobs, a recruiter's
+  search among them, waited with no error and no log for good. **Every network wait gets a
+  client-side bound just past the server's own limit, so a lost reply fails instead of hanging.**

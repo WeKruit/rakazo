@@ -21,6 +21,13 @@ const CONNECT_RETRY_ATTEMPTS = 8;
 const POOL_WAIT_MIN_MS = 50;
 /** db.pool.wait summarizes at most once per window, and only windows that waited. */
 const POOL_WAIT_REPORT_MS = 60_000;
+/**
+ * Postgres ends a statement at its statement_timeout (two minutes on our databases), so a session
+ * with no reply well past that is half-open, as after a pooler failover. node-postgres waits on
+ * such a socket forever and its own query_timeout leaves the sent statement holding the session,
+ * so the socket is destroyed: the statement fails and the pool drops the session.
+ */
+export const LOST_REPLY_MS = 5 * 60_000;
 /** One checkout in this many records its caller for db.pool.wait; a stack per checkout costs too much. */
 const POOL_CALLER_SAMPLE = 10;
 const POOL_CALLERS_LOGGED = 8;
@@ -348,7 +355,13 @@ function timeQueries(client: PoolClient, queried: (ms: number) => void): void {
     const startedAt = performance.now();
     // Inside a background job, name the statement's source line for that job's tally.
     const site = getLogContext()["job.id"] ? (callerFrame() ?? statementShape(args[0])) : undefined;
+    const lost = setTimeout(() => {
+      getLogger().warn("db.reply.lost", { waitedMs: LOST_REPLY_MS });
+      (client as { connection?: { stream?: { destroy(): void } } }).connection?.stream?.destroy();
+    }, LOST_REPLY_MS);
+    lost.unref?.();
     const done = () => {
+      clearTimeout(lost);
       const ms = performance.now() - startedAt;
       queried(ms);
       if (site) recordJobStatement(site, ms);
@@ -364,6 +377,7 @@ function timeQueries(client: PoolClient, queried: (ms: number) => void): void {
     }
     const result = query(...args);
     if (result instanceof Promise) result.then(done, done);
+    else clearTimeout(lost);
     return result;
   }) as PoolClient["query"];
 }
