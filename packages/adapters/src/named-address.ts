@@ -7,6 +7,8 @@ const fold = (text: string) =>
 const TYPED_ADDRESS =
   /[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+@[^\s\p{Script=Han}@<>()[\]{}"'`，,;；:：「」『』（）]+\.[a-z]{2,}/giu;
 
+const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * An address a person wrote in this run's conversation is theirs, not a guess: their own recent
  * message, or a teammate's brief that hands their words over. Delegated work also looks at the
@@ -35,7 +37,7 @@ export async function addressTypedInConversation(
   let where: Parameters<typeof prisma.message.findMany>[0] = {
     where: { role: "user", thread: { runs: { some: { id: runId } } } },
   };
-  let spaceId: string | undefined;
+  let owner: { spaceId: string; userId: string } | undefined;
   const seen = new Set<string>();
   // The run's own conversation, then up to two conversations that delegated to it.
   for (let hop = 0; hop < 3; hop += 1) {
@@ -46,13 +48,13 @@ export async function addressTypedInConversation(
       select: {
         blocks: true,
         threadId: true,
-        thread: { select: { spaceId: true } },
+        thread: { select: { spaceId: true, userId: true } },
       },
     });
     const from = new Set<string>();
     for (const row of rows) {
       seen.add(row.threadId);
-      spaceId ??= row.thread.spaceId;
+      owner ??= row.thread;
       for (const block of texts(row.blocks)) {
         if ((block.text.match(TYPED_ADDRESS) ?? []).some((address) => fold(address) === wanted))
           return true;
@@ -64,12 +66,32 @@ export async function addressTypedInConversation(
           from.add(block.returnThreadId);
       }
     }
-    if (!from.size || !spaceId) return false;
+    if (!from.size || !owner) break;
     where = {
-      where: { role: "user", threadId: { in: [...from] }, thread: { spaceId } },
+      where: { role: "user", threadId: { in: [...from] }, thread: { spaceId: owner.spaceId } },
     };
   }
-  return false;
+  if (!owner?.userId) return false;
+  // A role opened from the recruiter's request may hold only a later message of theirs, so their
+  // own recent messages anywhere in this account count too; an agent's text never does.
+  const own = await prisma.message.findMany({
+    where: {
+      role: "user",
+      botId: null,
+      createdAt: { gte: new Date(Date.now() - RECENT_MS) },
+      thread: { spaceId: owner.spaceId, userId: owner.userId },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: { blocks: true },
+  });
+  return own.some((row) =>
+    texts(row.blocks).some(
+      (block) =>
+        (block.kind === undefined || block.kind === "text") &&
+        (block.text.match(TYPED_ADDRESS) ?? []).some((address) => fold(address) === wanted),
+    ),
+  );
 }
 
 /**
