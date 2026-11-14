@@ -313,24 +313,7 @@ export async function messageBot(
         // the role's status, saw no new round and told the recruiter the search had not started.
         const working =
           crossThread && (intent === "request" || intent === "question")
-            ? await tx.run.findFirst({
-                where: {
-                  threadId: targetThreadId,
-                  trigger: "bot_message",
-                  status: { in: ["leased", "running"] },
-                  sourceMessage: {
-                    is: {
-                      blocks: {
-                        array_contains: [
-                          { kind: "bot_message_received", returnThreadId: run.threadId },
-                        ],
-                      },
-                    },
-                  },
-                },
-                orderBy: { createdAt: "asc" },
-                select: { createdAt: true, startedAt: true, bot: { select: { name: true } } },
-              })
+            ? await teamWorkingFor(tx, { threadId: targetThreadId, returnThreadId: run.threadId })
             : null;
         const task = await tx.task.create({
           data: {
@@ -426,6 +409,31 @@ export async function messageBot(
       ? `${committed.working.name} is still working on your earlier request from this conversation (started ${committed.working.minutes < 1 ? "under a minute" : `${committed.working.minutes} min`} ago); this message reaches the team when that work finishes, and its result comes back here. Tell the recruiter it is still in progress and that you will show the result here when it arrives; never say it has not started or that a new search began.`
       : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
+}
+
+/** The role team's turn still working on a request sent from the given conversation, if any. */
+export function teamWorkingFor(
+  prisma: Pick<PrismaClient, "run">,
+  input: { threadId: string; returnThreadId: string },
+): Promise<{ createdAt: Date; startedAt: Date | null; bot: { name: string } } | null> {
+  return prisma.run.findFirst({
+    where: {
+      threadId: input.threadId,
+      trigger: "bot_message",
+      status: { in: ["leased", "running"] },
+      sourceMessage: {
+        is: {
+          blocks: {
+            array_contains: [
+              { kind: "bot_message_received", returnThreadId: input.returnThreadId },
+            ],
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true, startedAt: true, bot: { select: { name: true } } },
+  });
 }
 
 /** Return a delegated run's terminal outcome unless it already sent one explicitly. */
