@@ -79,16 +79,34 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
   // How long the last page took to show, for the judge (slow or stuck pages are a UX failure).
   let loadMs = null;
 
+  // The app keeps a live stream open, so the network is never idle: a page has settled when its
+  // text has stopped changing for a second and nothing shows as loading (at most 15 s).
   const settle = async () => {
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    await sleep(1_500);
+    let last = "";
+    let stableSince = Date.now();
+    for (const until = Date.now() + 15_000; Date.now() < until; await sleep(300)) {
+      const text = await page
+        .locator("main")
+        .first()
+        .innerText()
+        .catch(() => "");
+      const busy = await page
+        .locator('[aria-busy="true"]:visible, [role="progressbar"]:visible')
+        .count()
+        .catch(() => 0);
+      const loading = /加载中|Loading…|Loading\.\.\./.test(text);
+      if (text !== last || busy || loading || text.trim().length < 20) {
+        last = text;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= 1_000) return;
+    }
   };
   const open = async (url) => {
     const at = Date.now();
     await page.goto(`${origin}${url}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
-    loadMs = Date.now() - at;
     await settle();
+    // Time until the page stopped changing, without the second it had to stay still.
+    loadMs = Math.max(0, Date.now() - at - 1_000);
   };
   const buttons = async () =>
     (
