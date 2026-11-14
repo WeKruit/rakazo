@@ -68,11 +68,12 @@ const HostComputerPrompt = lazyPanel(() =>
   withFeatureMessages(() => import("./HostComputerPrompt")).then((m) => m.HostComputerPrompt),
 );
 
+import { ServerRetryStatus } from "../components/ServerRetryStatus";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
-import { RecruitingReadCacheContext } from "./recruiting/shared";
+import { OpenConnectionsContext, RecruitingReadCacheContext } from "./recruiting/shared";
 import { HandoffSourceContext, handoffSourceFor } from "./shell/handoff-source";
 import { KruitDock } from "./shell/KruitDock";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
@@ -246,6 +247,7 @@ export function ShellPage() {
     (threadId: string) => handoffSourceFor(groups, threadId),
     [groups],
   );
+  const openConnections = useCallback(() => setPluginsOpen(true), [setPluginsOpen]);
   // A link to a moment in another conversation, as Kruit cites it, opens stacked from the right.
   useEffect(() => {
     function openLinkedConversation(event: MouseEvent) {
@@ -339,7 +341,7 @@ export function ShellPage() {
         onConversation={(text) => {
           openRoleChat(text);
         }}
-        onOpenConnections={() => setPluginsOpen(true)}
+        onOpenConnections={openConnections}
         onSaveDraft={saveSequenceDraft}
         refreshSignal={recruitingRefresh}
         readCache={recruitingReadCache.current}
@@ -359,7 +361,7 @@ export function ShellPage() {
         setBotsSidebarCollapsedPref(false);
         setMobileSidebarOpen(true);
       }}
-      onOpenConnections={() => setPluginsOpen(true)}
+      onOpenConnections={openConnections}
       renderCorrespondence={roleCorrespondencePage ? renderCorrespondence : undefined}
     />
   );
@@ -411,6 +413,7 @@ export function ShellPage() {
         mobileSidebarSwipeRef.current = null;
       }}
     >
+      <ServerRetryStatus />
       {showToolActivity ? (
         <ComputerUpdateProgress
           onCompleted={() => {
@@ -853,7 +856,9 @@ export function ShellPage() {
         <RecruitingDetailProvider value={recruitingDetail}>
           <RecruitingReadCacheContext.Provider value={recruitingReadCache.current}>
             <HandoffSourceContext.Provider value={handoffSource}>
-              {shell}
+              <OpenConnectionsContext.Provider value={openConnections}>
+                {shell}
+              </OpenConnectionsContext.Provider>
             </HandoffSourceContext.Provider>
           </RecruitingReadCacheContext.Provider>
         </RecruitingDetailProvider>

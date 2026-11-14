@@ -843,6 +843,7 @@ msgid "Calibration round"
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Can't reach the server."
 msgstr "सर्वर तक नहीं पहुंचा जा सका।"
 
@@ -1185,6 +1186,10 @@ msgstr ""
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "कंप्यूटर बंद हैं। SANDBOX_PROVIDER=docker और SANDBOX_SUPERVISOR_TOKEN सेट करें, या SANDBOX_PROVIDER को e2b, daytona, या box पर सेट कर उसका API key दें। .env बदलने के बाद स्टैक फिर बनाएँ।"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "पासवर्ड की पुष्टि करें"
@@ -1198,6 +1203,10 @@ msgstr "पुष्टि करें कि यह URL इस ब्राउ
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "कनेक्ट करें"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1825,6 +1834,10 @@ msgstr ""
 msgid "Direct MCP"
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr ""
+
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
 msgstr ""
@@ -2033,6 +2046,10 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -3829,6 +3846,7 @@ msgstr ""
 msgid "Recipients will be associated with {0}."
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr ""
@@ -3839,6 +3857,7 @@ msgid "Reconnect your model to continue."
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Reconnecting"
 msgstr "पुनः कनेक्ट हो रहा है"
 
@@ -5228,6 +5247,10 @@ msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
 msgstr ""
 
 #: src/components/computer/ComputerWorkspace.tsx

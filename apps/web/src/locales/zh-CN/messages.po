@@ -180,6 +180,7 @@ msgstr "什么都做一点"
 msgid "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 msgstr "无法确认草稿创建请求。请先查看已保存的邮件序列，再创建副本。"
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "A saved check failed."
 msgstr "一项已保存的检查失败。"
@@ -1407,7 +1408,6 @@ msgid "Configure a plugin catalog on the server to connect apps."
 msgstr "请在服务器上配置插件目录以连接应用。"
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr "已配置"
 
@@ -1504,10 +1504,6 @@ msgstr "连接模型"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "连接提供商后即可添加备用模型。"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Connect account"
-msgstr "连接账号"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect an app"
@@ -2477,10 +2473,6 @@ msgstr "详情"
 msgid "Developer diagnostics"
 msgstr "开发者诊断"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Disabled"
-msgstr "已停用"
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Disabled tools"
 msgstr "已停用的工具"
@@ -2705,10 +2697,6 @@ msgstr "邮件"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Employment"
 msgstr "工作经历"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Enable for this role"
-msgstr "为这个岗位启用"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "End"
@@ -5042,7 +5030,6 @@ msgid "Recipients"
 msgstr "收件人"
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Reconnect"
 msgstr "重新连接"
 
@@ -6074,6 +6061,10 @@ msgstr "正在发送…"
 msgid "Seniority"
 msgstr "职级"
 
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Sent (all time): {sentTotal}"
+msgstr "已发送（累计）：{sentTotal}"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr "发送时间"
@@ -6556,10 +6547,6 @@ msgstr "Teams 消息"
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
 msgstr "未启用 Teams"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Temporarily unavailable"
-msgstr "暂时不可用"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Test run"

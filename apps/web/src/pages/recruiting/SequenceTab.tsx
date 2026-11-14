@@ -417,6 +417,7 @@ export function SequenceTab(
       : [];
 
   const live = campaign?.status === "ready" ? campaign.campaign : null;
+  const sentTotal = live ? (campaign?.stats?.sent ?? null) : null;
   const currentRows = campaigns.data?.items ?? [];
   const sequenceRows = [
     ...currentRows,
@@ -678,6 +679,7 @@ export function SequenceTab(
         detail={page === "detail"}
         onMetric={page === "detail" ? setRunFilter : undefined}
         sendDates={null}
+        sendContext={sentTotal != null ? t`Sent (all time): ${sentTotal}` : undefined}
         overviewCounts={!live ? savedCounts : undefined}
         overviewPartial={
           !live &&

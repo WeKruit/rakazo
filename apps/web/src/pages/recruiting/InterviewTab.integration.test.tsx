@@ -141,7 +141,7 @@ it("preserves partial, changed-connection and access status with saved records",
   await render();
   expect(element.textContent).toContain("Some interviews could not be shown.");
   expect(element.textContent).toContain("These saved records may be out of date.");
-  expect(element.textContent).toContain("Synthetic calendar · Needs access · Failed");
+  expect(element.textContent).toContain("Synthetic calendar · Enable for this role · A saved check failed.");
   expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
 });
 
