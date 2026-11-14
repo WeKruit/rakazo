@@ -45,5 +45,5 @@ export async function globalRoleWriteRefusal(
     select: { id: true, title: true },
   });
   if (!role) return undefined;
-  return `Not done: this changes the email of "${role.title}", which that role's team holds and works on. Hand the recruiter's request to that team with delegate_to_role, role_id "${role.id}", in their own words, and tell them in one line that the team has it.`;
+  return `Not done: this changes the email of "${role.title}", which that role's team holds and works on. Hand the recruiter's request to that team with delegate_to_role, role_id "${role.id}", in their own words. In the same reply, answer what they asked from what you have already read (for example why nothing has gone out yet, from the queue time a read gave, as minutes from now), and say in one line that the team is doing the rest.`;
 }
