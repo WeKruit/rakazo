@@ -2038,6 +2038,7 @@ model RecruitingCrmMessage {
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmMessageId])
   @@index([userId, spaceId, crmCandidateId])
+  @@index([userId, spaceId, mcpServerId, organizationId, crmRoleId, sentAt])
   @@map("recruiting_crm_messages")
 }
 
