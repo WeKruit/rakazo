@@ -6051,6 +6051,28 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(f.state.requests.filter((r) => r.path.endsWith("/activate"))).toEqual([]);
       });
 
+      it("takes a person's name written beside their address for {{firstName}}", async () => {
+        const { f, binding } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        f.state.typed = ["Noah Liu noah@x.test 和 Ada Chen ada@x.test，帮我发"];
+        const note = { subject: "A data role", body: "Hi {{firstName}},\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [note],
+            recipients: ["Noah Liu <noah@x.test>", '"Ada Chen" <ada@x.test>'],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["noah@x.test", "ada@x.test"] });
+        expect(binding.result).toMatchObject({
+          drafts: {
+            "noah@x.test": { body: "Hi Noah,\n\nA note just for you." },
+            "ada@x.test": { body: "Hi Ada,\n\nA note just for you." },
+          },
+        });
+      });
+
       it("refuses an address nobody wrote, naming the saved one a letter off", async () => {
         const { f } = await roleWithSixteen();
         f.state.addToCampaign = true;
