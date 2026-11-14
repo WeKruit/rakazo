@@ -181,7 +181,10 @@ export type RecruiterSeen = {
  * would refuse as a repeat.
  */
 export async function readRecruiterSeen(
-  prisma: Pick<PrismaClient, "$queryRaw" | "recruitingCalibrationRound" | "recruitingCandidateOccurrence">,
+  prisma: Pick<
+    PrismaClient,
+    "$queryRaw" | "recruitingCalibrationRound" | "recruitingCandidateOccurrence"
+  >,
   actor: Actor,
   input: { roleId: string; candidateKeys: readonly string[] },
 ): Promise<RecruiterSeen> {
@@ -204,7 +207,11 @@ export async function readRecruiterSeen(
     }
   if (latest) {
     const pages = await prisma.recruitingCandidateOccurrence.findMany({
-      where: { roleId, candidateKey: { in: keys }, page: { observedAt: { lte: latest.createdAt } } },
+      where: {
+        roleId,
+        candidateKey: { in: keys },
+        page: { observedAt: { lte: latest.createdAt } },
+      },
       select: { candidateKey: true },
     });
     for (const row of pages) people.get(row.candidateKey)!.seenBeforeLatestRound = true;
