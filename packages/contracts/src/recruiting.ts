@@ -1945,6 +1945,8 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     z.strictObject({
       name: z.string(),
       status: z.enum(["configured", "needs_connection", "needs_access", "disabled", "unavailable"]),
+      /** The account was connected before and its sign-in expired. */
+      reconnect: z.literal(true).optional(),
       checkIssue: z
         .strictObject({ status: z.enum(["failed", "unsupported"]), checkedAt: IsoDate })
         .nullable(),
