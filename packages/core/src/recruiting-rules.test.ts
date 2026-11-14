@@ -868,6 +868,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13 round 9: a template the recruiter asked for ended on a bare 「Best,」 with no name and no question.",
   },
   {
+    rule: "sign-off question outside the email",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "after a blank line and outside the email, ask in one plain line which name to sign with",
+    why: "Staging 11-14 sim: 「请告诉我邮件署名用什么名字。」 sat right under 「Best,」 and read as part of the email.",
+  },
+  {
     rule: "saved only from a tool result",
     in: "RECRUITER_LANGUAGE",
     phrase: "tell the recruiter something was saved, sent or started only when a tool result in this conversation shows it",

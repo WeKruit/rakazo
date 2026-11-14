@@ -28,19 +28,30 @@ describe("own-email requests on accounts with an outreach mailbox", () => {
 // 11-14 gate: 「签名用 Noah。直接发」 got "I'll send it now" before the Gmail card, then
 // "the draft is not confirmed as saved".
 describe("send now before Gmail is connected", () => {
-  it.each(["签名用 Noah。直接发", "现在就发给两个人", "ok send it now", "just send it"])(
-    "recognizes %s",
-    (text) => expect(SEND_NOW_REQUEST.test(text)).toBe(true),
-  );
+  it.each([
+    "签名用 Noah。直接发",
+    "现在就发给两个人",
+    "ok send it now",
+    "just send it",
+    // 11-14 sim: the follow-up got a mailbox-draft-folder answer and "I'll check first".
+    "连哪个？点了就能发？草稿还在吗",
+  ])("recognizes %s", (text) => expect(SEND_NOW_REQUEST.test(text)).toBe(true));
 
-  it.each(["给 Wei Zhang 写封邮件", "write a first email for these two"])(
-    "leaves a drafting request alone: %s",
-    (text) => expect(SEND_NOW_REQUEST.test(text)).toBe(false),
+  it.each([
+    "给 Wei Zhang 写封邮件",
+    "write a first email for these two",
+    "draft an email to Wei",
+    "写个草稿给他",
+  ])("leaves a drafting request alone: %s", (text) =>
+    expect(SEND_NOW_REQUEST.test(text)).toBe(false),
   );
 
   it("opens with not sent and the one step, without the email again", () => {
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/open this reply with that/);
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never write the email again/);
     expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never say the draft is not saved/);
+    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/no check, tool call or progress line first/);
+    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/comes back on one Send card/);
+    expect(SEND_NOW_WITHOUT_GMAIL_NOTE).toMatch(/never mention a mailbox draft folder/);
   });
 });

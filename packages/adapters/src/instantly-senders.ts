@@ -69,12 +69,11 @@ function noSelfSetup(ownEmail: boolean) {
 /** A recruiter asking to send from their own email account. */
 export const OWN_EMAIL_REQUEST =
   /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
-/** A recruiter telling us to send an email now. */
+/** A recruiter telling us to send an email now, or asking what sending or the draft needs. */
 export const SEND_NOW_REQUEST =
-  /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send/i;
-/** Model-facing, for an account that sends from the recruiter's own email: "send now" before Gmail is connected. */
+  /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send|草稿还在|草稿在吗|draft (?:still|kept|saved)|still have the draft|连哪|连什么|点了|能发|发得出|can (?:you|it) send/i;
 export const SEND_NOW_WITHOUT_GMAIL_NOTE =
-  "When send_message is not among your tools, Gmail is not connected, so nothing can go out yet. Then open this reply with that in one short line in the recruiter's language: it has not been sent; the one step is the Connect Gmail card, so it goes out from their own address; the email above is kept. Call request_connection with provider gmail beside that line. Never first say you are sending it, never write the email again, and never say the draft is not saved or cannot be confirmed.";
+  "When send_message is not among your tools, Gmail is not connected, so nothing can go out yet. Then open this reply with that in one short reply in the recruiter's language, with no check, tool call or progress line first: it has not been sent; the one step is pressing Connect Gmail on the card, so it goes out from their own address; the draft is kept, it is the email above (signed with the name they gave, if any). Once Gmail is connected the email comes back on one Send card here and goes out when they press Send. Call request_connection with provider gmail beside that line, its reason saying the same. Never first say you are sending it or connecting anything yourself, never write the email again, never say the draft is not saved, cannot be confirmed or is only in chat, and never mention a mailbox draft folder.";
 export const OUTREACH_MAILBOX_ONLY_NOTE =
   "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
 
