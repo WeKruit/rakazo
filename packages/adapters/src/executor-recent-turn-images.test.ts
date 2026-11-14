@@ -120,6 +120,8 @@ async function runWithModel(
     holdMain?: Promise<void>;
     /** The quick first line's call waits for this, as a slow model does. */
     holdQuick?: Promise<void>;
+    /** The quick first line's own text; defaults to finalText. */
+    quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
     /** A message the run reads mid-turn, before the watch sees it unread. */
@@ -165,7 +167,13 @@ async function runWithModel(
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
     for (const event of options.events ?? []) yield event;
-    yield { type: "done" as const, text: options.finalText ?? "Done" };
+    yield {
+      type: "done" as const,
+      text:
+        next.runId.endsWith(":quick-reply") && options.quickText !== undefined
+          ? options.quickText
+          : (options.finalText ?? "Done"),
+    };
   });
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
@@ -527,6 +535,27 @@ describe("quick reply", () => {
     expect(runtimeRun.mock.calls[main]![0].prompt).toContain(
       'You already sent the person this first line while you work: "On it."',
     );
+  });
+
+  // Gate 1625bfd4: the first line already answered, the answer had nothing to add, and an
+  // empty-reply fallback was posted after it.
+  it("posts no fallback when the first line already answered and the answer adds nothing", async () => {
+    const { prisma, runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "",
+      quickText: "Your signature is Jules Hou.",
+      quickReplies: true,
+    });
+    // The runtime posts "No response. Try again." for an empty answer unless silence is allowed.
+    const main = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1")?.[0];
+    expect(main?.allowSilentEmpty).toBe(true);
+    const texts = prisma.message.create.mock.calls.flatMap(([args]) =>
+      ((args as { data: { blocks: Array<{ kind: string; text?: string }> } }).data.blocks ?? [])
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text),
+    );
+    expect(texts).toContain("Your signature is Jules Hou.");
+    expect(texts).not.toContain("done.");
+    expect(texts.some((text) => /No response/.test(text ?? ""))).toBe(false);
   });
 
   // Simulated 11-14: a first line posted after the answer started was unknown to the answer,
