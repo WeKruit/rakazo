@@ -7,7 +7,7 @@ script: a new test is almost always a new entry in an existing file, not a new f
 
 | You want to test | Add it to | Run it with |
 | --- | --- | --- |
-| A recruiter conversation or journey (any language, persona or goal) | a journey (persona + goal in plain words) in `simulated-journeys.mjs` | `node infra/acceptance/simulated-customer.mjs` (`--ui` for the real pages) |
+| A recruiter conversation or journey (any language, persona or goal) | `--story "<the case in plain words>"` for a one-off run, or a saved journey (persona + goal, with its source) in `simulated-journeys.mjs` | `node infra/acceptance/simulated-customer.mjs --ui` (`--journeys <name>` for saved ones) |
 | A rule about what a recruiter must or must not see in a reply | a check in `real-user-checks.mjs` (with its test) | used by `real-user.mjs` and the simulated customer's judge |
 | A page that broke and came back | a check in `ui-regressions.mjs` | release regression |
 | Something every release must prove | a layer in `regression.mjs` | release script, after deploy |

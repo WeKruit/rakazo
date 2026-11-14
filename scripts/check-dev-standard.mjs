@@ -21,7 +21,6 @@ export const REWRITE_MIN_LINES = 200;
 export const AGENT_TEXT_FILES = [
   "packages/core/src/recruiting-defaults.ts",
   "packages/core/src/recruiting-playbook.ts",
-  "packages/core/src/recruiting-rules.test.ts",
 ];
 /** Where reusable test and ops entry points live; a new one must be wired in, not left orphaned. */
 export const ENTRY_POINT_DIRS = ["infra/acceptance/", "scripts/"];

@@ -47,9 +47,8 @@ describe("development standard", () => {
     expect(rules({ files })).toEqual(["eval"]);
     const body = `${TESTED}\nEval: one-off-email journey, 6/10 before, 9/10 and 9/10 after.`;
     expect(rules({ files, body })).toEqual([]);
-    // A new pin in the rules table is an instruction change too.
     expect(
-      rules({ files: [modified("packages/core/src/recruiting-rules.test.ts", 1654, 9, 0)] }),
+      rules({ files: [modified("packages/core/src/recruiting-playbook.ts", 900, 4, 4)] }),
     ).toEqual(["eval"]);
   });
 
