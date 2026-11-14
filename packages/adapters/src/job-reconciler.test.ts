@@ -799,6 +799,7 @@ describe("createPostgresReconciliationLeadership", () => {
               if (acquired) locked = true;
               return { rows: [{ acquired }] };
             }
+            if (!sql.includes("pg_advisory_unlock")) return { rows: [] };
             const released = locked;
             locked = false;
             return { rows: [{ released }] };
