@@ -319,7 +319,12 @@ export const nativeInstantlyWrites = [
     false,
     "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all. To add people to a campaign that is already sending, stage them with add_shortlist_leads and pass them as recipients: only they are emailed. When people are queued (for later sending hours, or behind the gap between emails) and the recruiter wants them sent now, pass send_now: its card lists who is queued, and on confirm they go out as soon as the mail service picks them up (often minutes, at most about an hour), one a minute. Never tell the recruiter a queue cannot be sped up; offer send_now.",
   ),
-  tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
+  tool(
+    "pause_campaign",
+    CampaignIdInput,
+    false,
+    "Pauses a campaign; stops further sends. Only when the recruiter asks to stop or hold sending: a send they confirmed is their decision, so never pause it on your own, for example to change when it goes out; tell them when it goes out instead and offer send_now.",
+  ),
   tool(
     "get_email",
     EmailIdInput,
