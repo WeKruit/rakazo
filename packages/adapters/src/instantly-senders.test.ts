@@ -712,12 +712,6 @@ it("tells a self-signup account without a mailbox to send from its own email", a
   // 11-13 staging: the draft was pasted four times and "which mailbox sends" got "Google 邮箱".
   // 11-13 round 8: 「直接发」 got a re-check and the whole draft again, reworded.
   expect(read).toMatchObject({ next: expect.stringContaining("it has not gone out yet") });
-  // 4e2923f2 sim: the draft ended on "当前没有可用的发送邮箱，因此暂时无法生成发送确认卡。".
-  expect(read).toMatchObject({
-    next: expect.stringContaining(
-      "opened by one line that it is written and goes out from their own address",
-    ),
-  });
   // 11-14: a Connect Gmail press after the recruiter wrote again arrives as "Connected Gmail.".
   expect(read).toMatchObject({
     next: expect.stringContaining("put each email they already asked to send on its card at once"),

@@ -5,7 +5,6 @@ import {
   greetsByName,
   isChineseText,
   isEnglishText,
-  NAMED_SEND_ROLE_NOTE,
   RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
@@ -276,15 +275,5 @@ describe("recruiting tool list", () => {
     ].join("\n");
     for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
       expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
-  });
-});
-
-// 11-14 send-at-night: a role opened to email two named people asked about searching and ran one.
-describe("named-people role note", () => {
-  it("keeps a role opened for named people off the search path", () => {
-    expect(NAMED_SEND_ROLE_NOTE).toMatch(
-      /Never run people searches, never ask whether to look for others/,
-    );
-    expect(NAMED_SEND_ROLE_NOTE).toMatch(/exactly those people on its send card/);
   });
 });

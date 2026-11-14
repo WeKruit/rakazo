@@ -17,15 +17,20 @@ export function isOpenAskBlock(block: { kind: string; status?: string }): boolea
 
 /**
  * A card still marked pending whose run no longer waits (stopped, failed or finished) reads as
- * closed, the way an expired card reads, so history never presents it as waiting.
+ * closed, the way an expired card reads, so history never presents it as waiting. A connect card
+ * stays pressable after its wait ends (`reopenedAskMessageIds`), so it reads as open until answered.
  */
-export function closeEndedAsks<T extends { kind: string; status?: string }>(
+export function closeEndedAsks<T extends { kind: string; status?: string; connection?: unknown }>(
   blocks: readonly T[],
   runWaits: boolean,
 ): T[] {
-  return runWaits
-    ? [...blocks]
-    : blocks.map((block) => (isOpenAskBlock(block) ? { ...block, status: "expired" } : block));
+  return blocks.map((block) =>
+    block.kind === "ask" && block.connection && block.status === "expired"
+      ? { ...block, status: "pending" }
+      : !runWaits && isOpenAskBlock(block) && !block.connection
+        ? { ...block, status: "expired" }
+        : block,
+  );
 }
 
 export type ClosedAskAnswer = {

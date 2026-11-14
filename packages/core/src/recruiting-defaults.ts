@@ -160,6 +160,11 @@ export const RECRUITING_SCALE_START = `The recruiter accepts a calibration round
  * A recruiter message asking for contacts, an email draft or a send. Round 1 of the playtest saw
  * the lead answer these itself and decline; they belong to Outreach.
  */
+/** A role opened to email people the recruiter named with addresses has no search. */
+export function namesPeopleToEmail(texts: readonly string[]): boolean {
+  return texts.some((text) => /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) && asksForOutreach(text));
+}
+
 export function asksForOutreach(text: string): boolean {
   return /\b(?:send|e-?mails?|contacts?|outreach|campaign|draft)\b|发(?:\s*\d+|给|送|邮件|出去)|邮件|邮箱|联系方式|草稿|外联/i.test(
     text,
