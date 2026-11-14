@@ -34,6 +34,7 @@ import {
   recipientsOf,
 } from "./real-user-checks.mjs";
 import {
+  activeGroupsOf,
   client,
   groupsOf,
   InfraError,
@@ -44,6 +45,7 @@ import {
   sleep,
   stopAll,
   transcripts,
+  watchFrom,
 } from "./real-user-session.mjs";
 import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
 import { closeBrowser, openUi, SEND_BUTTON, STANDING_BUTTON } from "./simulated-ui.mjs";
@@ -173,7 +175,7 @@ const JUDGE = option("--judge-model", "sonnet");
 // --- What the recruiter sees and what is true ---------------------------------------------------
 async function cardsOpen(rpc) {
   const open = [];
-  for (const group of await groupsOf(rpc))
+  for (const group of await activeGroupsOf(rpc))
     for (const message of await messagesOf(rpc, group.id))
       for (const block of openCards(message)) {
         if (!message.runId || block.input === "secret") continue;
@@ -225,13 +227,13 @@ async function campaignOf(rpc, chat) {
 /** Every chat's campaign as it stands, by chat id. */
 async function campaigns(rpc) {
   const all = new Map();
-  for (const group of await groupsOf(rpc)) all.set(group.id, await campaignOf(rpc, group));
+  for (const group of await activeGroupsOf(rpc)) all.set(group.id, await campaignOf(rpc, group));
   return all;
 }
 async function records(rpc, since, before) {
   const now = await campaigns(rpc);
   const roles = [];
-  for (const group of await groupsOf(rpc)) {
+  for (const group of await activeGroupsOf(rpc)) {
     const record = now.get(group.id);
     if (!record?.campaign) continue;
     const touched = (await messagesOf(rpc, group.id)).some(
@@ -267,7 +269,7 @@ function render(chats) {
 // --- One journey --------------------------------------------------------------------------------
 async function newestBotMessageAfter(rpc, since) {
   let newest = null;
-  for (const group of await groupsOf(rpc))
+  for (const group of await activeGroupsOf(rpc))
     for (const message of await messagesOf(rpc, group.id))
       if (
         message.role !== "user" &&
@@ -341,6 +343,8 @@ async function play(journey, label, owner, mailbox, out) {
   if (journey.account === "batch") credentials = BATCH;
   if (journey.account) {
     await user.auth(...credentials);
+    // Waiting for a reused account to go quiet watches only its working chats, not every role.
+    watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
   } else {
@@ -351,8 +355,9 @@ async function play(journey, label, owner, mailbox, out) {
     credentials = [email, password];
   }
   const { rpc } = user;
-  const before = await campaigns(rpc);
   const startedAt = Date.now();
+  watchFrom(rpc, startedAt);
+  const before = await campaigns(rpc);
   // A per-play tag, so a journey on a reused account names a role of its own.
   const tag = new Date(startedAt).toISOString().slice(11, 16).replace(":", "");
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));

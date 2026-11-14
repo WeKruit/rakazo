@@ -209,7 +209,7 @@ export const JOURNEYS = [
     goals: [
       "Paste the three snippets and ask which of them show Kafka in production and how many years each has; expect a per-person list in that same reply.",
       "Expect Kruit to say plainly 'not shown' for what the snippet does not say, rather than saying it will check or hand it to a team.",
-      "Ask Kruit to drop anyone who does not show Kafka; expect it to say who it drops and what it will do about replacements.",
+      "Ask Kruit to drop anyone who does not show Kafka; expect it to say who it drops and plainly what happens about replacements (starting a search, or offering to start one, both count).",
     ],
   },
 ];

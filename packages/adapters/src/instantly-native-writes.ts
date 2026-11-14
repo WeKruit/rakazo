@@ -316,13 +316,13 @@ export const nativeInstantlyWrites = [
     "reply_to_email",
     ReplyToEmailInput,
     false,
-    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow.",
+    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow. Every new request to reply gets its own call and card, whatever happened to earlier cards for that email (sent, discarded or still open): never skip the call because of them.",
   ),
   tool(
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Emails go out as soon as the recruiter confirms; pass send_hours weekdays_9_to_5 only when the recruiter asks to send in business hours. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created (with no sending mailbox yet, steps are still saved for the role, no connection needed): a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Emails go out as soon as the recruiter confirms; pass send_hours weekdays_9_to_5 only when the recruiter asks to send in business hours. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -703,6 +703,7 @@ export async function lastUsedMailbox(
   return typeof eaccount === "string" ? eaccount : null;
 }
 
+const NO_MAILBOX = "No sending mailbox is set up for this account yet";
 /** Default sender: the last-used mailbox if still connected, else the first connected one. */
 async function defaultMailbox(
   prisma: PrismaClient,
@@ -718,10 +719,7 @@ async function defaultMailbox(
     .filter((email): email is string => typeof email === "string");
   const last = await lastUsedMailbox(prisma, context.spaceId, serverId, context.userId);
   const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked)
-    throw new Error(
-      "No sending mailbox is set up for this account yet; tell the recruiter instead of creating a campaign",
-    );
+  if (!picked) throw new Error(`${NO_MAILBOX}; tell the recruiter instead of creating a campaign`);
   return picked;
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -1686,7 +1684,7 @@ async function ensureRoleCampaign(
   input: z.output<typeof EnsureRoleCampaignInput>,
   /** People this call already added for its recipients; set only on the retry after adding. */
   added?: string[],
-): Promise<{ campaignId: string } & Record<string, unknown>> {
+): Promise<{ campaignId?: string } & Record<string, unknown>> {
   const role = await requireRole(prisma, context, input.role_id);
   const key = bindingKey(serverId, role.id);
   // Named recipients who are this role's saved candidates are added first, as add_shortlist_leads
@@ -1802,9 +1800,19 @@ async function ensureRoleCampaign(
   }
   if (input.recipients) return addThenSave(input.recipients);
   if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
-  const eaccount =
-    input.eaccount ??
-    (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
+  const emailKey = `${key}:email`;
+  let eaccount: string;
+  try {
+    eaccount =
+      input.eaccount ??
+      (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
+  } catch (error) {
+    // Saving the role's email needs no mailbox: it waits on the role until a campaign exists.
+    if (!input.steps || !(error instanceof Error) || !error.message.startsWith(NO_MAILBOX))
+      throw error;
+    return saveRoleEmail(prisma, context, emailKey, role, serverId, input.steps);
+  }
+  const steps = input.steps ?? (await savedRoleEmail(prisma, context, emailKey));
   // The user-visible name is the role title; the role id lives in the stored mapping's request.
   const name = role.title;
   const adopt = (await sameTitleCampaigns(prisma, context, rest, role)).find(
@@ -1814,7 +1822,7 @@ async function ensureRoleCampaign(
     (sender) => sender.email === eaccount.toLowerCase(),
   );
   const campaign =
-    adopt ?? (await createCampaign(rest, { ...input, eaccount, name }, pendingAllowed));
+    adopt ?? (await createCampaign(rest, { ...input, steps, eaccount, name }, pendingAllowed));
   if (adopt && adopt.stop_on_reply !== true)
     await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
   if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
@@ -1833,12 +1841,54 @@ async function ensureRoleCampaign(
     });
   else await recordBinding(prisma, context, key, role.id, serverId, binding);
   // Checked after binding, so a retry writes onto this campaign instead of adopting it.
-  if (!adopt && input.steps) await requireSavedEmail(rest, campaign.id);
+  if (!adopt && steps) await requireSavedEmail(rest, campaign.id);
   return {
     created: !adopt,
     adopted: Boolean(adopt),
     ...binding,
     ...(!adopt && input.steps ? { next: SHOW_SAVED_STEPS } : {}),
+  };
+}
+
+type Steps = NonNullable<z.output<typeof EnsureRoleCampaignInput>["steps"]>;
+
+/** The role's email saved before any sending mailbox existed. */
+async function savedRoleEmail(prisma: PrismaClient, context: AdapterContext, key: string) {
+  const effect = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
+  if (!effect) return undefined;
+  if (effect.spaceId !== context.spaceId) throw new IsolationError();
+  return (effect.result as { steps?: Steps } | null)?.steps;
+}
+
+async function saveRoleEmail(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  key: string,
+  role: { id: string; title: string },
+  serverId: string,
+  steps: Steps,
+) {
+  const current = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
+  if (current && current.spaceId !== context.spaceId) throw new IsolationError();
+  const result = { steps } as unknown as Prisma.InputJsonValue;
+  if (current) await prisma.externalEffect.update({ where: { id: current.id }, data: { result } });
+  else
+    await prisma.externalEffect.create({
+      data: {
+        spaceId: context.spaceId,
+        runId: context.runId!,
+        kind: "instantly_role_email",
+        idempotencyKey: key,
+        status: "completed",
+        request: { roleId: role.id, serverId },
+        result,
+      },
+    });
+  return {
+    saved: true,
+    role: role.title,
+    hasEmail: true,
+    next: `Saved as the ${role.title} role's email, with no mailbox needed: it becomes the first email of the role's sequence and is used whenever this role's candidates are emailed. Say in one line that it is saved for the role and that they can ask you to show it any time; never ask for a mailbox or connection to save it.`,
   };
 }
 
@@ -2407,7 +2457,7 @@ async function activateCampaign(
   const campaignId =
     input.campaign_id ??
     (await ensureRoleCampaign(prisma, rest, context, serverId, { timezone: "America/Chicago" }))
-      .campaignId;
+      .campaignId!;
   let campaign = await rest("GET", `/campaigns/${campaignId}`);
   const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
   if (confirmedSenderRequired) {
@@ -3351,14 +3401,21 @@ export async function runInstantlyWrite(
         ),
       );
     }
-    case "native_instantly_ensure_role_campaign":
-      return ensureRoleCampaign(
-        prisma,
-        rest,
-        context,
-        serverId,
-        EnsureRoleCampaignInput.parse(args),
+    case "native_instantly_ensure_role_campaign": {
+      const input = EnsureRoleCampaignInput.parse(args);
+      return ensureRoleCampaign(prisma, rest, context, serverId, input).catch(
+        async (error: unknown) => {
+          // No mailbox yet: the role's saved email is still there to show.
+          if (!(error instanceof Error) || !error.message.startsWith(NO_MAILBOX)) throw error;
+          const roleId = input.role_id ?? (await activeRoleId(prisma, context));
+          const steps =
+            roleId &&
+            (await savedRoleEmail(prisma, context, `${bindingKey(serverId, roleId)}:email`));
+          if (!steps) throw error;
+          return { campaign: null, savedEmail: steps, hasEmail: true, sending: NO_MAILBOX };
+        },
       );
+    }
     case "native_instantly_add_shortlist_leads":
       return addShortlistLeads(prisma, rest, context, serverId, AddShortlistLeadsInput.parse(args));
     default:

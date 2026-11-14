@@ -5041,6 +5041,26 @@ describe("local native Instantly campaign and lead tools", () => {
     });
   });
 
+  it("saves the role's email with no sending mailbox and uses it once a campaign is made", async () => {
+    const f = fixture();
+    f.state.accounts = [];
+    const steps = [{ subject: "Hi {{firstName}}", body: "A role for you", delay_days: 0 }];
+    const saved = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
+    expect(saved).toMatchObject({ saved: true, hasEmail: true });
+    expect(f.state.requests.some((r) => r.method === "POST")).toBe(false);
+    // Read back without a mailbox: the saved email, not an error.
+    const shown = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(shown).toMatchObject({ campaign: null, savedEmail: steps });
+    // Once a mailbox exists, the role's campaign is created with that email.
+    f.state.accounts = ["first@example.test"];
+    const made = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(made).toMatchObject({ created: true });
+    const create = f.state.requests.find(
+      (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
+    );
+    expect(JSON.stringify(create?.body)).toContain("A role for you");
+  });
+
   it("add_shortlist_leads fills in the email an earlier contact lookup saved", async () => {
     const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });

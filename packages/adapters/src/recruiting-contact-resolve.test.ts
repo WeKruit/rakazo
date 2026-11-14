@@ -363,9 +363,12 @@ describe("first campaign email", () => {
     const { nativeInstantlyWrites } = await import("./instantly-native-writes.js");
     const activate = nativeInstantlyWrites.find((t) => t.name === "activate_campaign")!;
     expect(activate.description).toContain("confirmation card");
+    // Staging 11-14 gate: a new reply request got no card after an earlier one was discarded.
+    const reply = nativeInstantlyWrites.find((t) => t.name === "reply_to_email")!;
+    expect(reply.description).toContain("Every new request to reply gets its own call and card");
     const role = (key: string) => RECRUITING_DEFAULT_BOTS.find((b) => b.key === key)!;
     expect(role("main").instructions).toContain(
-      "call ensure_role_campaign, then activate_campaign with any people they named as recipients; its confirmation card is the one-time approval",
+      "then activate_campaign with any people they named as recipients (and its campaign_id); its confirmation card is the one-time approval",
     );
     expect(role("outreach").instructions).toContain(
       "then call activate_campaign (recipients: the named people), whose card lists every recipient and is the one confirmation",
