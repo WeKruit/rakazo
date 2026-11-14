@@ -365,6 +365,20 @@ function variationFor(seed) {
   return `Today you are ${mood}. ${combine} Say everything in your own words: never copy the wording of the goals, and do not follow them in the listed order where the order does not matter.`;
 }
 
+// Without this the customer reopened a page it had just seen and ran out of moves before its goals.
+function looked(turns) {
+  const pages = [
+    ...new Set(
+      turns
+        .filter((turn) => turn.move?.action === "look")
+        .map((turn) => turn.move.page + (turn.move.chat ? ` (${turn.move.chat})` : "")),
+    ),
+  ];
+  return pages.length
+    ? `\n\nPages you already looked at: ${pages.join(", ")}. Open one again only to check something that changed.`
+    : "";
+}
+
 async function simulate(journey, turns, view, cards, screen, tag, since) {
   // A reused account's pages still show earlier tests; only this session's messages count.
   const earlier =
@@ -375,7 +389,7 @@ async function simulate(journey, turns, view, cards, screen, tag, since) {
     screen
       ? `\n\nYour screen (${screen.url}):\n${screen.text}\n\nButtons and links on it: ${screen.buttons.join(" | ") || "(none)"}`
       : ""
-  }${earlier}\n\nYour moves so far: ${turns.length}. Your next move:`;
+  }${earlier}${looked(turns)}\n\nYour moves so far: ${turns.length}. Your next move:`;
   return parse(await model(screen ? UI_RULES : SIMULATOR_RULES, prompt, SIMULATOR));
 }
 
@@ -649,7 +663,7 @@ async function answered(rpc, card) {
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat (Kruit says the same thing again unprompted or posts a message twice; answering a new or overlapping question with the same fact is not a repeat), wrong language, false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role must have its key requirement confirmed before the first search (the product's fixed order): one short, concrete question with choices, asked right away, is the right move and counts as answered; a second question, a question about something already said, or a bare "opened the role" with no question is not.
 The simulated customer cannot complete an account sign-in (connecting Gmail or a calendar), so "I can't click that here" about a connection card is the test's limit, not Kruit's dead end. Judge whether Kruit showed the card, said in one step what connecting does, and kept the work for afterwards.
