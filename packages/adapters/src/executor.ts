@@ -241,6 +241,7 @@ import {
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
   calibrationRoundRepeats,
+  campaignSendCardHash,
   canvasOf,
   changeCanvas,
   claimRecruitingCrmImport,
@@ -418,6 +419,7 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import { connectorRead, describeSend, sendCard } from "./campaign-send-card.js";
 import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
@@ -504,13 +506,8 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import {
-  describeCampaignActivation,
-  describeReplyToEmail,
-  EMPTY_ACTIVATION_DISPLAY,
-  type InstantlyReplyDisplay,
-  readRoleCampaignBinding,
-} from "./instantly-native-writes.js";
+import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
+import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
 import {
   classifyInstantlyReplyReceipt,
@@ -10579,6 +10576,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 args.spec)
             )
               await runComputer.get();
+            // The recruiter approved the exact emails the card showed: if anyone's first email or
+            // the people changed since (sim 11-14: a second card re-saved them), nothing is sent.
+            const sendRoute = connectorCall?.route;
+            const shownCard = (
+              applied?.effect.result as { instantlyActivationCard?: unknown } | null
+            )?.instantlyActivationCard;
+            if (
+              from === "approved" &&
+              typeof shownCard === "string" &&
+              sendRoute?.connectorId === "mcp" &&
+              sendRoute.toolName === "native_instantly_activate_campaign" &&
+              sendRoute.resourceId &&
+              deps.connector
+            ) {
+              const { display } = await describeSend({
+                prisma: deps.prisma,
+                connector: deps.connector,
+                context,
+                route: { ...sendRoute, resourceId: sendRoute.resourceId },
+                args,
+                threadId: thread.id,
+                spaceId: run.spaceId,
+                executionId,
+              });
+              if (campaignSendCardHash(sendCard(display, args.send_now === true)) !== shownCard)
+                return {
+                  error:
+                    "Nothing was sent: the emails or people changed after this card was shown, so it no longer shows what would go out. Tell the recruiter in one line, then call activate_campaign again; its new card shows the current emails.",
+                  dispatched: false,
+                };
+            }
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
             let claimed: boolean;
             try {
@@ -10828,9 +10856,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? result
                 : uncertainEffectResult(name);
             }
-            let instantlyActivation:
-              | Awaited<ReturnType<typeof describeCampaignActivation>>
-              | undefined;
+            let instantlyActivation: InstantlyActivationDisplay | undefined;
             let instantlyReply: InstantlyReplyDisplay | undefined;
             if (
               approvalRoute?.connectorId === "mcp" &&
@@ -10841,52 +10867,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deps.connector
             ) {
               // Enrich the one-time card with live campaign facts via read-only native tools.
-              let campaignId =
-                typeof args.campaign_id === "string" ? (args.campaign_id as string) : null;
-              let eaccount: string | null = null;
-              let roleBinding: Awaited<ReturnType<typeof readRoleCampaignBinding>> = null;
-              if (approvalRoute.toolName === "native_instantly_activate_campaign") {
-                const current = await deps.prisma.thread.findUnique({
-                  where: { id: thread.id },
-                  select: { activeRecruitingRoleId: true },
-                });
-                const binding = current?.activeRecruitingRoleId
-                  ? await readRoleCampaignBinding(
-                      deps.prisma,
-                      run.spaceId,
-                      approvalRoute.resourceId,
-                      current.activeRecruitingRoleId,
-                    )
-                  : null;
-                // The role's own record (lead types, people waiting to be sent) applies only to its campaign.
-                if (binding && (!campaignId || campaignId === binding.campaignId)) {
-                  campaignId = binding.campaignId;
-                  eaccount = binding.eaccount ?? null;
-                  roleBinding = binding;
-                }
-              }
-              const connector = deps.connector;
-              const read = async (tool: string, readArgs: Record<string, unknown>) => {
-                for await (const event of connector.execute(
-                  {
-                    tool,
-                    route: { ...approvalRoute, toolName: tool },
-                    args: readArgs,
-                    executionId: `${executionId}:${tool}`,
-                  },
-                  context,
-                )) {
-                  if (event.type === "result") {
-                    const obj = (value: unknown) =>
-                      value && typeof value === "object" && !Array.isArray(value)
-                        ? (value as Record<string, unknown>)
-                        : undefined;
-                    return obj(obj(obj(event.data)?.structuredContent)?.result);
-                  }
-                  if (event.type === "error") return undefined;
-                }
-                return undefined;
-              };
+              let campaignId: string | null = null;
+              const read = connectorRead(deps.connector, approvalRoute, executionId, context);
               if (
                 ["native_instantly_reply_to_email", "reply_to_email"].includes(
                   approvalRoute.toolName,
@@ -10909,20 +10891,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     : args,
                 );
               else
-                instantlyActivation = campaignId
-                  ? await describeCampaignActivation(
-                      read,
-                      campaignId,
-                      eaccount,
-                      roleBinding,
-                      Array.isArray(args.recipients)
-                        ? args.recipients.filter(
-                            (entry): entry is string => typeof entry === "string",
-                          )
-                        : undefined,
-                      args.send_now === true,
-                    )
-                  : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
+                ({ campaignId, display: instantlyActivation } = await describeSend({
+                  prisma: deps.prisma,
+                  connector: deps.connector,
+                  context,
+                  route: { ...approvalRoute, resourceId: approvalRoute.resourceId },
+                  args,
+                  threadId: thread.id,
+                  spaceId: run.spaceId,
+                  executionId,
+                }));
               // The same person never gets a second first email from another campaign unless the
               // recruiter asked: without resend the send is refused, with it the card shows when.
               const repeats =
@@ -10975,11 +10953,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         spaceId: run.spaceId,
                         effectId: applied!.effect.id,
                         campaignId: campaignId!,
-                        card: {
-                          sendNow: args.send_now === true,
-                          recipients: instantlyActivation!.recipients,
-                          firstEmail: instantlyActivation!.firstEmail ?? null,
-                        },
+                        card: sendCard(instantlyActivation!, args.send_now === true),
                       }),
                     )
                   : undefined;
