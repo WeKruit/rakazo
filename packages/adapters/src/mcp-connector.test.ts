@@ -4147,6 +4147,8 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       // Saved contact lookup receipts.
       $queryRaw: vi.fn(async () => state.lookups),
+      $executeRaw: vi.fn(async () => 1),
+      $transaction: vi.fn(async (work: (tx: unknown) => unknown) => work(prisma)),
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
