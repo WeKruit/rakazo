@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import type { PrismaClient, RecruiterSeen, ThreadEvents } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -20,7 +20,7 @@ const db = vi.hoisted(() => ({
   candidates: vi.fn(),
   sources: vi.fn(),
   round: vi.fn(),
-  seen: vi.fn(async () => ({ latestRound: null, people: new Map() })),
+  seen: vi.fn(async (): Promise<RecruiterSeen> => ({ latestRound: null, people: new Map() })),
 }));
 const overview = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./recruiting-account.js", () => ({ readRecruitingAccountView: overview.read }));
@@ -634,14 +634,24 @@ describe("native saved candidate reads", () => {
       nextCursor: null,
     });
     db.seen.mockResolvedValueOnce({
-      latestRound: { round: 1, recordedAt: new Date("2026-11-14T03:00:00Z"), people: 10, accepted: false },
+      latestRound: {
+        round: 1,
+        recordedAt: new Date("2026-11-14T03:00:00Z"),
+        people: 10,
+        accepted: false,
+      },
       people: new Map([
         ["shown", { round: 1, seenBeforeLatestRound: true }],
         ["rejected", { round: 1, seenBeforeLatestRound: true, verdict: "not_fit" }],
         ["fresh", { seenBeforeLatestRound: false }],
       ]),
     });
-    const result = await executeRecruitingCandidatesTool(f.deps, trusted, { operation: "list" }, context);
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list" },
+      context,
+    );
     expect(db.seen).toHaveBeenCalledWith(f.deps.prisma, actor, {
       roleId: "role",
       candidateKeys: ["shown", "rejected", "fresh"],
@@ -650,7 +660,12 @@ describe("native saved candidate reads", () => {
       latestRound: { round: 1, people: 10, accepted: false },
       items: [
         { candidateKey: "shown", shownInRound: 1, alreadySeen: true },
-        { candidateKey: "rejected", shownInRound: 1, alreadySeen: true, recruiterVerdict: "not_fit" },
+        {
+          candidateKey: "rejected",
+          shownInRound: 1,
+          alreadySeen: true,
+          recruiterVerdict: "not_fit",
+        },
         { candidateKey: "fresh" },
       ],
     });
