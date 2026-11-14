@@ -5951,7 +5951,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? undefined
                   : publishMessage(deps, run, "bot", [{ kind: "text", text: line }]),
               )
-              .then(() => {
+              .then((posted) => {
+                // Gate 7503e6bf: 「收到，马上处理。」 and the answer a second later. The answer
+                // takes this line's place.
+                if (posted?.id) quickReplyMessageId = posted.id;
                 steeringQuickReplies.set(item.messageId, line);
                 getLogger().info("run.steering_quick_reply", { runId });
               })
@@ -14032,14 +14035,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await flushProgress();
             await publishMidTurnNarration();
             fixedAckOpen = false;
-            await publishMessage(
-              deps,
-              run,
-              "bot",
-              [{ kind: "text", text }],
-              true,
-              userProgressClientNonce(run.id, midTurnProgressCount++),
-            );
+            // Gate 7503e6bf: a first line, then this update with the real answer. It takes the
+            // line's place like any other progress note.
+            const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
+            if (!(await replaceLatestReply([{ kind: "text", text }], progressNonce)))
+              quickReplyMessageId = (
+                await publishMessage(
+                  deps,
+                  run,
+                  "bot",
+                  [{ kind: "text", text }],
+                  true,
+                  progressNonce,
+                )
+              )?.id;
             midTurnUserTexts.push(text);
             publishedMidTurnUserMessage = true;
             return finish(
