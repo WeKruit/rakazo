@@ -518,6 +518,7 @@ import {
 } from "./instantly-reply.js";
 import {
   asksSenderCompanyName,
+  CLAIMS_CONNECTED,
   isSenderRead,
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
@@ -690,6 +691,8 @@ import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
   newRoleElsewhere,
   newRoleNote,
+  otherRefNamed,
+  otherRoleNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -6446,8 +6449,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const nudgeless = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
           // The question card that follows asks the question; the text keeps only what leads up to it.
+          // A line saying the mailbox is connected, just before the card asking to connect it.
           const narration =
-            hideVendors && progressInOtherLanguage(written, quickReplyText)
+            hideVendors &&
+            (progressInOtherLanguage(written, quickReplyText) ||
+              (nextTool === "request_connection" && CLAIMS_CONNECTED.test(written)))
               ? ""
               : hideVendors && nextTool === "ask_user"
                 ? beforeCardQuestion(written)
@@ -13923,6 +13929,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const otherRef = newRoleElsewhere(lastRecruiterText, target.title);
             if (otherRef && tools.some((tool) => tool.name === "start_role"))
               return finish({ error: newRoleNote(otherRef) });
+            // The recruiter's latest messages name another saved role by its ref.
+            const namedRef = otherRefNamed(recruiterTexts, target.title);
+            const namedRole = namedRef
+              ? await deps.prisma.recruitingRole
+                  .findFirst({
+                    where: {
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      archivedAt: null,
+                      title: { contains: namedRef, mode: "insensitive" },
+                    },
+                    select: { id: true, title: true },
+                  })
+                  .catch(() => null)
+              : null;
+            if (namedRef && namedRole)
+              return finish({ error: otherRoleNote(namedRef, namedRole.title ?? "", namedRole.id) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
