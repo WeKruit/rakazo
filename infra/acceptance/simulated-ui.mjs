@@ -9,6 +9,12 @@ import path from "node:path";
 import { sleep } from "./real-user-session.mjs";
 
 const { chromium } = createRequire(import.meta.url)("playwright");
+/** Clicks, or false when the control never becomes clickable within 10 s. */
+const press = (target) =>
+  target
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
 let browser;
 let catalog;
 /** A card button's label as the Chinese page shows it (from the web app's own catalog). */
@@ -133,7 +139,8 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
         .or(page.getByRole("link", { name, exact: true }))
         .first();
       if (!(await target.isVisible().catch(() => false))) return false;
-      await target.click();
+      // A control that is covered or never becomes clickable is the page's problem, not a crash.
+      if (!(await press(target))) return false;
       await settle();
       return true;
     },
@@ -142,7 +149,7 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
       for (const name of [label, inChinese(label)].filter(Boolean)) {
         const target = page.getByRole("button", { name, exact: true }).last();
         if (await target.isVisible().catch(() => false)) {
-          await target.click();
+          if (!(await press(target))) return false;
           await settle();
           return true;
         }
@@ -155,10 +162,10 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
           })
           .last();
         if (await option.isVisible().catch(() => false)) {
-          await option.getByRole("checkbox").first().click();
+          if (!(await press(option.getByRole("checkbox").first()))) return false;
           const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
           if (!(await send.isEnabled().catch(() => false))) return false;
-          await send.click();
+          if (!(await press(send))) return false;
           await settle();
           return true;
         }
@@ -181,7 +188,7 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
       await box.fill(text);
       const send = page.getByRole("button", { name: /^(Send answer|发送回答)$/ }).last();
       if (!(await send.isEnabled().catch(() => false))) return false;
-      await send.click();
+      if (!(await press(send))) return false;
       await settle();
       return true;
     },
