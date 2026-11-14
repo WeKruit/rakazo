@@ -23,7 +23,7 @@ import {
   ownEmailSequences,
   ownFirstEmails,
 } from "./campaign-own-emails.js";
-import { confirmedSends } from "./campaign-send-record.js";
+import { confirmedSends, sendingElsewhere } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
@@ -2615,6 +2615,18 @@ async function sendCampaign(
     input.send_now === true,
   );
   if ("refusal" in plan) throw new Error(plan.refusal);
+  if (input.resend !== true) {
+    const elsewhere = await sendingElsewhere(prisma, (id) => rest("GET", `/campaigns/${id}`), {
+      spaceId: context.spaceId,
+      serverId,
+      campaignId,
+      emails: plan.recipients.map((person) => person.email),
+    });
+    if (elsewhere.size)
+      throw new Error(
+        `Nothing was sent: ${[...elsewhere].map(([email, name]) => `${email} already gets a first email from ${name}`).join("; ")}, another of this account's campaigns, which is sending or has sent. Tell the recruiter in one line; only if they ask to email them again, call activate_campaign again with resend: true.`,
+      );
+  }
   // A confirmed send goes out now: hours the recruiter never asked for, or any hours on a
   // send-now, are widened first. The provider edits only paused campaigns, so a sending one is
   // paused for it and resumed below.
@@ -3496,7 +3508,8 @@ export async function runInstantlyWrite(
       // while the card waited went out 0.25 s later in place of the one the card showed).
       const input = ActivateCampaignInput.parse(args);
       const lock = roleLock(context, serverId, (await activeRoleId(prisma, context)) ?? "");
-      return oneAtATime(prisma, lock, () =>
+      // Sends of different roles one at a time too, so each sees what the other already sent.
+      return oneAtATime(prisma, [lock, ["instantly-send", context.spaceId, serverId]], () =>
         activateCampaign(prisma, rest, context, serverId, input, Boolean(owned)),
       );
     }

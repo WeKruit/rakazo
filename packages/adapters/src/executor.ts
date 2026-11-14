@@ -697,6 +697,8 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
+  roleGroupId,
+  roleStartKey,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -7348,9 +7350,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Without the check the question is asked as before.
           }
           if (!newer) return undefined;
-          return (Array.isArray(newer.blocks) ? (newer.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
-            .join("\n");
+          // A relayed brief (bot_message_received) has none of the person's words: not theirs.
+          return (
+            (Array.isArray(newer.blocks) ? (newer.blocks as MessageBlock[]) : [])
+              .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+              .join("\n") || undefined
+          );
         };
         /** The person's newest message, when another turn that is still working answers it. */
         const newestMessageAnsweredByActiveTurn = async () => {
@@ -7375,9 +7380,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Without the check the tool runs as before.
           }
           if (!newest?.sourceRuns?.length) return undefined;
-          return (Array.isArray(newest.blocks) ? (newest.blocks as MessageBlock[]) : [])
-            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
-            .join("\n");
+          // Staging 11-14: the newest "message" was Kruit's relayed brief, answered by the very
+          // turn this stage belongs to, so a retry to Outreach was refused as 'newer message ("")'.
+          return (
+            (Array.isArray(newest.blocks) ? (newest.blocks as MessageBlock[]) : [])
+              .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+              .join("\n") || undefined
+          );
         };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
@@ -14144,8 +14153,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               select: { botId: true },
               orderBy: { createdAt: "asc" },
             });
-            // One role per call, even when the call is retried.
-            const groupId = `${KRUIT_ROLE_GROUP_PREFIX}${createHash("sha256").update(effectKey).digest("hex").slice(0, 24)}`;
+            const roleKey = await roleStartKey(deps.prisma, {
+              spaceId: run.spaceId,
+              userId: run.userId,
+              threadId: run.threadId,
+              title,
+              fallback: effectKey,
+            });
+            const groupId = roleGroupId(roleKey);
             const group = await deps.prisma.$transaction((tx) =>
               createGroupInTransaction(
                 tx,
@@ -14172,7 +14187,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const started = await startRoleFromRecruiterMessage(deps, run, {
               threadId: group.thread.id,
               botId: bot.id,
-              deliveryKey: effectKey,
+              deliveryKey: roleKey,
               earlier: request,
             });
             if (!started) {
@@ -14192,7 +14207,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   target_label: `${title} team`,
                   message: `New role: ${title}. The recruiter's requirements, in their words:\n\n${request}`,
                   intent: "request",
-                  deliveryKey: effectKey,
+                  deliveryKey: roleKey,
                 },
               );
               if (!sent.ok) return finish({ error: sent.error });

@@ -80,16 +80,17 @@ export async function describeSend(input: {
   return { campaignId, display: misaddressed ? { ...display, refusal: misaddressed } : display };
 }
 
+const lines = (body: string) =>
+  body
+    .replace(/<(br|\/p|\/div)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 /** An email's greeting: the start of its first line, as plain text. */
-const greeting = (body: string) =>
-  (
-    body
-      .replace(/<(br|\/p|\/div)[^>]*>/gi, "\n")
-      .replace(/<[^>]+>/g, "")
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) ?? ""
-  ).slice(0, 40);
+const greeting = (body: string) => (lines(body)[0] ?? "").slice(0, 40);
+/** The email's last line, where the sender signs. */
+const signature = (body: string) => lines(body).at(-1) ?? "";
 
 const firstName = (name: string | null) => name?.trim().split(/\s+/)[0] ?? "";
 
@@ -104,11 +105,21 @@ const names = (line: string, name: string) =>
  * send, such as the email written for Noah going to Ada: a card must show each person their own.
  */
 export function misaddressedEmail(display: InstantlyActivationDisplay): string | undefined {
-  const people = display.recipients.map((person) => ({
-    person,
-    first: firstName(person.name),
-    opening: greeting((person.firstEmail ?? display.firstEmail)?.body ?? ""),
-  }));
+  const people = display.recipients.map((person) => {
+    const body = (person.firstEmail ?? display.firstEmail)?.body ?? "";
+    return { person, first: firstName(person.name), opening: greeting(body), body };
+  });
+  // Signed with a recipient's full name: the email reads as if they sent it (sim 11-14).
+  const signed = people.flatMap(({ person, body }) => {
+    const by = people.find(
+      (entry) =>
+        entry.person.name &&
+        signature(body).toLowerCase() === entry.person.name.trim().toLowerCase(),
+    );
+    return by
+      ? [`${person.name ?? person.email}'s email is signed "${by.person.name}", a recipient's name`]
+      : [];
+  });
   const wrong = people.flatMap(({ person, first, opening }) => {
     if (!first || !opening || names(opening, first)) return [];
     const other = people.find(
@@ -121,8 +132,9 @@ export function misaddressedEmail(display: InstantlyActivationDisplay): string |
       ? [`${person.name ?? person.email}'s email greets ${other.first} ("${opening}")`]
       : [];
   });
-  return wrong.length
-    ? `Nothing was sent and no card was shown: ${wrong.join("; ")}. Save each of them their own email with ensure_role_campaign (an email per person, greeting them by their own name), then call activate_campaign again.`
+  const all = [...wrong, ...signed];
+  return all.length
+    ? `Nothing was sent and no card was shown: ${all.join("; ")}. Save each of them their own email with ensure_role_campaign (an email per person, greeting them by their own name and signed by the recruiter), then call activate_campaign again.`
     : undefined;
 }
 
