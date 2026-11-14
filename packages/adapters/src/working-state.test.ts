@@ -229,6 +229,7 @@ describe("loadWorkingState", () => {
       )
     ).text;
     expect(own).toContain("- This role's saved email for this role (2 steps");
+    expect(own).not.toContain("Saved emails: none");
   });
 
   it("keeps the role last handed work in focus until the recruiter names another, and says when nothing was done", async () => {
@@ -252,6 +253,9 @@ describe("loadWorkingState", () => {
       'Role in focus: "Agent Engineer Ref 0153" (roleId role-1), the role this conversation last handed work to',
     );
     expect(state.text).toContain("nothing saved, sent or changed by a tool");
+    expect(state.text).toContain(
+      "Saved emails: none on record for the roles below. An email written only in chat",
+    );
   });
 
   it("gives a role conversation the recruiter's language from anywhere in the account", async () => {
