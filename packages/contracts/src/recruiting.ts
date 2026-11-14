@@ -1118,6 +1118,12 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
+    checks: z
+      .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
+      .optional()
+      .describe(
+        "candidateKey → { criterionId → verdict } for every hard criterion of the role (the criteria in the role, including those saved from the recruiter's feedback): \"shown\" when the person's row shows it, \"unknown\" when the row says nothing about it, \"fails\" when the row contradicts it. The round's \"not verified\" notes are written from the unknown verdicts.",
+      ),
     unverified: z
       .record(
         RecruitingId,
