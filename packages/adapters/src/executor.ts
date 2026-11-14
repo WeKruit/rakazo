@@ -489,6 +489,7 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
+import { globalRoleWriteRefusal } from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -9440,6 +9441,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             readExternalText: runReadExternalText,
           });
           if (memoryRefusal) return { error: memoryRefusal };
+          if (
+            connectorCall.route?.connectorId === "mcp" &&
+            thread.groupId?.startsWith("recruiting-global-")
+          ) {
+            const roleWrite = await globalRoleWriteRefusal(deps.prisma, run, {
+              toolName: connectorCall.route.toolName,
+              args: connectorCall.args,
+            });
+            if (roleWrite) return { error: roleWrite };
+          }
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
             nativeCrmRoute?.connectorId === "mcp" &&
