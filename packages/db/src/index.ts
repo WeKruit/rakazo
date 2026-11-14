@@ -33,6 +33,7 @@ export * from "./queued-messages.js";
 export * from "./recruiting.js";
 export * from "./recruiting-analytics.js";
 export * from "./recruiting-role-delete.js";
+export * from "./recruiting-round-repeats.js";
 export * from "./recruiting-search-quality.js";
 export * from "./recruiting-bootstrap.js";
 export * from "./recruiting-candidate-notes.js";
