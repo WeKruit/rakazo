@@ -2636,6 +2636,16 @@ msgstr "教育经历"
 msgid "Email"
 msgstr "邮箱"
 
+#. placeholder {0}: index + 1
+#. placeholder {1}: step.delay_days
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email {0}, day {1}"
+msgstr "第 {0} 封邮件，第 {1} 天"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email 1"
+msgstr "第 1 封邮件"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email content"
 msgstr "邮件内容"
@@ -5708,6 +5718,10 @@ msgstr "已保存的候选人"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Saved correspondence"
 msgstr "已保存的往来邮件"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Saved email"
+msgstr "已保存的邮件"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"

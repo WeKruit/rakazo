@@ -5085,6 +5085,9 @@ describe("local native Instantly campaign and lead tools", () => {
     // Read back without a mailbox: the saved email, not an error.
     const shown = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(shown).toMatchObject({ campaign: null, savedEmail: steps });
+    // The role's draft read shows it too: staging 11-14 said "nothing saved" after three saves.
+    const draft = f.result(await f.run("get_role_draft", { role_id: "role-1" }));
+    expect(draft).toMatchObject({ campaign: null, savedEmail: steps });
     // Once a mailbox exists, the role's campaign is created with that email.
     f.state.accounts = ["first@example.test"];
     const made = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));

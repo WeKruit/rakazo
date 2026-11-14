@@ -59,6 +59,8 @@ export const RecruitingSequenceOutputSchema = z.strictObject({
   mailboxes: z.array(z.string()),
   unconfirmedDrafts: z.number().int().nonnegative().optional(),
   campaigns: z.array(z.strictObject({ id: z.uuid(), name: z.string() })).optional(),
+  /** The role's email saved before any sending mailbox existed; it becomes the campaign's. */
+  savedEmail: z.array(RecruitingSequenceStepSchema).optional(),
   campaign: z
     .strictObject({
       id: z.uuid(),
