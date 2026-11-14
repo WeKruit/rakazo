@@ -16,7 +16,8 @@ export type RoleReference =
   /** They open a new role by a ref no saved role has. */
   | { kind: "new"; ref: string };
 
-const REF = /\bref\.?\s*#?\s*([a-z0-9-]*\d[a-z0-9-]*)/i;
+// "Ref 0733", or in Chinese 「编号0733」「岗位编号 0733」.
+const REF = /(?:\bref\.?|编号)\s*#?\s*([a-z0-9-]*\d[a-z0-9-]*)/i;
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
 
 // Words in many role titles say nothing about which one is meant.

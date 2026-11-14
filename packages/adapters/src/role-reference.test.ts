@@ -22,6 +22,10 @@ describe("referredRole", () => {
     const text = "新岗位 Senior Data Engineer，Seattle，ref 0232，写首封邮件，两个都发";
     expect(referredRole([text], roles)).toEqual({ kind: "new", ref: "0232" });
     expect(referredRole(["ref 0232 怎么样了"], roles)).toBeUndefined();
+    // Sim 11-14 2bb9124c: 「编号0733」 went into the saved Seattle role (ref 0303 here).
+    const numbered = "新岗位，西雅图Senior Data Engineer，编号0733。两个都发";
+    expect(referredRole([numbered], roles)).toEqual({ kind: "new", ref: "0733" });
+    expect(referredRole(["编号 0303 发了几封"], roles)).toMatchObject({ role: { id: "r303" } });
   });
 
   it("matches a title by its distinctive words, not generic ones", () => {
