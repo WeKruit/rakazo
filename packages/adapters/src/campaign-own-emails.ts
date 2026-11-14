@@ -14,8 +14,7 @@ const plain = (html: string) =>
     .replace(/&amp;/g, "&")
     .trim();
 
-export const OWN_EMAIL_STEP =
-  "(each recipient's own first email, saved on their lead; see firstEmails. Not blank.)";
+export const OWN_EMAIL_STEP = "Each person's own first email";
 
 /** The provider sequence with its variable-only first step named for what it is. */
 export function ownEmailSequences(sequences: unknown): unknown {
