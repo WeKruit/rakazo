@@ -26,7 +26,7 @@ export function templateOnlyRequest(text: string): boolean {
 
 /** Model-facing: start_role refused for a template-only request. */
 export const TEMPLATE_NOT_ROLE_NOTE =
-  "Not opened: the recruiter asked for an email template, not for people. Write the template in your reply now, from the recruiter to the candidate with {{firstName}} and the role details they gave, save it to memory as their outreach template for this role, and say in one line that it is saved and that asking for it by role name brings it back. Open a role only when they ask to find people.";
+  "Not opened: the recruiter asked for an email template, not for people. Write the template in your reply now, from the recruiter to the candidate with {{firstName}} and the role details they gave, and keep it where it can be found: for a saved role they name, save it to that role with ensure_role_campaign and say it is on that role's Sequence tab; with no saved role, save it to memory and say it is kept for when they ask for it by role name, naming no page. Open a role only when they ask to find people.";
 
 /** The parts of a recruiter's own message that a new role conversation starts from. */
 function recruiterBlocks(message: {
