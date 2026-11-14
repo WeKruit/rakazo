@@ -1271,6 +1271,66 @@ describe("stage report while the person's newest message is being answered", () 
   });
 });
 
+describe("stage report of a finished request", () => {
+  // Gate 91a438c4: the teammate posted the template and reported back, and Main sent it the same
+  // brief twice more, so one request got three answers.
+  it("does not hand the same brief back to the teammate that just finished it", async () => {
+    const f = fixture("report-same-brief");
+    const report = {
+      id: "stage-report",
+      seq: 3,
+      role: "bot",
+      botId: "bot-2",
+      runId: "teammate-run",
+      createdAt: new Date(1),
+      blocks: [
+        {
+          kind: "handoff",
+          fromBotId: "bot-2",
+          toBotId: "bot-1",
+          text: "Finished the stage you handed me.",
+          hop: 1,
+          report: "completed",
+        },
+      ],
+    };
+    const brief =
+      "Goal: 帮我写一封面试后跟进邮件的模板. Write one general follow-up email template.";
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({ id: "group-1", name: "Team", members: [] })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
+    f.prisma.message.findMany.mockResolvedValue([report]);
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { where?: { blocks?: unknown } }) =>
+      query?.where?.blocks
+        ? {
+            blocks: [
+              { kind: "handoff", fromBotId: "bot-1", toBotId: "bot-2", text: brief, hop: 0 },
+            ],
+          }
+        : null) as unknown as typeof findFirst);
+    f.setCalls([
+      {
+        name: "handoff_to_bot",
+        args: {
+          bot_id: "bot-2",
+          message:
+            "Goal: 帮我写一封面试后跟进邮件的模板. Write a general follow-up email template.",
+        },
+        executionId: "h",
+      },
+    ]);
+    await f.run();
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("just finished") });
+    expect(handoffToGroupBot).not.toHaveBeenCalled();
+  });
+});
+
 describe("computer that will not start", () => {
   it("fails the turn with the reset-the-computer notice instead of the provider error", async () => {
     const f = fixture("computer-start-failed");

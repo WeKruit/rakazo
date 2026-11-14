@@ -14545,6 +14545,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
               intakeHandoffRefused = true;
               return finish({ error: INTAKE_ASK_FIRST });
             }
+            // Gate 91a438c4: the teammate posted the template and reported back, and the same
+            // brief went to it twice more, so one request got three answers.
+            const handback = (
+              historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks ?? []
+            ).find(
+              (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
+                block.kind === "handoff" &&
+                block.toBotId === bot.id &&
+                block.report === "completed",
+            );
+            if (handback) {
+              const asked = await deps.prisma.message.findFirst({
+                where: {
+                  threadId: thread.id,
+                  botId: bot.id,
+                  blocks: { array_contains: [{ kind: "handoff", toBotId: handback.fromBotId }] },
+                },
+                orderBy: { seq: "desc" },
+                select: { blocks: true },
+              });
+              const brief = ((asked?.blocks ?? []) as MessageBlock[]).find(
+                (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
+                  block.kind === "handoff" && block.toBotId === handback.fromBotId,
+              )?.text;
+              if (restatesUpdate(String(args.message ?? ""), brief))
+                return finish({
+                  error: `Not handed off: this is the request it just finished, and its result is shown above. Reply exactly ${NO_RESPONSE}, or hand it only the concrete part that is still undone.`,
+                });
+            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
