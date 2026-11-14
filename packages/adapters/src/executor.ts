@@ -5182,10 +5182,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!text) return;
               // The card this run asked before the answer is not a reply to it, and a row that
               // only shows the run's steps says nothing to the person yet.
+              // Another run of this bot may have acknowledged the same message (it was steered
+              // into a run still finishing): one line is enough.
               const written = await deps.prisma.message.findMany({
                 where: {
                   threadId: thread.id,
-                  runId,
+                  botId: bot.id,
                   role: "bot",
                   createdAt: { gte: turnStartedAt },
                 },
@@ -5848,6 +5850,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // long search. It gets its own short reply now, whether the run reads it first or the
         // watch below finds it unread; the run is told not to acknowledge it again.
         if (quickRepliesOn) {
+          const answeredSince = async (messageId: string) => {
+            const sent = await deps.prisma.message.findUnique({
+              where: { id: messageId },
+              select: { createdAt: true },
+            });
+            if (!sent) return false;
+            const later = await deps.prisma.message.findMany({
+              where: {
+                threadId: thread.id,
+                botId: bot.id,
+                role: "bot",
+                createdAt: { gt: sent.createdAt },
+              },
+              select: { blocks: true },
+              take: 5,
+            });
+            return later.some((message) => saysSomething(message.blocks as MessageBlock[]));
+          };
           const started = new Set<string>();
           replyToSteering = (item) => {
             if (started.has(item.messageId)) return true;
@@ -5866,7 +5886,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return true;
             }
             fixedAckOpen = fixedAckSent = true;
-            void publishMessage(deps, run, "bot", [{ kind: "text", text: line }])
+            // A run started for the same message may have answered it already (11-14 sim: 「好，这就
+            // 处理。」 then 「收到，马上处理。」 a second later).
+            void answeredSince(item.messageId)
+              .then((answered) =>
+                answered
+                  ? undefined
+                  : publishMessage(deps, run, "bot", [{ kind: "text", text: line }]),
+              )
               .then(() => {
                 steeringQuickReplies.set(item.messageId, line);
                 getLogger().info("run.steering_quick_reply", { runId });
