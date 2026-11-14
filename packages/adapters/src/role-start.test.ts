@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { roleStartKey, startRoleFromRecruiterMessage, templateOnlyRequest } from "./role-start.js";
+import {
+  roleGroupId,
+  roleOpenedFromLatestMessage,
+  roleStartKey,
+  startRoleFromRecruiterMessage,
+  templateOnlyRequest,
+} from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
   withTransactionRetry: (fn: () => unknown) => fn(),
@@ -256,5 +262,33 @@ describe("roleStartKey", () => {
       chatGroup: { findFirst: vi.fn(async () => null) },
     };
     expect(await roleStartKey(none as never, { ...where, title: "X" })).toBe("effect-1");
+  });
+});
+
+describe("roleOpenedFromLatestMessage", () => {
+  const prisma = {
+    message: {
+      findMany: vi.fn(async () => [
+        {
+          id: "m-recruiter",
+          role: "user",
+          botId: null,
+          clientNonce: null,
+          externalTranscriptFor: null,
+          blocks: [{ kind: "text", text: "新岗位 Senior Data Engineer，first email写好发" }],
+        },
+      ]),
+    },
+  };
+
+  it("knows the role start_role opened from this message already has it (staging 11-14)", async () => {
+    // A follow-up turn delegated the same message again; two runs made two Send cards.
+    const role = { groupId: roleGroupId("m-recruiter"), title: "Senior Data Engineer" };
+    expect(await roleOpenedFromLatestMessage(prisma as never, "t-global", role)).toBe(true);
+  });
+
+  it("delegates to a role opened from an earlier message", async () => {
+    const role = { groupId: roleGroupId("m-earlier"), title: "Senior Data Engineer" };
+    expect(await roleOpenedFromLatestMessage(prisma as never, "t-global", role)).toBe(false);
   });
 });
