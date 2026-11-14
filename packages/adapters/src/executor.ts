@@ -17656,8 +17656,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // is still the newest message, the answer takes its place.
           if (
             quickReplyMessageId &&
-            blocks.length > 0 &&
-            blocks.every((block) => block.kind === "text") &&
+            // Gate b19c9913: an answer that read records first carries its steps row as well.
+            blocks.some((block) => block.kind === "text") &&
+            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
             (
               await deps.prisma.message.findFirst({
                 where: { threadId: thread.id },

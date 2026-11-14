@@ -587,6 +587,20 @@ describe("quick reply", () => {
     expect(texts.some((text) => /No response/.test(text ?? ""))).toBe(false);
   });
 
+  // Gate b19c9913: an answer that read the records first still came as a second message.
+  it("puts an answer that used tools in place of the first line", async () => {
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "No roles are saved yet.",
+      finalText: "No roles are saved yet. Send me a job description to start.",
+      quickReplies: true,
+      events: [{ type: "tool", name: "shell_exec", args: { command: "t1" }, executionId: "t1" }],
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "published-final" } }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
   // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
   // showed for 18 s.
   it("shows the fixed first line when the written one is unusable", async () => {
