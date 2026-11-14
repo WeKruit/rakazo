@@ -20,6 +20,7 @@ const db = vi.hoisted(() => ({
   candidates: vi.fn(),
   sources: vi.fn(),
   round: vi.fn(),
+  seen: vi.fn(async () => ({ latestRound: null, people: new Map() })),
 }));
 const overview = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./recruiting-account.js", () => ({ readRecruitingAccountView: overview.read }));
@@ -39,6 +40,7 @@ vi.mock("@rakazo/db", async (original) => ({
   listRecruitingCandidates: db.candidates,
   listRecruitingCandidateSources: db.sources,
   readRecruitingCalibrationRound: db.round,
+  readRecruiterSeen: db.seen,
 }));
 
 const actor: Actor = {
@@ -618,6 +620,41 @@ describe("native saved candidate reads", () => {
     expect(db.roleId).toHaveBeenCalledWith(f.deps.prisma, actor, { threadId: "thread" });
     expect(db.workspace).not.toHaveBeenCalled();
     expect(db.candidates).toHaveBeenCalledWith(f.deps.prisma, actor, { roleId: "role" });
+  });
+
+  it("marks each listed person with what the recruiter already saw of them", async () => {
+    // Staging 11-14: lists, rounds and replies each guessed who was already shown, and a pool page
+    // brought back people from round one and people the recruiter had turned down.
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce("role");
+    db.candidates.mockResolvedValue({
+      roleId: "role",
+      items: [{ candidateKey: "shown" }, { candidateKey: "rejected" }, { candidateKey: "fresh" }],
+      total: 3,
+      nextCursor: null,
+    });
+    db.seen.mockResolvedValueOnce({
+      latestRound: { round: 1, recordedAt: new Date("2026-11-14T03:00:00Z"), people: 10, accepted: false },
+      people: new Map([
+        ["shown", { round: 1, seenBeforeLatestRound: true }],
+        ["rejected", { round: 1, seenBeforeLatestRound: true, verdict: "not_fit" }],
+        ["fresh", { seenBeforeLatestRound: false }],
+      ]),
+    });
+    const result = await executeRecruitingCandidatesTool(f.deps, trusted, { operation: "list" }, context);
+    expect(db.seen).toHaveBeenCalledWith(f.deps.prisma, actor, {
+      roleId: "role",
+      candidateKeys: ["shown", "rejected", "fresh"],
+    });
+    expect(result).toMatchObject({
+      latestRound: { round: 1, people: 10, accepted: false },
+      items: [
+        { candidateKey: "shown", shownInRound: 1, alreadySeen: true },
+        { candidateKey: "rejected", shownInRound: 1, alreadySeen: true, recruiterVerdict: "not_fit" },
+        { candidateKey: "fresh" },
+      ],
+    });
+    expect((result as { items: object[] }).items[2]).not.toHaveProperty("alreadySeen");
   });
 
   it("reads a named role's round from the global conversation", async () => {
