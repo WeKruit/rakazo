@@ -7,6 +7,25 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { askedTemplate } from "./turn-report.js";
+
+/**
+ * A request for an email template only, with no ask to find people: simulated 11-14, "write me a
+ * short first outreach email … and keep it as my template" opened a role whose first card asked
+ * about hybrid attendance, and the draft never came.
+ */
+export function templateOnlyRequest(text: string): boolean {
+  return (
+    askedTemplate(text) &&
+    !/\b(?:find|search|source|sourcing|look for|candidates? like)\b|找人|找候选|搜|寻访|物色|찾아|検索|探して/i.test(
+      text,
+    )
+  );
+}
+
+/** Model-facing: start_role refused for a template-only request. */
+export const TEMPLATE_NOT_ROLE_NOTE =
+  "Not opened: the recruiter asked for an email template, not for people. Write the template in your reply now, from the recruiter to the candidate with {{firstName}} and the role details they gave, save it to memory as their outreach template for this role, and say in one line that it is saved and that asking for it by role name brings it back. Open a role only when they ask to find people.";
 
 /** The parts of a recruiter's own message that a new role conversation starts from. */
 function recruiterBlocks(message: {

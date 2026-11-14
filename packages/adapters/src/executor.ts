@@ -682,7 +682,11 @@ import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js"
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
-import { startRoleFromRecruiterMessage } from "./role-start.js";
+import {
+  startRoleFromRecruiterMessage,
+  TEMPLATE_NOT_ROLE_NOTE,
+  templateOnlyRequest,
+} from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -13871,6 +13875,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "start_role works only in the global conversation.",
               });
+            if (templateOnlyRequest(lastRecruiterText))
+              return finish({ error: TEMPLATE_NOT_ROLE_NOTE });
             const team = await deps.prisma.chatGroupMember.findMany({
               where: { groupId: thread.groupId },
               select: { botId: true },
