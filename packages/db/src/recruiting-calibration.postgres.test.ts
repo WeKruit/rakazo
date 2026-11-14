@@ -381,6 +381,18 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     });
     expect(quality).toMatchObject({ goodExample: 2, notFit: 4 });
 
+    // The one record of what the recruiter saw: each person's round and latest verdict.
+    const seen = await recruiting.readRecruiterSeen(prisma, actor, {
+      roleId,
+      candidateKeys: ["first-0", "first-2", "second-0", "spare-0"],
+    });
+    expect(seen.latestRound).toMatchObject({ round: 2, people: expect.any(Number) });
+    expect(seen.people.get("first-0")).toMatchObject({ round: 1, verdict: "not_fit" });
+    expect(seen.people.get("first-2")).toMatchObject({ round: 1, verdict: "good_example" });
+    expect(seen.people.get("second-0")).toMatchObject({ round: 2, verdict: "not_fit" });
+    expect(seen.people.get("spare-0")).toMatchObject({ verdict: "not_fit" });
+    expect(seen.people.get("spare-0")?.round).toBeUndefined();
+
     // What the praised and turned-down people share, from saved profiles or their search rows.
     await prisma.recruitingSavedProfile.create({
       data: {
