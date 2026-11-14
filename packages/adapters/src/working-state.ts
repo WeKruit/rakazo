@@ -116,7 +116,7 @@ function receiptLine(receipts: readonly Receipt[], now: number): string | undefi
 /** The message a new role's conversation opens with: a copy of the recruiter's words elsewhere. */
 export const ROLE_START_NONCE = "start-role:";
 
-type RecruiterRow = { blocks: unknown; clientNonce: string | null };
+type RecruiterRow = { blocks: unknown; clientNonce: string | null; own?: boolean };
 
 /**
  * The recruiter's latest words for the language decision: this conversation's own first, then the
@@ -143,7 +143,7 @@ function recruiterLanguageRows(
       take: RECRUITER_MESSAGES,
       select,
     }),
-  ]).then(([own, account]) => [...own, ...account]);
+  ]).then(([own, account]) => [...own.map((row) => ({ ...row, own: true })), ...account]);
 }
 
 /** Only the recruiter's own words: never relayed teammate messages, and role-opening copies only when nothing else is. */
@@ -331,7 +331,19 @@ export async function loadWorkingState(
       lines.push(
         `- Role in focus: "${roleById.get(lastHanded)?.title}" (roleId ${lastHanded}), the role this conversation last handed work to; the recruiter has named no other since.`,
       );
-    else lines.push("- Role in focus: none named yet.");
+    else {
+      // A short follow-up ("发了吗", "重试") names no role; the role is the one this conversation
+      // named last, never one found by a person's name (staging 11-14: a retry answered for
+      // another role that held the same two people).
+      const earlier = recruiterWords(recruiterRows.filter((row) => row.own))
+        .map((text) => referredRole([text], roles))
+        .find((found) => found?.kind === "saved");
+      lines.push(
+        earlier?.kind === "saved"
+          ? `- Role in focus: "${earlier.role.title}" (roleId ${earlier.role.id}), the role the recruiter last named in this conversation (${earlier.by}); the same person can be in several roles, so a person's name never picks the role.`
+          : "- Role in focus: none named yet.",
+      );
+    }
   }
 
   const cardRoleIds = global

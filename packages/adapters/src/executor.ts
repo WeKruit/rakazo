@@ -6672,6 +6672,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Kruit's first question in a turn is checked once against opening a role instead.
         let globalAskChecked = false;
         let roleStartedInTurn = false;
+        // Role conversations start_role opened this run: handing work to one is not another role.
+        const groupsStartedInTurn = new Set<string>();
         const globalAskNeedsRoleCheck = () =>
           Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
           Boolean(recruitingBotKey(bot)) &&
@@ -14041,7 +14043,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? referredRole(recruiterTexts, await savedRoles())
                 : undefined;
             if (reference) roleReferenceOverruled.add(target.threadId);
-            if (reference?.kind === "new" && tools.some((tool) => tool.name === "start_role"))
+            // Staging 11-14: the role start_role had just opened was refused as "a new role".
+            if (
+              reference?.kind === "new" &&
+              !groupsStartedInTurn.has(target.groupId) &&
+              tools.some((tool) => tool.name === "start_role")
+            )
               return finish({ error: newRoleNote(reference.ref) });
             if (reference?.kind === "saved" && !(await roleIsTarget(reference.role.id, target)))
               return finish({ error: otherRoleNote(reference) });
@@ -14177,6 +14184,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!sent.ok) return finish({ error: sent.error });
             }
             roleStartedInTurn = true;
+            groupsStartedInTurn.add(group.id);
             await publishMessage(deps, run, "bot", [
               { kind: "role_link", groupId: group.id, title },
             ]);
