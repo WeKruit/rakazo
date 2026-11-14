@@ -461,3 +461,40 @@ export async function publishMailReplyCard(prisma: PrismaClient, actor: Actor, e
     });
   });
 }
+
+/**
+ * The people of a planned send whom this account already sent a confirmed first email to from
+ * another campaign (a second role for the same job, an earlier send), with when. Same person, two
+ * campaigns, two first emails is the duplicate a card must not hide.
+ */
+export async function earlierConfirmedSends(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  spaceId: string,
+  campaignId: string,
+  emails: string[],
+): Promise<Map<string, string>> {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+  const found = new Map<string, string>();
+  if (!wanted.length) return found;
+  const rows = await prisma.$queryRaw<{ result: unknown; updatedAt: Date }[]>`
+    SELECT result, "updatedAt" FROM external_effects
+    WHERE "spaceId" = ${spaceId} AND status = 'completed'
+      AND kind LIKE '%activate_campaign' AND result::text NOT LIKE ${`%${campaignId}%`}
+      AND result::text NOT LIKE '%"error"%' AND result::text NOT LIKE '%already_waiting%'
+      AND lower(result::text) LIKE ANY(${wanted.map((email) => `%${email}%`)}::text[])
+    ORDER BY "updatedAt" DESC LIMIT 200`;
+  for (const row of rows) {
+    const value = row.result as {
+      recipients?: unknown;
+      structuredContent?: { result?: { recipients?: unknown } };
+    } | null;
+    const recipients = value?.structuredContent?.result?.recipients ?? value?.recipients;
+    if (!Array.isArray(recipients)) continue;
+    for (const entry of recipients) {
+      const email = typeof entry === "string" ? entry.trim().toLowerCase() : "";
+      if (wanted.includes(email) && !found.has(email))
+        found.set(email, row.updatedAt.toISOString());
+    }
+  }
+  return found;
+}

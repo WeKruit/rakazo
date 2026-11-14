@@ -31,3 +31,11 @@ export async function confirmedSends(
       }
     : {};
 }
+
+/** What the agent is told instead of a card when people were already emailed elsewhere. */
+export function repeatedSendRefusal(repeats: Map<string, string>): string {
+  const who = [...repeats].map(
+    ([email, at]) => `${email} (${at.slice(0, 16).replace("T", " ")} UTC)`,
+  );
+  return `Nothing was sent and no card was shown: this account already sent a first email to ${who.join(", ")} from another campaign. Tell the recruiter who and when, in one line. Only if they ask to email them again, call activate_campaign again with resend: true; the card then shows when each was emailed.`;
+}

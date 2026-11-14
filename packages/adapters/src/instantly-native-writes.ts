@@ -157,6 +157,12 @@ const ActivateCampaignInput = z.strictObject({
     .describe(
       "Send everyone already queued in this sending campaign now instead of waiting for its sending hours or the gap between emails (recipients are ignored). Its card lists who is queued.",
     ),
+  resend: z
+    .boolean()
+    .optional()
+    .describe(
+      "true only when the recruiter asked to email again people this account already sent a first email from another campaign; their card shows when.",
+    ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
@@ -760,6 +766,8 @@ export type InstantlyActivationDisplay = {
     personalization?: string;
     /** This person's own first email, when it is not the role's. */
     firstEmail?: FirstEmail;
+    /** When this account already sent them a first email from another campaign. */
+    alreadyEmailedAt?: string;
   }[];
   /** null when the leads could not be read; the list itself is capped at 100. */
   recipientCount: number | null;
