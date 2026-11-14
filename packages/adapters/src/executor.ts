@@ -15594,13 +15594,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .join(" ")
               : "",
           );
+        const roleStartTexts = messages.flatMap((message) =>
+          message.role === "user" &&
+          message.clientNonce?.startsWith(ROLE_START_NONCE) &&
+          Array.isArray(message.blocks)
+            ? [
+                message.blocks
+                  .map((block) =>
+                    block &&
+                    typeof block === "object" &&
+                    "text" in block &&
+                    typeof block.text === "string"
+                      ? block.text
+                      : "",
+                  )
+                  .join(" "),
+              ]
+            : [],
+        );
         // A message steered into the running turn moves it on to the language that message is in.
         let lastRecruiterText = recruiterLanguageText(recruiterTexts);
         turnLanguage = recruiterTexts.some((text) => textLanguage(text))
           ? recruiterLanguage(recruiterTexts)
-          : // A role conversation opened by a handoff holds only Kruit's brief: the recruiter's
-            // own language comes from their messages anywhere in the account.
-            ((await workingState)?.language ?? recruiterLanguage(recruiterTexts));
+          : // A role conversation opened by a handoff holds only Kruit's brief, or a copy of the
+            // recruiter's message: their language comes from their messages anywhere in the
+            // account, else from that copy.
+            ((await workingState)?.language ?? recruiterLanguage(roleStartTexts));
         // The account's saved roles, read once a turn picks a role, for what the recruiter names.
         let savedRoleList: Promise<SavedRole[]> | undefined;
         const savedRoles = () =>

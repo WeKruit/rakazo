@@ -146,15 +146,20 @@ function recruiterLanguageRows(
   ]).then(([own, account]) => [...own, ...account]);
 }
 
-/** Only the recruiter's own words: relayed teammate messages and role-opening copies are not. */
+/** Only the recruiter's own words: never relayed teammate messages, and role-opening copies only when nothing else is. */
 function recruiterWords(rows: readonly RecruiterRow[]): string[] {
-  return rows.flatMap((row) => {
-    if (row.clientNonce?.startsWith(ROLE_START_NONCE)) return [];
-    const blocks = (row.blocks ?? []) as MessageBlock[];
-    if (blocks.some((block) => block.kind === "bot_message_received")) return [];
-    const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
-    return text.trim() ? [text] : [];
-  });
+  const words = (copies: boolean) =>
+    rows.flatMap((row) => {
+      if (Boolean(row.clientNonce?.startsWith(ROLE_START_NONCE)) !== copies) return [];
+      const blocks = (row.blocks ?? []) as MessageBlock[];
+      if (blocks.some((block) => block.kind === "bot_message_received")) return [];
+      const text = blocks.flatMap((block) => (block.kind === "text" ? [block.text] : [])).join(" ");
+      return text.trim() ? [text] : [];
+    });
+  // The copy still speaks for the recruiter when it is all there is (staging 11-14: with it left
+  // out, a new role's first question went out in English to a Chinese recruiter).
+  const own = words(false);
+  return own.length ? own : words(true);
 }
 
 /**
