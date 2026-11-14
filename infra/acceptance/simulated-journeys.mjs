@@ -36,6 +36,7 @@ export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER, IMPATIENT };
 //   long-task      a long job finishes with its result
 //   latency        first reply and result arrive in time
 //   pages          each page shows the right state and a next step
+//   guard-dead-end a waiting card or one-question rule takes the recruiter's newer words, never refuses
 export const JOURNEYS = [
   {
     name: "send-at-night",
@@ -82,9 +83,9 @@ export const JOURNEYS = [
     maxTurns: 10,
     persona: `${AGENCY_RECRUITER} You have used Kruit for weeks: several roles are open, with people already found for them.`,
     facts: () =>
-      "You do not remember the exact role names; ask Kruit or look at the pages. Never more than eight people in one send.",
+      "You do not remember the exact role names; ask Kruit or look at the pages. Never more than eight people in one send. Looking up new email addresses is off on this account, so only people whose email is already saved can be emailed.",
     goals: [
-      "Ask Kruit which of your roles have people who have not been emailed yet.",
+      "Ask Kruit which of your roles have people with an email already saved who have not been emailed yet (looking up new addresses is off on this test account, so 'no email saved' is true for the rest; Kruit should point you to people who do have one, not stop).",
       "Pick one of those roles and ask Kruit to send the first email to five or six of those people.",
       "When the send confirmation card appears, check it lists those people and the email, and approve it.",
       "Ask how many have gone out and when the rest go.",
@@ -251,7 +252,7 @@ export const JOURNEYS = [
   },
   {
     name: "change-mind-mid-run",
-    mechanisms: ["reference", "language", "email-content"],
+    mechanisms: ["reference", "language", "email-content", "guard-dead-end"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
     gate: true,
