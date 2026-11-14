@@ -452,9 +452,7 @@ export async function teamProgress(
         select: { activeRecruitingRoleId: true },
       })
     )?.activeRecruitingRoleId;
-  const peopleFound = roleId
-    ? await countRecruitingPeopleFoundSince(prisma, { roleId, since })
-    : 0;
+  const peopleFound = roleId ? await countRecruitingPeopleFoundSince(prisma, { roleId, since }) : 0;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   return {
