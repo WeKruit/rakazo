@@ -147,6 +147,8 @@ import {
   messagingDmSurfaceNote,
   missingSkillRequirement,
   NAMED_EMAILS_NOTE,
+  NAMED_SEND_ROLE_NOTE,
+  namesPeopleToEmail,
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
@@ -519,6 +521,7 @@ import {
   ownMailboxSendingAllowed,
   SEND_NOW_REQUEST,
   SEND_NOW_WITHOUT_GMAIL_NOTE,
+  showsGmailCard,
   SENDER_READ_FIRST,
   senderApprovalDisplay,
 } from "./instantly-senders.js";
@@ -15368,7 +15371,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Own-email accounts: "send now" before Gmail is connected gets one plain line and the card.
         const sendNowNote =
           hideVendors &&
-          SEND_NOW_REQUEST.test(lastRecruiterText) &&
+          (SEND_NOW_REQUEST.test(lastRecruiterText) || showsGmailCard(messages)) &&
           (await ownMailboxSendingAllowed(deps.prisma, run).catch(() => false))
             ? SEND_NOW_WITHOUT_GMAIL_NOTE
             : undefined;
@@ -15388,7 +15391,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? REPLY_IN_ENGLISH_NOTE
               : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
-        const intakeNote =
+        const intakeSearchNote =
           intake &&
           [
             plannedNote
@@ -15399,6 +15402,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]
             .filter(Boolean)
             .join(" ");
+        const intakeNote =
+          intake && namesPeopleToEmail(recruiterTexts) ? NAMED_SEND_ROLE_NOTE : intakeSearchNote;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`

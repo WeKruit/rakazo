@@ -7,6 +7,7 @@ import {
   askFormDefaults,
   askFormOptions,
   closedAskAnswer,
+  closeEndedAsks,
   isOpenAskBlock,
   latestAnswerableAskMessageId,
   pendingInputAttention,
@@ -419,5 +420,21 @@ describe("reopenedAskMessageIds", () => {
       blocks: [{ kind: "ask", status: "expired" }],
     };
     expect(reopenedAskMessageIds({ messages: [question] })).toEqual(["q"]);
+  });
+});
+
+// Gate 4e2923f2: history showed the ended Connect Gmail card as expired, so Kruit told the
+// recruiter there was no card to press while the app still showed it.
+describe("closeEndedAsks", () => {
+  const connect = { kind: "ask", status: "expired", connection: { serverId: "s" } };
+  const question = { kind: "ask", status: "pending" };
+  it("closes an ended question but keeps a connect card open", () => {
+    expect(closeEndedAsks([question, connect], false)).toEqual([
+      { ...question, status: "expired" },
+      { ...connect, status: "pending" },
+    ]);
+    expect(closeEndedAsks([question], true)).toEqual([question]);
+    const answered = { ...connect, status: "answered" };
+    expect(closeEndedAsks([answered], false)).toEqual([answered]);
   });
 });
