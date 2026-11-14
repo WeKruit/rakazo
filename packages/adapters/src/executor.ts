@@ -645,6 +645,7 @@ import {
   linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
+import { raisedGapsSinceLastRound } from "./recruiting-raised-gaps.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
@@ -6704,6 +6705,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
+        const gapAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -8060,6 +8062,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ]
                   .filter(Boolean)
                   .join(" "),
+              };
+            }
+            // Asked once per person, like the location: a pick whose own note says a requirement
+            // is not shown that the recruiter just turned people down over.
+            const raised = [
+              ...(await raisedGapsSinceLastRound(deps.prisma, {
+                threadId: thread.id,
+                roleId: thread.activeRecruitingRoleId,
+                botId: bot.id,
+                unverified: researchInput.data.unverified,
+              })),
+            ].filter(([key]) => !gapAsked.has(key));
+            if (raised.length) {
+              for (const [key] of raised) gapAsked.add(key);
+              return {
+                error: `Not recorded. Your own notes say these rows do not show what the recruiter raised since the last round: ${raised.map(([key, hits]) => `${key} (${hits.join(", ")})`).join("; ")}. Replace them with people whose rows show it. If fewer than ten do, show the ones who do with show_picks, then ${SHORT_OF_TEN}. If a note is only cautious and the row does show it, record the same people again.`,
               };
             }
           }
