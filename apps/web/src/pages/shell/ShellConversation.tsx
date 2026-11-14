@@ -480,6 +480,10 @@ export function ShellConversation({
                         : undefined
                     }
                     onAskChat={(text) => openRoleChat(text)}
+                    onSendChat={(text) => {
+                      openRoleChat();
+                      void sendRoleText(text);
+                    }}
                     roleId={currentBindingRead.workspace.role.id}
                     spaceId={currentBindingRead.workspace.role.spaceId}
                     conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
