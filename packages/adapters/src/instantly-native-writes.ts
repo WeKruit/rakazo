@@ -960,9 +960,10 @@ export function queuePace(
   let queuedAt: string;
   try {
     const end = overdue ? new Date(now.getTime() + spread) : done;
-    // The time now beside it, so nobody reads a time still ahead as one already passed.
+    // UTC and the time left beside it: agents read the conversation's clock in UTC, so a bare
+    // local time still ahead was taken as one already passed.
     const left = Math.max(1, Math.round((end.getTime() - now.getTime()) / 60_000));
-    time = `${at(end)} ${shown} on ${on(end)} (about ${left} minutes from now, ${at(now)})`;
+    time = `${at(end)} ${shown} on ${on(end)} (${end.toISOString().slice(11, 16)} UTC, about ${left} minutes from now)`;
     queuedAt = at(start);
   } catch {
     return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
