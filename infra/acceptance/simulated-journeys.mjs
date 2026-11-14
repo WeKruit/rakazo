@@ -28,6 +28,8 @@ export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER, IMPATIENT };
 export const JOURNEYS = [
   {
     name: "send-at-night",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     title: "晚上确认发送，问发出去几个、为什么没发、现在发",
     area: "sending",
     source:
@@ -116,6 +118,8 @@ export const JOURNEYS = [
   },
   {
     name: "one-off-email",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     gate: true,
     title: "给一个人写封邮件并发出去",
     area: "sending",
@@ -134,6 +138,8 @@ export const JOURNEYS = [
   },
   {
     name: "progress-and-where",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     gate: true,
     title: "问进度、问在哪看",
     area: "first message",
@@ -186,6 +192,8 @@ export const JOURNEYS = [
   },
   {
     name: "first-timer-no-gmail",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     gate: true,
     title: "新注册、没连 Gmail、不知道该问什么",
     area: "first message",
@@ -222,6 +230,8 @@ export const JOURNEYS = [
   },
   {
     name: "change-mind-mid-run",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     gate: true,
     // The second message goes in while Kruit is still on the first.
     interrupt: true,
@@ -338,6 +348,8 @@ export const JOURNEYS = [
   },
   {
     name: "template-sign-with-my-name",
+    // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
+    blocks: true,
     title: "模板署名用我的名字",
     area: "first message",
     source: "template-then-send#1 2026-11-13 (learned by --learn, promoted 11-13)",

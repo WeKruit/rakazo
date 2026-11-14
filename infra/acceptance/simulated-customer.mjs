@@ -51,6 +51,9 @@ import {
   watchFrom,
 } from "./real-user-session.mjs";
 import { PERSONAS, JOURNEYS as WRITTEN } from "./simulated-journeys.mjs";
+
+const BLOCKS = new Set(WRITTEN.filter((journey) => journey.blocks).map((journey) => journey.name));
+
 import { closeBrowser, openUi, SEND_BUTTON, STANDING_BUTTON } from "./simulated-ui.mjs";
 
 const args = process.argv.slice(2);
@@ -922,7 +925,34 @@ if (BENCH) {
 }
 // One scoreboard for the whole run.
 const passed = rows.filter((row) => row.pass).length;
+// A journey passes only when every play ran and passed; a play that did not run never decides.
+const journeyRows = Object.entries(Object.groupBy(rows, (row) => row.scenario)).map(
+  ([name, plays]) => {
+    const ran = plays.filter((row) => !row.infra);
+    const status = !ran.length
+      ? "没跑成"
+      : ran.some((row) => !row.pass)
+        ? "不通过"
+        : ran.length < plays.length
+          ? "部分没跑成"
+          : "通过";
+    const reasons = ran.filter((row) => !row.pass).flatMap((row) => row.failures.slice(0, 2));
+    return { name, plays, status, reasons, blocks: BLOCKS.has(name) };
+  },
+);
+const blocking = journeyRows.filter((row) => row.blocks && row.status === "不通过");
 const summary = [
+  `blocking: ${blocking.length ? `yes (${blocking.map((row) => row.name).join(", ")})` : "no"}`,
+  "",
+  "标准：每次 8 分以上、目标全部达成、没有假话/死路/重复/没回应等一票否决；旅程要每次都通过才算通过；环境出错算没跑成。",
+  "",
+  "| 旅程 | 结果 | 每次 | 不通过的原因 |",
+  "|---|---|---|---|",
+  ...journeyRows.map(
+    (row) =>
+      `| ${row.name}${row.blocks ? " (卡发布)" : ""} | ${row.status} | ${row.plays.map((play) => (play.infra ? "没跑成" : `${Math.round(play.score * 10)}/10`)).join(" · ")} | ${[...new Set(row.reasons)].join("; ").replace(/\|/g, "/").slice(0, 300)} |`,
+  ),
+  "",
   `# 模拟客户 ${passed}/${rows.length} 通过 · staging ${SHA.slice(0, 8)} · ${Math.round((Date.now() - started) / 60_000)} 分钟 · 模型 $${usage.usd.toFixed(2)}`,
   "",
   "| 旅程 | 分数 | 结果 | 一句话 |",
