@@ -832,7 +832,12 @@ import {
   workStartNote,
 } from "./work-estimate.js";
 import type { WorkingState } from "./working-state.js";
-import { isRolelessHomeTeam, loadWorkingState } from "./working-state.js";
+import {
+  isRolelessHomeTeam,
+  loadWorkingState,
+  ROLE_START_NONCE,
+  recruiterLanguageNow,
+} from "./working-state.js";
 
 /** Built-in tools that reach the outside network for the run. */
 const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_navigate"]);
@@ -15541,6 +15546,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           .filter(
             (message) =>
               message.role === "user" &&
+              // A role opened from the main conversation starts with a copy of their words there.
+              !message.clientNonce?.startsWith(ROLE_START_NONCE) &&
               !(
                 Array.isArray(message.blocks) &&
                 message.blocks.some(
@@ -16613,6 +16620,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           turnLanguage = language;
                           return replyLanguageNote(language);
                         };
+                        // A teammate relaying the recruiter's newer words into a role team's
+                        // running turn: their language comes from the records, not the relay.
+                        const relayedLanguage =
+                          hideVendors && !freshHumanSteering && thread.activeRecruitingRoleId
+                            ? await recruiterLanguageNow(
+                                deps.prisma,
+                                { spaceId: run.spaceId, userId: run.userId },
+                                thread.id,
+                              ).catch(() => undefined)
+                            : undefined;
+                        const relayedLanguageNote =
+                          relayedLanguage && relayedLanguage !== turnLanguage
+                            ? replyLanguageNote(relayedLanguage)
+                            : undefined;
+                        if (relayedLanguage) turnLanguage = relayedLanguage;
                         const recruitingContextMessage = humanSteering ?? steering.at(-1);
                         const currentThread =
                           steering.length > 0 && !messagingChannelRun
@@ -16683,7 +16705,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                                       : undefined,
                                 item === freshHumanSteering && !item.internal
                                   ? steeringLanguageNote(item.text)
-                                  : undefined,
+                                  : item === steering.at(-1)
+                                    ? relayedLanguageNote
+                                    : undefined,
                               ]
                                 .filter(Boolean)
                                 .join("\n\n"),
