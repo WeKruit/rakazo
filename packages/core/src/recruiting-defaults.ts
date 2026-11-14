@@ -221,9 +221,10 @@ export const REPLY_IN_ENGLISH_NOTE =
  */
 export function roleOpenedNote(chinese: boolean): string {
   const example = chinese
-    ? "「岗位已经开好，第一个问题在岗位对话里等你。」"
-    : '"I opened the role. Its first question is waiting there."';
-  return `The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter in one line, in the language of their newest message (also one that arrives now), that the role is open and its first question is waiting there (for example ${example}); never say intake, and do not paste a link.`;
+    ? "「岗位已经开好，团队在岗位对话里接着做。」"
+    : '"I opened the role; its team is taking it from there."';
+  // Staging 11-14: "its first question is waiting there" was said while a Send card waited.
+  return `The role's conversation is open and its team is starting with the recruiter's requirements. A card that opens it is already shown: tell the recruiter once, in one line, in the language of their newest message (also one that arrives now), that the role is open and its team is on it there (for example ${example}); never say what is waiting there (a question, a card, a draft) until the team reports it, never say intake, and do not paste a link.`;
 }
 
 /**
