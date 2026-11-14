@@ -548,7 +548,9 @@ export function RecruitingRoleTab({ model }: { model: ReturnType<typeof useRecru
               </h4>
               <ul className="space-y-1">
                 {workspace.revision.preferences.map((preference) => (
-                  <li key={preference}>{preference}</li>
+                  <li key={preference} className="whitespace-pre-line break-words">
+                    {preference}
+                  </li>
                 ))}
               </ul>
             </div>
