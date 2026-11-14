@@ -807,7 +807,14 @@ import {
   unprovenReplyCardRetry,
 } from "./turn-end-guard.js";
 import { unbackedClaim } from "./claim-receipts.js";
-import { newRoleNote, otherRoleNote, referredRole, savedRoleNote } from "./role-reference.js";
+import {
+  newRoleNote,
+  otherRoleNote,
+  referredRole,
+  roleRef,
+  savedRoleNote,
+  titleWithRef,
+} from "./role-reference.js";
 import type { SavedRole } from "./role-reference.js";
 import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -14127,6 +14134,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               reference?.kind === "new" &&
               !groupsStartedInTurn.has(target.groupId) &&
+              roleRef(target.title) !== reference.ref &&
               tools.some((tool) => tool.name === "start_role")
             )
               return finish({ error: newRoleNote(reference.ref) });
@@ -14193,7 +14201,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
           if (name === "start_role") {
-            const title = visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim();
+            const title = titleWithRef(
+              visible(redactSecrets(String(args.title ?? ""), runSecrets)).trim(),
+              lastRecruiterText,
+            );
             const request = redactSecrets(String(args.message ?? ""), runSecrets).trim();
             if (!title) return finish({ error: "title is required" });
             if (!request && !run.sourceMessageId)

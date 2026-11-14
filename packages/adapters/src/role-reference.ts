@@ -20,6 +20,15 @@ export type RoleReference =
 const REF = /(?:\bref\.?|编号)\s*#?\s*([a-z0-9-]*\d[a-z0-9-]*)/i;
 /** The ref a text gives ("Ref 0733", 「编号0733」), lowercased. */
 export const roleRef = (text: string) => REF.exec(text)?.[1]?.toLowerCase();
+/**
+ * A new role's title with the ref the recruiter's request gives, so the role is found by it.
+ * Staging 11-14: start_role titled a role without ref 21271, so every handoff to it was refused
+ * as "a new role (ref 21271)" and a second role was opened.
+ */
+export function titleWithRef(title: string, request: string): string {
+  const ref = REF.exec(request)?.[1];
+  return !title || !ref || roleRef(title) === ref.toLowerCase() ? title : `${title} (Ref ${ref})`;
+}
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
 
 // Words in many role titles say nothing about which one is meant.
