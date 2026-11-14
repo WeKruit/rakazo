@@ -2178,6 +2178,10 @@ msgstr "按已存联系人筛选"
 msgid "Filter by saved contact…"
 msgstr "按已存联系人筛选…"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "让 Kruit 帮你找候选人"
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -3073,6 +3077,7 @@ msgstr "没有匹配的助手"
 msgid "No breakdown"
 msgstr "不分组"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
@@ -3370,6 +3375,10 @@ msgstr "暂缓"
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "只能删除空的空间。请先删除其中的助手和群组。"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
+msgstr "只显示了这封邮件的开头。"
 
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/shell/KruitDock.tsx
@@ -3698,10 +3707,6 @@ msgstr "仅预览"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
 msgstr "仅供预览 · 变量尚未填入"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
-msgstr "仅为预览，完整邮件还没加载。"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"

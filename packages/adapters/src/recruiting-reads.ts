@@ -1367,12 +1367,20 @@ export async function getRecruitingCorrespondence(
       connections: await Promise.all(
         sources.map(async (source): Promise<RecruitingCorrespondence["connections"][number]> => {
           let identityConnected = productIdentity?.connected;
-          if (source.enabled && source.provider?.kind === "crm" && source.secretId) {
+          // A sign-in that expired (its tokens were dropped) needs the recruiter to reconnect;
+          // reading it again cannot succeed, so it is not shown as a failed check.
+          let signInExpired = false;
+          if (source.enabled && source.secretId && oauth) {
             try {
-              identityConnected = (await oauth?.statusFor(source, actor)) === "connected";
+              const status = await oauth.statusFor(source, actor);
+              if (source.provider?.kind === "crm") identityConnected = status === "connected";
+              else signInExpired = status === "reconnect";
             } catch (error) {
-              if (!(error instanceof SecretStoreUnavailableError)) throw error;
-              return { name: source.name, status: "unavailable", checkIssue: null };
+              // Other services keep their read; only the CRM's status depends on this answer.
+              if (source.provider?.kind === "crm") {
+                if (!(error instanceof SecretStoreUnavailableError)) throw error;
+                return { name: source.name, status: "unavailable", checkIssue: null };
+              }
             }
           }
           return {
@@ -1383,7 +1391,7 @@ export async function getRecruitingCorrespondence(
               : (
                     source.provider?.kind === "crm"
                       ? !identityConnected
-                      : !source.secretId && !hasPlatformMcpCredential(source)
+                      : signInExpired || (!source.secretId && !hasPlatformMcpCredential(source))
                   )
                 ? "needs_connection"
                 : !source.assignments.some((assignment) =>

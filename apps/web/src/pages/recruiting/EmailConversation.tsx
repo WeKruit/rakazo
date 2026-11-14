@@ -83,7 +83,7 @@ function MessageBody({
       </dl>
       {email.partial ? (
         <p className="text-xs text-muted-foreground">
-          <Trans>Preview only. The complete message has not loaded.</Trans>
+          <Trans>Only the start of this email is shown.</Trans>
         </p>
       ) : null}
       <div className="break-words whitespace-pre-wrap text-sm leading-relaxed">

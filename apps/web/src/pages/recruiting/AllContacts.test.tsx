@@ -1,10 +1,10 @@
 import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import type { RecruitingContact } from "@rakazo/contracts";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { expect, it, vi } from "vitest";
 
 const list = vi.hoisted(() => vi.fn());
@@ -101,5 +101,50 @@ it("reveals secondary fields without refetching contacts and retains them when p
     await act(async () => root.unmount());
     view.remove();
     vi.unstubAllGlobals();
+  }
+});
+
+it("leads an empty new account to Kruit instead of a bare empty list", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  list.mockResolvedValue({ items: [], total: 0, nextCursor: null });
+  const view = document.createElement("div");
+  document.body.append(view);
+  const root = createRoot(view);
+  let path = "";
+  function Where() {
+    const location = useLocation();
+    path = `${location.pathname}${location.search}`;
+    return null;
+  }
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <Where />
+          <AllContacts
+            accountKey="test"
+            groups={[
+              { id: "recruiting-global-abc" } as ComponentProps<
+                typeof AllContacts
+              >["groups"][number],
+            ]}
+            refreshSignal={0}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(view.textContent).toContain("No candidates yet");
+    expect(view.textContent).not.toContain("No contacts match.");
+    const find = [...view.querySelectorAll("button")].find(
+      (button) => button.textContent === "Find candidates with Kruit",
+    );
+    await act(async () => find!.click());
+    expect(path).toBe("/app/g/recruiting-global-abc?view=conversation");
+  } finally {
+    await act(async () => root.unmount());
+    view.remove();
   }
 });

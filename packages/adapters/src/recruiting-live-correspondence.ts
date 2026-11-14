@@ -335,6 +335,9 @@ export async function refreshRecruitingCorrespondence(
       !tool ||
       !source.enabled ||
       (!source.secretId && !hasPlatformMcpCredential(source)) ||
+      // An expired sign-in waits for the recruiter to reconnect it.
+      output.connections.find((connection) => connection.name === source.name)?.status ===
+        "needs_connection" ||
       !source.assignments.some((permission) => allows(permission, tool))
     )
       continue;

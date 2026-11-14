@@ -3133,88 +3133,107 @@ describe("saved recruiting correspondence", () => {
       work_emails: [{ email: "person@example.test", status: "HIGH_PROBABILITY" }],
     },
   };
-  it("associates a live calendar event using saved Contacts without requiring a campaign or another lookup", async () => {
-    const f = contactFixture({ status: "FINISHED", results: [contactRow] });
-    const fullenrich = {
-      id: "mail",
-      name: "FullEnrich",
-      endpoint: "https://mcp.fullenrich.com/mcp",
-      transport: "streamable_http",
-      secretId: "saved-reference",
-      revision: 1,
-      enabled: true,
-      assignments: [
-        { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
-      ],
-    };
-    const calendar = {
-      id: "calendar-saved-contact",
-      name: "Calendar",
-      endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
-      transport: "streamable_http",
-      secretId: "saved-reference",
-      revision: 1,
-      enabled: true,
-      assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_events"] }],
-    };
-    f.client.mcpServer.findMany.mockReset().mockResolvedValue([fullenrich, calendar]);
-    f.client.externalEffect.findMany.mockReset().mockImplementation(async (input: any) => {
-      if (input.select?.request && JSON.stringify(input.where).includes("get_enrichment_results"))
-        return [f.retained];
-      if (input.select?.result && input.where?.id?.in?.includes("effect"))
-        return [{ id: "effect", result: f.result }];
-      return [];
-    });
-    Object.assign(f.client, {
-      botMcpServer: { findFirst: vi.fn(async () => calendar.assignments[0]) },
-    });
-    const plans = vi
-      .spyOn(db, "listRecruitingSchedulingPlans")
-      .mockResolvedValue({ plans: [], slots: [], partial: false });
-    const execute = vi.fn(async function* (_call: ConnectorCall) {
-      yield {
-        type: "result",
-        data: {
-          structuredContent: {
-            events: [
-              {
-                id: "saved-contact-interview",
-                summary: "Interview",
-                start: { dateTime: "2026-10-31T12:00:00Z" },
-                end: { dateTime: "2026-10-31T13:00:00Z" },
-                attendees: [{ email: "person@example.test" }],
-              },
-            ],
+  it.each(["connected", "reconnect"] as const)(
+    "associates a live calendar event using saved Contacts without requiring a campaign or another lookup (calendar sign-in %s)",
+    async (signIn) => {
+      const f = contactFixture({ status: "FINISHED", results: [contactRow] });
+      const fullenrich = {
+        id: "mail",
+        name: "FullEnrich",
+        endpoint: "https://mcp.fullenrich.com/mcp",
+        transport: "streamable_http",
+        secretId: "saved-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["get_enrichment_results"] },
+        ],
+      };
+      const calendar = {
+        id: "calendar-saved-contact",
+        name: "Calendar",
+        endpoint: "https://calendarmcp.googleapis.com/mcp/v1",
+        transport: "streamable_http",
+        secretId: "saved-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["list_events"] }],
+      };
+      f.client.mcpServer.findMany.mockReset().mockResolvedValue([fullenrich, calendar]);
+      f.client.externalEffect.findMany.mockReset().mockImplementation(async (input: any) => {
+        if (input.select?.request && JSON.stringify(input.where).includes("get_enrichment_results"))
+          return [f.retained];
+        if (input.select?.result && input.where?.id?.in?.includes("effect"))
+          return [{ id: "effect", result: f.result }];
+        return [];
+      });
+      Object.assign(f.client, {
+        botMcpServer: { findFirst: vi.fn(async () => calendar.assignments[0]) },
+      });
+      const plans = vi
+        .spyOn(db, "listRecruitingSchedulingPlans")
+        .mockResolvedValue({ plans: [], slots: [], partial: false });
+      const execute = vi.fn(async function* (_call: ConnectorCall) {
+        yield {
+          type: "result",
+          data: {
+            structuredContent: {
+              events: [
+                {
+                  id: "saved-contact-interview",
+                  summary: "Interview",
+                  start: { dateTime: "2026-10-31T12:00:00Z" },
+                  end: { dateTime: "2026-10-31T13:00:00Z" },
+                  attendees: [{ email: "person@example.test" }],
+                },
+              ],
+            },
           },
-        },
-      } as const;
-    });
-    try {
-      const result = await api.getRecruitingCorrespondence(
-        f.prisma,
-        actor,
-        target,
-        "interview",
-        undefined,
-        undefined,
-        {},
-        {
-          connectors: { execute },
-          reauthorize: async () => target,
-        },
-      );
-      expect(result.events).toEqual([
-        expect.objectContaining({
-          id: `${calendar.id}:saved-contact-interview`,
-          roleAssociation: "contact",
-        }),
-      ]);
-      expect(execute).toHaveBeenCalledOnce();
-      expect(execute.mock.calls[0]?.[0]).toMatchObject({ tool: "list_events" });
-    } finally {
-      plans.mockRestore();
-    }
-  });
+        } as const;
+      });
+      try {
+        const result = await api.getRecruitingCorrespondence(
+          f.prisma,
+          actor,
+          target,
+          "interview",
+          undefined,
+          {
+            statusFor: vi.fn(async (server: { id: string }) =>
+              server.id === calendar.id ? signIn : "connected",
+            ),
+          },
+          {},
+          {
+            connectors: { execute },
+            reauthorize: async () => target,
+          },
+        );
+        // An expired sign-in asks for a reconnect instead of a read that can only fail.
+        if (signIn === "reconnect") {
+          expect(result.connections).toContainEqual(
+            expect.objectContaining({
+              name: "Calendar",
+              status: "needs_connection",
+              checkIssue: null,
+            }),
+          );
+          expect(execute).not.toHaveBeenCalled();
+          return;
+        }
+        expect(result.events).toEqual([
+          expect.objectContaining({
+            id: `${calendar.id}:saved-contact-interview`,
+            roleAssociation: "contact",
+          }),
+        ]);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(execute.mock.calls[0]?.[0]).toMatchObject({ tool: "list_events" });
+      } finally {
+        plans.mockRestore();
+      }
+    },
+  );
   it("recognizes exact platform FullEnrich readiness without exposing a credential or inventing a personal connection", async () => {
     vi.stubEnv("FULLENRICH_API_KEY", "platform-service-key");
     try {

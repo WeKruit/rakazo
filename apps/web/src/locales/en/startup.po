@@ -2178,6 +2178,10 @@ msgstr "Filter by saved contact"
 msgid "Filter by saved contact…"
 msgstr "Filter by saved contact…"
 
+#: src/pages/recruiting/AllContacts.tsx
+msgid "Find candidates with Kruit"
+msgstr "Find candidates with Kruit"
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -3073,6 +3077,7 @@ msgstr "No bots match"
 msgid "No breakdown"
 msgstr "No breakdown"
 
+#: src/pages/recruiting/AllContacts.tsx
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "No candidates yet"
@@ -3370,6 +3375,10 @@ msgstr "On hold"
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "Only empty spaces can be deleted. Delete its bots and groups first."
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
+msgstr "Only the start of this email is shown."
 
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/shell/KruitDock.tsx
@@ -3698,10 +3707,6 @@ msgstr "Preview only"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
 msgstr "Preview only · variables remain unfilled"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
-msgstr "Preview only. The complete message has not loaded."
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"

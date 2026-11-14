@@ -2900,6 +2900,10 @@ msgstr "筛选"
 msgid "Find {0}'s full work history and education and save it to their profile."
 msgstr "查找 {0} 的完整工作经历和教育背景，并保存到他们的档案。"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
+msgstr "让 Kruit 帮你找候选人"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr "查找邮箱"
@@ -3509,11 +3513,6 @@ msgstr "已加载的邮件筛选"
 msgid "Loaded files"
 msgstr "已加载的文件"
 
-#. placeholder {0}: loadedEmails.length
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
-msgstr "已加载：{0} 封邮件 · {unreadCount} 封未读 · {unknownReadCount} 封阅读状态未知"
-
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
 msgstr "正在加载动态…"
@@ -3866,10 +3865,6 @@ msgstr "更多"
 #: src/pages/RoutineEditor.tsx
 msgid "More options"
 msgstr "更多选项"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "More results may be available. This is not the complete mailbox or calendar."
-msgstr "可能还有更多结果。这不是完整的邮箱或日历。"
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "More sources"
@@ -4484,14 +4479,6 @@ msgstr "已查到的空闲时间段"
 msgid "Observed email metadata"
 msgstr "已查到的邮件信息"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed read"
-msgstr "已读"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed unread"
-msgstr "未读"
-
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Older mail is still loading."
 msgstr "更早的邮件还在加载。"
@@ -4540,6 +4527,10 @@ msgstr "仅提议满足最短提前通知时间的已记录时段。预约前会
 #: src/pages/RoutineEditor.tsx
 msgid "Only run when"
 msgstr "仅在以下情况运行"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Only the start of this email is shown."
+msgstr "只显示了这封邮件的开头。"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -4628,10 +4619,6 @@ msgstr "自然"
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Organization-wide candidate-role records."
 msgstr "全组织的候选人岗位记录。"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Original email results saved in this role conversation."
-msgstr "这个岗位对话中保存的原始邮件结果。"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Original job description"
@@ -4873,10 +4860,6 @@ msgstr "准备联系邮件"
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "这种文件类型无法预览，请下载后查看。"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
-
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Previous"
@@ -4995,10 +4978,6 @@ msgstr "查看原对话"
 #: src/pages/shell/bot-panel.tsx
 msgid "Read replies aloud"
 msgstr "朗读回复"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Read status unknown"
-msgstr "阅读状态未知"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
@@ -5713,10 +5692,6 @@ msgstr "已保存"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr "保存于岗位最近一次更新之前"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Saved calendar checks in this conversation."
-msgstr "这个对话中保存的日历检查。"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
@@ -6600,6 +6575,14 @@ msgstr "地点由选定的日历事件类型决定。预约后添加来宾须单
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "所选记忆提供方在此构建中不可用。"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more replies. Check inbox to load them."
+msgstr "可能还有更多回复，点「查看收件箱」加载。"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more times. Check availability to load them."
+msgstr "可能还有更多时间，点「查看空闲时间」加载。"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "There was a problem sending this message."
