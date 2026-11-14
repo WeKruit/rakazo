@@ -347,6 +347,12 @@ export async function loadWorkingState(
     const saved = emailLine(records.get(thread.activeRecruitingRoleId));
     if (saved) lines.push(`- This role's ${saved}`);
   }
+  // An email shown only in chat is kept nowhere (staging 11-14: "草稿保留着" with no role, no
+  // mailbox and nothing saved). Say so where nothing is on record.
+  if (![...records.values()].some((record) => record.savedEmail))
+    lines.push(
+      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat is not saved or kept anywhere until a save tool returns it.`,
+    );
 
   const own = receiptLine(receiptsOf(thread.id), now);
   lines.push(
