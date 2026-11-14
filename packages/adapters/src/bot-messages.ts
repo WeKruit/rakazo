@@ -11,6 +11,7 @@ import {
 } from "@rakazo/core";
 import {
   appendEventInTransaction,
+  cancelRunsInTransaction,
   createThreadMessageInTransaction,
   type PrismaClient,
   withTransactionRetry,
@@ -269,6 +270,44 @@ export async function messageBot(
           clientNonce: deliveryKey,
           markUnread: options?.forceUnread === true,
         });
+        // Staging 11-14: Kruit passed each "where is it?" on as its own request while the team
+        // worked, and they ran one after another behind it, each redoing the round. A newer
+        // request from the same conversation replaces one not yet started; that turn still sees
+        // the older request in the conversation.
+        const superseded =
+          crossThread && (intent === "request" || intent === "question")
+            ? await tx.run.findMany({
+                where: {
+                  threadId: targetThreadId,
+                  botId: target.id,
+                  trigger: "bot_message",
+                  status: "queued",
+                  leaseFence: 0,
+                  sourceMessage: {
+                    is: {
+                      blocks: {
+                        array_contains: [
+                          { kind: "bot_message_received", returnThreadId: run.threadId },
+                        ],
+                      },
+                    },
+                  },
+                },
+                select: { id: true, taskId: true },
+              })
+            : [];
+        if (superseded.length) {
+          await cancelRunsInTransaction(tx, superseded, new Date());
+          for (const stale of superseded)
+            await appendEventInTransaction(tx, {
+              spaceId: run.spaceId,
+              threadId: targetThreadId,
+              botId: target.id,
+              type: "run.cancelled",
+              runId: stale.id,
+              payload: { reason: "superseded" },
+            });
+        }
         const task = await tx.task.create({
           data: {
             spaceId: run.spaceId,
@@ -499,6 +538,7 @@ export async function returnDelegatedTeamOutcome(
     select: { role: true, blocks: true },
   });
   let text = "";
+  let round = "";
   for (const message of later) {
     const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
     if (message.role === "user" && !botMessageContext(blocks)) break;
@@ -508,7 +548,11 @@ export async function returnDelegatedTeamOutcome(
       .join("\n")
       .trim();
     if (reply) text = reply;
+    if (ROUND_HEADING.test(reply)) round = reply;
   }
+  // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
+  // Kruit could neither show the people nor say who has both must-haves. The round comes too.
+  if (round && round !== text) text = `${text}\n\n${round}`;
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
@@ -604,6 +648,9 @@ export async function reportDelegatedTeamBlocked(
   if (!sent.ok)
     getLogger().warn("delegated team block not reported", { runId: run.id, error: sent.error });
 }
+
+/** The first line of a calibration round's people list, as the server writes it. */
+const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
 
 /** Only a recent delegation is still waiting for its team's result. */
 const DELEGATION_RETURN_WINDOW_MS = 24 * 60 * 60 * 1000;

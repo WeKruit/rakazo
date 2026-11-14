@@ -52,11 +52,17 @@ function deps(
         .mockResolvedValue(options.senderRunning === false ? null : { id: "run-1" }),
       findUnique: vi.fn().mockResolvedValue({ status: "running" }),
       create: vi.fn().mockResolvedValue({ id: "run-2" }),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    attempt: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     bot: {
       findFirst: vi.fn().mockResolvedValue(options.targetArchived ? null : { id: "bot-target" }),
     },
-    task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
+    task: {
+      create: vi.fn().mockResolvedValue({ id: "task-1" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     message: {
       findUnique: messageFindUnique,
       create: vi.fn().mockResolvedValue({ id: "message-1", seq: 1 }),
@@ -475,6 +481,51 @@ describe("delegating to a role team in another conversation", () => {
     );
   });
 
+  it("replaces an earlier request from the same conversation that has not started", async () => {
+    // Staging 11-14: each "where's the new round?" queued as its own turn behind the round and
+    // they ran one after another, so the recruiter's new instruction waited minutes.
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-role" } });
+    harness.tx.run.findMany.mockResolvedValue([{ id: "run-stale", taskId: "task-stale" }]);
+    harness.tx.run.findUnique.mockImplementation(async (args: { where: { id: string } }) => ({
+      status: args.where.id === "run-stale" ? "cancelled" : "running",
+    }));
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      message: "Redo the ones without Kafka",
+    });
+    expect(sent).toMatchObject({ ok: true });
+    expect(harness.tx.run.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        threadId: "thread-role",
+        botId: "bot-main",
+        status: "queued",
+        leaseFence: 0,
+        sourceMessage: {
+          is: {
+            blocks: {
+              array_contains: [{ kind: "bot_message_received", returnThreadId: "thread-global" }],
+            },
+          },
+        },
+      }),
+      select: { id: true, taskId: true },
+    });
+    expect(harness.tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["run-stale"] } },
+        data: expect.objectContaining({ status: "cancelled" }),
+      }),
+    );
+    expect(harness.tx.run.create).toHaveBeenCalled();
+  });
+
+  it("never replaces a request inside the same conversation", async () => {
+    const harness = deps();
+    await messageBot(harness.deps, run, sender, { bot_id: "bot-target", message: "hello" });
+    expect(harness.tx.run.findMany).not.toHaveBeenCalled();
+  });
+
   it("refuses a conversation outside this user's active role teams", async () => {
     const harness = deps({ bots: mainBot, addressedThread: null });
     const sent = await messageBot(harness.deps, globalRun, kruit, {
@@ -636,6 +687,19 @@ describe("delegating to a role team in another conversation", () => {
     );
     expect(returnedTo(harness)).toEqual([
       expect.objectContaining({ text: "10 people this round: …", intent: "result" }),
+    ]);
+  });
+
+  it("brings the round's people back with the team's closing line", async () => {
+    // Staging 11-14: only "the next round has been posted" came back, so Kruit could not show
+    // the people or say who has both must-haves.
+    const round = "10 people this round:\n\n1. **Hima Y** · Sr Data Engineer · Starbucks";
+    const harness = team({
+      later: [said("Recording the feedback."), said(round), said("Round 2 is posted.")],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({ text: `Round 2 is posted.\n\n${round}` }),
     ]);
   });
 
