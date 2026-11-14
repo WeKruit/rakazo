@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { referredRole } from "./role-reference.js";
+import { referredRole, titleWithRef } from "./role-reference.js";
 
 const roles = [
   { id: "r153", title: "Warehouse Manager (Ref 0153)" },
@@ -34,5 +34,22 @@ describe("referredRole", () => {
     });
     expect(referredRole(["any senior engineer updates?"], roles)).toBeUndefined();
     expect(referredRole(["Ada现在就发"], roles)).toBeUndefined();
+  });
+});
+
+describe("titleWithRef", () => {
+  it("keeps the ref the recruiter gave in a new role's title (staging 11-14)", () => {
+    // start_role dropped ref 21271, so every later handoff to the role was refused as "a new
+    // role (ref 21271)", and a second role was opened.
+    const asked = "新岗位 Senior Data Engineer 西雅图 ref 21271，first email写好发";
+    expect(titleWithRef("Senior Data Engineer — Seattle", asked)).toBe(
+      "Senior Data Engineer — Seattle (Ref 21271)",
+    );
+    expect(titleWithRef("Senior Data Engineer (Ref 21271)", asked)).toBe(
+      "Senior Data Engineer (Ref 21271)",
+    );
+    expect(titleWithRef("Senior Data Engineer", "新岗位 Senior Data Engineer")).toBe(
+      "Senior Data Engineer",
+    );
   });
 });
