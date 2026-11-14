@@ -5218,7 +5218,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   if (line) fixedAckOpen = fixedAckSent = true;
                   return line;
                 })
-              : writeQuickReply(quickReplyText)
+              : // Gate 5fed6e53: "你好" got no usable line and nothing showed for 18 s. The answer
+                // takes the line's place, so a fixed one is enough when the written one is unusable.
+                writeQuickReply(quickReplyText).then((line) => line ?? fixedAck(turnLanguage))
           )
             .then(async (text) => {
               if (!text) return;

@@ -587,6 +587,21 @@ describe("quick reply", () => {
     expect(texts.some((text) => /No response/.test(text ?? ""))).toBe(false);
   });
 
+  // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
+  // showed for 18 s.
+  it("shows the fixed first line when the written one is unusable", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Which role are you hiring for?",
+      finalText: "Hi! Send me a job description to start.",
+      quickReplies: true,
+    });
+    expect(prisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ blocks: [{ kind: "text", text: "Got it, on it." }] }),
+      }),
+    );
+  });
+
   // A line still being written when the answer is finished is never posted after it.
   it("never posts a first line after the answer", async () => {
     let release!: () => void;
