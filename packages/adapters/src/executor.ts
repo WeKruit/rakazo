@@ -6522,11 +6522,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
         };
         /** Writes the run's newest reply into its earlier one, so the person reads one message. */
-        const replaceLatestReply = async (blocks: MessageBlock[]) => {
+        // The progress tag goes with the text: a teammate's result is read from the untagged reply.
+        const replaceLatestReply = async (blocks: MessageBlock[], clientNonce: string | null) => {
           if (!quickReplyMessageId || !(await lineIsLatestReply(quickReplyMessageId))) return false;
           await deps.prisma.message.update({
             where: { id: quickReplyMessageId },
-            data: { blocks: blocks as Prisma.InputJsonValue },
+            data: { blocks: blocks as Prisma.InputJsonValue, clientNonce },
           });
           await deps.events.append({
             spaceId: run.spaceId,
@@ -6585,7 +6586,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           fixedAckOpen = false;
           // Gate 27c0fd0c: a first line, a progress note and the answer said one thing three
           // times. The note takes the line's place, and the answer takes the note's.
-          if (!(await replaceLatestReply([{ kind: "text", text: narration }])))
+          const progressNonce = userProgressClientNonce(run.id, midTurnProgressCount++);
+          if (!(await replaceLatestReply([{ kind: "text", text: narration }], progressNonce)))
             quickReplyMessageId = (
               await publishMessage(
                 deps,
@@ -6593,7 +6595,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 "bot",
                 [{ kind: "text", text: narration }],
                 undefined,
-                userProgressClientNonce(run.id, midTurnProgressCount++),
+                progressNonce,
               )
             )?.id;
           midTurnUserTexts.push(narration);
@@ -17731,7 +17733,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 block.kind === "steps" ||
                 (block.kind === "ask" && !block.approvalEffectId),
             ) &&
-            (await replaceLatestReply(blocks))
+            (await replaceLatestReply(blocks, null))
           ) {
             finalBlocks = [];
           }
