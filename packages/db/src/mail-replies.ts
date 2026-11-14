@@ -304,11 +304,16 @@ export async function findSameMailReply(
  * card is recorded on the effect (instantlyActivationCampaign, instantlyActivationCard) under a
  * lock before it is posted, so two runs racing see each other.
  */
+/** The fingerprint of what a campaign send card shows: who gets which first email, and when. */
+export function campaignSendCardHash(card: unknown): string {
+  return createHash("sha256").update(stableJsonValue(card)).digest("hex");
+}
+
 export async function findWaitingCampaignSend(
   tx: Prisma.TransactionClient,
   input: { spaceId: string; effectId: string; campaignId: string; card: unknown },
 ): Promise<{ effectId: string; threadId: string; place: string | null } | undefined> {
-  const card = createHash("sha256").update(stableJsonValue(input.card)).digest("hex");
+  const card = campaignSendCardHash(input.card);
   const lock = `campaign-send:${input.spaceId}:${input.campaignId}`;
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))::text AS "lock"`;
   const waiting = await tx.externalEffect.findFirst({

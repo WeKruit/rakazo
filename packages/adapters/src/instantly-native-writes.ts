@@ -988,6 +988,13 @@ export function queuePace(
     return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}`;
   return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} at the latest`;
 }
+/** One role's campaign record is changed by one call at a time: saves, adds and sends. */
+const roleLock = (context: AdapterContext, serverId: string, roleId: string) => [
+  "instantly-role-campaign",
+  context.spaceId,
+  serverId,
+  roleId,
+];
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
 export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
@@ -3443,15 +3450,15 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
-    case "native_instantly_activate_campaign":
-      return activateCampaign(
-        prisma,
-        rest,
-        context,
-        serverId,
-        ActivateCampaignInput.parse(args),
-        Boolean(owned),
+    case "native_instantly_activate_campaign": {
+      // A send and a save to the same role's campaign never interleave (sim 11-14: an email saved
+      // while the card waited went out 0.25 s later in place of the one the card showed).
+      const input = ActivateCampaignInput.parse(args);
+      const lock = roleLock(context, serverId, (await activeRoleId(prisma, context)) ?? "");
+      return oneAtATime(prisma, lock, () =>
+        activateCampaign(prisma, rest, context, serverId, input, Boolean(owned)),
       );
+    }
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
     case "native_instantly_get_email": {
@@ -3507,8 +3514,11 @@ export async function runInstantlyWrite(
       const input = EnsureRoleCampaignInput.parse(args);
       // Agents call this in parallel (sim 11-14: three at once); the role's campaign is made and
       // bound by one call at a time, and the others then find it.
-      const role = input.role_id ?? (await activeRoleId(prisma, context)) ?? "";
-      const lock = ["instantly-role-campaign", context.spaceId, serverId, role];
+      const lock = roleLock(
+        context,
+        serverId,
+        input.role_id ?? (await activeRoleId(prisma, context)) ?? "",
+      );
       const ensure = () => ensureRoleCampaign(prisma, rest, context, serverId, input);
       return oneAtATime(prisma, lock, ensure).catch(async (error: unknown) => {
         // No mailbox yet: the role's saved email is still there to show.
@@ -3521,8 +3531,17 @@ export async function runInstantlyWrite(
         return { campaign: null, savedEmail: steps, hasEmail: true, sending: NO_MAILBOX };
       });
     }
-    case "native_instantly_add_shortlist_leads":
-      return addShortlistLeads(prisma, rest, context, serverId, AddShortlistLeadsInput.parse(args));
+    case "native_instantly_add_shortlist_leads": {
+      const input = AddShortlistLeadsInput.parse(args);
+      const lock = roleLock(
+        context,
+        serverId,
+        input.role_id ?? (await activeRoleId(prisma, context)) ?? "",
+      );
+      return oneAtATime(prisma, lock, () =>
+        addShortlistLeads(prisma, rest, context, serverId, input),
+      );
+    }
     default:
       throw new IsolationError();
   }
