@@ -1,8 +1,8 @@
 name: dev-standard
 run-name: development standard ${{ inputs.pr && format('PR {0}', inputs.pr) || github.event.pull_request.number }}
 # The development standard in AGENTS.md, checked for a PR. Needs only git and Node.
-# PRs opened by the agent integration don't start pull_request workflows here, so the release flow
-# dispatches this next to unit-shards (inputs.pr); pull_request covers PRs opened any other way.
+# PRs opened by the agent integration don't start pull_request workflows here, so the thread that
+# owns a PR dispatches this next to its unit-shards run (inputs.pr) before merging to stage.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
