@@ -76,7 +76,54 @@ export async function describeSend(input: {
         args.send_now === true,
       )
     : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
-  return { campaignId, display };
+  const misaddressed = display.refusal ? undefined : misaddressedEmail(display);
+  return { campaignId, display: misaddressed ? { ...display, refusal: misaddressed } : display };
+}
+
+/** An email's greeting: the start of its first line, as plain text. */
+const greeting = (body: string) =>
+  (
+    body
+      .replace(/<(br|\/p|\/div)[^>]*>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean) ?? ""
+  ).slice(0, 40);
+
+const firstName = (name: string | null) => name?.trim().split(/\s+/)[0] ?? "";
+
+const names = (line: string, name: string) =>
+  name.length > 1 &&
+  new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(
+    line,
+  );
+
+/**
+ * Why no card can be shown when someone's email opens by greeting another person in the same
+ * send, such as the email written for Noah going to Ada: a card must show each person their own.
+ */
+export function misaddressedEmail(display: InstantlyActivationDisplay): string | undefined {
+  const people = display.recipients.map((person) => ({
+    person,
+    first: firstName(person.name),
+    opening: greeting((person.firstEmail ?? display.firstEmail)?.body ?? ""),
+  }));
+  const wrong = people.flatMap(({ person, first, opening }) => {
+    if (!first || !opening || names(opening, first)) return [];
+    const other = people.find(
+      (entry) =>
+        entry.first &&
+        entry.first.toLowerCase() !== first.toLowerCase() &&
+        names(opening, entry.first),
+    );
+    return other
+      ? [`${person.name ?? person.email}'s email greets ${other.first} ("${opening}")`]
+      : [];
+  });
+  return wrong.length
+    ? `Nothing was sent and no card was shown: ${wrong.join("; ")}. Save each of them their own email with ensure_role_campaign (an email per person, greeting them by their own name), then call activate_campaign again.`
+    : undefined;
 }
 
 /** What the recruiter approves on a send card: who gets which first email, and when. */

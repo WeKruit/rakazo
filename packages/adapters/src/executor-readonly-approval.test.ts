@@ -1472,6 +1472,35 @@ describe("native Instantly activation card", () => {
     expect(f.results[0]).toMatchObject({ error: expect.stringContaining("no recipients") });
   });
 
+  it("refuses a send card whose email greets another person in the send", async () => {
+    // Sim 11-14: Ada's card showed the email written for Noah ("Hi Noah,").
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: {
+        ...connectorResults,
+        native_instantly_list_leads: {
+          structuredContent: {
+            source: "local_native_instantly_rest",
+            result: {
+              items: [
+                { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
+                { id: "l2", email: "noah@x.test", first_name: "Noah", last_name: "Liu" },
+              ],
+            },
+          },
+        },
+      },
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({
+      error: expect.stringContaining("Noah Liu's email greets Ada"),
+    });
+  });
+
   it("refuses a send card that names no campaign outside a role", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
