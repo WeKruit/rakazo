@@ -1522,6 +1522,8 @@ export const appContract = {
       }),
     ),
     costs: oc.output(UsageCostsSchema),
+    /** Credits left, alone: the low-credit notice reads it on every page. */
+    remaining: oc.output(z.object({ remaining: z.number().nullable() })),
     internalCosts: oc.output(InternalUsageCostsSchema),
     workMetrics: oc.output(WorkMetricsSchema),
   },

@@ -2900,6 +2900,10 @@ msgstr "Filters"
 msgid "Find {0}'s full work history and education and save it to their profile."
 msgstr "Find {0}'s full work history and education and save it to their profile."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
+msgstr "Find candidates with Kruit"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr "Find email"
@@ -3509,11 +3513,6 @@ msgstr "Loaded email filters"
 msgid "Loaded files"
 msgstr "Loaded files"
 
-#. placeholder {0}: loadedEmails.length
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
-msgstr "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
-
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
 msgstr "Loading activity…"
@@ -3866,10 +3865,6 @@ msgstr "More"
 #: src/pages/RoutineEditor.tsx
 msgid "More options"
 msgstr "More options"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "More results may be available. This is not the complete mailbox or calendar."
-msgstr "More results may be available. This is not the complete mailbox or calendar."
 
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "More sources"
@@ -4484,14 +4479,6 @@ msgstr "Observed availability intervals"
 msgid "Observed email metadata"
 msgstr "Observed email metadata"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed read"
-msgstr "Observed read"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed unread"
-msgstr "Observed unread"
-
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Older mail is still loading."
 msgstr "Older mail is still loading."
@@ -4540,6 +4527,10 @@ msgstr "Only recorded slots after this notice are proposed. Availability is rech
 #: src/pages/RoutineEditor.tsx
 msgid "Only run when"
 msgstr "Only run when"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Only the start of this email is shown."
+msgstr "Only the start of this email is shown."
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open"
@@ -4628,10 +4619,6 @@ msgstr "Organic"
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Organization-wide candidate-role records."
 msgstr "Organization-wide candidate-role records."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Original email results saved in this role conversation."
-msgstr "Original email results saved in this role conversation."
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Original job description"
@@ -4873,10 +4860,6 @@ msgstr "Preparing outreach"
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "Preview isn't available for this file type — download it to view it."
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr "Preview only. Ask for the complete message to read the full body."
-
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Previous"
@@ -4995,10 +4978,6 @@ msgstr "Read original conversation"
 #: src/pages/shell/bot-panel.tsx
 msgid "Read replies aloud"
 msgstr "Read replies aloud"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Read status unknown"
-msgstr "Read status unknown"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
@@ -5713,10 +5692,6 @@ msgstr "Saved"
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
 msgstr "Saved before latest role update"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Saved calendar checks in this conversation."
-msgstr "Saved calendar checks in this conversation."
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Saved calendar events"
@@ -6600,6 +6575,14 @@ msgstr "The selected calendar event type supplies the location. Guest additions 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "The selected memory provider is not available in this build."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more replies. Check inbox to load them."
+msgstr "There may be more replies. Check inbox to load them."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more times. Check availability to load them."
+msgstr "There may be more times. Check availability to load them."
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "There was a problem sending this message."

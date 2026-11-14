@@ -89,6 +89,10 @@ it("lists only records sharing the already-authorized thread's owner in one snap
   expect(sql).toContain('r."spaceId" = o."spaceId" AND r."userId" = o."userId"');
   expect(sql).toContain('c."spaceId" = o."spaceId" AND c."userId" = o."userId"');
   expect(sql).toContain('rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"');
+  // Each research task reads its own run by key, never a scan of the account's runs per task.
+  expect(sql).toMatch(
+    /CROSS JOIN LATERAL \(\s*SELECT r\."startedAt", r\."createdAt" FROM runs r\s*WHERE r\.id = q\."createdByRunId"[^)]*LIMIT 1\s*\) r/,
+  );
   expect(sql).toContain('e."spaceId" = o."spaceId"');
   expect(sql).toContain("starts_with(e.\"idempotencyKey\", 'work_estimate:agent_run_')");
   expect(sql).toContain("e.request->>'estimateMs'");

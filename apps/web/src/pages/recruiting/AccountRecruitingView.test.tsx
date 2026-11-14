@@ -6,7 +6,7 @@ import type {
   RecruitingAccountViewOutput,
   RecruitingCorrespondence,
 } from "@rakazo/contracts";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -295,7 +295,11 @@ it.each([
             <AccountRecruitingView
               spaceId="space"
               accountKey="user-space"
-              groups={[]}
+              groups={[
+                { id: "recruiting-global-abc" } as ComponentProps<
+                  typeof AccountRecruitingView
+                >["groups"][number],
+              ]}
               bots={[]}
               refreshSignal={0}
               onOpenNavigation={() => {}}
@@ -305,6 +309,7 @@ it.each([
         ),
       );
       expect(container.textContent?.includes("No emails yet.")).toBe(empty);
+      expect(container.textContent?.includes("Find candidates with Kruit")).toBe(empty);
       expect(container.textContent?.includes("Could not load recruiting records.")).toBe(retry);
       expect(container.textContent).not.toContain("0 replies");
       expect(container.textContent).not.toContain("0 unread");

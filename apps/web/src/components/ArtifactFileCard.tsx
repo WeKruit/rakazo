@@ -58,18 +58,28 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
     }
   }
 
+  // Files without an in-app preview (Word, images, …) use the same card; opening one downloads it.
   if (!previewable) {
     return (
       <div className="min-w-0 max-w-full wrap-anywhere">
         <button
           type="button"
+          aria-label={t`Download ${props.name}`}
           onClick={() => void startDownload()}
-          className="max-w-full rounded-2xl border border-border bg-card px-4 py-3 text-left text-[14px] text-foreground hover:bg-accent"
+          className="flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-left text-foreground hover:bg-accent"
         >
-          <div className="font-medium">{props.name}</div>
-          <div className="mt-1 text-muted-foreground">
-            {props.mimeType} · {formatBytes(props.size)}
-          </div>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-muted text-foreground">
+            <FileText size={21} strokeWidth={1.8} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span title={props.name} className="block truncate text-[14px] font-medium">
+              {props.name}
+            </span>
+            <span className="mt-0.5 block text-[13px] text-muted-foreground">
+              {formatBytes(props.size)}
+            </span>
+          </span>
+          <Download size={19} strokeWidth={1.8} className="shrink-0 text-muted-foreground" />
         </button>
         {downloadError ? <DownloadError message={downloadError} /> : null}
       </div>

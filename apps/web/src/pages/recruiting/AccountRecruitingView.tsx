@@ -782,9 +782,21 @@ export function AccountRecruitingView({
                 !indexedMail.data.items.length &&
                 indexedMail.data.coverage.importsComplete &&
                 indexedMail.data.coverage.crmComplete ? (
-                  <p data-dock-avoid className="mb-3 text-sm text-muted-foreground">
-                    <Trans>No emails yet.</Trans>
-                  </p>
+                  <div data-dock-avoid className="mb-3 space-y-3 text-sm text-muted-foreground">
+                    <p>
+                      <Trans>No emails yet.</Trans>
+                    </p>
+                    {!mailSearch && !mailUnread && globalChat ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          navigate(`/app/g/${encodeURIComponent(globalChat.id)}?view=conversation`)
+                        }
+                      >
+                        <Trans>Find candidates with Kruit</Trans>
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
                 <AccountInbox
                   accountKey={accountKey}

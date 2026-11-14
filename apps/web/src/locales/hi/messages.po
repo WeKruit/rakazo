@@ -2900,6 +2900,10 @@ msgstr ""
 msgid "Find {0}'s full work history and education and save it to their profile."
 msgstr ""
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Find candidates with Kruit"
+msgstr ""
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr ""
@@ -3508,11 +3512,6 @@ msgstr ""
 msgid "Loaded files"
 msgstr ""
 
-#. placeholder {0}: loadedEmails.length
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
-msgstr ""
-
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
 msgstr "गतिविधि लोड हो रही है…"
@@ -3864,10 +3863,6 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "More options"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr ""
 
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -4483,14 +4478,6 @@ msgstr ""
 msgid "Observed email metadata"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed read"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Observed unread"
-msgstr ""
-
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "Older mail is still loading."
 msgstr ""
@@ -4538,6 +4525,10 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Only run when"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Only the start of this email is shown."
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -4626,10 +4617,6 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Organization-wide candidate-role records."
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Original email results saved in this role conversation."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -4872,10 +4859,6 @@ msgstr ""
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Preview only. Ask for the complete message to read the full body."
-msgstr ""
-
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Previous"
@@ -4994,10 +4977,6 @@ msgstr ""
 #: src/pages/shell/bot-panel.tsx
 msgid "Read replies aloud"
 msgstr "उत्तर पढ़कर सुनाएं"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Read status unknown"
-msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
@@ -5709,10 +5688,6 @@ msgstr "सहेजा गया"
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Saved before latest role update"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Saved calendar checks in this conversation."
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
@@ -6597,6 +6572,14 @@ msgstr ""
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "चयनित मेमोरी प्रोवाइडर इस बिल्ड में उपलब्ध नहीं है।"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more replies. Check inbox to load them."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "There may be more times. Check availability to load them."
+msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "There was a problem sending this message."
