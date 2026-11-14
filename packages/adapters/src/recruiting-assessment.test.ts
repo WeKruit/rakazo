@@ -19,6 +19,7 @@ const db = vi.hoisted(() => ({
   question: vi.fn(),
   candidates: vi.fn(),
   sources: vi.fn(),
+  round: vi.fn(),
 }));
 const overview = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock("./recruiting-account.js", () => ({ readRecruitingAccountView: overview.read }));
@@ -37,6 +38,7 @@ vi.mock("@rakazo/db", async (original) => ({
   getRecruitingQuestion: db.question,
   listRecruitingCandidates: db.candidates,
   listRecruitingCandidateSources: db.sources,
+  readRecruitingCalibrationRound: db.round,
 }));
 
 const actor: Actor = {
@@ -616,6 +618,26 @@ describe("native saved candidate reads", () => {
     expect(db.roleId).toHaveBeenCalledWith(f.deps.prisma, actor, { threadId: "thread" });
     expect(db.workspace).not.toHaveBeenCalled();
     expect(db.candidates).toHaveBeenCalledWith(f.deps.prisma, actor, { roleId: "role" });
+  });
+
+  it("reads a named role's round from the global conversation", async () => {
+    // Staging 11-14: global Kruit was told to read the round with the roleId, the schema refused
+    // the key, and it listed the newest saved people instead of the round as the new ten.
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce(null);
+    const round = { round: 2, candidates: [{ candidateKey: "c1" }] };
+    db.round.mockResolvedValue({ roleId: "role-named", round });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "round", roleId: "role-named" },
+      context,
+    );
+    expect(db.round).toHaveBeenCalledWith(f.deps.prisma, actor, {
+      threadId: "thread",
+      roleId: "role-named",
+    });
+    expect(result).toMatchObject({ status: "found", round });
   });
 
   it.each([

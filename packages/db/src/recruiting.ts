@@ -12280,12 +12280,14 @@ async function calibrationRoundView(
 export async function readRecruitingCalibrationRound(
   prisma: PrismaClient,
   actor: Actor,
-  input: { threadId: string },
+  input: { threadId: string; roleId?: string },
 ): Promise<{ roleId: string | null; round: RecruitingCalibrationRound | null }> {
   return prisma.$transaction(async (tx) => {
     const thread = await requireThread(tx, actor, input.threadId);
-    if (!thread.activeRecruitingRoleId) return { roleId: null, round: null };
-    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+    // A role conversation reads its own role; the global conversation names one.
+    const roleId = thread.activeRecruitingRoleId ?? input.roleId;
+    if (!roleId) return { roleId: null, round: null };
+    const role = await requireRole(tx, actor, roleId, false, thread);
     return { roleId: role.id, round: await calibrationRoundView(tx, role.id) };
   });
 }
