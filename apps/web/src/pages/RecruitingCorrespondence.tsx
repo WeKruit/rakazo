@@ -32,7 +32,13 @@ import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { SchedulingPlanForm, SchedulingPlanHistory } from "./recruiting/SchedulingPlan";
 import { sequenceLine, useSequenceLabels, useSequenceStats } from "./recruiting/SequenceStats";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
-import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
+import {
+  ConnectionState,
+  LoadMore,
+  type RoleCrm,
+  useCrmPages,
+  useKeyedRead,
+} from "./recruiting/shared";
 import { useInboxReadState } from "./recruiting/useInboxReadState";
 
 export type RecruitingSequenceSaveInput = {
@@ -731,27 +737,7 @@ function SavedCorrespondenceView({
               <li key={index} className="rounded-lg border border-border px-3 py-2">
                 {connection.name}
                 {" · "}
-                {connection.status === "configured" ? (
-                  <Trans>Configured</Trans>
-                ) : connection.status === "needs_access" ? (
-                  <Trans>Enable for this role</Trans>
-                ) : connection.status === "disabled" ? (
-                  <Trans>Disabled</Trans>
-                ) : connection.status === "unavailable" ? (
-                  <Trans>Temporarily unavailable</Trans>
-                ) : (
-                  <button
-                    type="button"
-                    className="underline underline-offset-2"
-                    onClick={() => onOpenConnections()}
-                  >
-                    {connection.reconnect ? (
-                      <Trans>Reconnect</Trans>
-                    ) : (
-                      <Trans>Connect account</Trans>
-                    )}
-                  </button>
-                )}
+                <ConnectionState connection={connection} />
                 {/* A saved result this page cannot show is diagnostics; a recruiter cannot act on it. */}
                 {connection.checkIssue?.status === "failed" ||
                 (connection.checkIssue && diagnostics) ? (

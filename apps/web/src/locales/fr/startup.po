@@ -1186,6 +1186,10 @@ msgstr ""
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "Les ordinateurs sont désactivés. Définissez SANDBOX_PROVIDER=docker avec SANDBOX_SUPERVISOR_TOKEN, ou définissez SANDBOX_PROVIDER sur e2b, daytona ou box avec sa clé API. Recréez la pile après avoir modifié .env."
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Confirmer le mot de passe"
@@ -1199,6 +1203,10 @@ msgstr "Confirmez que l'URL est accessible depuis cette session du navigateur, p
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "Connecter"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1826,6 +1834,10 @@ msgstr ""
 msgid "Direct MCP"
 msgstr "MCP direct"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr ""
+
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
 msgstr ""
@@ -2034,6 +2046,10 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -3830,6 +3846,7 @@ msgstr ""
 msgid "Recipients will be associated with {0}."
 msgstr ""
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr ""
@@ -5230,6 +5247,10 @@ msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
 msgstr ""
 
 #: src/components/computer/ComputerWorkspace.tsx

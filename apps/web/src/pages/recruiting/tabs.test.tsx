@@ -40,6 +40,7 @@ import { InboxWithReply, replyStatus } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { InboxTab, SequenceTab } from "./index";
 import { RoleCampaignCard } from "./SequenceTab";
+import { OpenConnectionsContext } from "./shared";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ROLE = "00000000-0000-4000-8000-000000000002";
@@ -1145,6 +1146,29 @@ it("reads the role's Interview stage from the CRM", async () => {
   expect(view.textContent).toContain("Ada");
   expect(view.textContent).toContain("Interview");
   expect(view.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("offers to reconnect an expired calendar from the Interview page", async () => {
+  crmData.mockResolvedValue(candidatesPage);
+  correspondence.mockResolvedValue({
+    ...savedCorrespondence,
+    connections: [
+      { name: "Calendar", status: "needs_connection", reconnect: true, checkIssue: null },
+    ],
+  });
+  const open = vi.fn();
+  const view = await mount(
+    <OpenConnectionsContext.Provider value={open}>
+      <InterviewTab {...props} />
+    </OpenConnectionsContext.Provider>,
+  );
+  await settle();
+  expect(view.textContent).not.toContain("Needs connection");
+  const reconnect = [...view.querySelectorAll("button")].find(
+    (button) => button.textContent === "Reconnect",
+  )!;
+  await act(async () => reconnect.click());
+  expect(open).toHaveBeenCalledOnce();
 });
 
 it("falls back to this role's interview workflow rows without the stage filter", async () => {

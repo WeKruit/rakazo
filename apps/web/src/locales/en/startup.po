@@ -1186,6 +1186,10 @@ msgstr "Computers are available. Reload or open a bot to continue."
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 
+#: src/pages/recruiting/shared.tsx
+msgid "Configured"
+msgstr "Configured"
+
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Confirm password"
@@ -1199,6 +1203,10 @@ msgstr "Confirm the URL is reachable from this browser session, then test again.
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "Connect"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Connect account"
+msgstr "Connect account"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1826,6 +1834,10 @@ msgstr "Dimension"
 msgid "Direct MCP"
 msgstr "Direct MCP"
 
+#: src/pages/recruiting/shared.tsx
+msgid "Disabled"
+msgstr "Disabled"
+
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
 msgstr "Discard"
@@ -2035,6 +2047,10 @@ msgstr "Emails"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Employment rule"
 msgstr "Employment rule"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Enable for this role"
+msgstr "Enable for this role"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Engagement"
@@ -3830,6 +3846,7 @@ msgstr "Recipients unavailable"
 msgid "Recipients will be associated with {0}."
 msgstr "Recipients will be associated with {0}."
 
+#: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Reconnect"
 msgstr "Reconnect"
@@ -5231,6 +5248,10 @@ msgstr "Teammate replies"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Teamwork"
 msgstr "Teamwork"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Temporarily unavailable"
+msgstr "Temporarily unavailable"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"

@@ -180,6 +180,7 @@ msgstr ""
 msgid "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 msgstr ""
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "A saved check failed."
 msgstr ""
@@ -1407,7 +1408,6 @@ msgid "Configure a plugin catalog on the server to connect apps."
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr ""
 
@@ -1504,10 +1504,6 @@ msgstr "Подключить модель"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "Подключите провайдера, чтобы добавить резервные модели."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Connect account"
-msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect an app"
@@ -2477,10 +2473,6 @@ msgstr ""
 msgid "Developer diagnostics"
 msgstr ""
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Disabled"
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Disabled tools"
 msgstr ""
@@ -2704,10 +2696,6 @@ msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Employment"
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Enable for this role"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
@@ -5041,7 +5029,6 @@ msgid "Recipients"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Reconnect"
 msgstr ""
 
@@ -6557,10 +6544,6 @@ msgstr "Сообщение Teams"
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
 msgstr "Teams не настроен"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Temporarily unavailable"
-msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Test run"

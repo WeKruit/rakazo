@@ -180,6 +180,7 @@ msgstr "A bit of everything"
 msgid "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 msgstr "A draft creation request could not be confirmed. Review the saved sequences before starting another copy."
 
+#: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "A saved check failed."
 msgstr "A saved check failed."
@@ -1407,7 +1408,6 @@ msgid "Configure a plugin catalog on the server to connect apps."
 msgstr "Configure a plugin catalog on the server to connect apps."
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Configured"
 msgstr "Configured"
 
@@ -1504,10 +1504,6 @@ msgstr "Connect a model"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "Connect a provider to add backups."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Connect account"
-msgstr "Connect account"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect an app"
@@ -2477,10 +2473,6 @@ msgstr "Details"
 msgid "Developer diagnostics"
 msgstr "Developer diagnostics"
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Disabled"
-msgstr "Disabled"
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Disabled tools"
 msgstr "Disabled tools"
@@ -2705,10 +2697,6 @@ msgstr "Emails"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Employment"
 msgstr "Employment"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Enable for this role"
-msgstr "Enable for this role"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "End"
@@ -5042,7 +5030,6 @@ msgid "Recipients"
 msgstr "Recipients"
 
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/RecruitingCorrespondence.tsx
 msgid "Reconnect"
 msgstr "Reconnect"
 
@@ -6560,10 +6547,6 @@ msgstr "Teams message"
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
 msgstr "Teams not enabled"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "Temporarily unavailable"
-msgstr "Temporarily unavailable"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Test run"
