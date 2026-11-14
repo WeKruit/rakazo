@@ -3000,6 +3000,7 @@ msgstr ""
 msgid "Needs a new review"
 msgstr ""
 
+#: src/components/InactiveAsk.tsx
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3159,7 +3160,7 @@ msgstr ""
 msgid "No loaded candidates match this date filter."
 msgstr ""
 
-#: src/components/MailReplyAskContent.tsx
+#: src/components/InactiveAsk.tsx
 msgid "No longer active"
 msgstr "Nicht mehr aktiv"
 
