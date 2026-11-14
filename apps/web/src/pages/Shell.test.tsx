@@ -6485,6 +6485,7 @@ it("retries a failed reply without sending or clearing the recruiter's new draft
     interrupt: true,
     clientNonce: expect.any(String),
     addressing: "coordinator",
+    uiLocale: "en",
   });
   expect(shellApi.createArtifact).not.toHaveBeenCalled();
   expect(
