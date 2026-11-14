@@ -261,6 +261,30 @@ describe("executeRecruitingProfilesTool", () => {
   });
 });
 
+describe("prepareRecruitingProfileRows", () => {
+  // Staging 11-14: save_search failed twice with "invalid input syntax for type json". An emoji
+  // cut in half (a lone surrogate) cannot be stored in a JSON column.
+  it("keeps every saved string storable, even an emoji cut in half", () => {
+    const [row] = prepareRecruitingProfileRows([
+      {
+        name: "Ada Example",
+        linkedin_url: "https://www.linkedin.com/in/ada-example",
+        current_title: `${"a".repeat(299)}😀`.slice(0, 300),
+        snippet: `Kafka in production ${String.fromCharCode(0xd83d)}`,
+      },
+    ]);
+    const strings: string[] = [];
+    JSON.stringify(row, (_key, value) => {
+      if (typeof value === "string") strings.push(value);
+      return value;
+    });
+    expect(strings.length).toBeGreaterThan(2);
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(strings.filter((value) => lone.test(value))).toEqual([]);
+    expect(row).toMatchObject({ snippet: "Kafka in production " });
+  });
+});
+
 describe("peopleFromSearch", () => {
   it("reads the people a finished agent run returned, with their education", () => {
     const body = {

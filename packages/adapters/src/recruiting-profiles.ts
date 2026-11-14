@@ -920,9 +920,24 @@ export function factsFromSearchRow(row: PeopleSearchRow): Facts | null {
   };
 }
 
+/**
+ * Every string made storable in a JSON column: an emoji cut in half by a length limit (a lone
+ * surrogate) failed the whole save on staging 11-14 ("invalid input syntax for type json").
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+function storable<T>(value: T): T {
+  if (typeof value === "string") return value.replace(LONE_SURROGATE, "") as T;
+  if (Array.isArray(value)) return value.map(storable) as T;
+  if (isRecord(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, storable(item)]),
+    ) as T;
+  return value;
+}
+
 /** The existing native save lane retains canonical supplied facts before a later grading row. */
 export function prepareRecruitingProfileRows(rows: readonly unknown[]) {
-  const prepared = rows.map((value) => (isRecord(value) ? { ...value } : value));
+  const prepared = rows.map((value) => storable(isRecord(value) ? { ...value } : value));
   const people = prepared.flatMap((value) => {
     if (!isRecord(value)) return [];
     const retained = factsSchema.safeParse(value._profile).data ?? coresignalProfile(value);
