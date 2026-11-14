@@ -83,6 +83,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import { readActorArtifact } from "./artifact-read.js";
+import { sentCount } from "./campaign-send-record.js";
 import { lastUsedMailbox } from "./instantly-native-writes.js";
 import { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
@@ -943,11 +944,6 @@ export async function getRecruitingRoleCampaign(
     }
     return result;
   });
-}
-
-/** Emails sent: the provider's total, never fewer than the people it has contacted. */
-export function sentCount(total: number | null, contacted: number): number | null {
-  return total === null && contacted === 0 ? null : Math.max(total ?? 0, contacted);
 }
 
 /**

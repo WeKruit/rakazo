@@ -17,6 +17,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
+import { confirmedSends } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
@@ -2675,26 +2676,6 @@ async function leadDelivery(rest: InstantlyRest, campaign: Record<string, unknow
           }
         : {}),
   };
-}
-
-/**
- * When the recruiter confirmed a send of this campaign on its card: every activate_campaign that
- * completed went through that one-time card, so this is the record of who approved what.
- */
-async function confirmedSends(prisma: PrismaClient, context: AdapterContext, campaignId: string) {
-  const rows = await prisma.$queryRaw<{ updatedAt: Date }[]>`
-    SELECT "updatedAt" FROM external_effects
-    WHERE "spaceId" = ${context.spaceId} AND status = 'completed'
-      AND kind LIKE '%activate_campaign' AND result::text LIKE ${`%${campaignId}%`}
-      AND result::text NOT LIKE '%"error"%' AND result::text NOT LIKE '%already_waiting%'
-    ORDER BY "updatedAt" DESC LIMIT 5`;
-  return rows.length
-    ? {
-        recruiterConfirmedSendAt: rows.map((row) => row.updatedAt.toISOString()),
-        confirmedNote:
-          "The recruiter confirmed these sends on their card at these times (most recent first); nothing in this campaign is emailed without that confirmation. Tell them so if they ask who approved it.",
-      }
-    : {};
 }
 
 function draftDelivery(campaign: Record<string, unknown>) {

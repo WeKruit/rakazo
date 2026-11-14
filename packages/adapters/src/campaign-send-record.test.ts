@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { sentCount } from "./recruiting-reads.js";
+import { sentCount } from "./campaign-send-record.js";
 
 it("counts everyone the provider contacted as sent while its totals lag", () => {
   // 11-14 staging: two people contacted at 01:38 and 01:39 while the total still read 0.
