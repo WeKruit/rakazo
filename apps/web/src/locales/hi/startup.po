@@ -843,6 +843,7 @@ msgid "Calibration round"
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Can't reach the server."
 msgstr "सर्वर तक नहीं पहुंचा जा सका।"
 
@@ -3839,6 +3840,7 @@ msgid "Reconnect your model to continue."
 msgstr ""
 
 #: src/App.tsx
+#: src/components/ServerRetryStatus.tsx
 msgid "Reconnecting"
 msgstr "पुनः कनेक्ट हो रहा है"
 

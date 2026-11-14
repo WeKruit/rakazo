@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { retryTransientRead } from "./read-retry";
+import { readRetries, retryTransientRead } from "./read-retry";
 
 afterEach(() => vi.useRealTimers());
 
@@ -23,8 +23,11 @@ it("returns the first successful read after a network failure", async () => {
   vi.useFakeTimers();
   const read = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValue(7);
   const result = retryTransientRead(read);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(readRetries.getSnapshot()).toBe(true);
   await vi.advanceTimersByTimeAsync(1_000);
   expect(await result).toBe(7);
+  expect(readRetries.getSnapshot()).toBe(false);
 });
 
 it.each([
@@ -46,4 +49,5 @@ it("stops retrying once the read is abandoned", async () => {
   await vi.advanceTimersByTimeAsync(60_000);
   expect(await result).toBe("stopped");
   expect(read).toHaveBeenCalledTimes(1);
+  expect(readRetries.getSnapshot()).toBe(false);
 });

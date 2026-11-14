@@ -68,6 +68,7 @@ const HostComputerPrompt = lazyPanel(() =>
   withFeatureMessages(() => import("./HostComputerPrompt")).then((m) => m.HostComputerPrompt),
 );
 
+import { ServerRetryStatus } from "../components/ServerRetryStatus";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
@@ -411,6 +412,7 @@ export function ShellPage() {
         mobileSidebarSwipeRef.current = null;
       }}
     >
+      <ServerRetryStatus />
       {showToolActivity ? (
         <ComputerUpdateProgress
           onCompleted={() => {
