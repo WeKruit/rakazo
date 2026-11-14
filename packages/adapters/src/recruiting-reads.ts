@@ -872,7 +872,13 @@ export async function getRecruitingRoleCampaign(
           ? { nextLeadCursor: null }
           : {}),
       stats: {
-        sent: count(analytics?.emails_sent_count),
+        // The provider's totals lag its per-person record: everyone it has contacted was sent one.
+        sent: sentCount(
+          count(analytics?.emails_sent_count),
+          (rawLeads ?? []).filter(
+            (value) => typeof correspondenceRecord(value)?.timestamp_last_contact === "string",
+          ).length,
+        ),
         opened: count(analytics?.open_count_unique),
         replied: count(analytics?.reply_count_unique),
       },
@@ -937,6 +943,11 @@ export async function getRecruitingRoleCampaign(
     }
     return result;
   });
+}
+
+/** Emails sent: the provider's total, never fewer than the people it has contacted. */
+export function sentCount(total: number | null, contacted: number): number | null {
+  return total === null && contacted === 0 ? null : Math.max(total ?? 0, contacted);
 }
 
 /**
