@@ -1,14 +1,24 @@
 name: dev-standard
-# The development standard in AGENTS.md, checked on every PR. Needs only git and Node.
+run-name: development standard ${{ inputs.pr && format('PR {0}', inputs.pr) || github.event.pull_request.number }}
+# The development standard in AGENTS.md, checked for a PR. Needs only git and Node.
+# PRs opened by the agent integration don't start pull_request workflows here, so the release flow
+# dispatches this next to unit-shards (inputs.pr); pull_request covers PRs opened any other way.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to check
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: dev-standard-${{ github.event.pull_request.number }}
+  group: dev-standard-${{ inputs.pr || github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -26,10 +36,14 @@ jobs:
           node-version: 22
       - name: Check the PR against the standard
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr || github.event.pull_request.number }}
         run: |
-          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-          node scripts/check-dev-standard.mjs --base "$BASE_SHA" --head "$HEAD_SHA" \
+          gh pr view "$PR" --json body,baseRefOid,headRefOid > "$RUNNER_TEMP/pr.json"
+          node -e 'const p=require(process.argv[1]); require("fs").writeFileSync(process.argv[2], p.body ?? "")' \
+            "$RUNNER_TEMP/pr.json" "$RUNNER_TEMP/pr-body.md"
+          base=$(node -p 'require(process.argv[1]).baseRefOid' "$RUNNER_TEMP/pr.json")
+          head=$(node -p 'require(process.argv[1]).headRefOid' "$RUNNER_TEMP/pr.json")
+          git fetch -q origin "$head" "$base"
+          node scripts/check-dev-standard.mjs --base "$base" --head "$head" \
             --body-file "$RUNNER_TEMP/pr-body.md"
