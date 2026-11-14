@@ -592,7 +592,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import { fixedAck, quickReply, withoutLeadingAck } from "./quick-reply.js";
+import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -6408,7 +6408,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
           // The question card that follows asks the question; the text keeps only what leads up to it.
           const narration =
-            hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
+            hideVendors && progressInOtherLanguage(written, quickReplyText)
+              ? ""
+              : hideVendors && nextTool === "ask_user"
+                ? beforeCardQuestion(written)
+                : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) {

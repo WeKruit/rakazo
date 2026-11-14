@@ -539,10 +539,15 @@ export const DRAFT_VARIABLES_NOTE =
  * anyone ("write me a short cold outreach email for a senior data engineer role in Seattle").
  */
 export function askedTemplate(request: string): boolean {
-  if (/template|模板|模版/i.test(request)) return true;
+  if (
+    /template|模板|模版|템플릿|テンプレート|\{\{\s*first_?name\s*\}\}|placeholder|자리표시자|占位/i.test(
+      request,
+    )
+  )
+    return true;
   return (
-    /\b(?:e-?mail|message|note)\b|邮件/i.test(request) &&
-    /\b(?:role|position|job|opening)\b|职位|岗位/i.test(request) &&
+    /\b(?:e-?mail|message|note)\b|邮件|이메일|메일|メール/i.test(request) &&
+    /\b(?:role|position|job|opening)\b|职位|岗位|포지션|직무|ポジション|求人/i.test(request) &&
     !/@|\b(?:these|those|them|him|her|each|everyone|people|candidates?)\b|这些|他们|候选人|这位/i.test(
       request,
     )
