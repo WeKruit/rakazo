@@ -184,6 +184,11 @@ const WORK_DONE: Record<TurnWork, string> = {
   connected: "made changes in a connected app",
 };
 
+export const isTurnWork = (value: string): value is TurnWork => Object.hasOwn(WORK_DONE, value);
+
+/** Past-tense English label of one kind of work, for model-facing state. */
+export const workDoneLabel = (work: TurnWork): string => WORK_DONE[work];
+
 const WORK_DONE_ZH: Record<TurnWork, string> = {
   people_search: "搜索了候选人",
   people_saved: "把候选人存进了岗位",
@@ -290,6 +295,12 @@ export class TurnReportLedger {
     return entry.kind === "tool"
       ? turnWork(entry.name, entry.args, this.settled.get(entry.id))
       : undefined;
+  }
+
+  /** What one returned call did, for its durable receipt. */
+  workFor(id: string): TurnWork | undefined {
+    const entry = this.entries.find((item) => item.kind === "tool" && item.id === id);
+    return entry && this.settled.get(id)?.ok === true ? this.workOf(entry) : undefined;
   }
 
   /** Work done since the last visible report; a recorded round is its own report (its list). */
