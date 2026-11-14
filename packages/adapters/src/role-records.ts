@@ -57,6 +57,17 @@ export function requirementsText(criteria: unknown, preferences: unknown): strin
   return all.length ? capped(all.join("; "), REQUIREMENTS_CHARS) : undefined;
 }
 
+/** Before any requirement is saved, the recruiter's own words the role was opened from. */
+function sourceWords(sourceRefs: unknown): string | undefined {
+  const quotes = (Array.isArray(sourceRefs) ? sourceRefs : []).flatMap((ref) => {
+    const { kind, quote } = ref as { kind?: unknown; quote?: unknown };
+    return kind === "original_material" && typeof quote === "string" && quote.trim() ? [quote] : [];
+  });
+  return quotes.length
+    ? `the recruiter's words: "${capped(quotes.join(" / "), REQUIREMENTS_CHARS)}"`
+    : undefined;
+}
+
 export async function loadRoleRecords(
   prisma: Pick<PrismaClient, "recruitingRole" | "run" | "externalEffect">,
   scope: { spaceId: string; userId: string },
@@ -68,7 +79,10 @@ export async function loadRoleRecords(
   const [roles, runs] = await Promise.all([
     prisma.recruitingRole.findMany({
       where: { id: { in: [...roleIds] }, spaceId: scope.spaceId, userId: scope.userId },
-      select: { id: true, currentRevision: { select: { criteria: true, preferences: true } } },
+      select: {
+        id: true,
+        currentRevision: { select: { criteria: true, preferences: true, sourceRefs: true } },
+      },
     }),
     prisma.run.findMany({
       where: { threadId: { in: [...threadIds] }, spaceId: scope.spaceId },
@@ -78,10 +92,9 @@ export async function loadRoleRecords(
     }),
   ]);
   for (const role of roles) {
-    const requirements = requirementsText(
-      role.currentRevision?.criteria,
-      role.currentRevision?.preferences,
-    );
+    const requirements =
+      requirementsText(role.currentRevision?.criteria, role.currentRevision?.preferences) ??
+      sourceWords(role.currentRevision?.sourceRefs);
     if (requirements) records.set(role.id, { requirements });
   }
   const effects = runs.length

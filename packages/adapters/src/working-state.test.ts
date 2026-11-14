@@ -243,6 +243,34 @@ describe("loadWorkingState", () => {
     expect(own).not.toContain("Saved emails: none");
   });
 
+  // Staging 11-14 send-at-night: a role opened from 「…hybrid 每周3天，6年以上…base 180-220k…」 saved
+  // no criteria, and its team asked for the salary and location the recruiter had already given.
+  it("puts the recruiter's own words on record before any requirement is saved", async () => {
+    const quote = "Senior Data Engineer 西雅图，hybrid 每周3天，base 180-220k";
+    const revisions = [
+      {
+        id: "role-1",
+        currentRevision: {
+          criteria: [],
+          preferences: [],
+          sourceRefs: [{ kind: "original_material", quote }],
+        },
+      },
+    ];
+    const own = (
+      await loadWorkingState(
+        fakePrisma({ revisions }) as never,
+        scope,
+        { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
+        (t) => t,
+        now,
+      )
+    ).text;
+    expect(own).toContain(
+      `- This role's requirements on record: the recruiter's words: "${quote}"`,
+    );
+  });
+
   it("says a confirmed send is not a delivery, and that a campaign with no confirmed send emailed nobody", async () => {
     const lead = { leadId: "l", email: "a@x.test" };
     const bindings = [
