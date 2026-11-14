@@ -259,7 +259,9 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
       `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,
       ...(r.personalization ? [`  Opening: ${r.personalization}`] : []),
       ...(r.alreadyEmailedAt
-        ? [`  Already emailed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`]
+        ? [
+            `  First email already confirmed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`,
+          ]
         : []),
       ...(r.firstEmail
         ? [

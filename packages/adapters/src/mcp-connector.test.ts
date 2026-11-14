@@ -5280,6 +5280,39 @@ describe("local native Instantly campaign and lead tools", () => {
       expect(sends(f)).toEqual([]);
     });
 
+    it("resumes a one-email campaign for the named people when everyone else was already emailed", async () => {
+      // Sim 11-14: a finished role campaign got two new people, and the send was refused as
+      // "would also email" the two it had already emailed, who have no step left.
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 2;
+      f.state.campaign.sequences = [
+        {
+          steps: [{ type: "email", delay: 0, variants: [{ subject: "Hi", body: "<p>Hello</p>" }] }],
+        },
+      ];
+      for (const lead of f.state.campaignLeads.slice(1))
+        Object.assign(lead, { timestamp_last_contact: "2026-11-14T05:55:34.180Z" });
+      const out = f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] }));
+      expect(out).toMatchObject({ recipients: ["abe@x.test"] });
+      expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
+      expect(sends(f).map((r) => r.path)).toEqual([`/api/v2/campaigns/${CAMPAIGN}/activate`]);
+    });
+
+    it("pauses a finished campaign before adding new people to it, emailing nobody", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 3;
+      await f.run("add_shortlist_leads", {
+        candidates: [{ candidate_key: "zoe", email: "zoe@x.test", first_name: "Zoe" }],
+      });
+      const writes = f.state.requests
+        .filter((r) => r.method !== "GET" && !r.path.endsWith("/leads/list"))
+        .map((r) => `${r.method} ${r.path}`);
+      expect(writes).toEqual([
+        `POST /api/v2/campaigns/${CAMPAIGN}/pause`,
+        "POST /api/v2/leads/add",
+      ]);
+    });
+
     it("adds only the named people to a campaign that is already sending", async () => {
       const { f, binding } = await roleWithSixteen();
       f.state.campaign.status = 1;
@@ -5400,7 +5433,7 @@ describe("local native Instantly campaign and lead tools", () => {
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
             // The date too: sim 11-14 turned a bare 22:05 into the next day's evening.
-            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 (about 60 minutes from now, 00:30) at the latest",
+            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 (07:30 UTC, about 60 minutes from now) at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
