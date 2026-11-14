@@ -18,6 +18,8 @@ export type RoleReference =
 
 // "Ref 0733", or in Chinese 「编号0733」「岗位编号 0733」.
 const REF = /(?:\bref\.?|编号)\s*#?\s*([a-z0-9-]*\d[a-z0-9-]*)/i;
+/** The ref a text gives ("Ref 0733", 「编号0733」), lowercased. */
+export const roleRef = (text: string) => REF.exec(text)?.[1]?.toLowerCase();
 const NEW_ROLE = /新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job|req)\b/i;
 
 // Words in many role titles say nothing about which one is meant.

@@ -1073,5 +1073,10 @@ describe("a role named in a handoff", () => {
     );
     expect(namesRole("write to ada", "Senior Data Engineer (Seattle)")).toBeUndefined();
     expect(namesRole("an ops role", "Ops (NY)")).toBeUndefined();
+    // 11-14 staging: a new role's ref is not an older role with the same title words.
+    const opened = "新岗位 senior data engineer (seattle) ref 12181，首封今晚发";
+    expect(namesRole(opened, "Senior Data Engineer (Seattle)")).toBeUndefined();
+    expect(namesRole(opened, "Senior Data Engineer Seattle — Ref 0842")).toBeUndefined();
+    expect(namesRole(opened, "Senior Data Engineer (Seattle) Ref 12181")).toBe("full");
   });
 });
