@@ -5,6 +5,7 @@ import {
   firstSentence,
   fixedAck,
   inPersonLanguage,
+  progressInOtherLanguage,
   quickReply,
   replyLanguage,
   withoutLeadingAck,
@@ -173,6 +174,23 @@ describe("fixedAck", () => {
   it("answers in the language of the person's message", () => {
     expect(fixedAck("对了，远程也可以")).toBe("收到，马上处理。");
     expect(fixedAck("Remote works too")).toBe("Got it, on it.");
+    // A Korean recruiter got the English line (simulated korean-recruiter-template, 2026-11-14).
+    expect(fixedAck("영어 버전으로 부탁드립니다")).toBe("네, 바로 처리할게요.");
+    expect(fixedAck("テンプレートをお願いします")).toBe("承知しました。すぐ対応します。");
+  });
+});
+
+describe("progressInOtherLanguage", () => {
+  it("drops a one-line progress note that left the person's language (simulated 2026-11-14)", () => {
+    const ask = "base改70-90万，另外加一条每周五可以远程";
+    expect(
+      progressInOtherLanguage(
+        "I’ll revise the template to show a RMB 700,000–900,000 base and that Fridays are remote.",
+        ask,
+      ),
+    ).toBe(true);
+    expect(progressInOtherLanguage("我先改模板里的薪资和远程安排。", ask)).toBe(false);
+    expect(progressInOtherLanguage("Hi {{firstName}},\n\nI'm reaching out…", ask)).toBe(false);
   });
 });
 
@@ -185,6 +203,7 @@ describe("withoutLeadingAck", () => {
       "Remote in the US works too.",
     );
     expect(withoutLeadingAck("好的，我会更新搜寻范围。")).toBe("我会更新搜寻范围。");
+    expect(withoutLeadingAck("네, 영어 버전으로 작성했어요.")).toBe("영어 버전으로 작성했어요.");
   });
 
   it("keeps a line that is only an acknowledgement, or opens otherwise", () => {

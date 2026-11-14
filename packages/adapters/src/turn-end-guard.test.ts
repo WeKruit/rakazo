@@ -1400,6 +1400,13 @@ describe("planDeclineRetry", () => {
       false,
     );
     expect(askedTemplate("Email alex@example.com about the role")).toBe(false);
+    // Korean template asks (simulated korean-recruiter-template, 2026-11-14): no Korean word
+    // matched, so the guard demanded a real candidate's name instead of keeping {{firstName}}.
+    expect(
+      askedTemplate("시니어 백엔드 엔지니어 포지션용 첫 아웃리치 이메일 템플릿 부탁드립니다."),
+    ).toBe(true);
+    expect(askedTemplate("후보자는 아직 없으니 {{firstName}} 자리표시자로 쓰세요")).toBe(true);
+    expect(askedTemplate("採用メールのテンプレートをお願いします")).toBe(true);
   });
 
   it("keeps {{firstName}} when the recruiter edits a template they asked for (2026-11-13 staging)", async () => {
