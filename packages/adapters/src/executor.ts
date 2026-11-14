@@ -700,6 +700,7 @@ import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
   roleGroupId,
+  roleOpenedFromLatestMessage,
   roleStartKey,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
@@ -14145,6 +14146,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
               recipient = match.bot.id;
             }
+            if (await roleOpenedFromLatestMessage(deps.prisma, run.threadId, target))
+              return finish({
+                ok: true,
+                team: `${target.title} team`,
+                note: "Already with that team: the role was opened from this same message, so its team is working on it now; nothing more was sent. Do not hand it over again or repeat that the role is open; the team's result comes back here.",
+              });
             const sent = await messageBot(
               deps,
               { ...run, sourceMessageId: run.sourceMessageId },

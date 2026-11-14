@@ -109,6 +109,23 @@ export async function roleStartKey(
 }
 
 /**
+ * Whether a role conversation was opened from the recruiter's latest message here, so its team
+ * already has that request. Staging 11-14: a follow-up turn delegated the same message to the
+ * role start_role had just opened, and two runs each made a Send card for the same people.
+ */
+export async function roleOpenedFromLatestMessage(
+  prisma: Pick<PrismaClient, "message">,
+  threadId: string,
+  role: { groupId: string; title: string },
+): Promise<boolean> {
+  const asked = await latestRecruiterMessage(prisma, threadId);
+  if (!asked) return false;
+  return [asked.id, `${asked.id}:${titleCore(role.title)}`].some(
+    (key) => roleGroupId(key) === role.groupId,
+  );
+}
+
+/**
  * Start a new role's conversation from the recruiter's own message in the global
  * conversation: the same words appear there as theirs, and the role team's lead takes
  * its first turn on them, exactly as if they had been written in the role.
