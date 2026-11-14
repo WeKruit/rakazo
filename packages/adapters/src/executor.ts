@@ -599,6 +599,7 @@ import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
 import {
   fixedAck,
+  isFixedAck,
   oneLineNote,
   progressInOtherLanguage,
   quickReply,
@@ -5470,6 +5471,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
+        // Gate edfa2b9e: a run that ended just as the person wrote posted 「收到，马上处理。」 and left
+        // the message to this run. That line is this run's first line: its answer takes its place.
+        if (run.trigger !== "user" && !quickReplyMessageId) {
+          try {
+            const newest = await deps.prisma.message.findFirst({
+              where: { threadId: thread.id },
+              orderBy: { seq: "desc" },
+              select: { id: true, botId: true, runId: true, role: true, blocks: true },
+            });
+            const blocks = (Array.isArray(newest?.blocks) ? newest.blocks : []) as MessageBlock[];
+            const line = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
+            if (
+              newest?.botId === bot.id &&
+              newest.role === "bot" &&
+              newest.runId &&
+              newest.runId !== runId &&
+              isFixedAck(line)
+            ) {
+              const owner = await deps.prisma.run.findUnique({
+                where: { id: newest.runId },
+                select: { status: true },
+              });
+              if (owner && !(ACTIVE_RUN_STATUSES as readonly string[]).includes(owner.status)) {
+                quickReplyMessageId = newest.id;
+                fixedAckSent = true;
+              }
+            }
+          } catch {
+            // Without the lookup the answer is posted as its own message.
+          }
+        }
         quickReplyEarlier = () =>
           historyMessages
             .filter(

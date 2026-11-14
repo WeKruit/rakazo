@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
+    ackFromEndedRun?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
     teammateResult?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
@@ -190,6 +192,13 @@ async function runWithModel(
           : (options.finalText ?? "Done"),
     };
   });
+  const endedRunAck = {
+    id: "ack-0",
+    botId: "bot-1",
+    runId: "run-0",
+    role: "bot",
+    blocks: [{ kind: "text", text: "收到，马上处理。" }],
+  };
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
@@ -202,7 +211,9 @@ async function runWithModel(
       }),
     },
     run: {
-      findUnique: vi.fn(async () => run),
+      findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
+        options.ackFromEndedRun && args?.where?.id === "run-0" ? { status: "completed" } : run,
+      ),
       findUniqueOrThrow: vi.fn(async () => run),
       count: vi.fn(async () => 0),
       // The running run, as the unread-message check reads it.
@@ -279,6 +290,7 @@ async function runWithModel(
                 )
                   .map((message) => ({ runId: "run-1", role: "bot", ...message }))
                   .reverse(),
+                ...(options.ackFromEndedRun ? [endedRunAck] : []),
               ]
             : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
               ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
@@ -300,7 +312,8 @@ async function runWithModel(
             ? // The thread's newest message: the last one this run posted.
               options.cardsAfterLine?.length
               ? { id: "card-0", ...options.cardsAfterLine[0] }
-              : (prisma.message.create.mock.results.at(-1)?.value ?? null)
+              : (prisma.message.create.mock.results.at(-1)?.value ??
+                (options.ackFromEndedRun ? endedRunAck : null))
             : args?.where?.role === "user" || args?.where?.id
               ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
                   (message: { role: string; id?: string }) =>
@@ -960,6 +973,24 @@ describe("handed-in stage", () => {
       finalText: "NO_RESPONSE",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");
+  });
+
+  // Gate edfa2b9e, change-mind-mid-run: the run handling a teammate's report posted 「收到，马上处理。」
+  // for a message sent just then and ended; the run that took the message posted its own line.
+  it("puts the answer in place of the fixed line a run that ended left for it", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      ackFromEndedRun: true,
+      finalText: "Base is now 70–90万, with remote Fridays.",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "ack-0" },
+        data: expect.objectContaining({
+          blocks: [{ kind: "text", text: "Base is now 70–90万, with remote Fridays." }],
+        }),
+      }),
+    );
   });
 
   // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported
