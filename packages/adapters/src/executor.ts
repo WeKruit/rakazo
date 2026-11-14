@@ -595,6 +595,7 @@ import {
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
 import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
+import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -685,6 +686,8 @@ import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
+  newRoleElsewhere,
+  newRoleNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -796,6 +799,7 @@ import {
   questionStatesWork,
   CLAIMS_CARD_PENDING,
   readsOnly,
+  lastOwnUpdate,
   restatesUpdate,
   TurnReportLedger,
   turnReportText,
@@ -5178,10 +5182,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!text) return;
               // The card this run asked before the answer is not a reply to it, and a row that
               // only shows the run's steps says nothing to the person yet.
+              // Another run of this bot may have acknowledged the same message (it was steered
+              // into a run still finishing): one line is enough.
               const written = await deps.prisma.message.findMany({
                 where: {
                   threadId: thread.id,
-                  runId,
+                  botId: bot.id,
                   role: "bot",
                   createdAt: { gte: turnStartedAt },
                 },
@@ -5844,6 +5850,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // long search. It gets its own short reply now, whether the run reads it first or the
         // watch below finds it unread; the run is told not to acknowledge it again.
         if (quickRepliesOn) {
+          const answeredSince = async (messageId: string) => {
+            const sent = await deps.prisma.message.findUnique({
+              where: { id: messageId },
+              select: { createdAt: true },
+            });
+            if (!sent) return false;
+            const later = await deps.prisma.message.findMany({
+              where: {
+                threadId: thread.id,
+                botId: bot.id,
+                role: "bot",
+                createdAt: { gt: sent.createdAt },
+              },
+              select: { blocks: true },
+              take: 5,
+            });
+            return later.some((message) => saysSomething(message.blocks as MessageBlock[]));
+          };
           const started = new Set<string>();
           replyToSteering = (item) => {
             if (started.has(item.messageId)) return true;
@@ -5862,7 +5886,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return true;
             }
             fixedAckOpen = fixedAckSent = true;
-            void publishMessage(deps, run, "bot", [{ kind: "text", text: line }])
+            // A run started for the same message may have answered it already (11-14 sim: 「好，这就
+            // 处理。」 then 「收到，马上处理。」 a second later).
+            void answeredSince(item.messageId)
+              .then((answered) =>
+                answered
+                  ? undefined
+                  : publishMessage(deps, run, "bot", [{ kind: "text", text: line }]),
+              )
               .then(() => {
                 steeringQuickReplies.set(item.messageId, line);
                 getLogger().info("run.steering_quick_reply", { runId });
@@ -7094,6 +7125,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return (Array.isArray(last?.blocks) ? (last.blocks as MessageBlock[]) : [])
               .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
               .join("\n");
+          } catch {
+            return undefined;
+          }
+        };
+        const lastOwnReplyText = async () => {
+          try {
+            const rows = await deps.prisma.message.findMany({
+              where: { threadId: thread.id, NOT: { runId } },
+              orderBy: { seq: "desc" },
+              take: 8,
+              select: { role: true, botId: true, blocks: true },
+            });
+            return lastOwnUpdate(rows, run.botId);
           } catch {
             return undefined;
           }
@@ -13819,6 +13863,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error:
                   "No active role team with that roleId or groupId. Read recruiting_candidates operation roles, or use a groupId from the role summary. An email to an address the recruiter gave needs no role: hand it to Outreach here with handoff_to_bot.",
               });
+            const otherRef = newRoleElsewhere(lastRecruiterText, target.title);
+            if (otherRef && tools.some((tool) => tool.name === "start_role"))
+              return finish({ error: newRoleNote(otherRef) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
@@ -15381,6 +15428,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ? await remainingUsageCredits(deps.prisma, run.userId).catch(() => null)
           : null;
         const creditsNote = creditsLeft === null ? undefined : creditEstimateNote(creditsLeft);
+        const signingNote = hideVendors
+          ? await recruiterSigningNote(deps.prisma, run.userId).catch(() => undefined)
+          : undefined;
         // Accounts we set up send only through their outreach mailbox; say so when asked.
         const mailboxNote =
           hideVendors &&
@@ -15442,6 +15492,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           awayNote,
           languageNote,
           creditsNote,
+          signingNote,
           mailboxNote,
           sendNowNote,
           !linkRole &&
@@ -17260,12 +17311,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The update just sent already said it: no second, near-identical message. A turn that
           // went on in the background may have sent that update before it resumed, so the
           // run's last saved message counts too.
+          // A teammate's report relayed after this bot already said the same adds nothing either.
           if (
-            run.trigger !== "bot_message" &&
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
-            (restatesUpdate(text, midTurnUserTexts.at(-1)) ||
-              restatesUpdate(text, await lastRunMessageText()))
+            (run.trigger === "bot_message"
+              ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
+              : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
+                restatesUpdate(text, await lastRunMessageText()))
           ) {
             text = "";
             blocks = [];

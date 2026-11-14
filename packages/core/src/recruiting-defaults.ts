@@ -184,7 +184,13 @@ export const RECRUITING_SCALE_START = `The recruiter accepts a calibration round
  */
 /** A role opened to email people the recruiter named with addresses has no search. */
 export function namesPeopleToEmail(texts: readonly string[]): boolean {
-  return texts.some((text) => /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) && asksForOutreach(text));
+  // A reply to someone's email stays a reply card, never a new send (staging gate 60b7e937).
+  return texts.some(
+    (text) =>
+      /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) &&
+      asksForOutreach(text) &&
+      !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(text),
+  );
 }
 
 export function asksForOutreach(text: string): boolean {

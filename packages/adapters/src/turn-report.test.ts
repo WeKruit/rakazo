@@ -5,6 +5,7 @@ import {
   declineRetry,
   questionStatesWork,
   REPORT_BEFORE_ASK,
+  lastOwnUpdate,
   restatesUpdate,
   readsOnly,
   CLAIMS_CARD_PENDING,
@@ -445,6 +446,21 @@ describe("declineRetry", () => {
     expect(retry("Find 20 more people for this role", true)?.note).toMatch(/declined/);
   });
 
+  // verify-musthave 11-14: "drop the ones that don't show kafka" after a roles read got
+  // "There isn't a saved list, so I can't drop anyone" with no retry.
+  it("retries a refused instruction even after a read", () => {
+    expect(
+      declineRetry({
+        reply:
+          "There isn’t a saved role or candidate list to update, so I can’t drop anyone from the pool.",
+        request: "ok drop the ones that don't show kafka then",
+        tools: [],
+        teammates: [],
+        read: true,
+      })?.note,
+    ).toMatch(/declined/);
+  });
+
   it("keeps a reply that shows the drafted email, whatever its aside", () => {
     expect(
       declineRetry({
@@ -608,6 +624,48 @@ describe("restatesUpdate", () => {
       ),
     ).toBe(false);
     expect(restatesUpdate("Found 122 people.", undefined)).toBe(false);
+  });
+
+  // send-at-night 11-14: each role report of the same timeout went out again in Chinese.
+  it("compares Chinese by its characters, not as one long word", () => {
+    const said =
+      "0232 岗位刚刚再次检查：邮件服务仍然连接超时，Noah Liu 和 Ada Chen 的首封邮件都没有保存，也没有生成发送确认卡，因此目前两人都还没有收到邮件。阻塞原因仍是邮件服务连接问题。";
+    expect(
+      restatesUpdate(
+        "0232 岗位检查时，邮件服务仍连接超时；Noah Liu 和 Ada Chen 的首封邮件都没有保存，也没有生成发送确认卡，两人都还没有收到邮件。仍被邮件服务连接问题卡住。",
+        said,
+      ),
+    ).toBe(true);
+    expect(restatesUpdate("Noah 的邮件已经发出，Ada 的明早 9 点发出。", said)).toBe(false);
+  });
+});
+
+describe("lastOwnUpdate", () => {
+  const text = (value: string) => [{ kind: "text", text: value }];
+  const relay = [{ kind: "bot_message_received", text: "report" }];
+  it("is this bot's newest reply when the recruiter has not written since", () => {
+    expect(
+      lastOwnUpdate(
+        [
+          { role: "user", botId: null, blocks: relay },
+          { role: "assistant", botId: "main", blocks: text("still timing out") },
+          { role: "user", botId: null, blocks: text("send it now") },
+        ],
+        "main",
+      ),
+    ).toBe("still timing out");
+    expect(
+      lastOwnUpdate(
+        [
+          { role: "user", botId: null, blocks: text("send it now") },
+          { role: "assistant", botId: "main", blocks: text("still timing out") },
+        ],
+        "main",
+      ),
+    ).toBeUndefined();
+    expect(
+      lastOwnUpdate([{ role: "assistant", botId: "other", blocks: text("x") }], "main"),
+    ).toBeUndefined();
   });
 });
 

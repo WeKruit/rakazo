@@ -117,6 +117,8 @@ async function runWithModel(
     recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
+    /** Another run of this bot already answered the steered message. */
+    answeredElsewhere?: boolean;
     /** A message the run reads mid-turn, before the watch sees it unread. */
     claimed?: { id: string; messageId: string; text: string };
     /** Messages sent while the run works that it has not read yet. */
@@ -228,12 +230,19 @@ async function runWithModel(
     },
     message: {
       // The run's own replies so far: none until the model writes one.
-      findMany: vi.fn(async (args: { where?: { threadId?: string; runId?: string } }) =>
-        args.where?.threadId && !args.where.runId
-          ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-          : [],
+      findMany: vi.fn(
+        async (args: { where?: { threadId?: string; runId?: string; role?: string } }) =>
+          args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+            ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+            : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+              ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+              : [],
       ),
-      findUnique: vi.fn(async () => null),
+      findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
+        options.answeredElsewhere && args?.where?.id === "message-9"
+          ? { createdAt: new Date(0) }
+          : null,
+      ),
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async (args?: { where?: { role?: string; id?: string } }) =>
         args?.where?.role === "user" || args?.where?.id
@@ -548,6 +557,34 @@ describe("quick reply", () => {
     expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply:steer-1")).toBe(
       false,
     );
+  });
+
+  // Sim 11-14: a message steered into a finishing run and answered by its own new run got
+  // 「好，这就处理。」 then 「收到，马上处理。」.
+  it("sends no fixed line for a steered message another run already answered", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "Done.",
+      quickReplies: true,
+      holdMain,
+      answeredElsewhere: true,
+      unreadSteering: [
+        { id: "steer-1", messageId: "message-9", blocks: [{ kind: "text", text: "草稿还在吗" }] },
+      ],
+    });
+    await new Promise((done) => setTimeout(done, STEERING_PEEK_MS + 1_000));
+    release();
+    const { prisma } = await pending;
+    const fixedLine = JSON.stringify([{ kind: "text", text: "收到，马上处理。" }]);
+    expect(
+      prisma.message.create.mock.calls.some(
+        ([args]) =>
+          JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) === fixedLine,
+      ),
+    ).toBe(false);
   });
 
   // Staging 11-13: two messages in a row each got a fixed line, one after the other.
