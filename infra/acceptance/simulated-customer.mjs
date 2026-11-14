@@ -467,8 +467,9 @@ async function play(journey, label, owner, mailbox, out) {
   const startedAt = Date.now();
   watchFrom(rpc, startedAt);
   const before = await campaigns(rpc);
-  // A per-play tag, so a journey on a reused account names a role of its own.
-  const tag = new Date(startedAt).toISOString().slice(11, 16).replace(":", "");
+  // A per-play tag, so a journey on a reused account names a role and recipients of its own. Plays
+  // of one journey start in the same minute, so the play number is part of it.
+  const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${label.split("#")[1] ?? ""}`;
   // Plays of one journey started together still talk differently.
   const seed = [...label].reduce((sum, char) => sum + char.charCodeAt(0), Number(tag));
   journey = { ...journey, variation: variationFor(seed) };
