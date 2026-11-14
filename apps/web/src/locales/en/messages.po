@@ -2636,6 +2636,16 @@ msgstr "Education"
 msgid "Email"
 msgstr "Email"
 
+#. placeholder {0}: index + 1
+#. placeholder {1}: step.delay_days
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email {0}, day {1}"
+msgstr "Email {0}, day {1}"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Email 1"
+msgstr "Email 1"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Email content"
 msgstr "Email content"
@@ -5708,6 +5718,10 @@ msgstr "Saved candidates"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Saved correspondence"
 msgstr "Saved correspondence"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Saved email"
+msgstr "Saved email"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"

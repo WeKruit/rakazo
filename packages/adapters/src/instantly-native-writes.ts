@@ -3073,7 +3073,14 @@ async function roleDraft(
       }),
     ).values(),
   ];
-  if (!campaign)
+  if (!campaign) {
+    // The email ensure_role_campaign saved for the role before a mailbox existed: staging 11-14,
+    // it was saved three times while this read kept saying nothing was saved.
+    const savedEmail = await savedRoleEmail(
+      prisma,
+      context,
+      `${bindingKey(serverId, role.id)}:email`,
+    );
     return {
       roleId: role.id,
       roleTitle: role.title,
@@ -3081,7 +3088,9 @@ async function roleDraft(
       campaigns,
       unconfirmedDrafts,
       campaign: null,
+      ...(savedEmail?.length ? { savedEmail } : {}),
     };
+  }
   const { timezone, hours } = draftDelivery(campaign);
   const raw = Array.isArray(campaign.sequences) ? campaign.sequences : [];
   const steps = editableDraft(campaign)

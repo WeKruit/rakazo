@@ -626,6 +626,19 @@ export function SequenceTab(
         </TabNotice>
       ) : null}
       <SendQueue campaign={campaign} onAskChat={props.onAskChat} />
+      {!live && !nativeDrafts.data?.campaign && nativeDrafts.data?.savedEmail?.length ? (
+        <section aria-label={t`Saved email`} className="space-y-4 rounded-xl border p-5">
+          {nativeDrafts.data.savedEmail.map((step, index) => (
+            <article key={`${index}:${step.subject}`} className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                {index === 0 ? t`Email 1` : t`Email ${index + 1}, day ${step.delay_days}`}
+              </p>
+              <h3 className="text-sm font-medium">{step.subject}</h3>
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{step.body}</p>
+            </article>
+          ))}
+        </section>
+      ) : null}
       {currentRows.length || nativeDrafts.data?.campaigns?.length ? (
         <label className="flex max-w-sm items-center gap-3 text-xs">
           <span className="shrink-0">
