@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   newRoleElsewhere,
+  otherRefNamed,
   startRoleFromRecruiterMessage,
   templateOnlyRequest,
 } from "./role-start.js";
@@ -65,6 +66,18 @@ describe("newRoleElsewhere", () => {
     expect(newRoleElsewhere(text, "Senior Data Engineer Seattle (ref 0232)")).toBeUndefined();
     expect(newRoleElsewhere("ref 0232 怎么样了", "Warehouse Manager (Ref 0153)")).toBeUndefined();
     expect(newRoleElsewhere("新岗位 数据工程师 西雅图", "Warehouse Manager")).toBeUndefined();
+  });
+});
+
+describe("otherRefNamed", () => {
+  it("is the ref of the latest messages when the target role is another one", () => {
+    const texts = [
+      "Ada现在就发，别等到明晚",
+      "新岗位 Senior Data Engineer Seattle ref 0303，两个都发",
+    ];
+    expect(otherRefNamed(texts, "Warehouse Manager (Ref 0153)")).toBe("0303");
+    expect(otherRefNamed(texts, "Senior Data Engineer Seattle (ref 0303)")).toBeUndefined();
+    expect(otherRefNamed(["Ada现在就发"], "Warehouse Manager")).toBeUndefined();
   });
 });
 

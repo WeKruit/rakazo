@@ -924,17 +924,26 @@ export function queuePace(
     const { minutes } = wallClock(date, zone);
     return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
   };
+  // A bare clock time gets a day guessed for it; the date keeps it on the right one.
+  const on = (date: Date) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(date);
   let time: string;
   let queuedAt: string;
   try {
-    time = at(overdue ? new Date(now.getTime() + spread) : done);
+    const end = overdue ? new Date(now.getTime() + spread) : done;
+    time = `${at(end)} ${shown} on ${on(end)}`;
     queuedAt = at(start);
   } catch {
     return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
   }
   if (overdue)
-    return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${shown}`;
-  return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} ${shown} at the latest`;
+    return `queued with the mail service since ${queuedAt} ${shown}, longer than its usual hour; nothing failed, it is still sending about one every ${gap} minutes, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time}`;
+  return `queued with the mail service: the first email can take up to an hour to leave (tell the recruiter so), then about one every ${gap} minutes from the mailbox, so ${count > 1 ? `all ${count} should be` : "it should be"} out by about ${time} at the latest`;
 }
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */

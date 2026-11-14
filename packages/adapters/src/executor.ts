@@ -688,6 +688,8 @@ import { nextRoleContactBatch } from "./role-contact-batch.js";
 import {
   newRoleElsewhere,
   newRoleNote,
+  otherRefNamed,
+  otherRoleNote,
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
@@ -13866,6 +13868,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const otherRef = newRoleElsewhere(lastRecruiterText, target.title);
             if (otherRef && tools.some((tool) => tool.name === "start_role"))
               return finish({ error: newRoleNote(otherRef) });
+            // The recruiter's latest messages name another saved role by its ref.
+            const namedRef = otherRefNamed(recruiterTexts, target.title);
+            const namedRole = namedRef
+              ? await deps.prisma.recruitingRole
+                  .findFirst({
+                    where: {
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      archivedAt: null,
+                      title: { contains: namedRef, mode: "insensitive" },
+                    },
+                    select: { id: true, title: true },
+                  })
+                  .catch(() => null)
+              : null;
+            if (namedRef && namedRole)
+              return finish({ error: otherRoleNote(namedRef, namedRole.title ?? "", namedRole.id) });
             // Work can go straight to a named teammate of that role team; otherwise to its lead.
             const teammateName = String(args.teammate ?? "")
               .trim()
