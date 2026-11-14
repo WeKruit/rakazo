@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { startRoleFromRecruiterMessage } from "./role-start.js";
+import { startRoleFromRecruiterMessage, templateOnlyRequest } from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
   withTransactionRetry: (fn: () => unknown) => fn(),
@@ -32,6 +32,23 @@ function deps(source: unknown, already: unknown = null) {
 
 const run = { spaceId: "s", userId: "u", threadId: "t-global", sourceMessageId: "m-1" };
 const role = { threadId: "t-role", botId: "bot-main", deliveryKey: "k" };
+
+describe("templateOnlyRequest", () => {
+  it("keeps a template request in the chat unless it also asks to find people (simulated 2026-11-14)", () => {
+    expect(
+      templateOnlyRequest(
+        "hiring a staff backend engineer, go, payments infra. NY hybrid, base 200-250k, series C fintech. write me a short first outreach email to candidates for it, and keep it as my template for later",
+      ),
+    ).toBe(true);
+    expect(
+      templateOnlyRequest(
+        "staff backend engineer in NY: find me people and write an outreach template",
+      ),
+    ).toBe(false);
+    expect(templateOnlyRequest("帮我找人：上海的高级后端，顺便写个邮件模板")).toBe(false);
+    expect(templateOnlyRequest("Senior data engineer in Seattle, here is the JD")).toBe(false);
+  });
+});
 
 describe("startRoleFromRecruiterMessage", () => {
   it("copies the recruiter's own words into the role and starts the lead's turn", async () => {

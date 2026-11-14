@@ -71,7 +71,7 @@ export const OWN_EMAIL_REQUEST =
   /gmail|outlook|(?:my|own) (?:e-?mail|mailbox|inbox)|自己的?(?:邮箱|邮件)|我的邮箱/i;
 /** A recruiter telling us to send an email now, or asking what sending or the draft needs. */
 export const SEND_NOW_REQUEST =
-  /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send|草稿还在|草稿在吗|draft (?:still|kept|saved)|still have the draft|连哪|连什么|点了|能发|发得出|can (?:you|it) send/i;
+  /直接发|现在发|马上发|立刻发|发出去|发吧|就发|send (?:it |them )?now|just send|go ahead and send|草稿还在|草稿在吗|draft (?:still|kept|saved)|still have the draft|连哪|连什么|点了|能发|发得出|can (?:you|it) send|(?:不连|没连|不用|不接)\s*gmail|without (?:connecting )?gmail/i;
 /** Once a Connect Gmail card is in the conversation, every follow-up gets the send-now answer. */
 export function showsGmailCard(messages: readonly { role: string; blocks: unknown }[]): boolean {
   return messages.some(
@@ -85,7 +85,7 @@ export function showsGmailCard(messages: readonly { role: string; blocks: unknow
   );
 }
 export const SEND_NOW_WITHOUT_GMAIL_NOTE =
-  "When send_message is not among your tools, Gmail is not connected, so nothing can go out yet. Then, when the recruiter asks to send, what to do or press, or whether the draft is kept, open this reply with that in one short reply in the recruiter's language, with no check, tool call or progress line first: it has not been sent; the one step is pressing Connect Gmail on the card, so it goes out from their own address; the draft is kept (say so in those words), it is the email above, signed with the name they gave, if any (show the new closing line when they just gave it). Once Gmail is connected the email comes back on one Send card here and goes out when they press Send. Call request_connection with provider gmail beside that line, its reason saying the same. Never first say you are sending it or connecting anything yourself, never write the email again, never say the draft is not saved, cannot be confirmed or is only in chat, and never mention a mailbox draft folder.";
+  "When send_message is not among your tools, Gmail is not connected, so nothing can go out yet. When they ask whether email can go out without Gmail, the answer is no: say in one line that each email goes out from their own Gmail after they press Send on its card, so Gmail is the one step, and call request_connection; there is no other sending account. Then, when the recruiter asks to send, what to do or press, or whether the draft is kept, open this reply with that in one short reply in the recruiter's language, with no check, tool call or progress line first: it has not been sent; the one step is pressing Connect Gmail on the card, so it goes out from their own address; the draft is kept (say so in those words), it is the email above, signed with the name they gave, if any (show the new closing line when they just gave it). Once Gmail is connected the email comes back on one Send card here and goes out when they press Send. Call request_connection with provider gmail beside that line, its reason saying the same. Never first say you are sending it or connecting anything yourself, never write the email again, never say the draft is not saved, cannot be confirmed or is only in chat, and never mention a mailbox draft folder.";
 export const OUTREACH_MAILBOX_ONLY_NOTE =
   "This account sends email only through its outreach mailbox, never the recruiter's own email account. If asked to send from their own email, say so in one line and offer to send through the outreach mailbox; never suggest connecting or reconnecting their email.";
 

@@ -38,11 +38,13 @@ export function replyLanguage(userText: string): string {
  * with no model call, in the language of the person's message. The run's own answer follows.
  */
 export function fixedAck(userText: string): string {
+  if (/[\uac00-\ud7af]/.test(userText)) return "네, 바로 처리할게요.";
+  if (/[\u3040-\u30ff]/.test(userText)) return "承知しました。すぐ対応します。";
   return isChineseText(userText) ? "收到，马上处理。" : "Got it, on it.";
 }
 
 const LEADING_ACK =
-  /^\s*(?:(?:收到|好的|明白|了解|没问题)(?:了)?[，,：:。！!、\s]*|(?:got it|okay|ok|sure|understood|noted|will do)\b[,.:;!—–\-\s]*)/i;
+  /^\s*(?:(?:收到|好的|明白|了解|没问题|네|알겠습니다|承知しました)(?:了)?[，,：:。！!、\s]*|(?:got it|okay|ok|sure|understood|noted|will do)\b[,.:;!—–\-\s]*)/i;
 
 /**
  * The run's own line without an opening acknowledgement, once the fixed line already said it.
@@ -76,6 +78,21 @@ const SAYS_SENDING =
 export function inPersonLanguage(line: string | null, userText: string): string | null {
   if (!line || isChineseText(userText) === isChineseText(line)) return line;
   return fixedAck(userText);
+}
+
+/**
+ * A one-line progress note in another language than the person's message: simulated 11-14, a
+ * Chinese edit request got "I'll revise the template to show…". It is dropped; the answer follows.
+ */
+export function progressInOtherLanguage(line: string, userText: string): boolean {
+  const text = line.trim();
+  return (
+    !!text &&
+    !!userText.trim() &&
+    !text.includes("\n") &&
+    text.length <= 2 * MAX_REPLY_CHARS &&
+    isChineseText(userText) !== isChineseText(text)
+  );
 }
 
 /** One sentence the chat can show as-is, or null when the model gave nothing usable. */

@@ -592,7 +592,7 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import { fixedAck, quickReply, withoutLeadingAck } from "./quick-reply.js";
+import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -682,7 +682,11 @@ import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js"
 import { blocksText, suggestNextMessage } from "./reply-suggestion.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
-import { startRoleFromRecruiterMessage } from "./role-start.js";
+import {
+  startRoleFromRecruiterMessage,
+  TEMPLATE_NOT_ROLE_NOTE,
+  templateOnlyRequest,
+} from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -6408,7 +6412,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
           // The question card that follows asks the question; the text keeps only what leads up to it.
           const narration =
-            hideVendors && nextTool === "ask_user" ? beforeCardQuestion(written) : written;
+            hideVendors && progressInOtherLanguage(written, quickReplyText)
+              ? ""
+              : hideVendors && nextTool === "ask_user"
+                ? beforeCardQuestion(written)
+                : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) {
@@ -13867,6 +13875,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "start_role works only in the global conversation.",
               });
+            if (templateOnlyRequest(lastRecruiterText))
+              return finish({ error: TEMPLATE_NOT_ROLE_NOTE });
             const team = await deps.prisma.chatGroupMember.findMany({
               where: { groupId: thread.groupId },
               select: { botId: true },

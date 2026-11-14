@@ -8,7 +8,7 @@
 //
 // Usage (the deployment owner's sign-in creates the throwaway accounts):
 //   RAKAZO_URL=<direct backend> RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate | --story "<test in plain words>"] [--paid] [--samples 1]
+//     node infra/acceptance/simulated-customer.mjs [--journeys a,b | --gate | --story "<test in plain words>" | --calibrate <gold dir>] [--paid] [--samples 1]
 //       [--concurrency 6] [--out <dir>] [--bench <dir>] [--model sonnet] [--judge-model sonnet]
 // Without --journeys it plays every journey that needs no paid search (with --paid, all of them),
 // side by side, each on its own brand-new account, and writes one scoreboard, <out>/summary.md,
@@ -199,9 +199,9 @@ const JUDGE = option("--judge-model", "sonnet");
 // --- What the recruiter sees and what is true ---------------------------------------------------
 async function cardsOpen(rpc) {
   const open = [];
+  // A connect card stays pressable after its wait ends, as the app shows it.
   for (const group of await activeGroupsOf(rpc))
     for (const message of await messagesOf(rpc, group.id))
-      // A connect card stays pressable after its wait ends, as the app shows it.
       for (const block of [
         ...openCards(message),
         ...(message.blocks ?? []).filter(
@@ -621,7 +621,7 @@ async function answered(rpc, card) {
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), broken email (an email or template Kruit offers as ready contains a question to the recruiter, a "[...]" fill-in, or a sign-off with no name), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 A new role must have its key requirement confirmed before the first search (the product's fixed order): one short, concrete question with choices, asked right away, is the right move and counts as answered; a second question, a question about something already said, or a bare "opened the role" with no question is not.
 When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
@@ -663,6 +663,7 @@ const BLOCKING = new Set([
   "blank or stuck",
   "button did nothing",
   "stopped midway",
+  "broken email",
 ]);
 
 /** Kruit's reply times over a play: median and slowest first reply, slowest finish. */
@@ -677,21 +678,8 @@ function latencyLine(turns) {
 }
 
 /** Plays one journey, has it judged, and writes its report; returns its scoreboard row. */
-async function runOne(journey, sample, owner, mailbox) {
-  const label = `${journey.name}#${sample}`;
-  const out = path.join(OUT, label);
-  fs.mkdirSync(out, { recursive: true });
-  const at = Date.now();
-  let result;
-  let verdict;
-  let error;
-  try {
-    result = await play(journey, label, owner, mailbox, out);
-    verdict = await judge(journey, result);
-  } catch (caught) {
-    error = caught;
-    result ??= caught.partial;
-  }
+/** The strict bar: the play passes only with every goal, no false claim and no blocking issue. */
+function strictBar(verdict, result) {
   // Rule checks the scripted conversations use apply here too.
   const checks = [
     ...visible(result?.chats ?? []).flatMap(({ group, messages }) =>
@@ -720,6 +708,25 @@ async function runOne(journey, sample, owner, mailbox) {
     !missed.length &&
     !checks.length &&
     !blocking.length;
+  return { checks, falseClaims, missed, blocking, notRun, pass };
+}
+
+async function runOne(journey, sample, owner, mailbox) {
+  const label = `${journey.name}#${sample}`;
+  const out = path.join(OUT, label);
+  fs.mkdirSync(out, { recursive: true });
+  const at = Date.now();
+  let result;
+  let verdict;
+  let error;
+  try {
+    result = await play(journey, label, owner, mailbox, out);
+    verdict = await judge(journey, result);
+  } catch (caught) {
+    error = caught;
+    result ??= caught.partial;
+  }
+  const { checks, falseClaims, missed, blocking, notRun, pass } = strictBar(verdict, result);
   const row = {
     suite: "simulated",
     scenario: journey.name,
@@ -885,6 +892,58 @@ function compareBaseline(rows) {
 
 // Each journey on a free account gets a brand-new account, so journeys run side by side. Journeys
 // on the one mailbox fixture take turns, or they would read each other's chats.
+// Judge calibration (--calibrate <dir>): each <dir>/*.json is {"label": "pass"|"fail", "why",
+// "from": "<a play's journey.json>"} labelled by a person. The judge re-grades each play and its
+// strict-bar verdict is compared with the label: agreement and Cohen's kappa, the usual check
+// that an LLM judge matches people before its verdicts are trusted.
+const CALIBRATE = option("--calibrate");
+if (CALIBRATE) {
+  const items = fs
+    .readdirSync(CALIBRATE)
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => ({ file, ...JSON.parse(fs.readFileSync(path.join(CALIBRATE, file), "utf8")) }));
+  const graded = [];
+  for (const item of items) {
+    const played = JSON.parse(fs.readFileSync(item.from, "utf8"));
+    const journey = JOURNEYS.find((candidate) => candidate.name === played.journey);
+    if (!journey || !played.result?.turns) {
+      graded.push({ ...item, judge: "not run" });
+      continue;
+    }
+    const verdict = await judge(journey, played.result).catch(() => null);
+    const bar = strictBar(verdict, played.result);
+    graded.push({ ...item, judge: bar.notRun ? "not run" : bar.pass ? "pass" : "fail" });
+    log(`${item.file}: label ${item.label}, judge ${graded.at(-1).judge}`);
+  }
+  const both = graded.filter((item) => item.judge !== "not run");
+  const agree = both.filter((item) => item.judge === item.label).length;
+  const share = (who, value) => both.filter((item) => item[who] === value).length / both.length;
+  const chance =
+    share("label", "pass") * share("judge", "pass") +
+    share("label", "fail") * share("judge", "fail");
+  const observed = agree / both.length;
+  // With only one kind of label, kappa says nothing; report agreement (recall) alone.
+  const oneClass = new Set(both.map((item) => item.label)).size < 2;
+  const kappa = oneClass || chance === 1 ? null : (observed - chance) / (1 - chance);
+  const kappaText =
+    kappa === null ? "kappa n/a (all labels are one kind)" : `Cohen's kappa ${kappa.toFixed(2)}`;
+  const report = [
+    `# Judge calibration · ${new Date().toISOString().slice(0, 16)} · ${both.length} graded of ${graded.length}`,
+    "",
+    `Agreement ${Math.round(observed * 100)}% · ${kappaText} (target ≥ 0.6)`,
+    "",
+    "| Item | Person | Judge | Why the person said so |",
+    "|---|---|---|---|",
+    ...graded.map(
+      (item) =>
+        `| ${item.file} | ${item.label} | ${item.judge} | ${(item.why ?? "").replace(/\|/g, "/")} |`,
+    ),
+  ].join("\n");
+  fs.writeFileSync(path.join(CALIBRATE, "calibration.md"), `${report}\n`);
+  log(`agreement ${Math.round(observed * 100)}%, ${kappaText}`);
+  process.exit(0);
+}
+
 const GATE = args.includes("--gate");
 const selected = JOURNEYS.filter(
   (journey) =>
