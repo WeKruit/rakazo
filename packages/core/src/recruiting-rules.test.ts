@@ -856,6 +856,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-13 send-at-night: the send went to the role team, its card sat in the role conversation the recruiter could not see, and Main kept saying the card still waited after it was confirmed.",
   },
   {
+    rule: "no role yet ends with the next step",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "say there is no role yet and end with the one next step",
+    why: "Gate 11-14: 'why can't anything be sent?' on an empty account got an accurate answer with no next step.",
+  },
+  {
     rule: "never a bare sign-off",
     in: "RECRUITER_LANGUAGE",
     phrase: "never leave an email on a bare sign-off with neither a name nor that question",
