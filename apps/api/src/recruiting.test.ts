@@ -7374,7 +7374,8 @@ describe("role campaign read", () => {
       sourceRevision: 4,
       campaignObservedAt: expect.any(String),
       status: "ready",
-      stats: { sent: null, opened: null, replied: null },
+      // Analytics gave no total, but one lead was contacted: that one was sent.
+      stats: { sent: 1, opened: null, replied: null },
       leadsComplete: true,
       serverId: "instantly",
       campaign: {
