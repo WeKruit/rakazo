@@ -17,7 +17,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
-import { ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
+import { greetsSeveral, ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
 import { confirmedSends } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
@@ -552,6 +552,14 @@ const fillFor = (email: FirstEmail, person: Person): FirstEmail => {
     });
   return { subject: fill(email.subject), body: fill(email.body) };
 };
+/** The variables an email uses that this person has no value for. */
+const missingFields = (email: FirstEmail, person: Person) =>
+  [...`${email.subject} ${email.body}`.matchAll(VARIABLE)]
+    .map((match) => match[1]!)
+    .filter((name) => {
+      const field = LEAD_VARIABLES[name];
+      return !field || !text(person[field]);
+    });
 type Copy = Pick<RoleBinding, "roleEmail" | "drafts"> | null | undefined;
 /** The first email a person in a templated campaign gets: their own, else the role's. */
 function emailFor(binding: Copy, person: Person): FirstEmail | undefined {
@@ -936,7 +944,9 @@ export function queuePace(
   let queuedAt: string;
   try {
     const end = overdue ? new Date(now.getTime() + spread) : done;
-    time = `${at(end)} ${shown} on ${on(end)}`;
+    // The time now beside it, so nobody reads a time still ahead as one already passed.
+    const left = Math.max(1, Math.round((end.getTime() - now.getTime()) / 60_000));
+    time = `${at(end)} ${shown} on ${on(end)} (about ${left} minutes from now, ${at(now)})`;
     queuedAt = at(start);
   } catch {
     return `queued with the mail service: the first email can take up to an hour to leave, then about one every ${gap} minutes from the mailbox`;
@@ -2059,8 +2069,6 @@ async function saveOwnEmail(
     throw new Error(
       "With recipients, pass exactly one step: the first email written for them, with its subject and full body.",
     );
-  if (/\{\{/.test(`${own.subject} ${own.body}`))
-    throw new Error("Write their own email out in full, without {{variables}}, then save again.");
   const { binding } = existing;
   const leads = await allLeads(rest, binding.campaignId);
   const waiting = stagedPeople(binding).filter(
@@ -2075,6 +2083,22 @@ async function saveOwnEmail(
   }
   if (unmatched.length) return { unmatched };
   const who = label(chosen);
+  // One email saved for several people reaches each of them alone: it greets each one by
+  // {{firstName}}, filled in per person below, never by all their names at once.
+  if (/\{\{/.test(`${own.subject} ${own.body}`)) requireFillable(own);
+  const unnamed = chosen.filter((person) => missingFields(own, person).length);
+  if (unnamed.length)
+    throw new Error(
+      `No ${missingFields(own, unnamed[0]!).join(" or ")} is known for ${label(unnamed)}; write their email out in full without it, then save again.`,
+    );
+  const together = greetsSeveral(
+    own.body,
+    chosen.map((person) => text(person.first_name)),
+  );
+  if (together)
+    throw new Error(
+      `Each of these people gets this email alone, but it greets ${together} together. Greet with {{firstName}}, which is filled in for each person, then save again.`,
+    );
   if (binding.created !== true)
     throw new Error(askAbout(who, "this role's campaign was set up outside this product"));
   const templated = isTemplated(campaign);
@@ -2085,6 +2109,18 @@ async function saveOwnEmail(
         "this role's emails have already gone out, and its first email cannot become one person's own without changing it for people already approved",
       ),
     );
+  // Saving the email they already have changes nothing, even once it is sending.
+  if (
+    chosen.every((person) =>
+      isDeepStrictEqual(binding.drafts?.[person.email.toLowerCase()], fillFor(own, person)),
+    )
+  )
+    return {
+      campaignId: binding.campaignId,
+      ownEmailSavedFor: chosen.map((person) => person.email),
+      unchanged: true,
+      next: "They already have exactly this email saved, so nothing changed and nothing needs confirming again.",
+    };
   const emailed = chosen.filter(
     (person) =>
       leads.includes(person) &&
@@ -2101,10 +2137,7 @@ async function saveOwnEmail(
     drafts: {
       ...binding.drafts,
       ...Object.fromEntries(
-        chosen.map((person) => [
-          person.email.toLowerCase(),
-          { subject: own.subject, body: own.body },
-        ]),
+        chosen.map((person) => [person.email.toLowerCase(), fillFor(own, person)]),
       ),
     },
   };

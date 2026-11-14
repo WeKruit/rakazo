@@ -5397,7 +5397,7 @@ describe("local native Instantly campaign and lead tools", () => {
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
             // The date too: sim 11-14 turned a bare 22:05 into the next day's evening.
-            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 at the latest",
+            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 (about 60 minutes from now, 00:30) at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
@@ -5650,6 +5650,45 @@ describe("local native Instantly campaign and lead tools", () => {
         ]);
       });
 
+      it("fills {{firstName}} for each person when one email is saved for several", async () => {
+        const { f, binding } = await roleWithSixteen();
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [{ subject: "A data role", body: "Hi {{firstName}},\n\nA role in Seattle." }],
+            recipients: ["abe@x.test", "p0@x.test"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test", "p0@x.test"] });
+        expect(binding.result).toMatchObject({
+          drafts: {
+            "abe@x.test": { subject: "A data role", body: "Hi Abe,\n\nA role in Seattle." },
+            "p0@x.test": { subject: "A data role", body: "Hi P0,\n\nA role in Seattle." },
+          },
+        });
+      });
+
+      it("saving the same email again once it is sending changes nothing", async () => {
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        f.state.campaign.status = 1;
+        f.state.requests.length = 0;
+        const out = f.result(await saveForAbe(f));
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test"], unchanged: true });
+        expect(patches(f)).toEqual([]);
+      });
+
+      it("refuses one email that greets several of its recipients at once", async () => {
+        const { f } = await roleWithSixteen();
+        const events = await f.run("ensure_role_campaign", {
+          steps: [{ subject: "A data role", body: "Hi Abe and P0,\n\nA role in Seattle." }],
+          recipients: ["abe@x.test", "p0@x.test"],
+        });
+        expect((events[0] as { message: string }).message).toMatch(
+          /greets Abe and P0 together\. Greet with \{\{firstName\}\}/,
+        );
+        expect(f.state.requests.filter((r) => r.method === "PATCH")).toEqual([]);
+      });
+
       it("keeps their own email when the role's email is saved again", async () => {
         const { f } = await roleWithSixteen();
         await saveForAbe(f);
@@ -5744,16 +5783,19 @@ describe("local native Instantly campaign and lead tools", () => {
         }
       });
 
-      it("refuses an email with variables, more than one step, or a person not yet added", async () => {
+      it("refuses an unfillable variable, more than one step, or a person not yet added", async () => {
         const { f } = await roleWithSixteen();
         const message = async (args: Record<string, unknown>) =>
           ((await f.run("ensure_role_campaign", args))[0] as { message: string }).message;
         expect(
+          await message({ steps: [{ subject: "Hi", body: "Hi {{title}}" }], recipients: ["Abe"] }),
+        ).toMatch(/uses \{\{title\}\}; use only \{\{firstName\}\}/);
+        expect(
           await message({
-            steps: [{ subject: "Hi", body: "Hi {{firstName}}" }],
-            recipients: ["Abe"],
+            steps: [{ subject: "Hi", body: "Hi {{firstName}} {{lastName}}" }],
+            recipients: ["abe@x.test", "p0@x.test"],
           }),
-        ).toMatch(/without \{\{variables\}\}/);
+        ).toMatch(/No lastName is known for P0/);
         expect(await message({ steps: [OWN, OWN], recipients: ["Abe Stone"] })).toMatch(
           /exactly one step/,
         );
