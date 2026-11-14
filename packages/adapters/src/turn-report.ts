@@ -668,7 +668,10 @@ export function declineRetry(input: {
   if (input.worked && !(declined.kind === "decline" && cardOwed)) return undefined;
   // A question that asks for nothing to be done ("what interviews do I have") is answered by its
   // reads; a coverage aside in that answer is no refusal.
-  if (input.read && !cardOwed && asked.every((kind) => kind === "schedule")) return undefined;
+  // An instruction ("drop the ones without Kafka") is no question, whatever was read for it.
+  const question = /[?？]|[吗呢][\s。.!！]*$/.test(input.personRequest ?? input.request);
+  if (input.read && question && !cardOwed && asked.every((kind) => kind === "schedule"))
+    return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
     return {

@@ -445,6 +445,21 @@ describe("declineRetry", () => {
     expect(retry("Find 20 more people for this role", true)?.note).toMatch(/declined/);
   });
 
+  // verify-musthave 11-14: "drop the ones that don't show kafka" after a roles read got
+  // "There isn't a saved list, so I can't drop anyone" with no retry.
+  it("retries a refused instruction even after a read", () => {
+    expect(
+      declineRetry({
+        reply:
+          "There isn’t a saved role or candidate list to update, so I can’t drop anyone from the pool.",
+        request: "ok drop the ones that don't show kafka then",
+        tools: [],
+        teammates: [],
+        read: true,
+      })?.note,
+    ).toMatch(/declined/);
+  });
+
   it("keeps a reply that shows the drafted email, whatever its aside", () => {
     expect(
       declineRetry({
