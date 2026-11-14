@@ -270,7 +270,8 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     trustedOrigins: [...buildTrustedOrigins(env), "rakazo://"],
     account: {
       encryptOAuthTokens: true,
-      accountLinking: { enabled: true, disableImplicitLinking: true, trustedProviders: [] },
+      // A verified Google sign-in for a verified existing account signs in to that account.
+      accountLinking: { enabled: true, trustedProviders: [] },
     },
     rateLimit: authRateLimitOptions(),
     database: prismaAdapter(prisma, { provider: "postgresql" }),
@@ -340,6 +341,8 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
         if (isMessagingEmail(email)) return { error: "EMAIL_NOT_AVAILABLE" };
         if (source.action === "link-account") {
           if (!verified) return { error: "unable_to_link_account" };
+          // The deployment's identity provider links only when the signed-in person asks.
+          if (!(await getOAuthState())?.link) return { error: "account_not_linked" };
           return;
         }
         if (source.action === "create-user") {

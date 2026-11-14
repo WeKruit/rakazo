@@ -1045,6 +1045,72 @@ it("keeps Work secondary links scoped and opens the existing global chat", async
   }
 });
 
+it("asks to reconnect an expired calendar, and a closed connections panel refreshes Gmail", async () => {
+  read.mockResolvedValue({
+    roles,
+    items: [
+      {
+        roleId: "one",
+        correspondence: {
+          ...correspondence("one"),
+          events: [],
+          status: "ready",
+          connections: [
+            { name: "CRM", status: "configured", checkIssue: null },
+            {
+              name: "Google Calendar",
+              status: "needs_connection",
+              reconnect: true,
+              checkIssue: null,
+            },
+          ],
+        },
+      },
+    ],
+    nextCursor: null,
+  });
+  listServers.mockResolvedValue([
+    { enabled: true, endpoint: "https://gmailmcp.googleapis.com/mcp/v1", oauthStatus: "reconnect" },
+  ]);
+  const connect = vi.fn();
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  const view = (path: string, refreshSignal: number) => (
+    <MemoryRouter key={path} initialEntries={[path]}>
+      <AccountRecruitingView
+        spaceId="space"
+        accountKey="user-space"
+        groups={[]}
+        bots={[]}
+        refreshSignal={refreshSignal}
+        onOpenNavigation={() => {}}
+        onOpenConnections={connect}
+      />
+    </MemoryRouter>
+  );
+  const button = (text: string) =>
+    [...container.querySelectorAll("button")].find((node) => node.textContent === text);
+  try {
+    await act(async () => pageRoot.render(view("/app?view=interview&role=all", 0)));
+    await act(async () => button("Reconnect Google Calendar")?.click());
+    expect(connect).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain("Could not");
+    await act(async () => pageRoot.render(view("/app?view=inbox&role=all", 0)));
+    expect(button("Reconnect Gmail")).toBeTruthy();
+    listServers.mockResolvedValue([
+      {
+        enabled: true,
+        endpoint: "https://gmailmcp.googleapis.com/mcp/v1",
+        oauthStatus: "connected",
+      },
+    ]);
+    await act(async () => pageRoot.render(view("/app?view=inbox&role=all", 1)));
+    expect(button("Reconnect Gmail")).toBeUndefined();
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
 it.each([
   [[], true],
   [

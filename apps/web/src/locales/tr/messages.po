@@ -5041,7 +5041,16 @@ msgid "Recipients"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "Reconnect"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Reconnect {expiredCalendars}"
+msgstr ""
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Reconnect Gmail"
 msgstr ""
 
 #: src/pages/McpServersOverlay.tsx

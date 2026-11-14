@@ -740,7 +740,17 @@ function SavedCorrespondenceView({
                 ) : connection.status === "unavailable" ? (
                   <Trans>Temporarily unavailable</Trans>
                 ) : (
-                  <Trans>Connect account</Trans>
+                  <button
+                    type="button"
+                    className="underline underline-offset-2"
+                    onClick={() => onOpenConnections()}
+                  >
+                    {connection.reconnect ? (
+                      <Trans>Reconnect</Trans>
+                    ) : (
+                      <Trans>Connect account</Trans>
+                    )}
+                  </button>
                 )}
                 {/* A saved result this page cannot show is diagnostics; a recruiter cannot act on it. */}
                 {connection.checkIssue?.status === "failed" ||

@@ -3215,6 +3215,7 @@ describe("saved recruiting correspondence", () => {
             expect.objectContaining({
               name: "Calendar",
               status: "needs_connection",
+              reconnect: true,
               checkIssue: null,
             }),
           );
