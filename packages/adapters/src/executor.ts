@@ -19342,14 +19342,15 @@ async function threadLaneAncestors(
 
 async function threadLaneBusy(
   tx: Pick<PrismaClient, "run" | "message">,
-  run: LaneRun & { createdAt: Date; trigger: string },
+  run: LaneRun & { createdAt: Date; trigger: string; leaseFence: number },
 ): Promise<boolean> {
   const ancestors = ["bot_message", "tool_background"].includes(run.trigger)
     ? await threadLaneAncestors(tx, run)
     : [];
   // A teammate's message carries the recruiter's request, like a person's turn: it does not wait
   // behind background grading (staging 11-13: feedback waited 2 minutes behind a grade run).
-  const delegated = run.trigger === "bot_message";
+  // Neither does a turn resuming on the recruiter's card answer (staging 11-14: 103 s).
+  const delegated = run.trigger === "bot_message" || run.leaseFence > 0;
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,
