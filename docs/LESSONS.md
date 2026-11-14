@@ -25,6 +25,9 @@ that repeats into the existing line instead of adding another.
   Enter on a touch screen); later "stuck loading" pages were a snapshot taken on an unrecognised loading
   line, and "unsigned" emails came from a placeholder account name. **Before routing an eval finding,
   check the harness could have produced it: read the page's own wording and the account's setup.**
+- A scrubbed account copy rewrote emails but kept real LinkedIn URLs, so a simulated batch send let
+  Kruit look up six real people's addresses and add them to a draft campaign. **A test copy keeps no
+  enrichable identity and has paid lookups turned off; the harness refuses to play if one is on.**
 - Four instruction PRs for one feedback round still left the recruiter seeing nine people while a
   different ten were recorded: the chat list and the round record checked repeats differently. **Read
   the run's events before rewording; when two tools judge the same thing, give them one rule.**
