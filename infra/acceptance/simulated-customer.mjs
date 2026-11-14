@@ -177,7 +177,13 @@ async function cardsOpen(rpc) {
   const open = [];
   for (const group of await activeGroupsOf(rpc))
     for (const message of await messagesOf(rpc, group.id))
-      for (const block of openCards(message)) {
+      // A connect card stays pressable after its wait ends, as the app shows it.
+      for (const block of [
+        ...openCards(message),
+        ...(message.blocks ?? []).filter(
+          (block) => block.kind === "ask" && block.connection && block.status === "expired",
+        ),
+      ]) {
         if (!message.runId || block.input === "secret") continue;
         const text = [block.text, block.detail].filter(Boolean).join("\n");
         open.push({
