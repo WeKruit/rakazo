@@ -1230,6 +1230,45 @@ describe("stage report while the person's newest message is being answered", () 
     await f.run();
     expect(f.results[0]).toEqual({ error: newerRequestElsewhere("发一下") });
   });
+
+  it("hands off when the newest message is a relayed request, not the person's words (staging 11-14)", async () => {
+    // The role's newest message was Kruit's delegated brief, which the stage's own originating
+    // turn was answering; the retry to Outreach was refused as 'newer message ("")'.
+    const f = fixture("report-relayed-newest");
+    const report = {
+      id: "stage-report",
+      seq: 2,
+      role: "bot",
+      botId: "bot-2",
+      runId: "teammate-run",
+      createdAt: new Date(1),
+      blocks: [
+        {
+          kind: "handoff",
+          fromBotId: "bot-2",
+          toBotId: "bot-1",
+          text: "Finished the stage you handed me.",
+          hop: 1,
+          report: "completed",
+        },
+      ],
+    };
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
+    f.prisma.message.findMany.mockResolvedValue([report]);
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { select?: { sourceRuns?: unknown } }) =>
+      query?.select?.sourceRuns
+        ? {
+            blocks: [{ kind: "bot_message_received", text: "Goal: reply in the thread", hop: 1 }],
+            sourceRuns: [{ id: "originating-run" }],
+          }
+        : null) as unknown as typeof findFirst);
+    f.setCalls([
+      { name: "handoff_to_bot", args: { bot: "Outreach", request: "send" }, executionId: "h" },
+    ]);
+    await f.run();
+    expect(f.results[0]).not.toEqual({ error: newerRequestElsewhere("") });
+  });
 });
 
 describe("computer that will not start", () => {
