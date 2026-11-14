@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLAIMS_CONNECTED,
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
   SEND_NOW_REQUEST,
@@ -71,4 +72,17 @@ describe("a Connect Gmail card already in the conversation", () => {
     expect(showsGmailCard([{ role: "user", blocks: card("Gmail").blocks }])).toBe(false);
     expect(showsGmailCard([{ role: "bot", blocks: null }])).toBe(false);
   });
+});
+
+// Sim 11-14: 「邮箱已连接，草稿会保留」 went out right before the Connect Gmail card.
+describe("a progress line that says the mailbox is connected", () => {
+  it.each([
+    "邮箱已连接，草稿会保留；我现在继续准备发送确认。",
+    "Gmail is connected, preparing the send card.",
+  ])("is caught: %s", (text) => expect(CLAIMS_CONNECTED.test(text)).toBe(true));
+  it.each([
+    "连接 Gmail 后，草稿会保留。",
+    "Once Gmail is connected, the card shows the email.",
+    "我先确认邮箱连接步骤和草稿状态。",
+  ])("is left alone: %s", (text) => expect(CLAIMS_CONNECTED.test(text)).toBe(false));
 });

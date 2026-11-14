@@ -5396,7 +5396,8 @@ describe("local native Instantly campaign and lead tools", () => {
           queued: true,
           recipients: ["nick@x.test"],
           next: expect.stringContaining(
-            "it should be out by about 01:30 Central time (Chicago) at the latest",
+            // The date too: sim 11-14 turned a bare 22:05 into the next day's evening.
+            "it should be out by about 01:30 Central time (Chicago) on Fri, Nov 13 at the latest",
           ),
         });
         expect(out).not.toHaveProperty("firstEmailAt");
