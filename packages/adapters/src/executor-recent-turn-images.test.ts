@@ -591,7 +591,7 @@ describe("quick reply", () => {
     ];
     expect(prisma.message.update).toHaveBeenCalledWith({
       where: { id: "published-final" },
-      data: { blocks: answer },
+      data: { blocks: answer, clientNonce: null },
     });
     expect(lastExecutorEvents?.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({ blocks: [] }),
@@ -651,6 +651,7 @@ describe("quick reply", () => {
           blocks: expect.arrayContaining([
             expect.objectContaining({ kind: "ask", text: "Which role should I start with?" }),
           ]),
+          clientNonce: null,
         },
       }),
     );
@@ -704,7 +705,10 @@ describe("quick reply", () => {
     expect(texts).toHaveLength(1);
     expect(prisma.message.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { blocks: [{ kind: "text", text: expect.stringContaining("Without Gmail") }] },
+        data: {
+          blocks: [{ kind: "text", text: expect.stringContaining("Without Gmail") }],
+          clientNonce: expect.any(String),
+        },
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
