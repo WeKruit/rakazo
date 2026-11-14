@@ -11,6 +11,31 @@ import { isMatchScoreKey, matchScore100, matchScoreScale } from "./match-score.j
 import { recruitingCalibrationIdentity } from "./recruiting-playbook.js";
 
 /**
+ * One person's LinkedIn identity for matching rows across sources, or null when the link
+ * cannot identify anyone. A profile link (any LinkedIn subdomain, encoded or not, with or
+ * without trailing sections or query) becomes "linkedin.com/in/<handle>"; any other link
+ * becomes its lowercased host and path.
+ */
+export function linkedinIdentity(url: string | null | undefined): string | null {
+  const text = url?.trim();
+  if (!text) return null;
+  let parsed: URL;
+  let path: string;
+  try {
+    parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
+    path = decodeURIComponent(parsed.pathname).replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (/(^|\.)linkedin\.com$/.test(host)) {
+    const profile = /^\/in\/([^/]+)/.exec(path);
+    return profile ? `linkedin.com/in/${profile[1]}` : path ? `linkedin.com${path}` : null;
+  }
+  return path ? `${host}${path}` : null;
+}
+
+/**
  * Flat profile columns the recruiter's profile view renders. They stay outside the frozen
  * identity contract, so older rows without them remain valid.
  */

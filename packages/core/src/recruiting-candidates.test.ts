@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  linkedinIdentity,
   normalizeRecruitingCandidateRow,
   projectRecruitingCandidateReport,
   RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
@@ -329,5 +330,27 @@ describe("canonical recruiting candidate output", () => {
       "entities",
     ])
       expect(RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS).toContain(column);
+  });
+});
+
+describe("linkedinIdentity", () => {
+  it("gives one profile key across hosts, schemes, case, encoding, sections and queries", () => {
+    for (const link of [
+      "https://www.linkedin.com/in/Ada-L/?trk=x",
+      "uk.linkedin.com/in/ada-l",
+      "http://linkedin.com/in/ada-l/details/experience/",
+      "https://www.linkedin.com/in/%41da-L",
+    ])
+      expect(linkedinIdentity(link)).toBe("linkedin.com/in/ada-l");
+  });
+
+  it("keeps other links by host and path and drops what identifies no one", () => {
+    expect(linkedinIdentity("https://GitHub.com/ada/")).toBe("github.com/ada");
+    expect(linkedinIdentity("https://www.linkedin.com/company/example")).toBe(
+      "linkedin.com/company/example",
+    );
+    expect(linkedinIdentity("not a url")).toBeNull();
+    expect(linkedinIdentity("https://example.com/")).toBeNull();
+    expect(linkedinIdentity(null)).toBeNull();
   });
 });

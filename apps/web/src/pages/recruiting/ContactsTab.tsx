@@ -1,5 +1,6 @@
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
+import { linkedinIdentity } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { Bookmark, Sparkles, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,7 +14,6 @@ import { ProfileMailIcon } from "./ProfileMailIcon";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
-import { linkedinIdentity } from "./roleCandidates";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,

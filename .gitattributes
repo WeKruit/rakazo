@@ -6,3 +6,6 @@ infra/sandboxes/computer/fluxbox.* text eol=lf
 *.png binary
 *.jpg binary
 *.ico binary
+
+# Data tables, not code: collapsed in diffs and skipped by code search.
+packages/adapters/src/datasets/** linguist-generated=true

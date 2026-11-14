@@ -8,11 +8,12 @@ import type {
   RecruitingCrmSyncOutput,
 } from "@rakazo/contracts";
 import { RecruitingCrmSyncCursorSchema } from "@rakazo/contracts";
+import { linkedinIdentity } from "@rakazo/core";
 import type { CrmSyncContact, CrmSyncScope, PrismaClient } from "@rakazo/db";
 import * as recruiting from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { RecruitingCrmReadDeps } from "./recruiting.js";
-import { getRecruitingCrmData, linkedinIdentity } from "./recruiting.js";
+import { getRecruitingCrmData } from "./recruiting.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 const PAGE = 50;
