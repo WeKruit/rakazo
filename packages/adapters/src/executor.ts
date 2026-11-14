@@ -15706,7 +15706,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
           quickReplySaid
-            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or open with an acknowledgement such as "Absolutely" or "Sure"; go on with the full answer.`
+            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or open with an acknowledgement such as "Absolutely" or "Sure", and write no other line about what you will check or do first: your next words are the answer itself.`
             : undefined,
         ]
           .filter(Boolean)
