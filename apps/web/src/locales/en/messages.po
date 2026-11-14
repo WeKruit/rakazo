@@ -4139,10 +4139,6 @@ msgstr "No job description is saved for this role. Add a JD or link when startin
 msgid "No loaded sequences match your search."
 msgstr "No loaded sequences match your search."
 
-#: src/components/AskCard.tsx
-msgid "No longer active"
-msgstr "No longer active"
-
 #: src/pages/PluginsOverlay.tsx
 msgid "No managed app catalog is configured on this deployment."
 msgstr "No managed app catalog is configured on this deployment."
