@@ -27,35 +27,6 @@ export function templateOnlyRequest(text: string): boolean {
 export const TEMPLATE_NOT_ROLE_NOTE =
   "Not opened: the recruiter asked for an email template, not for people. Write the template in your reply now, from the recruiter to the candidate with {{firstName}} and the role details they gave, save it to memory as their outreach template for this role, and say in one line that it is saved and that asking for it by role name brings it back. Open a role only when they ask to find people.";
 
-/**
- * The ref of a new role the recruiter's message opens, when the role team work would go to is a
- * different one: send-at-night 11-14 handed 「新岗位 … ref 0232」 to the only saved role, 0153.
- */
-export function newRoleElsewhere(text: string, targetTitle: string): string | undefined {
-  if (!/新(?:的)?\s*(?:岗位|职位|role)|\bnew (?:role|position|job)\b/i.test(text)) return undefined;
-  const ref = refIn(text);
-  return ref && !targetTitle.toLowerCase().includes(ref.toLowerCase()) ? ref : undefined;
-}
-
-const refIn = (text: string) => /\bref\.?\s*#?\s*([a-z0-9-]*\d[a-z0-9-]*)/i.exec(text)?.[1];
-
-/**
- * The role ref the recruiter's latest messages are about (newest first), when the work would go
- * to a role whose title lacks it: send-at-night 11-14 sent 「Ada现在就发」 for ref 0303 to 0153.
- */
-export function otherRefNamed(texts: readonly string[], targetTitle: string): string | undefined {
-  const ref = texts.slice(0, 4).map(refIn).find(Boolean);
-  return ref && !targetTitle.toLowerCase().includes(ref.toLowerCase()) ? ref : undefined;
-}
-
-/** Model-facing: delegate_to_role refused because the recruiter means another saved role. */
-export const otherRoleNote = (ref: string, title: string, roleId: string) =>
-  `Not handed over: the recruiter's messages are about ref ${ref}, which is the role "${title}" (roleId ${roleId}), not this one. Hand it to that role now.`;
-
-/** Model-facing: delegate_to_role refused because the message opens another role. */
-export const newRoleNote = (ref: string) =>
-  `Not handed over: the recruiter's message opens a new role (ref ${ref}), not this one. Open it with start_role now, carrying their whole request (including any people and emails to send); never put its people or emails in another role.`;
-
 /** The parts of a recruiter's own message that a new role conversation starts from. */
 function recruiterBlocks(message: {
   role: string;
