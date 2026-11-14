@@ -216,6 +216,27 @@ describe("loadWorkingState", () => {
     expect(handedOff.language).toBe("zh");
   });
 
+  it("takes no language from the copy of the recruiter's message a new role opens with", async () => {
+    // Staging 11-14: an English JD opened the role, then 「远程也可以」 in the main conversation,
+    // and the role team kept replying in English.
+    const state = await loadWorkingState(
+      fakePrisma({
+        recruiter: [
+          {
+            ...text("Senior Data Engineer, Seattle, hybrid, 5+ years"),
+            clientNonce: "start-role:k",
+          },
+        ],
+        account: [text("对了，远程也可以，不一定要在西雅图")],
+      }) as never,
+      scope,
+      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
+      (t) => t,
+      now,
+    );
+    expect(state.language).toBe("zh");
+  });
+
   it("never offers the account's own team as a role team before it holds a role", async () => {
     const home = recruitingHomeGroupId(scope);
     const roleless = { id: home, thread: { activeRecruitingRoleId: null } };

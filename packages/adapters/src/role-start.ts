@@ -8,6 +8,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { askedTemplate } from "./turn-report.js";
+import { ROLE_START_NONCE } from "./working-state.js";
 
 /**
  * A request for an email template only, with no ask to find people: simulated 11-14, "write me a
@@ -96,7 +97,7 @@ export async function startRoleFromRecruiterMessage(
     earlier && !text.includes(earlier)
       ? `${text}\n\nWhat the recruiter said about this role earlier, in the main conversation:\n${earlier}`
       : text;
-  const clientNonce = `start-role:${role.deliveryKey}`;
+  const clientNonce = `${ROLE_START_NONCE}${role.deliveryKey}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${role.threadId} FOR UPDATE`;
