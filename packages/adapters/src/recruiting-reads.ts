@@ -1386,6 +1386,7 @@ export async function getRecruitingCorrespondence(
           return {
             name: source.name,
             checkIssue: null,
+            ...(source.enabled && signInExpired ? { reconnect: true as const } : {}),
             status: !source.enabled
               ? "disabled"
               : (

@@ -65,7 +65,7 @@ export function AccountRecruitingView({
       ? { roleId: role, key: params.get("mailThread")!, emailId: params.get("mailMessage")! }
       : undefined;
   // null while unknown, so the connect button never flashes for a connected inbox.
-  const [gmailConnected, setGmailConnected] = useState<boolean | null>(null);
+  const [gmail, setGmail] = useState<"connected" | "missing" | "reconnect" | null>(null);
   useEffect(() => {
     if (!globalInbox) return;
     let active = true;
@@ -73,20 +73,22 @@ export function AccountRecruitingView({
       .list()
       .then((servers) => {
         if (!active) return;
-        setGmailConnected(
-          servers.some(
-            (server) =>
-              server.enabled &&
-              server.endpoint?.startsWith(GMAIL_MCP_ENDPOINT) &&
-              server.oauthStatus === "connected",
-          ),
+        const statuses = servers
+          .filter((server) => server.enabled && server.endpoint?.startsWith(GMAIL_MCP_ENDPOINT))
+          .map((server) => server.oauthStatus);
+        setGmail(
+          statuses.includes("connected")
+            ? "connected"
+            : statuses.includes("reconnect")
+              ? "reconnect"
+              : "missing",
         );
       })
       .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [globalInbox]);
+  }, [globalInbox, refreshSignal]);
   function clearMailAnchor() {
     if (!params.has("mailThread")) return;
     const next = new URLSearchParams(params);
@@ -442,6 +444,16 @@ export function AccountRecruitingView({
     ),
   ];
   const failedCalendars = failedCalendarList.join(", ");
+  const expiredCalendars = [
+    ...new Set(
+      page?.items.flatMap(
+        (item) =>
+          item.correspondence?.connections
+            .filter((connection) => connection.reconnect)
+            .map((connection) => connection.name) ?? [],
+      ) ?? [],
+    ),
+  ].join(", ");
   const calendarConnected = page?.items.some((item) =>
     item.correspondence?.connections.some((connection) => connection.status !== "needs_connection"),
   );
@@ -673,7 +685,11 @@ export function AccountRecruitingView({
           ) : null}
           {view === "interview" && page ? (
             <>
-              {!calendarConnected && !calendarFailed && !pending.length ? (
+              {expiredCalendars ? (
+                <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
+                  <Trans>Reconnect {expiredCalendars}</Trans>
+                </Button>
+              ) : !calendarConnected && !calendarFailed && !pending.length ? (
                 <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
                   <Trans>Connect calendar</Trans>
                 </Button>
@@ -760,9 +776,13 @@ export function AccountRecruitingView({
           <div className="space-y-6">
             {view === "inbox" && !renderCorrespondence ? (
               <>
-                {gmailConnected === false ? (
+                {gmail === "missing" || gmail === "reconnect" ? (
                   <Button className="mb-4" variant="outline" onClick={onOpenConnections}>
-                    <Trans>Connect Gmail</Trans>
+                    {gmail === "reconnect" ? (
+                      <Trans>Reconnect Gmail</Trans>
+                    ) : (
+                      <Trans>Connect Gmail</Trans>
+                    )}
                   </Button>
                 ) : null}
                 {indexedMail?.key === readKey ? (

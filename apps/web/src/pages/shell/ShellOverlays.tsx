@@ -111,6 +111,7 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
     updateSnapshot,
     pluginsOpen,
     setPluginsOpen,
+    setRecruitingRefresh,
     mcpOpen,
     setMcpOpen,
     settingsOpen,
@@ -610,7 +611,11 @@ export function ShellOverlays({ model }: { model: ReturnType<typeof useShellCont
             }}
             memberBotIds={inGroup || workspaceNewRole ? connectionMemberIds : undefined}
             developerView={showToolActivity}
-            onClose={() => setPluginsOpen(false)}
+            onClose={() => {
+              setPluginsOpen(false);
+              // A service connected or reconnected in the overlay changes what the pages can read.
+              setRecruitingRefresh((value) => value + 1);
+            }}
             onOpenMcp={() => {
               setPluginsOpen(false);
               setMcpOpen(true);
