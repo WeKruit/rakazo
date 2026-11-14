@@ -3,12 +3,16 @@
 // recruiter decides the actual messages from Kruit's replies. Journeys that send email name only
 // the internal test inboxes the harness is given (RAKAZO_SIM_RECIPIENTS).
 
+// Our customer (11-14 user: 「我们的用户画像就是不耐烦的像jules一样的用户」): every persona is this
+// impatient, and the others only change language and background.
+const IMPATIENT = `Like all our customers you are impatient: you switch topics without warning, never repeat yourself (if you already said it, Kruit should know), and give up after one pushback: if Kruit still dodges, you are done with that goal. A reply that takes over a minute, or that makes you read past its first two lines for the answer, annoys you, and you say so ("?", "在吗", "说重点").`;
+
 // An agency recruiter like the ones who complained: writes short Chinese messages, is busy, has
 // little patience for explanations, pushes back when an answer dodges the question.
-const AGENCY_RECRUITER = `You are an agency headhunter in your thirties who places engineers for clients. You write Chinese, in short, terse messages (often under 15 characters, no greetings, no punctuation fuss), and switch to English only for job titles and names. You are busy and impatient: you want things done, not explained. When Kruit dodges, refuses, lectures or asks you something you already said, you get annoyed and say so bluntly ("我问的是…", "别解释了，直接做"). You change your mind sometimes. You never read long replies closely: if the answer is not in the first lines, you ask again.`;
+const AGENCY_RECRUITER = `You are an agency headhunter in your thirties who places engineers for clients. You write Chinese, in short, terse messages (often under 15 characters, no greetings, no punctuation fuss), and switch to English only for job titles and names. You are busy and impatient: you want things done, not explained. When Kruit dodges, refuses, lectures or asks you something you already said, you get annoyed and say so bluntly ("我问的是…", "别解释了，直接做"). You change your mind sometimes. You never read long replies closely: if the answer is not in the first lines, you ask again. ${IMPATIENT}`;
 
 // A US agency recruiter who writes English, quickly and informally, and expects Kruit to keep up.
-const US_RECRUITER = `You are a US agency recruiter who fills engineering roles for startups. You write English, short and informal, sometimes lowercase, sometimes two asks in one message. You expect Kruit to just do things. When it stalls, dodges or makes you repeat yourself you say so directly ("that's not what I asked", "just do it").`;
+const US_RECRUITER = `You are a US agency recruiter who fills engineering roles for startups. You write English, short and informal, sometimes lowercase, sometimes two asks in one message. You expect Kruit to just do things. When it stalls, dodges or makes you repeat yourself you say so directly ("that's not what I asked", "just do it"). ${IMPATIENT}`;
 
 // Personas by name, for journeys learned from failures (simulated-customer.mjs --learn).
 // Two candidate addresses from the first test inbox: the inbox itself and a plus-alias of it, so
@@ -19,7 +23,7 @@ const twoInboxes = ([first], tag = "") => [
   first.replace("@", `+ada${tag}@`),
 ];
 
-export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER };
+export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER, IMPATIENT };
 
 export const JOURNEYS = [
   {
@@ -207,8 +211,7 @@ export const JOURNEYS = [
     source: "11-13 Korean first-round failures (#1159); 11-14 user: more customer types",
     chinese: false,
     maxTurns: 5,
-    persona:
-      "You are a recruiter at a Seoul agency who writes Korean only, in polite but short messages. You get annoyed if Kruit answers in English or Chinese.",
+    persona: `You are a recruiter at a Seoul agency who writes Korean only, in polite but short messages. You get annoyed if Kruit answers in English or Chinese. ${IMPATIENT}`,
     facts: () =>
       "The role: Senior Backend Engineer (Java, Spring), Seoul, 7+ years, for a US gaming client opening a Seoul office; the candidate email must be in English. You have no candidates yet.",
     goals: [
@@ -220,6 +223,8 @@ export const JOURNEYS = [
   {
     name: "change-mind-mid-run",
     gate: true,
+    // The second message goes in while Kruit is still on the first.
+    interrupt: true,
     title: "改主意：Kruit 还在写的时候换要求",
     area: "first message",
     source:
@@ -269,6 +274,66 @@ export const JOURNEYS = [
       "Pick one role you saw and open its Results, Sequence and Inbox tabs.",
       "Ask Kruit how many people that role has and how many were emailed, and check the answer matches the pages.",
       "Ask Kruit about one reply you saw in the Inbox (who wrote and what they said), and check it matches.",
+    ],
+  },
+  {
+    name: "schedule-interview",
+    title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
+    area: "sending",
+    source:
+      "11-14 user: interview scheduling must be reviewed end to end; AGENTS.md: external interview invitations need the exact recipient, content and time approved",
+    account: "mailbox",
+    sends: true,
+    chinese: true,
+    maxTurns: 9,
+    persona: `${AGENCY_RECRUITER} A candidate just said yes to a first call with your client and you want it on the calendar today.`,
+    facts: (recipients, tag) =>
+      `The candidate: Noah Liu <${twoInboxes(recipients, tag)[0]}>, for the Senior Data Engineer role (Seattle, ref ${tag}). He is free Tuesday or Wednesday 2–4 pm Central. The call is 30 minutes with the hiring manager. Halfway through, Noah asks to move it to Thursday same time.`,
+    goals: [
+      "Tell Kruit Noah agreed to a 30-minute call and give his free times; ask it to set it up.",
+      "If a card asks to confirm the invitation, check it names Noah, the time and the content before approving.",
+      "Tell Kruit Noah wants Thursday instead, and get it moved without retyping everything.",
+      "Open the Interview page and check it shows Noah's call at the right time and status.",
+    ],
+  },
+  {
+    name: "feedback-on-some-people",
+    paid: true,
+    title: "对几个人给反馈，看下一轮真的改了",
+    area: "search",
+    source:
+      "11-14 user: feedback must be reviewed and actually applied; AGENTS.md: feedback may target any subset or a general direction",
+    account: "batch",
+    chinese: true,
+    maxTurns: 8,
+    waitMs: 12 * 60_000,
+    persona: `${AGENCY_RECRUITER} You have a role with people already found and want the next people to be better.`,
+    facts: () =>
+      "Pick one role that already shows people. Do not approve any send. Keep any new search small (20 people at most).",
+    goals: [
+      "Look at one role's people and tell Kruit which two or three are not a fit and why, in one short message.",
+      "Check Kruit says plainly what it changed for the next people, without asking you to rate everyone.",
+      "Ask for a few more people and check none of the rejected ones come back and the new ones follow your feedback.",
+      "Open the role's Results page and check the rejected people are marked and the new people show.",
+    ],
+  },
+  {
+    name: "long-search-finishes",
+    paid: true,
+    title: "长任务：找一批人，中途不停，做完告诉我",
+    area: "search",
+    source: "11-10 long tasks stopped midway; 11-14 user: 包括长任务能不能真的完成",
+    chinese: true,
+    maxTurns: 6,
+    waitMs: 25 * 60_000,
+    persona: `${AGENCY_RECRUITER} You give Kruit one search and go to a meeting; you only want to hear back when it is done.`,
+    facts: () =>
+      "The role: Senior Site Reliability Engineer, Austin TX on site, 6+ years, Kubernetes and Terraform in production, base $170k–$210k. Ask for at most 20 people. Answer Kruit's first question in one message, then leave it alone.",
+    goals: [
+      "Give Kruit the role and ask it to find up to 20 people and tell you when it is done.",
+      "Answer what Kruit needs in one message and then wait without nudging.",
+      "Check the job finished with people shown (not stopped midway, not a promise), and ask how many it found.",
+      "Open the role's Results page and check the count matches what Kruit said.",
     ],
   },
   {

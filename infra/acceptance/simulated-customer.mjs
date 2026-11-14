@@ -281,12 +281,18 @@ async function newestBotMessageAfter(rpc, since) {
   return newest;
 }
 /** Seconds until Kruit's first visible reply, then waits until the account is quiet. */
-async function replyAfter(journey, rpc, since) {
+/** Seconds to Kruit's first reply and until it went quiet; quick returns after the first reply. */
+async function replyAfter(journey, rpc, since, quick = false) {
   let first = null;
   for (const until = Date.now() + 3 * 60_000; !first && Date.now() < until; await sleep(2_000))
     first = await newestBotMessageAfter(rpc, since);
+  const firstSeconds = first ? Math.round((Date.parse(first.createdAt) - since) / 1000) : null;
+  if (quick) return { firstSeconds, doneSeconds: null };
   await settle(rpc, { quietMs: 25_000, limitMs: journey.waitMs ?? 6 * 60_000 });
-  return first ? Math.round((Date.parse(first.createdAt) - since) / 1000) : null;
+  // Quiet for 25 s means the last reply came that long before the wait ended.
+  const latest = await newestBotMessageAfter(rpc, since);
+  const doneSeconds = latest ? Math.round((Date.parse(latest.createdAt) - since) / 1000) : null;
+  return { firstSeconds, doneSeconds };
 }
 
 const SIMULATOR_RULES = `You play a recruiter using a recruiting assistant called Kruit, to test it the way a real customer would. Stay in character: write the way this person writes (language, length, tone). Decide your next move from what Kruit actually said and showed, not from what it should have said. If Kruit did not answer what you asked, did not do what you asked, or said something you doubt, push back the way this person would. Never explain that you are testing. Answer with one JSON object and nothing else:
@@ -519,8 +525,17 @@ async function play(journey, label, owner, mailbox, out) {
         for (const problem of problems) log(`${label}:   UI: ${problem}`);
       }
       if (waitForKruit) {
-        turn.firstReplySeconds = await replyAfter(journey, rpc, at);
-        log(`${label}:   Kruit's first reply after ${turn.firstReplySeconds ?? "no reply"} s`);
+        // An interrupting customer writes again as soon as Kruit starts on the first ask.
+        const quick =
+          journey.interrupt &&
+          move.action === "say" &&
+          !turns.some((item) => item.move.action === "say");
+        const { firstSeconds, doneSeconds } = await replyAfter(journey, rpc, at, quick);
+        turn.firstReplySeconds = firstSeconds;
+        turn.doneSeconds = doneSeconds;
+        log(
+          `${label}:   Kruit's first reply after ${firstSeconds ?? "no reply"} s, last after ${doneSeconds ?? "-"} s`,
+        );
       }
       turn.records = await records(rpc, startedAt, before);
       if (ui) turn.shot = await ui.shot(`turn-${turn.turn}-${move.action}`);
@@ -572,7 +587,7 @@ async function answered(rpc, card) {
 const JUDGE_RULES = `You judge a recruiting assistant called Kruit from the customer's side. You get one simulated customer's whole conversation, the moves the customer made, how long Kruit took to reply, and the role's real send records after each move. Be strict and concrete; quote Kruit. For every customer move decide:
 - answered: did Kruit's reply directly answer or do what the customer asked (not a deferral, not a different question)?
 - truthful: "yes", "no" or "unknown" — does every claim Kruit made about state (sent, queued, scheduled, paused, how many) match the records? A count or status that contradicts the records is "no". The records hold only the campaigns the test could read: when a claim is about a campaign or person missing from them, it is "unknown", never "no". Instantly sends one email per mailbox about every 10 minutes, so a second person contacted minutes after the first is normal. The first email of a newly confirmed or activated send takes 45–60 minutes to go out: within that time, "queued, not sent yet, out by about HH:MM" is truthful and a goal of getting the email sent counts as met if the records show it queued (the campaign active, the person added). A confirmed send fails only if the person is still not contacted after the time Kruit gave.
-- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
+- issues: short labels for what went wrong, from: dead end, refused, lecture, repeat, wrong language, false claim, internal jargon, slow (first reply over 10 s), slow result (an ordinary ask not finished within 2 minutes, or a long job with no progress line for 5 minutes), wordy (the answer is not in the first two lines, or Kruit lectures or explains what it will do instead of doing it), stopped midway (a job Kruit started ended without its result), did not act, asked again, screen wrong, missing control, confusing page, slow page (a page over 5 s to show), blank or stuck (a page or chat that shows nothing, a spinner, or an old state), button did nothing, other.
 - Check every move against the records and against what the page showed after Kruit's reply ("screen"): a claim the screen contradicts (a count, a status, "saved", "sent", a place to click that is not there) is truthful "no". Do not give the benefit of the doubt: an answer that is only "I'll check" or "on it" with nothing after it is "did not act".
 When the customer used the browser, a move may also show what a page displayed ("screen") and UI problems the test hit ("ui"). Check the screen against the records and against what Kruit said: a page that shows a different count or status from the records, or says nothing where Kruit said to look, is "screen wrong"; a control the customer needed and could not find is "missing control". A "look" or "click" move has no Kruit reply: judge "answered" for it by whether the page gave the customer what they went there for.
 Then judge the whole journey: which of the customer's goals were met, a score from 0 to 10 for how a real recruiter would rate the experience, a one-sentence verdict, and the top problems. Write the verdict and problems in Chinese, in short plain sentences. Answer with one JSON object and nothing else:
@@ -582,7 +597,7 @@ async function judge(journey, result) {
   const moves = result.turns
     .map(
       (turn) =>
-        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
+        `Move ${turn.turn} at ${turn.at.slice(11, 19)}: ${turn.move.action}${turn.move.text ? ` "${turn.move.text}"` : ""}${turn.guard ? ` (${turn.guard})` : ""}${turn.invalid ? ` (not done: ${turn.invalid})` : ""}${turn.move.page ? ` page ${turn.move.page}${turn.move.chat ? ` of ${turn.move.chat}` : ""}` : ""}\n  first reply after: ${turn.firstReplySeconds ?? "none"} s${turn.doneSeconds ? `, last reply after ${turn.doneSeconds} s` : ""}\n  records after: ${JSON.stringify(turn.records ?? [])}${turn.ui ? `\n  ui: ${turn.ui.join("; ")}` : ""}${turn.screen ? `\n  screen (${turn.screen.url}${turn.screen.loadSeconds ? `, took ${turn.screen.loadSeconds} s to show` : ""}):\n${turn.screen.text.replace(/^/gm, "    ")}` : ""}`,
     )
     .join("\n");
   const prompt = `Customer persona:\n${journey.persona}\n\nGoals:\n${journey.goals.map((goal, i) => `${i + 1}. ${goal}`).join("\n")}\n\nRecord codes: ${CAMPAIGN_CODES}\n\nConversation (UTC):\n${render(result.chats)}\n\nCustomer moves:\n${moves}`;
@@ -612,7 +627,19 @@ const BLOCKING = new Set([
   "missing control",
   "blank or stuck",
   "button did nothing",
+  "stopped midway",
 ]);
+
+/** Kruit's reply times over a play: median and slowest first reply, slowest finish. */
+function latencyLine(turns) {
+  const first = turns
+    .map((turn) => turn.firstReplySeconds)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const done = turns.map((turn) => turn.doneSeconds).filter(Number.isFinite);
+  if (!first.length) return "回复速度：没有回复";
+  return `回复速度：首次回复中位 ${first[Math.floor(first.length / 2)]} s，最慢 ${first.at(-1)} s${done.length ? `，做完最慢 ${Math.max(...done)} s` : ""}`;
+}
 
 /** Plays one journey, has it judged, and writes its report; returns its scoreboard row. */
 async function runOne(journey, sample, owner, mailbox) {
@@ -718,6 +745,7 @@ async function runOne(journey, sample, owner, mailbox) {
     render(result?.chats ?? []),
     "",
     `Staging ${SHA.slice(0, 8)} · ${row.seconds} s`,
+    latencyLine(result?.turns ?? []),
   ].join("\n");
   fs.writeFileSync(path.join(out, "report.md"), `${report}\n`);
   log(`${label}: ${verdict ? `${verdict.score}/10 ${pass ? "PASS" : "FAIL"}` : "NOT RUN"}`);
@@ -832,7 +860,7 @@ for (const journey of JOURNEYS.filter(
   (item) => (!named || named.includes(item.name)) && missing(item).length,
 ))
   log(`skipping ${journey.name}: set ${missing(journey).join(", ")}`);
-const SAMPLES = Number(option("--samples", "1"));
+const SAMPLES = Number(option("--samples", "2"));
 const CONCURRENCY = Number(option("--concurrency", "6"));
 // Mailbox samples take turns on the fixture; the batch copy plays once, since each play sends.
 const plays = selected.flatMap((journey) =>
