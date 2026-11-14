@@ -40,6 +40,8 @@ export const PERSONAS = { AGENCY_RECRUITER, US_RECRUITER, IMPATIENT };
 export const JOURNEYS = [
   {
     name: "send-at-night",
+    // Roles earlier plays of this journey left on the reused account; archived before a play.
+    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
     mechanisms: ["state-claims", "reference"],
     // A strict-bar failure blocks a prod release (agreed with the release thread 11-14).
     blocks: true,
@@ -313,6 +315,8 @@ export const JOURNEYS = [
   },
   {
     name: "schedule-interview",
+    // Roles earlier plays of this journey left on the reused account; archived before a play.
+    leftover: /^Senior Data Engineer.*\bRef \d{4,5}\b/i,
     mechanisms: ["state-claims", "reference"],
     title: "候选人同意面试：约时间、发邀请、改期、在 Interview 页看",
     area: "sending",

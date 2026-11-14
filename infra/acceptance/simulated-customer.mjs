@@ -456,6 +456,11 @@ async function play(journey, label, owner, mailbox, out) {
     watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
+    // Roles earlier plays of this journey left behind (idle an hour, so not a play running now).
+    if (journey.leftover) {
+      const old = (await groupsOf(user.rpc)).filter((group) => journey.leftover.test(group.name ?? ""));
+      if (old.length) await archiveRoles(credentials, old.map((group) => group.id), label, { idleHours: 1 });
+    }
   } else {
     const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
@@ -665,15 +670,15 @@ async function play(journey, label, owner, mailbox, out) {
   }
 }
 /** Archives the roles one play opened on a reused account, through the shared archive script. */
-function archiveRoles([email, password], groupIds, label) {
+function archiveRoles([email, password], groupIds, label, { idleHours = 0 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
       [
         path.join(import.meta.dirname, "archive-test-copies.mjs"),
         "--idle-hours",
-        "0",
-        "--stop",
+        String(idleHours),
+        ...(idleHours ? [] : ["--stop"]),
         "--only",
         groupIds.join(","),
       ],
