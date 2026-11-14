@@ -597,7 +597,13 @@ import {
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
-import { fixedAck, progressInOtherLanguage, quickReply, withoutLeadingAck } from "./quick-reply.js";
+import {
+  fixedAck,
+  oneLineNote,
+  progressInOtherLanguage,
+  quickReply,
+  withoutLeadingAck,
+} from "./quick-reply.js";
 import { recruiterSigningNote } from "./recruiter-name.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import type { RecruiterListItem } from "./recruiting-assessment.js";
@@ -1512,6 +1518,10 @@ const PLANNED_SEARCHES_EMPTY =
 const PLANNED_SEARCHES_MISSING =
   "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
 
+// The first line waits this long for the records card, then goes without it.
+const QUICK_REPLY_RECORDS_WAIT_MS = 1_000;
+// The answer's prompt waits this long for a first line still being written; a later one is dropped.
+const QUICK_REPLY_FINISH_WAIT_MS = 3_000;
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 /** After the first planned search returns, the others get at least this long: profile reads make them finish close together. */
@@ -5137,46 +5147,60 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // their messages, refined once history loads and moved by a message steered in.
         let turnLanguage = recruiterLanguage([quickReplyText]);
         let quickReplySaid: string | undefined;
+        // The first line is posted only before the answer's prompt is written, so the answer
+        // always knows what it said: posted and known, or never posted.
+        let quickReplyOpen = true;
+        let quickReplyPosted: Promise<unknown> = Promise.resolve();
+        // The records card, so the first line can already answer when the records do.
+        let setQuickReplyRecords: (text: string | undefined) => void = () => {};
+        const quickReplyRecords = Promise.race([
+          new Promise<string | undefined>((resolve) => {
+            setQuickReplyRecords = resolve;
+          }),
+          new Promise<undefined>((resolve) => setTimeout(resolve, QUICK_REPLY_RECORDS_WAIT_MS)),
+        ]);
         // Earlier turns, once history is loaded; the first line starts before that.
         let quickReplyEarlier: () => Array<{
           role: "user" | "assistant";
           text: string;
         }> = () => [];
         const writeQuickReply = (userText: string, key?: string) =>
-          resolvedPending().then((resolved) =>
-            quickReply({
-              runtime: deps.runtime,
-              model: runModelFromResolved(
-                runModelProvider ?? "",
-                runModelId ?? "",
-                resolved,
-                "off",
-              ),
-              earlier: quickReplyEarlier(),
-              userText,
-              runId,
-              ...(key ? { key } : {}),
-              ...(hideVendors ? { recruiting: true } : {}),
-              spaceId: run.spaceId,
-              userId: run.userId,
-              botId: bot.id,
-              threadId: thread.id,
-              onUsage: (event) =>
-                recordUsage(
-                  deps.prisma,
-                  event,
-                  {
-                    spaceId: run.spaceId,
-                    userId: run.userId,
-                    botId: bot.id,
-                    parentRunId: runId,
-                    runId,
-                    operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
-                    operationKind: "setup",
-                  },
-                  estimateCatalogTokenCostUsd,
+          Promise.all([resolvedPending(), key ? undefined : quickReplyRecords]).then(
+            ([resolved, records]) =>
+              quickReply({
+                runtime: deps.runtime,
+                model: runModelFromResolved(
+                  runModelProvider ?? "",
+                  runModelId ?? "",
+                  resolved,
+                  "off",
                 ),
-            }),
+                earlier: quickReplyEarlier(),
+                userText,
+                ...(records ? { records } : {}),
+                runId,
+                ...(key ? { key } : {}),
+                ...(hideVendors ? { recruiting: true } : {}),
+                spaceId: run.spaceId,
+                userId: run.userId,
+                botId: bot.id,
+                threadId: thread.id,
+                onUsage: (event) =>
+                  recordUsage(
+                    deps.prisma,
+                    event,
+                    {
+                      spaceId: run.spaceId,
+                      userId: run.userId,
+                      botId: bot.id,
+                      parentRunId: runId,
+                      runId,
+                      operationId: `quick-reply:${runId}${key ? `:${key}` : ""}`,
+                      operationKind: "setup",
+                    },
+                    estimateCatalogTokenCostUsd,
+                  ),
+              }),
           );
         const turnStartedAt = new Date();
         if (
@@ -5188,14 +5212,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           quickReplyText.trim()
         )
           // A card answer gets the fixed line at once; only a new request gets a written one.
-          void (
+          quickReplyPosted = (
             nativeSources?.currentAnswer
-              ? Promise.resolve(fixedAckOpen ? undefined : fixedAck(turnLanguage)).then(
-                  (line) => {
-                    if (line) fixedAckOpen = fixedAckSent = true;
-                    return line;
-                  },
-                )
+              ? Promise.resolve(fixedAckOpen ? undefined : fixedAck(turnLanguage)).then((line) => {
+                  if (line) fixedAckOpen = fixedAckSent = true;
+                  return line;
+                })
               : writeQuickReply(quickReplyText)
           )
             .then(async (text) => {
@@ -5220,6 +5242,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 return;
               }
+              if (!quickReplyOpen) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "answer_started" });
+                return;
+              }
+              quickReplySaid = text;
               await publishMessage(deps, run, "bot", [
                 { kind: "text", text: redactSecrets(text, runSecrets) },
               ]);
@@ -5227,7 +5254,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 runId,
                 sinceSetupMs: Math.round(performance.now() - setupStartedAt),
               });
-              quickReplySaid = text;
             })
             .catch((error) => {
               getLogger().warn("quick reply failed", {
@@ -5528,6 +5554,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }),
               )
             : Promise.resolve(undefined);
+        void workingState.then(
+          (state) => setQuickReplyRecords(state?.text),
+          () => setQuickReplyRecords(undefined),
+        );
         const workingStateNotes = lateNote(workingState.then((state) => state?.text));
         const memoryContextPromise = ownTime(
           "memoryContext",
@@ -6473,6 +6503,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const narration =
             hideVendors &&
             (progressInOtherLanguage(written, turnLanguage) ||
+              // Simulated 11-14: after the first line, "我现在为…起草…" before each step. The first
+              // line already said what is happening; the next words are the answer.
+              (nextTool !== undefined && quickReplySaid !== undefined && oneLineNote(written)) ||
               unbackedClaim(written, turnReport.receipts()) !== undefined)
               ? ""
               : hideVendors && nextTool === "ask_user"
@@ -15991,11 +16024,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           sentReplyDirectly = true;
         }
         if (sentReplyDirectly) probeFoundNothing = true;
+        await Promise.race([
+          quickReplyPosted.catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, QUICK_REPLY_FINISH_WAIT_MS)),
+        ]);
+        quickReplyOpen = false;
         const prompt = [
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
           quickReplySaid
-            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or open with an acknowledgement such as "Absolutely" or "Sure", and write no other line about what you will check or do first: your next words are the answer itself.`
+            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or anything it said, or open with an acknowledgement such as "Absolutely" or "Sure", and write no other line about what you will check or do first: your next words continue from it with the rest of the answer, and correct it plainly if the records show otherwise.`
             : undefined,
         ]
           .filter(Boolean)

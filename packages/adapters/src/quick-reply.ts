@@ -15,15 +15,16 @@ const MAX_USER_CHARS = 1_500;
 const MAX_EARLIER_CHARS = 400;
 const EARLIER_TURNS = 4;
 const MAX_REPLY_CHARS = 160;
+const MAX_RECORDS_CHARS = 3_000;
 const MAX_OUTPUT_TOKENS = 80;
 
 // Fixed text first, so providers that cache prompt prefixes can reuse it.
 const INSTRUCTIONS = [
-  'You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that names the concrete thing you will check or do first ("I\'ll check this role\'s email queue", "我先看这个岗位的发信队列").',
+  'You are the assistant in this chat. The person just sent the latest message. Your full answer takes a little while, so first send one short sentence right away that already gives them something: when the saved records below answer the latest message, that answer ("还没有已保存的岗位，所以还没有候选人或回复。"); otherwise the concrete thing you are doing for this ask, never a bare "let me check" ("I\'ll draft the English template for this role", "我按这个岗位写一版英文模板").',
   'When the latest message confirms or approves something already shown (Send, Confirm, Allow, 发送, 发吧, 确认, 同意), say you are going ahead with it ("好，这就处理。"), never that it is being sent (a send can still need a connection or a card) and never that you will check it. An instruction for later ("once there are candidates, send them this") gets only that you are noting it ("好，我记下来。"), never how or when it will be done; when it also asks something ("…会怎么发？"), name what you will check instead.',
   'Never paraphrase or restate their message ("I\'m looking into your question about…", "我正在梳理你问的…"), and never use the word 梳理.',
   "One sentence of at most 20 words (at most 30 characters in Chinese), in the language of the person's latest message, in the assistant's own voice.",
-  "You cannot see their data yet: never say what you can or cannot see or find. Never answer the request itself, state facts, names, numbers or results, say anything is done, saved or sent, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
+  "State only facts the saved records below show, in their words; with no records, or none that answer it, state no facts, names, numbers or results and never say what you can or cannot see or find. Never say anything is done, saved or sent that the records do not show, promise a time or an outcome, ask a question, or mention tools, systems or internal steps.",
   "No quotes, no markdown, no greeting unless they greeted you.",
   "The sentence is about the latest message alone: earlier messages and saved preferences are background, never the task.",
 ].join(" ");
@@ -94,10 +95,13 @@ export function inPersonLanguage(line: string | null, language: ReplyLanguage): 
  * Chinese edit request got "I'll revise the template to show…". It is dropped; the answer follows.
  */
 export function progressInOtherLanguage(line: string, language: ReplyLanguage): boolean {
+  return oneLineNote(line) && inOtherLanguage(line.trim(), language);
+}
+
+/** One short line, as a note about the next step is: not an answer, a list or a draft. */
+export function oneLineNote(line: string): boolean {
   const text = line.trim();
-  return (
-    !text.includes("\n") && text.length <= 2 * MAX_REPLY_CHARS && inOtherLanguage(text, language)
-  );
+  return !text.includes("\n") && text.length <= 2 * MAX_REPLY_CHARS;
 }
 
 const GOING_AHEAD: Record<ReplyLanguage, string> = {
@@ -134,6 +138,8 @@ export function quickReply(input: {
   /** Messages before this turn, oldest first; only the last few are used. */
   earlier?: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
   userText: string;
+  /** The working-state card, read from saved records this turn, when it was ready in time. */
+  records?: string | undefined;
   runId: string;
   /** The person is a recruiter in a recruiting chat. */
   recruiting?: boolean;
@@ -162,6 +168,9 @@ export function quickReply(input: {
       .reverse(),
   ]);
   const prompt = [
+    ...(input.records?.trim()
+      ? ["Saved records now:", clip(input.records, MAX_RECORDS_CHARS), ""]
+      : []),
     ...(earlier.length ? ["Earlier in the conversation:", ...earlier, ""] : []),
     "Latest message from the person:",
     clip(input.userText, MAX_USER_CHARS),
