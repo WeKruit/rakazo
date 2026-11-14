@@ -1624,6 +1624,18 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("interviews") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("shortlist") }),
   RecruitingAccountToolReadSchema.extend({ operation: z.literal("sequences") }),
+  // The Contacts page's people, across roles: who was never emailed, or never replied.
+  z.strictObject({
+    operation: z.literal("contacts"),
+    roleId: RecruitingId.optional(),
+    contacted: z.boolean().optional(),
+    replied: z.boolean().optional(),
+    cursor: z
+      .string()
+      .regex(/^\d{1,7}$/)
+      .optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 

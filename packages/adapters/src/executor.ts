@@ -138,6 +138,7 @@ import {
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isOpenAskBlock,
+  isRecruitingNextStepCard,
   isRecruitingSpawnKey,
   isSkillFilePath,
   isTerminal,
@@ -238,6 +239,7 @@ import {
   backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
+  calibrationRoundRepeats,
   canvasOf,
   changeCanvas,
   claimRecruitingCrmImport,
@@ -1608,7 +1610,7 @@ export function requestTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies, sequences and contacts (contacted false: who has not been emailed yet, with their roles); default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation; an interview booking for a person named with an email goes to Scheduling here. Never bind a role in global Main; to open a new role use start_role when offered.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -7054,6 +7056,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return recruitingNextStepCard(
             isChineseText(lastRecruiterText),
             Array.isArray(keys) && keys.length < RECRUITING_CALIBRATION_ROUND_SIZE,
+            recruiterTexts.map(requestedPeopleTarget).findLast(Boolean),
           );
         };
         // The next-step card stands in for the agent's own question only right after the round
@@ -7877,11 +7880,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             // Someone whose profile shows only a country or a state, or under six months in the
             // current role, is left out of the first picks rather than costing a step.
-            const [{ regionOnly, beyond, place }, recent] = await Promise.all([
+            const [{ regionOnly, beyond, place }, recent, repeated] = await Promise.all([
               locationSlips(roleId, picked),
               newInCurrentRole(roleId, picked),
+              calibrationRoundRepeats(deps.prisma, roleId, picked),
             ]);
+            // The round record refuses anyone already shown or returned before the last round, so
+            // the list on screen leaves them out too instead of changing once the round is recorded.
+            const repeats = new Set(repeated?.repeats);
             const left = [
+              repeats.size &&
+                `${[...repeats].join(", ")}: already returned before round ${repeated?.round}; a later round takes only people returned since, whose alreadyInPool is false.`,
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
               beyond.size &&
@@ -7893,7 +7902,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .filter(Boolean)
               .join(" ");
             const keys = picked.filter(
-              (key) => !regionOnly.has(key) && !beyond.has(key) && !recent.has(key),
+              (key) =>
+                !regionOnly.has(key) && !beyond.has(key) && !recent.has(key) && !repeats.has(key),
             );
             if (!keys.length)
               return {
@@ -16289,16 +16299,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       select: { role: true, blocks: true },
                     });
                     // Older rounds asked this card in Chinese; its answer is not an intake answer either.
-                    const nextStep = [
-                      recruitingNextStepCard().text,
-                      recruitingNextStepCard(true).text,
-                      recruitingNextStepCard(false, true).text,
-                      recruitingNextStepCard(true, true).text,
-                      "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
-                    ];
                     const known = answeredAsk(
                       question,
-                      intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
+                      intakeAnswers(messages).filter(({ key }) => !isRecruitingNextStepCard(key)),
                     );
                     if (known && !knownAskBounced.has(known.key)) {
                       knownAskBounced.add(known.key);
@@ -19342,14 +19345,15 @@ async function threadLaneAncestors(
 
 async function threadLaneBusy(
   tx: Pick<PrismaClient, "run" | "message">,
-  run: LaneRun & { createdAt: Date; trigger: string },
+  run: LaneRun & { createdAt: Date; trigger: string; leaseFence: number },
 ): Promise<boolean> {
   const ancestors = ["bot_message", "tool_background"].includes(run.trigger)
     ? await threadLaneAncestors(tx, run)
     : [];
   // A teammate's message carries the recruiter's request, like a person's turn: it does not wait
   // behind background grading (staging 11-13: feedback waited 2 minutes behind a grade run).
-  const delegated = run.trigger === "bot_message";
+  // Neither does a turn resuming on the recruiter's card answer (staging 11-14: 103 s).
+  const delegated = run.trigger === "bot_message" || run.leaseFence > 0;
   const blockers = await tx.run.count({
     where: {
       threadId: run.threadId,

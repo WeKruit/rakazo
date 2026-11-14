@@ -192,6 +192,17 @@ describe("thread lanes for automation runs", () => {
     expect(await db.start("routine")).toBe(false);
   });
 
+  it("resumes a turn on the recruiter's card answer without waiting behind background grading", async () => {
+    // Staging 11-14: feedback typed on the next-step card waited 103 s while the Reviewer graded.
+    const db = lane([
+      { id: "grade", botId: "reviewer", trigger: "recruiting_grade", status: "running" },
+      { id: "intake", botId: "lead", trigger: "tool_background", status: "queued", leaseFence: 1 },
+      { id: "routine", trigger: "routine", status: "queued" },
+    ]);
+    expect(await db.start("intake")).toBe(true);
+    expect(await db.start("routine")).toBe(false);
+  });
+
   it("ignores runs in other threads", async () => {
     const db = lane([
       { id: "elsewhere", threadId: "thread-2", trigger: "routine", status: "running" },

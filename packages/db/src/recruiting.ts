@@ -142,6 +142,7 @@ import {
   loadRunHumanSources,
   validateRunHumanSourceRows,
 } from "./messages.js";
+import { calibrationRoundRepeats } from "./recruiting-round-repeats.js";
 import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
@@ -12164,32 +12165,11 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
       );
-    if (previous) {
-      const shown = new Set(
-        (
-          await tx.recruitingCalibrationRound.findMany({
-            where: { roleId: role.id },
-            select: { candidateKeys: true },
-          })
-        ).flatMap((round) => round.candidateKeys),
+    const repeated = previous && (await calibrationRoundRepeats(tx, role.id, keys));
+    if (repeated?.repeats.length)
+      throw new RecruitingCalibrationRoundError(
+        `Round ${repeated.round + 1} must show only new people, but ${repeated.repeats.length} of these ten were already returned before round ${repeated.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
       );
-      const pages = await tx.recruitingCandidateOccurrence.findMany({
-        where: { roleId: role.id, candidateKey: { in: [...keys] } },
-        select: { candidateKey: true, page: { select: { observedAt: true } } },
-      });
-      const earliest = new Map<string, number>();
-      for (const row of pages) {
-        const at = row.page.observedAt.getTime();
-        earliest.set(row.candidateKey, Math.min(earliest.get(row.candidateKey) ?? at, at));
-      }
-      const seen = keys.filter(
-        (key) => shown.has(key) || (earliest.get(key) ?? 0) <= previous.createdAt.getTime(),
-      );
-      if (seen.length)
-        throw new RecruitingCalibrationRoundError(
-          `Round ${previous.round + 1} must show only new people, but ${seen.length} of these ten were already returned before round ${previous.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
-        );
-    }
     const round = await tx.recruitingCalibrationRound.create({
       data: {
         roleId: role.id,

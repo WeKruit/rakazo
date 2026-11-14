@@ -27,6 +27,7 @@ import {
   IsolationError,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
+  listRecruitingContacts,
   readRecruitingCalibrationRound,
   recordRecruitingWebMaterial,
   saveRecruitingAssessment,
@@ -149,6 +150,36 @@ export async function executeRecruitingCandidatesTool(
       itemCount = result.matches.length;
       succeeded = true;
       return result;
+    }
+    if (input.operation === "contacts") {
+      // Simulated 11-14: "which roles have people not emailed yet" got "cannot verify" on an
+      // account with 985 roles. The Contacts page's own read answers it, newest people first.
+      const page = await listRecruitingContacts(deps.prisma, trusted.actor, {
+        filters: {
+          ...((input.roleId ?? roleId) ? { roleIds: [(input.roleId ?? roleId)!] } : {}),
+          ...(input.contacted !== undefined ? { contacted: input.contacted } : {}),
+          ...(input.replied !== undefined ? { replied: input.replied } : {}),
+        },
+        sort: "added",
+        cursor: input.cursor,
+        limit: Math.min(input.limit ?? 25, 50),
+      });
+      itemCount = page.items.length;
+      succeeded = true;
+      return {
+        operation: input.operation,
+        total: page.total,
+        nextCursor: page.nextCursor,
+        items: page.items.map((person) => ({
+          name: person.name,
+          title: person.title,
+          company: person.company,
+          email: person.email,
+          roles: person.roles.map((role) => ({ roleId: role.id, title: role.title })),
+          lastContactedAt: person.lastContactedAt,
+          lastRepliedAt: person.lastRepliedAt,
+        })),
+      };
     }
     if (
       input.operation === "roles" ||
