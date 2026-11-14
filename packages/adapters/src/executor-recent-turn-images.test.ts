@@ -39,6 +39,7 @@ const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 const claimedSteering: { items?: Array<{ text: string }> } = {};
 // The newest run's database mock, for checks while that run still works.
 let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
+let lastRuntimeRun: { mock: { calls: Array<[AgentRunRequest]> } } | undefined;
 let lastExecutorEvents:
   | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
   | undefined;
@@ -117,6 +118,8 @@ async function runWithModel(
     recalledMemory?: string;
     /** The main model call waits for this, as a long step does. */
     holdMain?: Promise<void>;
+    /** The quick first line's call waits for this, as a slow model does. */
+    holdQuick?: Promise<void>;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
     /** A message the run reads mid-turn, before the watch sees it unread. */
@@ -150,6 +153,7 @@ async function runWithModel(
   const runtimeRun = vi.fn(async function* (next: AgentRunRequest) {
     request = next;
     if (next.runId === "run-1") await options.holdMain;
+    if (next.runId === "run-1:quick-reply") await options.holdQuick;
     if (next.runId === "run-1" && options.claimed)
       claimedSteering.items = await next.claimSteering?.([]);
     if (switchModel) {
@@ -322,6 +326,7 @@ async function runWithModel(
     },
   };
   lastPrisma = prisma as never;
+  lastRuntimeRun = runtimeRun as never;
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
   const events = {
     claimSteering: vi.fn(async () =>
@@ -523,6 +528,42 @@ describe("quick reply", () => {
       'You already sent the person this first line while you work: "On it."',
     );
   });
+
+  // Simulated 11-14: a first line posted after the answer started was unknown to the answer,
+  // which then said the same thing again. A line still being written by then is never posted.
+  it("never posts a first line the answer did not know about", async () => {
+    let release!: () => void;
+    const holdQuick = new Promise<void>((done) => {
+      release = done;
+    });
+    let finish!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      finish = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "On it.",
+      quickReplies: true,
+      holdQuick,
+      holdMain,
+    });
+    // The answer is being written when the first line arrives.
+    await vi.waitFor(
+      () => expect(lastRuntimeRun?.mock.calls.some(([call]) => call.runId === "run-1")).toBe(true),
+      { timeout: 6_000 },
+    );
+    release();
+    await new Promise((done) => setTimeout(done, 50));
+    finish();
+    const { runtimeRun, prisma } = await pending;
+    const main = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1")?.[0];
+    expect(main?.prompt).not.toContain("You already sent the person this first line");
+    const posted = prisma.message.create.mock.calls.filter(
+      ([args]) =>
+        JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) ===
+        JSON.stringify([{ kind: "text", text: "On it." }]),
+    );
+    expect(posted).toHaveLength(0);
+  }, 10_000);
 
   it("answers a message sent during a long step at once, without waiting for the step", async () => {
     let release!: () => void;
