@@ -38,6 +38,7 @@ import {
   sendingMailboxState,
 } from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { untypedAddressRefusal } from "./named-address.js";
 import { oneAtATime } from "./one-at-a-time.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
@@ -2388,9 +2389,22 @@ async function addShortlistLeads(
       })
       .map((candidate) => candidate.candidateKey),
   );
+  const named = candidates.filter(isNamedEmail);
+  if (named.length) {
+    const known = [
+      ...[...(await lookedUpContactEmails(prisma, context)).values()].flatMap((emails) =>
+        emails.map((email) => email.address),
+      ),
+      ...Object.values(binding.leads ?? {}).map((lead) => lead.email),
+    ];
+    for (const candidate of named) {
+      const refusal = await untypedAddressRefusal(prisma, context.runId, candidate.email!, known);
+      if (refusal) throw new Error(refusal);
+    }
+  }
   const inRole = new Set([
     ...saved.map((candidate) => candidate.candidateKey),
-    ...candidates.filter(isNamedEmail).map((candidate) => candidate.candidate_key),
+    ...named.map((candidate) => candidate.candidate_key),
   ]);
   const notInRole = candidates.filter((c) => !inRole.has(c.candidate_key));
   const onHoldOrPassed = candidates.filter((c) => stopped.has(c.candidate_key));
