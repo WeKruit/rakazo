@@ -348,9 +348,24 @@ export async function loadWorkingState(
     record?.savedEmail
       ? `saved email for this role (${record.savedEmail.steps} step${record.savedEmail.steps > 1 ? "s" : ""}, ${ago(record.savedEmail.at, now)}; read it with get_role_draft before writing another): "${record.savedEmail.first}"`
       : undefined;
+  // A confirmation is not a delivery: the provider can pause a campaign or hold its emails.
+  const campaignLine = (record: RoleRecord | undefined) => {
+    const campaign = record?.campaign;
+    if (!campaign) return undefined;
+    const people = `Campaign: ${campaign.people} ${campaign.people === 1 ? "person" : "people"} in it${campaign.waiting ? `, ${campaign.waiting} more added and not in it until a confirmed send` : ""}`;
+    if (campaign.confirmedAt)
+      return `${people}; the recruiter confirmed a send ${ago(campaign.confirmedAt, now)}. Whether it is sending and who has been emailed are known only from get_campaign this turn, never from the confirmation.`;
+    return campaign.adopted
+      ? `${people}; taken over from the account's history, so who was emailed is known only from get_campaign this turn.`
+      : `${people}; no send confirmed, so nobody has been emailed from it.`;
+  };
   if (!global && thread.activeRecruitingRoleId) {
-    const saved = emailLine(records.get(thread.activeRecruitingRoleId));
+    const record = records.get(thread.activeRecruitingRoleId);
+    const saved = emailLine(record);
     if (saved) lines.push(`- This role's ${saved}`);
+    const campaign = campaignLine(record);
+    if (campaign)
+      lines.push(`- This role's ${campaign.charAt(0).toLowerCase()}${campaign.slice(1)}`);
   }
   // An email shown only in chat is kept nowhere (staging 11-14: "草稿保留着" with no role, no
   // mailbox and nothing saved). Say so where nothing is on record.
@@ -407,6 +422,8 @@ export async function loadWorkingState(
       if (record?.requirements) lines.push(`  Requirements on record: ${record.requirements}`);
       const saved = emailLine(record);
       if (saved) lines.push(`  The ${saved}`);
+      const campaign = campaignLine(record);
+      if (campaign) lines.push(`  ${campaign}`);
       const done = receiptLine(receiptsOf(threadId), now);
       if (done) lines.push(`  Done in the last 24 h (tool receipts): ${done}`);
       // The team's newest message is its report, as a worker's report summary.

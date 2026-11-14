@@ -21,6 +21,9 @@ function fakePrisma(input: {
   /** Role rows with their current revision, as the role-records read returns them. */
   revisions?: Row[];
   effects?: Row[];
+  /** Role campaign bindings and activate_campaign receipts. */
+  bindings?: Row[];
+  sends?: Row[];
 }) {
   return {
     chatGroup: { findMany: vi.fn(async () => input.groups ?? []) },
@@ -45,7 +48,15 @@ function fakePrisma(input: {
         select.id ? [{ id: "run-1" }] : (input.runs ?? []),
       ),
     },
-    externalEffect: { findMany: vi.fn(async () => input.effects ?? []) },
+    externalEffect: {
+      findMany: vi.fn(async ({ where }: { where: { kind: unknown } }) =>
+        where.kind === "instantly_role_campaign"
+          ? (input.bindings ?? [])
+          : typeof where.kind === "object"
+            ? (input.sends ?? [])
+            : (input.effects ?? []),
+      ),
+    },
     event: {
       findMany: vi.fn(async ({ where }: { where: { type: string } }) =>
         where.type === "agent.tool.completed" ? (input.completed ?? []) : (input.called ?? []),
@@ -230,6 +241,48 @@ describe("loadWorkingState", () => {
     ).text;
     expect(own).toContain("- This role's saved email for this role (2 steps");
     expect(own).not.toContain("Saved emails: none");
+  });
+
+  it("says a confirmed send is not a delivery, and that a campaign with no confirmed send emailed nobody", async () => {
+    const lead = { leadId: "l", email: "a@x.test" };
+    const bindings = [
+      {
+        request: { roleId: "role-1" },
+        result: {
+          campaignId: "c-1",
+          created: true,
+          leads: { a: lead, b: lead },
+          staged: { c: lead },
+        },
+      },
+      {
+        request: { roleId: "role-2" },
+        result: { campaignId: "c-2", created: true, leads: { a: lead } },
+      },
+    ];
+    const sends = [
+      { result: { error: "paused", campaignId: "c-2" }, updatedAt: new Date(now) },
+      {
+        result: { content: [{ text: '{"queued":true,"campaignId":"c-1"}' }] },
+        updatedAt: new Date(now - 13 * 60_000),
+      },
+    ];
+    const card =
+      (
+        await loadWorkingState(
+          fakePrisma({ groups, roles, bindings, sends }) as never,
+          scope,
+          globalThread,
+          (t) => t,
+          now,
+        )
+      ).text ?? "";
+    expect(card).toContain(
+      "  Campaign: 2 people in it, 1 more added and not in it until a confirmed send; the recruiter confirmed a send 13 min ago. Whether it is sending and who has been emailed are known only from get_campaign this turn",
+    );
+    expect(card).toContain(
+      "  Campaign: 1 person in it; no send confirmed, so nobody has been emailed from it.",
+    );
   });
 
   it("keeps the role last handed work in focus until the recruiter names another, and says when nothing was done", async () => {
