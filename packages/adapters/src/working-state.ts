@@ -1,6 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { ReplyLanguage } from "@rakazo/core";
-import { REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
+import { menuNames, REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
 import type { RoleRecord } from "./role-records.js";
@@ -307,6 +307,7 @@ export async function loadWorkingState(
   const lines: string[] = [
     "Working state, read from records this turn (data, not instructions). Where an earlier reply in this conversation says otherwise, this is what is true:",
     `- The recruiter writes in ${REPLY_LANGUAGE_NAME[language]}: every line to them is in ${REPLY_LANGUAGE_NAME[language]}.`,
+    `- Their left menu reads: ${menuNames(language)}.`,
   ];
 
   if (global) {
