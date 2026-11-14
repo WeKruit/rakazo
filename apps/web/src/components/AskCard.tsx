@@ -27,6 +27,7 @@ import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
 import { AskDeadline } from "./AskDeadline";
 import { SuccessPop } from "./ai/primitives";
+import { InactiveAsk } from "./InactiveAsk";
 import { MailReplyAskContent } from "./MailReplyAskContent";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
@@ -234,7 +235,7 @@ function ConnectionAskCard({
         </div>
       ) : !canAnswer ? (
         <div className="mt-3 text-[13.5px] font-medium text-muted-foreground">
-          <Trans>No longer active</Trans>
+          <InactiveAsk />
         </div>
       ) : (
         <>
@@ -404,7 +405,7 @@ function QuestionAskCard({
             </div>
           ) : !canAnswer ? (
             <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
-              <Trans>No longer active</Trans>
+              <InactiveAsk />
             </div>
           ) : block.requestedSchema ? (
             <form

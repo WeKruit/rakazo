@@ -4139,10 +4139,6 @@ msgstr "这个岗位还没有保存职位描述。开始招聘时请添加职位
 msgid "No loaded sequences match your search."
 msgstr "已加载的邮件序列中没有匹配的结果。"
 
-#: src/components/AskCard.tsx
-msgid "No longer active"
-msgstr "已停用"
-
 #: src/pages/PluginsOverlay.tsx
 msgid "No managed app catalog is configured on this deployment."
 msgstr "此部署未配置托管应用目录。"

@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AskDeadline } from "./AskDeadline";
 import { LoadingState } from "./ai/primitives";
+import { InactiveAsk } from "./InactiveAsk";
 
 /** Content of the existing approval card; both Inbox and the transcript render AskCard. */
 export function MailReplyAskContent({
@@ -263,7 +264,7 @@ export function MailReplyAskContent({
         </>
       ) : status === "needs_approval" && !reportedError ? (
         <p className="text-sm text-muted-foreground">
-          <Trans>No longer active</Trans>
+          <InactiveAsk />
         </p>
       ) : null}
       {visibleError ? (

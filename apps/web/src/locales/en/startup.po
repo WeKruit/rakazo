@@ -3000,6 +3000,7 @@ msgstr "Needs a closer look"
 msgid "Needs a new review"
 msgstr "Needs a new review"
 
+#: src/components/InactiveAsk.tsx
 #: src/lib/roster-status.ts
 #: src/pages/shell/Transcript.tsx
 msgid "Needs an answer"
@@ -3159,7 +3160,7 @@ msgstr "No loaded candidates match these filters."
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
 
-#: src/components/MailReplyAskContent.tsx
+#: src/components/InactiveAsk.tsx
 msgid "No longer active"
 msgstr "No longer active"
 

@@ -4138,10 +4138,6 @@ msgstr ""
 msgid "No loaded sequences match your search."
 msgstr ""
 
-#: src/components/AskCard.tsx
-msgid "No longer active"
-msgstr "Nicht mehr aktiv"
-
 #: src/pages/PluginsOverlay.tsx
 msgid "No managed app catalog is configured on this deployment."
 msgstr "Für diese Bereitstellung ist kein verwalteter App-Katalog konfiguriert."
