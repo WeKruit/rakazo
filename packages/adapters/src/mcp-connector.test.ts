@@ -4498,6 +4498,33 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
+  it("get_campaign shows each person's own first email, never the bare variables", async () => {
+    // An agent read "{{rk_body}}" as a blank email and paused a send the recruiter had confirmed.
+    const f = fixture();
+    f.state.campaign = {
+      ...f.state.campaign,
+      status: 1,
+      sequences: [
+        { steps: [{ variants: [{ subject: "{{rk_subject}}", body: "<p>{{rk_body}}</p>" }] }] },
+      ],
+    };
+    f.state.campaignLeads = [
+      {
+        id: "lead-ada",
+        email: "ada@x.test",
+        payload: { rk_subject: "Data role", rk_body: "Hi Ada,<br /><br />A role in Seattle." },
+      },
+    ];
+    const events = await f.run("get_campaign", { campaign_id: CAMPAIGN });
+    const result = (
+      events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }
+    ).data.structuredContent.result;
+    expect(result.firstEmails).toEqual({
+      "ada@x.test": { subject: "Data role", opening: "Hi Ada,\n\nA role in Seattle." },
+    });
+    expect(JSON.stringify(result.sequences)).not.toContain("{{rk_body}}");
+  });
+
   it("refuses a foreign sending mailbox without creating anything", async () => {
     const f = fixture();
     const events = await f.run("create_campaign", {
