@@ -456,6 +456,11 @@ async function play(journey, label, owner, mailbox, out) {
     watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
     await settle(user.rpc, { quietMs: 15_000, limitMs: 2 * 60_000 });
+    // Roles earlier plays of this journey left behind (idle an hour, so not a play running now).
+    if (journey.leftover) {
+      const old = (await groupsOf(user.rpc)).filter((group) => journey.leftover.test(group.name ?? ""));
+      if (old.length) await archiveRoles(credentials, old.map((group) => group.id), label, { idleHours: 1 });
+    }
   } else {
     const email = `kruit-sim-${journey.name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
     const password = `Sim-${crypto.randomUUID()}`;
@@ -467,6 +472,7 @@ async function play(journey, label, owner, mailbox, out) {
   const startedAt = Date.now();
   watchFrom(rpc, startedAt);
   const before = await campaigns(rpc);
+  const groupsBefore = new Set((await groupsOf(rpc)).map((group) => group.id));
   // A per-play tag, so a journey on a reused account names a role and recipients of its own. Plays
   // of one journey start in the same minute, so the play number is part of it.
   const tag = `${new Date(startedAt).toISOString().slice(11, 16).replace(":", "")}${label.split("#")[1] ?? ""}`;
@@ -652,7 +658,40 @@ async function play(journey, label, owner, mailbox, out) {
     await ui?.close();
     await stopAll(rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
     unfollowAll(rpc);
+    // A reused account keeps every role a play opens, so the next play would start among them:
+    // archive (restorable) the roles this play made, so plays stay independent. Only roles named
+    // with this play's tag: another play on the same account may be running at the same time.
+    if (journey.account) {
+      const made = (await groupsOf(rpc).catch(() => []))
+        .filter((group) => !groupsBefore.has(group.id) && group.name?.includes(tag))
+        .map((group) => group.id);
+      if (made.length) await archiveRoles(credentials, made, label);
+    }
   }
+}
+/** Archives the roles one play opened on a reused account, through the shared archive script. */
+function archiveRoles([email, password], groupIds, label, { idleHours = 0 } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "archive-test-copies.mjs"),
+        "--idle-hours",
+        String(idleHours),
+        ...(idleHours ? [] : ["--stop"]),
+        "--only",
+        groupIds.join(","),
+      ],
+      {
+        env: { ...process.env, RAKAZO_URL: BASE, RAKAZO_ORIGIN: ORIGIN, RAKAZO_EMAIL: email, RAKAZO_PASSWORD: password },
+        stdio: "ignore",
+      },
+    );
+    child.on("exit", (code) => {
+      if (code) log(`${label}: archiving its ${groupIds.length} role(s) exited ${code}`);
+      resolve();
+    });
+  });
 }
 /** Whether a message typed in the browser reached the chat within 90 seconds. */
 async function landed(rpc, groupId, text) {

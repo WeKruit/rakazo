@@ -799,6 +799,8 @@ export type InstantlyActivationDisplay = {
   firstEmail?: { subject: string; body: string } | null;
   /** Why this send cannot be shown as exact recipients; no card is shown. */
   refusal?: string;
+  /** People a paused campaign never emailed who this send takes out of it, unemailed. */
+  takenOut?: string[];
 };
 export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
   campaignName: null,
@@ -1334,8 +1336,9 @@ function matchRecipient(people: Person[], wanted: string) {
 
 /**
  * Who one activate_campaign call emails, decided the same way for the card and for the send.
- * Only a draft (never activated, so nobody in it was approved or emailed) may have unnamed people
- * taken out; a campaign that has run keeps everyone and is resumed only when nobody else is in it.
+ * A draft or a paused campaign has the unnamed people it never emailed taken out (a paused one's
+ * card lists them); a campaign that emailed someone else keeps everyone and is resumed only when
+ * nobody else would be emailed.
  */
 function planSend(
   campaign: Record<string, unknown> | undefined,
@@ -1436,9 +1439,15 @@ function planRecipients(
         .join(" "),
     };
   }
+  // A paused campaign's people it never emailed are taken out like a draft's; the card lists
+  // them, so the recruiter approves leaving them out (sim 11-14: a mistyped address in a paused
+  // campaign blocked every send to the people the recruiter named).
+  const emailed = others.filter((lead) => lead.contacted);
+  if (status === PAUSED && !emailed.length)
+    return { send: "activate", recipients: chosen, remove: others };
   return others.length
     ? {
-        refusal: `This campaign has already run; resuming it would also email ${label(others)}, so nothing was sent. Ask the recruiter whether to resume it for everyone in it.`,
+        refusal: `This campaign has already run; resuming it would also email ${label(emailed.length ? emailed : others)}, so nothing was sent. Ask the recruiter whether to resume it for everyone in it.`,
       }
     : { send: "activate", recipients: chosen, remove: [] };
 }
@@ -1567,6 +1576,9 @@ export async function describeCampaignActivation(
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: sendTime(campaign, binding, sendNow),
     ...shownEmail,
+    ...("remove" in plan && plan.remove.length && campaign?.status !== DRAFT
+      ? { takenOut: plan.remove.map((person) => person.email) }
+      : {}),
   };
 }
 

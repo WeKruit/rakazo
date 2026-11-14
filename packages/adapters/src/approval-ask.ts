@@ -276,6 +276,9 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
       : []),
+    ...(display.takenOut?.length
+      ? [`Taken out of the queue, not emailed: ${display.takenOut.join(", ")}`]
+      : []),
     `Send time: ${unknown(display.schedule)}`,
     ...(display.firstEmail === undefined
       ? []
