@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** A teammate already answered the recruiter's latest message with a line. */
+    replyAfterTurn?: boolean;
     /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
     ackFromEndedRun?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
@@ -292,13 +294,21 @@ async function runWithModel(
                   .reverse(),
                 ...(options.ackFromEndedRun ? [endedRunAck] : []),
               ]
-            : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
-              ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
-              : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-                ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-                  ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                  : [],
+            : options.replyAfterTurn && args.take === 8 && !args.select?.runId
+              ? [
+                  {
+                    role: "bot",
+                    blocks: [{ kind: "text", text: "I'm writing the template now." }],
+                  },
+                  { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                ]
+              : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
+                ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
+                : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                  ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                  : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+                    ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                    : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
@@ -962,6 +972,17 @@ describe("handed-in stage", () => {
     });
     expect(request.model.firstStepThinkingLevel).toBe("low");
     expect(request.prompt).toContain("Begin your first step with one short sentence");
+  });
+
+  // Gate 264149c9, change-mind-mid-run: the recruiter already had Main's line, and the stage
+  // opened with another sentence saying what it was doing before the template.
+  it("asks for no opening sentence when the recruiter already has a reply", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      replyAfterTurn: true,
+    });
+    expect(request.prompt).not.toContain("Begin your first step with one short sentence");
   });
 
   it("posts nothing when the answer to a teammate's check-in is NO_RESPONSE", async () => {

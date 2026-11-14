@@ -1366,8 +1366,12 @@ const ASK_DECLINES =
  */
 const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
-const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+const HANDOFF_STAGE_NOTE =
+  "The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+const HANDOFF_OPENING_NOTE = `A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. ${HANDOFF_STAGE_NOTE}`;
+// Gate 264149c9: the recruiter already had a line saying what was being done, and the stage's
+// own opening sentence said it again before the answer.
+const HANDOFF_ANSWER_NOTE = `A teammate just handed this stage to you, and the recruiter already has a reply saying what is being done: do not say it again; your text is the result itself. ${HANDOFF_STAGE_NOTE}`;
 
 /** A message typed while an approval card waits is its own request, never the card's answer. */
 const WAITING_CARDS_NEW_MESSAGE_NOTE =
@@ -15675,6 +15679,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
           historyMessages
             .find((message) => message.id === run.sourceMessageId)
             ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
+        /** Whether a reply with text came after the recruiter's latest message. */
+        const recruiterHasReply = async () => {
+          try {
+            const recent = await deps.prisma.message.findMany({
+              where: { threadId: thread.id },
+              orderBy: { seq: "desc" },
+              take: 8,
+              select: { role: true, blocks: true },
+            });
+            for (const message of recent) {
+              if (message.role === "user") return false;
+              if (saysSomething(message.blocks as MessageBlock[])) return true;
+            }
+          } catch {
+            return false;
+          }
+          return false;
+        };
         const [jobRole, intake, intakeSkill, replyContext, plannedNote, waitingCards, attached] =
           await ownTime(
             "turnNotes",
@@ -15938,7 +15960,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           intakeNote,
           plannedNote,
-          handedIn ? HANDOFF_OPENING_NOTE : undefined,
+          handedIn
+            ? (await recruiterHasReply())
+              ? HANDOFF_ANSWER_NOTE
+              : HANDOFF_OPENING_NOTE
+            : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
           discardedReplies
