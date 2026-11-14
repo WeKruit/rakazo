@@ -4547,6 +4547,13 @@ describe("local native Instantly campaign and lead tools", () => {
         path: "/api/v2/leads/list",
         body: { campaign: CAMPAIGN, limit: 100 },
       },
+      // A send to a few people goes out a minute apart, not ten.
+      {
+        method: "PATCH",
+        path: `/api/v2/campaigns/${CAMPAIGN}`,
+        body: { email_gap: 1, random_wait_max: 1 },
+      },
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
     ]);
   });
