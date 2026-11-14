@@ -161,6 +161,8 @@ export function RoleCampaignCard(props: CampaignScope) {
 export function SequenceTab(
   props: RecruitingTabProps & {
     onAskChat?: (message: string) => void;
+    /** Sends the recruiter's request into the role chat at once, for a one-click ask. */
+    onSendChat?: (message: string) => void;
     onViewAnalytics?: (roleId?: string) => void;
     requestedCampaign?: { id: string; serverId?: string };
     composeNew?: boolean;
@@ -625,7 +627,7 @@ export function SequenceTab(
           <Trans>Could not read this sequence. Try refreshing.</Trans>
         </TabNotice>
       ) : null}
-      <SendQueue campaign={campaign} onAskChat={props.onAskChat} />
+      <SendQueue campaign={campaign} onAskChat={props.onSendChat ?? props.onAskChat} />
       {!live && !nativeDrafts.data?.campaign && nativeDrafts.data?.savedEmail?.length ? (
         <section aria-label={t`Saved email`} className="space-y-4 rounded-xl border p-5">
           {nativeDrafts.data.savedEmail.map((step, index) => (

@@ -9,7 +9,7 @@ const SHOWN = 5;
 
 /**
  * Who the role's sending campaign has emailed and who is still waiting for their first email, with
- * when that goes out. Sending now or resuming goes through the role's chat, whose card confirms it.
+ * when that goes out. Sending now or resuming is asked in the role's chat, whose card confirms it.
  */
 export function SendQueue(props: {
   campaign: RecruitingRoleCampaign | undefined;
