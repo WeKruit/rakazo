@@ -5240,6 +5240,32 @@ describe("local native Instantly campaign and lead tools", () => {
         (r) => r.path.endsWith("/activate") || r.path === "/api/v2/leads/add",
       );
 
+    it("refuses to email people another of this account's campaigns is already sending to", async () => {
+      // Sim 11-14: one request opened two roles, both cards were confirmed, and both campaigns
+      // emailed the same two people.
+      const { f } = await roleWithSixteen();
+      const OTHER = "223e4567-e89b-42d3-a456-4266141740c2";
+      f.state.campaigns = [{ id: OTHER, name: "Senior Data Engineer Seattle", status: 1 }];
+      f.state.effects.set("instantly-role-campaign:other-role", {
+        id: "binding-other",
+        kind: "instantly_role_campaign",
+        status: "completed",
+        spaceId: "w1",
+        request: { roleId: "role-2", serverId: SERVER.id },
+        result: { campaignId: OTHER, leads: { abe: { leadId: "x-abe", email: "abe@x.test" } } },
+      });
+      const events = await f.run("activate_campaign", { recipients: ["Abe Stone"] });
+      expect((events[0] as { message: string }).message).toMatch(
+        /abe@x\.test already gets a first email from Senior Data Engineer Seattle/,
+      );
+      expect(sends(f)).toEqual([]);
+      // Asked to email them again, the recruiter's resend goes through.
+      const again = f.result(
+        await f.run("activate_campaign", { recipients: ["Abe Stone"], resend: true }),
+      );
+      expect(again).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+    });
+
     it("takes the unnamed never-sent people out of a draft before activating it", async () => {
       const { f, binding } = await roleWithSixteen();
       const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
