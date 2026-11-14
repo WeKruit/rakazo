@@ -518,6 +518,7 @@ import {
 } from "./instantly-reply.js";
 import {
   asksSenderCompanyName,
+  CLAIMS_CONNECTED,
   isSenderRead,
   OUTREACH_MAILBOX_ONLY_NOTE,
   OWN_EMAIL_REQUEST,
@@ -6448,8 +6449,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const nudgeless = withoutNudge(visible(redactSecrets(extracted.text, runSecrets))).trim();
           const written = fixedAckSent ? withoutLeadingAck(nudgeless) : nudgeless;
           // The question card that follows asks the question; the text keeps only what leads up to it.
+          // A line saying the mailbox is connected, just before the card asking to connect it.
           const narration =
-            hideVendors && progressInOtherLanguage(written, quickReplyText)
+            hideVendors &&
+            (progressInOtherLanguage(written, quickReplyText) ||
+              (nextTool === "request_connection" && CLAIMS_CONNECTED.test(written)))
               ? ""
               : hideVendors && nextTool === "ask_user"
                 ? beforeCardQuestion(written)
