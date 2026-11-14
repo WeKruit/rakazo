@@ -39,3 +39,47 @@ export function repeatedSendRefusal(repeats: Map<string, string>): string {
   );
   return `Nothing was sent and no card was shown: the recruiter already confirmed a first email to ${who.join(", ")} from another campaign. That confirmation means queued or sent, not necessarily sent yet: get_campaign on that campaign says which, so never call it sent from this. Tell the recruiter who was confirmed and when, in one line. Only if they ask to email them again, call activate_campaign again with resend: true; the card then shows when each was confirmed.`;
 }
+
+/**
+ * People of a send whom another of this account's role campaigns already holds while it is
+ * sending or has sent, so they are or were emailed from it; keyed by email, valued by its name.
+ * Read from the provider at send time, so two cards confirmed side by side cannot both send.
+ */
+export async function sendingElsewhere(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  readCampaign: (campaignId: string) => Promise<Record<string, unknown>>,
+  input: { spaceId: string; serverId: string; campaignId: string; emails: string[] },
+): Promise<Map<string, string>> {
+  const wanted = new Set(input.emails.map((email) => email.trim().toLowerCase()));
+  const found = new Map<string, string>();
+  if (!wanted.size) return found;
+  const bindings = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: input.spaceId,
+      kind: "instantly_role_campaign",
+      status: "completed",
+      request: { path: ["serverId"], equals: input.serverId },
+    },
+    select: { result: true },
+  });
+  for (const { result } of bindings) {
+    const binding = result as {
+      campaignId?: unknown;
+      leads?: Record<string, { email?: unknown }>;
+    } | null;
+    if (typeof binding?.campaignId !== "string" || binding.campaignId === input.campaignId)
+      continue;
+    const held = Object.values(binding.leads ?? {}).flatMap((lead) =>
+      typeof lead?.email === "string" && wanted.has(lead.email.toLowerCase())
+        ? [lead.email.toLowerCase()]
+        : [],
+    );
+    if (!held.length) continue;
+    const campaign = await readCampaign(binding.campaignId).catch(() => undefined);
+    // Active (1) or completed (3): its people are being or have been emailed.
+    if (campaign?.status !== 1 && campaign?.status !== 3) continue;
+    const name = typeof campaign.name === "string" ? campaign.name : "another campaign";
+    for (const email of held) if (!found.has(email)) found.set(email, name);
+  }
+  return found;
+}

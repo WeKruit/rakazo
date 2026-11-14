@@ -1501,6 +1501,45 @@ describe("native Instantly activation card", () => {
     });
   });
 
+  it("refuses a send card whose email is signed with a recipient's name", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: {
+        ...connectorResults,
+        native_instantly_get_campaign: {
+          structuredContent: {
+            ...connectorResults.native_instantly_get_campaign.structuredContent,
+            result: {
+              ...connectorResults.native_instantly_get_campaign.structuredContent.result,
+              sequences: [
+                {
+                  steps: [
+                    {
+                      variants: [
+                        {
+                          subject: "Founding role",
+                          body: "<p>Hi Ada,</p><p>Best,</p><p>Ada Lovelace</p>",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({
+      error: expect.stringContaining('signed "Ada Lovelace", a recipient\'s name'),
+    });
+  });
+
   it("refuses a send card that names no campaign outside a role", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
