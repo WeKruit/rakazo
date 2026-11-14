@@ -37,6 +37,8 @@ const SEARCH_WAIT_REARM_MS = 2 * 60_000;
 // with an application using the one-key advisory-lock API.
 const RECONCILIATION_LOCK_NAMESPACE = 1_380_019_075;
 const RECONCILIATION_LOCK_ID = 1;
+/** A leader touches its lock session every tick (30 s); one silent this long is gone. */
+const STALE_LEADER_SECONDS = 5 * 60;
 
 type Cursor = { at: Date; id: string };
 type ControlCursor = { at: Date | null; id: string };
@@ -53,9 +55,10 @@ export interface ReconciliationLeadership {
  */
 export function createPostgresReconciliationLeadership(
   pool: Pick<Pool, "connect">,
-  options: { lockId?: number } = {},
+  options: { lockId?: number; staleLeaderSeconds?: number } = {},
 ): ReconciliationLeadership {
   const lockId = options.lockId ?? RECONCILIATION_LOCK_ID;
+  const staleLeaderSeconds = options.staleLeaderSeconds ?? STALE_LEADER_SECONDS;
   let leaderClient: PoolClient | undefined;
   let leaderErrorListener: (() => void) | undefined;
 
@@ -68,7 +71,17 @@ export function createPostgresReconciliationLeadership(
 
   return {
     async tryAcquire() {
-      if (leaderClient) return true;
+      if (leaderClient) {
+        // Each tick touches the lock's session, so followers can tell a live leader from one
+        // whose worker died without closing its connection.
+        const client = leaderClient;
+        try {
+          await client.query("SELECT 1");
+          return true;
+        } catch {
+          loseClient(client);
+        }
+      }
 
       const candidate = await pool.connect();
       try {
@@ -77,6 +90,16 @@ export function createPostgresReconciliationLeadership(
           [RECONCILIATION_LOCK_NAMESPACE, lockId],
         );
         if (!result.rows[0]?.acquired) {
+          // A worker that vanished (a replaced container) can leave its session open and keep
+          // the lock, so no one reconciles until the connection times out (20 minutes on staging,
+          // 2026-11-14). A holder whose session has been idle far past the tick is ended here.
+          await candidate.query(
+            `SELECT pg_terminate_backend(a.pid) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+             WHERE l.locktype = 'advisory' AND l.granted AND l.classid = $1::integer::oid
+               AND l.objid = $2::integer::oid AND l.objsubid = 2 AND a.state = 'idle'
+               AND a.state_change < now() - make_interval(secs => $3)`,
+            [RECONCILIATION_LOCK_NAMESPACE, lockId, staleLeaderSeconds],
+          );
           candidate.release();
           return false;
         }
