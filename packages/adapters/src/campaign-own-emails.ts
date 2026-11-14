@@ -49,3 +49,22 @@ export function ownFirstEmails(
     }),
   );
 }
+
+/**
+ * The names an email's greeting gives when it greets several of its recipients at once ("Hi Noah
+ * and Ada"), though each recipient gets the email alone; undefined when it does not.
+ */
+export function greetsSeveral(
+  body: string,
+  firstNames: (string | undefined)[],
+): string | undefined {
+  const greeting = body.split("\n").find((line) => line.trim()) ?? "";
+  const named = [...new Set(firstNames.filter((name): name is string => Boolean(name)))].filter(
+    (name) =>
+      new RegExp(
+        `(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}])`,
+        "iu",
+      ).test(greeting),
+  );
+  return named.length > 1 ? named.join(" and ") : undefined;
+}
