@@ -17672,8 +17672,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             quickReplyMessageId &&
             // Gate b19c9913: an answer that read records first carries its steps row as well.
-            blocks.some((block) => block.kind === "text") &&
-            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
+            // Gate 2a73ed94: one that ends in a question card takes its place too.
+            blocks.some((block) => block.kind === "text" || block.kind === "ask") &&
+            blocks.every(
+              (block) =>
+                block.kind === "text" ||
+                block.kind === "steps" ||
+                (block.kind === "ask" && !block.approvalEffectId),
+            ) &&
             (
               await deps.prisma.message.findFirst({
                 where: { threadId: thread.id },
