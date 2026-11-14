@@ -28,6 +28,8 @@ that repeats into the existing line instead of adding another.
 - A scrubbed account copy rewrote emails but kept real LinkedIn URLs, so a simulated batch send let
   Kruit look up six real people's addresses and add them to a draft campaign. **A test copy keeps no
   enrichable identity and has paid lookups turned off; the harness refuses to play if one is on.**
+- A new `--mechanism` replay picked a paid journey because it bypassed the paid filter; it was stopped
+  before any search. **Every new way to select tests keeps the paid and send gates of the old ones.**
 - Four instruction PRs for one feedback round still left the recruiter seeing nine people while a
   different ten were recorded: the chat list and the round record checked repeats differently. **Read
   the run's events before rewording; when two tools judge the same thing, give them one rule.**
