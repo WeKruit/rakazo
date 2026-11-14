@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** The last message of the teammate that reported back, as its own latest posts return it. */
+    teammateResult?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
     cardsAfterLine?: Array<{ runId: string; blocks: object[] }>;
     /** A message the run reads mid-turn, before the watch sees it unread. */
@@ -278,11 +280,13 @@ async function runWithModel(
                   .map((message) => ({ runId: "run-1", role: "bot", ...message }))
                   .reverse(),
               ]
-            : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-              ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-              : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-                ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                : [],
+            : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
+              ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
+              : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+                  ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                  : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
@@ -956,6 +960,22 @@ describe("handed-in stage", () => {
       finalText: "NO_RESPONSE",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");
+  });
+
+  // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported
+  // back, and Main posted the same template again.
+  it("posts nothing when the answer to a finished teammate repeats its result", async () => {
+    const report = handoff("bot-1");
+    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
+    const template =
+      "**Subject:** Senior Backend Engineer (Java/Spring) opportunity in Seoul\n\nHi {{firstName}},\n\nI'm reaching out about a Senior Backend Engineer opportunity in Seoul that focuses on Java and Spring.\n\nBest,\nAlex Morgan";
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: report,
+      teammateResult: `\n\n${template}`,
+      finalText: template,
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
   });
 
   it("keeps full thinking for a handoff addressed to another bot", async () => {

@@ -5456,6 +5456,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             "clientNonce" in message && message.clientNonce?.startsWith("autocontinue:"),
           ),
         }));
+        // A teammate's report that it finished the stage this bot handed it.
+        const handback = (
+          historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks ?? []
+        ).find(
+          (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
+            block.kind === "handoff" && block.toBotId === bot.id && block.report === "completed",
+        );
         const currentTurnMessage = nativeSources?.currentAnswer
           ? {
               ...nativeSources.currentAnswer,
@@ -7295,6 +7302,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
           } catch {
             return undefined;
           }
+        };
+        /** The result a finished teammate posted just before its report: what the report points to. */
+        const handbackResultText = async () => {
+          if (!handback) return undefined;
+          try {
+            const rows = await deps.prisma.message.findMany({
+              where: { threadId: thread.id, botId: handback.fromBotId, role: "bot" },
+              orderBy: { seq: "desc" },
+              take: 4,
+              select: { blocks: true },
+            });
+            for (const row of rows) {
+              const text = (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
+                .flatMap((block) =>
+                  block.kind === "text" && block.text.trim() ? [block.text] : [],
+                )
+                .join("\n");
+              if (text) return text;
+            }
+          } catch {
+            return undefined;
+          }
+          return undefined;
         };
         const lastOwnReplyText = async () => {
           try {
@@ -14547,14 +14577,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             // Gate 91a438c4: the teammate posted the template and reported back, and the same
             // brief went to it twice more, so one request got three answers.
-            const handback = (
-              historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks ?? []
-            ).find(
-              (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
-                block.kind === "handoff" &&
-                block.toBotId === bot.id &&
-                block.report === "completed",
-            );
             if (handback) {
               const asked = await deps.prisma.message.findFirst({
                 where: {
@@ -17694,14 +17716,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The update just sent already said it: no second, near-identical message. A turn that
           // went on in the background may have sent that update before it resumed, so the
           // run's last saved message counts too.
-          // A teammate's report relayed after this bot already said the same adds nothing either.
+          // A teammate's report relayed after this bot already said the same adds nothing either,
+          // and neither does repeating the result a finished teammate just posted.
           if (
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
             (run.trigger === "bot_message"
               ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
               : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
-                restatesUpdate(text, await lastRunMessageText()))
+                restatesUpdate(text, await lastRunMessageText()) ||
+                restatesUpdate(text, await handbackResultText()))
           ) {
             text = "";
             blocks = [];
