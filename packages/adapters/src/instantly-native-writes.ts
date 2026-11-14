@@ -38,6 +38,7 @@ import {
   sendingMailboxState,
 } from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { oneAtATime } from "./one-at-a-time.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
@@ -2204,8 +2205,6 @@ async function saveOwnEmail(
   };
 }
 
-// ponytail: no cross-request lock; two concurrent first calls can both create (the unique key
-// keeps one binding and the retry adopts by name). Add an advisory lock if this ever races.
 async function recordBinding(
   prisma: PrismaClient,
   context: AdapterContext,
@@ -3506,18 +3505,21 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_ensure_role_campaign": {
       const input = EnsureRoleCampaignInput.parse(args);
-      return ensureRoleCampaign(prisma, rest, context, serverId, input).catch(
-        async (error: unknown) => {
-          // No mailbox yet: the role's saved email is still there to show.
-          if (!(error instanceof Error) || !error.message.startsWith(NO_MAILBOX)) throw error;
-          const roleId = input.role_id ?? (await activeRoleId(prisma, context));
-          const steps =
-            roleId &&
-            (await savedRoleEmail(prisma, context, `${bindingKey(serverId, roleId)}:email`));
-          if (!steps) throw error;
-          return { campaign: null, savedEmail: steps, hasEmail: true, sending: NO_MAILBOX };
-        },
-      );
+      // Agents call this in parallel (sim 11-14: three at once); the role's campaign is made and
+      // bound by one call at a time, and the others then find it.
+      const role = input.role_id ?? (await activeRoleId(prisma, context)) ?? "";
+      const lock = ["instantly-role-campaign", context.spaceId, serverId, role];
+      const ensure = () => ensureRoleCampaign(prisma, rest, context, serverId, input);
+      return oneAtATime(prisma, lock, ensure).catch(async (error: unknown) => {
+        // No mailbox yet: the role's saved email is still there to show.
+        if (!(error instanceof Error) || !error.message.startsWith(NO_MAILBOX)) throw error;
+        const roleId = input.role_id ?? (await activeRoleId(prisma, context));
+        const steps =
+          roleId &&
+          (await savedRoleEmail(prisma, context, `${bindingKey(serverId, roleId)}:email`));
+        if (!steps) throw error;
+        return { campaign: null, savedEmail: steps, hasEmail: true, sending: NO_MAILBOX };
+      });
     }
     case "native_instantly_add_shortlist_leads":
       return addShortlistLeads(prisma, rest, context, serverId, AddShortlistLeadsInput.parse(args));
