@@ -5307,13 +5307,35 @@ describe("local native Instantly campaign and lead tools", () => {
       ).toEqual([]);
     });
 
-    it("keeps everyone in a campaign that has already run and sends nothing", async () => {
+    it("keeps everyone a paused campaign already emailed and sends nothing", async () => {
       const { f } = await roleWithSixteen();
       f.state.campaign.status = 2;
+      // A follow-up is left for those it emailed, so resuming would email them again.
+      f.state.campaign.sequences = [
+        {
+          steps: [
+            { delay: 0, variants: [{ subject: "Hi", body: "<p>Hello</p>" }] },
+            { delay: 4, variants: [{ subject: "", body: "<p>Following up</p>" }] },
+          ],
+        },
+      ];
+      for (const lead of f.state.campaignLeads.slice(1))
+        Object.assign(lead, { timestamp_last_contact: "2026-11-14T05:55:34.180Z" });
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(/would also email/);
       expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
       expect(sends(f)).toEqual([]);
+    });
+
+    it("takes never-emailed people nobody named out of a paused campaign, then resumes it", async () => {
+      // Sim 11-14: a mistyped address in a paused campaign blocked every send to the two people
+      // the recruiter named, and nothing could take it out.
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 2;
+      const out = f.result(await f.run("activate_campaign", { recipients: ["abe@x.test"] }));
+      expect(out).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+      expect(f.state.campaignLeads.map((lead) => lead.email)).toEqual(["abe@x.test"]);
+      expect(sends(f).map((r) => r.path)).toEqual([`/api/v2/campaigns/${CAMPAIGN}/activate`]);
     });
 
     it("resumes a one-email campaign for the named people when everyone else was already emailed", async () => {

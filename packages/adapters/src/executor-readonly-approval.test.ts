@@ -1501,6 +1501,50 @@ describe("native Instantly activation card", () => {
     });
   });
 
+  it("refuses a send card whose email greets two of its recipients at once", async () => {
+    // Sim 11-14: "Hi Noah and Ada," was queued as both people's own email.
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: {
+        ...connectorResults,
+        native_instantly_get_campaign: {
+          structuredContent: {
+            ...connectorResults.native_instantly_get_campaign.structuredContent,
+            result: {
+              ...connectorResults.native_instantly_get_campaign.structuredContent.result,
+              sequences: [
+                {
+                  steps: [
+                    { variants: [{ subject: "Founding role", body: "<p>Hi Ada and Noah,</p>" }] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        native_instantly_list_leads: {
+          structuredContent: {
+            source: "local_native_instantly_rest",
+            result: {
+              items: [
+                { id: "l1", email: "ada@x.test", first_name: "Ada", last_name: "Lovelace" },
+                { id: "l2", email: "noah@x.test", first_name: "Noah", last_name: "Liu" },
+              ],
+            },
+          },
+        },
+      },
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({
+      error: expect.stringContaining("Ada Lovelace's email greets Noah"),
+    });
+  });
+
   it("refuses a send card whose email is signed with a recipient's name", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
@@ -1774,7 +1818,7 @@ describe("native Instantly activation card", () => {
     expect(card(f).detail).not.toMatch(/ada@x\.test|bob@x\.test/);
   });
 
-  it("shows no card when resuming would also email people who were not named", async () => {
+  it("lists on the card who a paused campaign never emailed and this send takes out", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
       route,
@@ -1784,8 +1828,8 @@ describe("native Instantly activation card", () => {
     bindRole(f);
     f.setCalls([{ args: { recipients: ["ada@x.test"] }, executionId: "activate" }]);
     await f.run();
-    expect(f.pauseRunForInput).not.toHaveBeenCalled();
-    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("would also email") });
+    expect(card(f).detail).toContain("To (1):");
+    expect(card(f).detail).toContain("Taken out of the queue, not emailed: bob@x.test");
   });
 });
 
