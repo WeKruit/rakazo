@@ -374,6 +374,24 @@ describe("shared mail account isolation", () => {
     expect(rest).toHaveBeenCalledTimes(3);
   });
 
+  it("owns a campaign a parallel call bound after this call started", async () => {
+    const rest = account();
+    const bound = new Set<string>();
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set(),
+      mailboxes: new Set(),
+      campaignsNow: async () => bound,
+    });
+    await expect(own("GET", `/campaigns/${MINE}`)).rejects.toThrow(
+      "does not belong to this account",
+    );
+    bound.add(MINE);
+    await expect(own("GET", `/campaigns/${MINE}`)).resolves.toMatchObject({ ok: true });
+    await expect(own("GET", `/campaigns/${THEIRS}`)).rejects.toThrow(
+      "does not belong to this account",
+    );
+  });
+
   it("adds people to its own campaign without checking the rest of the shared account", async () => {
     const rest = account();
     const own = ownedInstantlyRest(rest as never, {

@@ -38,7 +38,7 @@ import {
   sendingMailboxState,
 } from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
-import { untypedAddressRefusal } from "./named-address.js";
+import { recipientParts, untypedAddressRefusal } from "./named-address.js";
 import { oneAtATime } from "./one-at-a-time.js";
 import { campaignObservedDetails } from "./recruiting-campaign-details.js";
 import { linkedinPersonKey } from "./recruiting-profiles.js";
@@ -177,7 +177,7 @@ const EnsureRoleCampaignInput = z.strictObject({
     "Change when emails may go out; a sending campaign keeps sending in the new hours.",
   ),
   recipients: Recipients.describe(
-    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
+    "Save steps (one step: the first email written for them) as only these people's own email, each one's email, full name, or 'Full Name <email>' (which also gives {{firstName}} its name); a candidate of this role with a saved email, or an email the recruiter typed for someone not in Results, who is not in the campaign yet is added first. Everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -1008,7 +1008,12 @@ const roleLock = (context: AdapterContext, serverId: string, roleId: string) => 
 ];
 /** Role-campaign binding for a role, read without a run (approval cards, API). */
 /** What one connection owns on the shared mail account: its roles' campaigns and senders. */
-export type OwnedInstantly = { campaigns: ReadonlySet<string>; mailboxes: ReadonlySet<string> };
+export type OwnedInstantly = {
+  campaigns: ReadonlySet<string>;
+  mailboxes: ReadonlySet<string>;
+  /** Reads the campaigns again: a call running beside this one may have bound a new one since. */
+  campaignsNow?: () => Promise<Iterable<string>>;
+};
 
 const mailboxKey = (email: string) => email.trim().toLowerCase();
 
@@ -1061,8 +1066,11 @@ export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): 
   const refuse = (what = "campaign") => {
     throw new IsolationError(`That ${what} does not belong to this account`);
   };
-  const own = (id: unknown) => {
-    if (typeof id !== "string" || !mine.has(id)) refuse();
+  const own = async (id: unknown) => {
+    if (typeof id !== "string") return refuse();
+    if (!mine.has(id) && owned.campaignsNow)
+      for (const campaign of await owned.campaignsNow()) mine.add(campaign);
+    if (!mine.has(id)) refuse();
   };
   const sender = (email: unknown) =>
     typeof email === "string" && owned.mailboxes.has(mailboxKey(email));
@@ -1091,16 +1099,17 @@ export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): 
     }
     const campaign = CAMPAIGN_PATH.exec(route!);
     if (campaign) {
-      own(campaign[1]);
+      await own(campaign[1]);
       senders(fields.email_list);
-    } else if (route === "/campaigns/analytics/overview") own(new URLSearchParams(query).get("id"));
-    else if (route === "/leads/list") own(fields.campaign);
+    } else if (route === "/campaigns/analytics/overview")
+      await own(new URLSearchParams(query).get("id"));
+    else if (route === "/leads/list") await own(fields.campaign);
     else if (route === "/leads/add") {
-      own(fields.campaign_id);
+      await own(fields.campaign_id);
       // Skipping people already in the shared account would reveal other accounts' leads.
       if (fields.skip_if_in_workspace)
         return rest(method, path, { ...fields, skip_if_in_workspace: false });
-    } else if (route === "/leads/update-interest-status") own(fields.campaign_id);
+    } else if (route === "/leads/update-interest-status") await own(fields.campaign_id);
     else if (route === "/emails/reply") {
       if (!sender(fields.eaccount)) refuse("mailbox");
     } else if (!route!.startsWith("/emails") && !/^\/leads\/[0-9a-f-]{36}$/i.test(route!)) refuse();
@@ -1322,8 +1331,15 @@ function firstQueued(people: Person[]): Date | undefined {
 }
 
 /** One requested recipient: an exact email, else the one person with that full or first name. */
+/** A name written beside a person's address fills the names their lead does not have yet. */
+function nameFrom(person: Person, name: string | undefined) {
+  const [first, ...last] = (name ?? "").split(/\s+/).filter(Boolean);
+  if (first && !text(person.first_name)) person.first_name = first;
+  if (last.length && !text(person.last_name)) person.last_name = last.join(" ");
+}
+
 function matchRecipient(people: Person[], wanted: string) {
-  const value = wanted.trim().toLowerCase();
+  const value = recipientParts(wanted).value;
   for (const pick of [
     (person: Person) => person.email.toLowerCase() === value,
     (person: Person) =>
@@ -2067,7 +2083,7 @@ async function addSavedRecipients(
   const noEmail: string[] = [];
   const candidates: z.output<typeof AddShortlistLeadsInput>["candidates"] = [];
   for (const entry of wanted) {
-    const value = entry.trim().toLowerCase();
+    const { value, name } = recipientParts(entry);
     const byEmail = people.filter((p) => p.emails.some((e) => sameAddress(e.address, value)));
     const byName = people.filter((p) => p.name.toLowerCase() === value);
     const byFirst = people.filter((p) => p.name.toLowerCase().split(/\s+/)[0] === value);
@@ -2080,8 +2096,14 @@ async function addSavedRecipients(
       // An address the recruiter typed for someone not in Results is theirs to send to; the send
       // card still lists it before anything goes out.
       const key = namedEmailKey(value);
+      const [first, ...last] = (name ?? "").split(/\s+/).filter(Boolean);
       if (!candidates.some((c) => c.candidate_key === key))
-        candidates.push({ candidate_key: key, email: value });
+        candidates.push({
+          candidate_key: key,
+          email: value,
+          ...(first ? { first_name: first } : {}),
+          ...(last.length ? { last_name: last.join(" ") } : {}),
+        });
     } else if (!person) unknown.push(entry);
     else if (!email) noEmail.push(person.name || entry);
     else if (!candidates.some((c) => c.candidate_key === person.key)) {
@@ -2143,6 +2165,7 @@ async function saveOwnEmail(
   const unmatched: string[] = [];
   for (const entry of input.recipients!) {
     const hit = matchRecipient([...leads, ...waiting], entry);
+    if (hit) nameFrom(hit, recipientParts(entry).name);
     if (!hit) unmatched.push(entry);
     else if (!chosen.includes(hit)) chosen.push(hit);
   }
@@ -2154,7 +2177,7 @@ async function saveOwnEmail(
   const unnamed = chosen.filter((person) => missingFields(own, person).length);
   if (unnamed.length)
     throw new Error(
-      `No ${missingFields(own, unnamed[0]!).join(" or ")} is known for ${label(unnamed)}; write their email out in full without it, then save again.`,
+      `No ${missingFields(own, unnamed[0]!).join(" or ")} is known for ${label(unnamed)}; pass each of them as "Full Name <email>" with the name the recruiter gave, or write their email out in full without it, then save again.`,
     );
   const together = greetsSeveral(
     own.body,
