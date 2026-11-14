@@ -383,6 +383,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  teamWorkingFor,
 } from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
@@ -644,6 +645,7 @@ import {
   linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
+import { raisedGapsSinceLastRound } from "./recruiting-raised-gaps.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
@@ -6705,6 +6707,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
+        const gapAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -6777,6 +6780,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               posting: Promise<unknown>;
             }
           | undefined;
+        let globalListSort: string | undefined;
         // A plain list of one role's people in Kruit's conversation. A name or
         // profile lookup finds one person; it is not a list to show.
         const isGlobalRoleList = (args: Record<string, unknown>) =>
@@ -6813,7 +6817,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!role) return undefined;
           const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
-          const shown = items.slice(0, size);
+          // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
+          // the saved pool and the recruiter took it for the round, repeats from round one included.
+          const working = await teamWorkingFor(deps.prisma, {
+            threadId: role.sourceThreadId,
+            returnThreadId: thread.id,
+          });
+          const roundKeys = working
+            ? new Set(
+                (
+                  await deps.prisma.recruitingCalibrationRound.findMany({
+                    where: { roleId: args.roleId },
+                    select: { candidateKeys: true },
+                  })
+                ).flatMap((round) => round.candidateKeys),
+              )
+            : new Set<string>();
+          const shown = items
+            .slice(0, size)
+            .filter(
+              (item) => typeof item.candidateKey !== "string" || !roundKeys.has(item.candidateKey),
+            );
+          if (!shown.length)
+            return {
+              shownInChat: `${working?.bot.name ?? "The team"} is still preparing the next round; everyone on this page was already shown in a round. Tell the recruiter the round is still being prepared and will appear here; never list these people as new.`,
+            };
           const first =
             typeof args.page === "number" && args.cursor === undefined
               ? (args.page - 1) * size + 1
@@ -6844,6 +6872,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
           return {
             ...(result as object),
+            ...(working
+              ? {
+                  roundInProgress: `${working.bot.name} is still preparing the next round. The people listed are saved search results not yet reviewed, with anyone already shown in a round left out; they are not the next round, so never call them the new round.`,
+                }
+              : {}),
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
@@ -8031,6 +8064,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ]
                   .filter(Boolean)
                   .join(" "),
+              };
+            }
+            // Asked once per person, like the location: a pick whose own note says a requirement
+            // is not shown that the recruiter just turned people down over.
+            const raised = [
+              ...(await raisedGapsSinceLastRound(deps.prisma, {
+                threadId: thread.id,
+                roleId: thread.activeRecruitingRoleId,
+                botId: bot.id,
+                unverified: researchInput.data.unverified,
+              })),
+            ].filter(([key]) => !gapAsked.has(key));
+            if (raised.length) {
+              for (const [key] of raised) gapAsked.add(key);
+              return {
+                error: `Not recorded. Your own notes say these rows do not show what the recruiter raised since the last round: ${raised.map(([key, hits]) => `${key} (${hits.join(", ")})`).join("; ")}. Replace them with people whose rows show it. If fewer than ten do, show the ones who do with show_picks, then ${SHORT_OF_TEN}. If a note is only cautious and the row does show it, record the same people again.`,
               };
             }
           }
@@ -12481,11 +12530,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               if (!deps.artifacts) throw new IsolationError();
               // Kruit reads and shows a role's people one page at a time, never the whole pool.
-              const callArgs =
-                isGlobalRoleList(args) &&
+              const globalList = isGlobalRoleList(args);
+              const callArgs = {
+                ...args,
+                ...(globalList &&
                 (typeof args.limit !== "number" || args.limit > SHOWN_ROLE_PEOPLE)
-                  ? { ...args, limit: SHOWN_ROLE_PEOPLE }
-                  : args;
+                  ? { limit: SHOWN_ROLE_PEOPLE }
+                  : {}),
+                // Page 2 read in another order repeated page 1 (staging 11-14): pages keep one order.
+                ...(globalList && args.sort === undefined && globalListSort
+                  ? { sort: globalListSort }
+                  : {}),
+              };
+              if (globalList && typeof callArgs.sort === "string") globalListSort = callArgs.sort;
               const result = await executeRecruitingCandidatesTool(
                 {
                   prisma: deps.prisma,
