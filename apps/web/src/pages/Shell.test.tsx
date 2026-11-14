@@ -221,6 +221,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     voice: { status: vi.fn().mockResolvedValue(null) },
     messaging: { status: vi.fn().mockResolvedValue({ enabled: false, providers: [] }) },
     usage: {
+      remaining: vi.fn().mockResolvedValue({ remaining: null }),
       costs: vi.fn().mockResolvedValue({
         total: { credits: 0, calls: 0, tokens: 0 },
         month: { credits: 0, calls: 0, tokens: 0 },

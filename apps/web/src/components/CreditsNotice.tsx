@@ -14,7 +14,7 @@ export function CreditsNotice() {
     let active = true;
     const read = () =>
       rpc.usage
-        .costs()
+        .remaining()
         .then((usage) => {
           if (active) setRemaining(usage.remaining);
         })

@@ -371,6 +371,17 @@ describe("account preferences", () => {
     expect(f.routines).not.toHaveBeenCalled();
   });
 
+  it("reads the selected chat once, with the first navigation page only", async () => {
+    const f = groupBootstrapDeps();
+    // A large account's navigation arrives in several pages; only the first carries the chat.
+    await expect(f.client.bootstrap({ groupId: "group-1", offset: 200 })).resolves.toMatchObject({
+      thread: null,
+    });
+    expect(f.snapshot).not.toHaveBeenCalled();
+    await f.client.bootstrap({ groupId: "group-1" });
+    expect(f.snapshot).toHaveBeenCalledOnce();
+  });
+
   it("loads the selected group snapshot while navigation is still loading", async () => {
     const f = groupBootstrapDeps();
     const memberships = await f.deps.prisma.spaceMember.findMany();

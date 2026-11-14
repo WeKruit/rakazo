@@ -279,6 +279,16 @@ export async function remainingUsageCredits(prisma: UsageDb, userId: string) {
   return Math.max(0, rounded(row.limit - (row.spent ?? 0)));
 }
 
+/** The account's remaining credits without the per-day and per-role breakdown. */
+export async function usageRemaining(
+  prisma: UsageDb,
+  actor: Scope,
+  options: { priceTokens?: TokenPricer } = {},
+) {
+  await snapshotPendingModelCosts(prisma, options.priceTokens, actor);
+  return { remaining: await remainingUsageCredits(prisma, actor.userId) };
+}
+
 export async function summarizeUsageCosts(
   prisma: UsageDb,
   actor: Scope,
