@@ -171,14 +171,18 @@ export function RecruitingAnalytics({
     accountKey: string;
     roles: RecruitingAnalyticsOutput["roles"];
   }>();
+  // Callers pass a fresh RPC function on each render; only the filters should refetch.
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => {
     if (!valid) return;
     let cancelled = false;
-    void load({
-      since: `${since}T00:00:00Z`,
-      until: new Date(Date.parse(`${until}T00:00:00Z`) + 86400000).toISOString(),
-      ...(roleId ? { roleId } : {}),
-    })
+    void loadRef
+      .current({
+        since: `${since}T00:00:00Z`,
+        until: new Date(Date.parse(`${until}T00:00:00Z`) + 86400000).toISOString(),
+        ...(roleId ? { roleId } : {}),
+      })
       .then((next) => {
         if (cancelled) return;
         setResult({ key, data: next });
@@ -190,7 +194,7 @@ export function RecruitingAnalytics({
     return () => {
       cancelled = true;
     };
-  }, [key, accountKey, since, until, roleId, load, valid]);
+  }, [key, accountKey, since, until, roleId, valid]);
   const roles = choices?.accountKey === accountKey ? choices.roles : [];
   const value = (count: number | null) => (count === null ? t`Unknown` : count.toLocaleString());
   const trend = [
