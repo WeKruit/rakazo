@@ -1,6 +1,7 @@
 import { boundDirectApprovalRequest } from "@rakazo/core";
 import { mailReplyState, type Prisma } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { OWN_EMAIL_STEP, ownEmailSequences } from "./campaign-own-emails.js";
 import {
   describeCampaignActivation,
   describeReplyToEmail,
@@ -208,6 +209,18 @@ describe("activation card for one person's own first email", () => {
     // Nobody on this card gets the role's email, so it is not shown.
     expect(display).not.toHaveProperty("firstEmail");
     expect(display.refusal).toBeUndefined();
+  });
+
+  it("shows the real email when the campaign comes from get_campaign, never its step label", async () => {
+    // get_campaign labels the variable-only step for agents (#1247); the card read the label.
+    const fromTool = async (tool: string) =>
+      tool === "native_instantly_get_campaign"
+        ? { ...campaign, sequences: ownEmailSequences(campaign.sequences) }
+        : { items: leads };
+    const display = await describeCampaignActivation(fromTool, "c-1", null, binding);
+    expect(JSON.stringify(display)).not.toContain(OWN_EMAIL_STEP);
+    expect(display.recipients[0]?.firstEmail?.subject).toBe("Ada, your compiler work");
+    expect(display.firstEmail?.subject).toBe("Founding role");
   });
 
   it("names the sending mailbox from get_campaign when no role says it", async () => {

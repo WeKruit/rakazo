@@ -17,7 +17,12 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
-import { greetsSeveral, ownEmailSequences, ownFirstEmails } from "./campaign-own-emails.js";
+import {
+  greetsSeveral,
+  OWN_EMAIL_STEP,
+  ownEmailSequences,
+  ownFirstEmails,
+} from "./campaign-own-emails.js";
 import { confirmedSends } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
@@ -510,8 +515,11 @@ const OWN_SUBJECT = "rk_subject";
 const OWN_BODY = "rk_body";
 const TEMPLATE_VARIANT = { subject: `{{${OWN_SUBJECT}}}`, body: `<p>{{${OWN_BODY}}}</p>` };
 type FirstEmail = { subject: string; body: string };
-const isTemplated = (campaign: Record<string, unknown> | undefined) =>
-  firstEmail(campaign)?.subject === TEMPLATE_VARIANT.subject;
+/** Also true for get_campaign's read, which labels the variable step for agents. */
+const isTemplated = (campaign: Record<string, unknown> | undefined) => {
+  const subject = firstEmail(campaign)?.subject;
+  return subject === TEMPLATE_VARIANT.subject || subject === OWN_EMAIL_STEP;
+};
 /** The body as one paragraph's content: the template keeps the value inside its paragraph. */
 const inlineHtml = (body: string) =>
   bodyHtml(body)
