@@ -187,6 +187,7 @@ import {
   redactSecrets,
   renderBotDirectory,
   replyLanguageNote,
+  screenLanguage,
   resolveActionApprovalDetail,
   roleOpenedNote,
   runBudgetExceeded,
@@ -15679,7 +15680,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 messageId: currentTurnMessage.id,
               }).catch(() => undefined)
             : undefined;
-        const languageNote = hideVendors ? replyLanguageNote(turnLanguage) : undefined;
+        // The screen's own language, when the client sent it, names the menu as it is shown.
+        const screen = screenLanguage(
+          ((currentTurnMessage?.blocks ?? []) as MessageBlock[]).flatMap((block) =>
+            block.kind === "text" && block.uiLocale ? [block.uiLocale] : [],
+          )[0],
+        );
+        const languageNote = hideVendors ? replyLanguageNote(turnLanguage, screen) : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeSearchNote =
           intake &&

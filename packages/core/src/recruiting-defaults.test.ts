@@ -21,7 +21,9 @@ import {
   recruiterLanguageText,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
+  replyLanguageNote,
   roleOpenedNote,
+  screenLanguage,
   signedAsTeam,
   textLanguage,
   unfilledPlaceholder,
@@ -331,5 +333,17 @@ describe("recruiting tool list", () => {
     ].join("\n");
     for (const name of RECRUITING_UNUSED_BUILTIN_TOOLS)
       expect(playbook, name).not.toMatch(new RegExp(`\\b${name}\\b`));
+  });
+});
+
+describe("screenLanguage", () => {
+  // Staging 11-14: a Chinese chat was told "Sequence" while the screen showed 邮件序列; the
+  // screen's own locale decides the menu names, and only the Chinese catalog translates them.
+  it("names the menu in the screen's language, not the message's", () => {
+    expect(screenLanguage("zh-CN")).toBe("zh");
+    expect(screenLanguage("ko")).toBe("en");
+    expect(screenLanguage(undefined)).toBeUndefined();
+    expect(replyLanguageNote("zh", screenLanguage("en"))).not.toContain("邮件序列");
+    expect(replyLanguageNote("en", screenLanguage("zh-CN"))).toContain("邮件序列");
   });
 });
