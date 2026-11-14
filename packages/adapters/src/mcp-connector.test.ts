@@ -5762,6 +5762,19 @@ describe("local native Instantly campaign and lead tools", () => {
         expect(f.state.requests.filter((r) => r.method === "PATCH")).toEqual([]);
       });
 
+      it("refuses one email that greets one of its recipients by name for all of them", async () => {
+        // Sim 11-14: "Hi Abe," was saved as both people's own email, so P0's card greeted Abe.
+        const { f } = await roleWithSixteen();
+        const events = await f.run("ensure_role_campaign", {
+          steps: [{ subject: "A data role", body: "Hi Abe,\n\nA role in Seattle." }],
+          recipients: ["abe@x.test", "p0@x.test"],
+        });
+        expect((events[0] as { message: string }).message).toMatch(
+          /greets one person by name\. Greet with \{\{firstName\}\}/,
+        );
+        expect(f.state.requests.filter((r) => r.method === "PATCH")).toEqual([]);
+      });
+
       it("keeps their own email when the role's email is saved again", async () => {
         const { f } = await roleWithSixteen();
         await saveForAbe(f);
