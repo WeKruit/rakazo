@@ -238,6 +238,7 @@ import {
   backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
+  calibrationRoundRepeats,
   canvasOf,
   changeCanvas,
   claimRecruitingCrmImport,
@@ -7877,11 +7878,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             // Someone whose profile shows only a country or a state, or under six months in the
             // current role, is left out of the first picks rather than costing a step.
-            const [{ regionOnly, beyond, place }, recent] = await Promise.all([
+            const [{ regionOnly, beyond, place }, recent, repeated] = await Promise.all([
               locationSlips(roleId, picked),
               newInCurrentRole(roleId, picked),
+              calibrationRoundRepeats(deps.prisma, roleId, picked),
             ]);
+            // The round record refuses anyone already shown or returned before the last round, so
+            // the list on screen leaves them out too instead of changing once the round is recorded.
+            const repeats = new Set(repeated?.repeats);
             const left = [
+              repeats.size &&
+                `${[...repeats].join(", ")}: already returned before round ${repeated?.round}; a later round takes only people returned since, whose alreadyInPool is false.`,
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
               beyond.size &&
@@ -7893,7 +7900,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .filter(Boolean)
               .join(" ");
             const keys = picked.filter(
-              (key) => !regionOnly.has(key) && !beyond.has(key) && !recent.has(key),
+              (key) =>
+                !regionOnly.has(key) && !beyond.has(key) && !recent.has(key) && !repeats.has(key),
             );
             if (!keys.length)
               return {
