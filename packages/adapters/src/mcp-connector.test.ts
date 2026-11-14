@@ -4113,6 +4113,8 @@ describe("local native Instantly campaign and lead tools", () => {
       addToCampaign: false,
       /** What the recruiter wrote in the run's conversation. */
       typed: [] as string[],
+      /** What the recruiter wrote in their other conversations in this account. */
+      typedElsewhere: [] as string[],
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -4124,10 +4126,10 @@ describe("local native Instantly campaign and lead tools", () => {
         findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]),
       },
       message: {
-        findMany: vi.fn(async () =>
-          state.typed.map((text) => ({
+        findMany: vi.fn(async ({ where }) =>
+          (where.botId === null ? state.typedElsewhere : state.typed).map((text) => ({
             threadId: "thread-1",
-            thread: { spaceId: "w1" },
+            thread: { spaceId: "w1", userId: "u1" },
             blocks: [{ kind: "text", text }],
           })),
         ),
@@ -6093,6 +6095,24 @@ describe("local native Instantly campaign and lead tools", () => {
         // Two saved addresses as close says nothing about which one they meant.
         expect(await message(["p@x.test"])).not.toMatch(/closest/);
         expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([]);
+      });
+
+      it("takes an address the recruiter wrote in the conversation that opened the role", async () => {
+        const { f } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [];
+        f.state.lookups = [];
+        // The role holds only a later message of theirs; the address is in their first request.
+        f.state.typed = ["Ada呢？卡片上只有Noah"];
+        f.state.typedElsewhere = ["Noah Liu noah@x.test 和 Ada Chen ada@x.test，首封写好发"];
+        const note = { subject: "A data role", body: "Hi {{firstName}},\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", {
+            steps: [note],
+            recipients: ["Noah Liu <noah@x.test>", "Ada Chen <ada@x.test>"],
+          }),
+        );
+        expect(out).toMatchObject({ ownEmailSavedFor: ["noah@x.test", "ada@x.test"] });
       });
 
       it("still refuses an unknown or ambiguous person with one question, adding nobody", async () => {
