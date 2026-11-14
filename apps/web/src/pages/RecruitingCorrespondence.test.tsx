@@ -234,7 +234,7 @@ it("renders only retained email fields, supports selection and never treats assi
   );
   expect(view.container.textContent).toContain("Can we speak Thursday?");
   expect(view.container.querySelector("script")).toBeNull();
-  expect(view.container.textContent).toContain("More results may be available");
+  expect(view.container.textContent).toContain("There may be more replies");
   const rails = view.container.querySelectorAll<HTMLButtonElement>(
     'section[aria-label="Candidate conversations"] button',
   );
@@ -243,7 +243,7 @@ it("renders only retained email fields, supports selection and never treats assi
     expect.objectContaining({ emailId: "email-2", sourceName: "Other mailbox", snippet: true }),
   );
   expect(view.container.textContent).toContain("Please share the role.");
-  expect(view.container.textContent).toContain("Preview only");
+  expect(view.container.textContent).toContain("Only the start of this email is shown.");
   expect(view.conversation).not.toHaveBeenCalled();
   await view.render({ view: "interview" });
   expect(selection).toHaveBeenLastCalledWith(undefined);
@@ -314,11 +314,11 @@ it("shows a credential-store outage without asking the user to reconnect or hidi
 });
 
 it.each([
-  ["inbox", "failed", "A saved check failed."],
-  ["interview", "unsupported", "A saved result cannot be displayed."],
+  ["inbox", "failed", "A saved check failed.", false],
+  ["interview", "unsupported", "A saved result cannot be displayed.", true],
 ] as const)(
   "shows a service's %s check issue without hiding other saved results",
-  async (kind, status, text) => {
+  async (kind, status, text, diagnostics) => {
     readCorrespondence.mockResolvedValue({
       status: "ready",
       checkedAt: "2026-10-22T01:00:00Z",
@@ -358,7 +358,10 @@ it.each([
       ],
       partial: true,
     });
-    const view = await mount({ view: kind });
+    const view = await mount({
+      view: kind,
+      artifactTarget: { groupId: "role-group", includeDiagnostics: diagnostics },
+    });
     const alert = view.container.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain(text);
     expect(alert?.closest("li")?.textContent).toContain("Affected service");
@@ -373,6 +376,43 @@ it.each([
     );
   },
 );
+
+it("keeps saved results the page cannot show out of the recruiter view", async () => {
+  readCorrespondence.mockResolvedValue({
+    roleId: "role-1",
+    status: "ready",
+    checkedAt: "2026-10-22T01:00:00Z",
+    connectionChanged: true,
+    connections: [
+      {
+        name: "Mailbox",
+        status: "configured",
+        checkIssue: { status: "unsupported", checkedAt: "2026-10-22T01:00:00Z" },
+      },
+    ],
+    emails: [
+      {
+        id: "saved",
+        sourceName: "Mailbox",
+        sender: "person@example.test",
+        recipients: [],
+        subject: "Saved reply",
+        body: "Original reply remains",
+        snippet: false,
+        date: null,
+        url: null,
+      },
+    ],
+    events: [],
+    partial: false,
+  });
+  const view = await mount({ view: "inbox", threadId: "role-thread" });
+  expect(view.container.textContent).toContain("Original reply remains");
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+  expect(view.container.textContent).not.toMatch(
+    /cannot be displayed|earlier connection|saved in this role conversation|Loaded observations|read status unknown/i,
+  );
+});
 
 it("shows actual observed calendar events separately from available times and does not imply booking", async () => {
   readCorrespondence.mockResolvedValue({
@@ -904,8 +944,9 @@ it.each(["source", "revision", "organization", "role"])(
         (button) => button.textContent === "Profile",
       ),
     ).toBe(false);
+    // The row names the address the mail came from, never a guessed person.
     expect(
-      view.container.querySelector('[aria-label="Candidate details unavailable"]'),
+      view.container.querySelector('[aria-label="Do not infer <person@example.test>"]'),
     ).not.toBeNull();
     expect(openDetail).not.toHaveBeenCalled();
   },
@@ -945,10 +986,9 @@ it("filters only observed unread mail without treating unknown status as read or
     partial: true,
   });
   const view = await mount({ view: "inbox", threadId: "thread", onEmailSelection: selected });
-  expect(view.container.textContent).toContain(
-    "Loaded observations: 4 emails · 1 unread · 2 read status unknown",
-  );
-  expect(view.container.textContent).toContain("Observed unread");
+  expect(
+    view.container.querySelector('[aria-label="Observed email metadata"]')?.textContent,
+  ).toContain("Unread");
   expect(view.container.textContent).not.toContain("11111111-1111-4111-8111-111111111111");
   await view.click("Unread");
   expect(view.container.querySelectorAll('[aria-label="Candidate conversations"] li')).toHaveLength(
@@ -964,7 +1004,7 @@ it("filters only observed unread mail without treating unknown status as read or
   );
   await act(async () => rows[2]!.click());
   expect(view.container.querySelector('[aria-label="Observed email metadata"]')?.textContent).toBe(
-    "Read status unknown",
+    "",
   );
   expect(readCorrespondence).toHaveBeenCalledTimes(1);
   expect(view.conversation).not.toHaveBeenCalled();
@@ -1003,7 +1043,7 @@ it.each([
     nextCursor: null,
   });
   const view = await mount({ view: "inbox", threadId: "thread" });
-  expect(view.container.textContent?.includes("More results may be available.")).toBe(partial);
+  expect(view.container.textContent?.includes("There may be more replies.")).toBe(partial);
   expect(view.container.textContent?.match(/No replies yet\./g)?.length ?? 0).toBe(
     !count && !partial ? 1 : 0,
   );

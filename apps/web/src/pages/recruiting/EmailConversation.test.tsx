@@ -172,7 +172,7 @@ it("preserves missing fields, preview limitations, and unknown dates without inv
   expect(view.textContent).toContain("Time not recorded");
   expect(view.textContent).toContain("No subject");
   expect(view.textContent).toContain("Message body unavailable");
-  expect(view.textContent).toContain("Preview only.");
+  expect(view.textContent).toContain("Only the start of this email is shown.");
   expect(view.querySelector("time")).toBeNull();
   expect(view.querySelector("img")).toBeNull();
   expect(view.querySelector("button")).toBeNull();
@@ -420,7 +420,9 @@ it("loads only the opened preview's real body, retains it on reselection, and re
   expect(view.querySelector("summary")).not.toBeNull();
   await act(async () => button(view, "Retry").click());
   expect(view.querySelector("article")?.textContent).toContain(complete.body);
-  expect(view.querySelector("article")?.textContent).not.toContain("Preview only");
+  expect(view.querySelector("article")?.textContent).not.toContain(
+    "Only the start of this email is shown.",
+  );
   expect(globalInbox).toHaveBeenCalledTimes(2);
   await render(
     <EmailConversation

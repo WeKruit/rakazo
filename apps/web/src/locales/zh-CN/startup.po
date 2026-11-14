@@ -3371,6 +3371,10 @@ msgstr "暂缓"
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
 msgstr "只能删除空的空间。请先删除其中的助手和群组。"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Only the start of this email is shown."
+msgstr "只显示了这封邮件的开头。"
+
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/shell/KruitDock.tsx
 #: src/pages/shell/ShellPanelContent.tsx
@@ -3698,10 +3702,6 @@ msgstr "仅预览"
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Preview only · variables remain unfilled"
 msgstr "仅供预览 · 变量尚未填入"
-
-#: src/pages/recruiting/EmailConversation.tsx
-msgid "Preview only. The complete message has not loaded."
-msgstr "仅为预览，完整邮件还没加载。"
 
 #: src/pages/recruiting/AddToSequenceDialog.tsx
 msgid "Preview steps"

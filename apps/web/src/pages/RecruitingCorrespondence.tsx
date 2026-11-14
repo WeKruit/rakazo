@@ -42,6 +42,15 @@ export type RecruitingSequenceSaveInput = {
   clientNonce: string;
 };
 
+/** The other party of a saved email: who wrote a received reply, or whom we wrote to. */
+function correspondentOf(email: {
+  direction?: string | null;
+  sender: string | null;
+  recipients: readonly string[];
+}) {
+  return (email.direction === "sent" ? email.recipients[0] : email.sender) || undefined;
+}
+
 type Props = {
   view: "sequence" | "inbox" | "interview";
   messages: readonly ThreadMessage[];
@@ -345,7 +354,7 @@ export function CorrespondenceEmails({
               </p>
               {selected.snippet ? (
                 <p className="text-xs text-muted-foreground">
-                  <Trans>Preview only. Ask for the complete message to read the full body.</Trans>
+                  <Trans>Only the start of this email is shown.</Trans>
                 </p>
               ) : null}
               <p className="whitespace-pre-wrap break-words">
@@ -392,6 +401,7 @@ function SavedCorrespondenceView({
   view: "inbox" | "interview";
 }) {
   const { t } = useLingui();
+  const diagnostics = artifactTarget.includeDiagnostics === true;
   const [refresh, setRefresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string>();
   const [planningKey, setPlanningKey] = useState<string>();
@@ -578,8 +588,6 @@ function SavedCorrespondenceView({
             ])
           : `message:${email.id}`;
   const loadedEmails = data?.emails ?? [];
-  const unreadCount = loadedEmails.filter((email) => email.unread === true).length;
-  const unknownReadCount = loadedEmails.filter((email) => email.unread == null).length;
   const visibleEmails =
     mailFilter === "unread" ? loadedEmails.filter((email) => email.unread === true) : loadedEmails;
   const rail = new Map<
@@ -690,13 +698,6 @@ function SavedCorrespondenceView({
           {interview ? <Trans>Scheduling</Trans> : <Trans>Conversations</Trans>}
         </span>
         <h1>{interview ? <Trans>Interview</Trans> : <Trans>Inbox</Trans>}</h1>
-        <p>
-          {interview ? (
-            <Trans>Saved calendar checks in this conversation.</Trans>
-          ) : (
-            <Trans>Original email results saved in this role conversation.</Trans>
-          )}
-        </p>
       </header>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <button type="button" className="hire-black-button" onClick={check}>
@@ -741,7 +742,9 @@ function SavedCorrespondenceView({
                 ) : (
                   <Trans>Connect account</Trans>
                 )}
-                {connection.checkIssue ? (
+                {/* A saved result this page cannot show is diagnostics; a recruiter cannot act on it. */}
+                {connection.checkIssue?.status === "failed" ||
+                (connection.checkIssue && diagnostics) ? (
                   <p role="alert" className="mt-1 text-destructive">
                     {connection.checkIssue.status === "failed" ? (
                       <Trans>A saved check failed.</Trans>
@@ -769,7 +772,7 @@ function SavedCorrespondenceView({
           <Trans>Could not load saved results. Try refreshing.</Trans>
         </p>
       ) : null}
-      {data?.connectionChanged ? (
+      {data?.connectionChanged && diagnostics ? (
         <p className="mb-4 text-sm text-muted-foreground">
           <Trans>
             Some saved results use an earlier connection setup. Check again to load results from the
@@ -779,9 +782,11 @@ function SavedCorrespondenceView({
       ) : null}
       {data?.partial ? (
         <p className="mb-4 text-sm text-muted-foreground">
-          <Trans>
-            More results may be available. This is not the complete mailbox or calendar.
-          </Trans>
+          {interview ? (
+            <Trans>There may be more times. Check availability to load them.</Trans>
+          ) : (
+            <Trans>There may be more replies. Check inbox to load them.</Trans>
+          )}
         </p>
       ) : null}
       {data && data.status !== "ready" && (interview || data.status !== "empty") ? (
@@ -833,12 +838,6 @@ function SavedCorrespondenceView({
             >
               <Trans>Unread</Trans>
             </Button>
-            <span className="text-xs text-muted-foreground">
-              <Trans>
-                Loaded observations: {loadedEmails.length} emails · {unreadCount} unread ·{" "}
-                {unknownReadCount} read status unknown
-              </Trans>
-            </span>
           </fieldset>
           {mailFilter === "unread" && !visibleEmails.length ? (
             <p>
@@ -875,6 +874,7 @@ function SavedCorrespondenceView({
                       !candidateQuery.trim() ||
                       [
                         row.person?.name,
+                        row.email && correspondentOf(row.email),
                         row.person?.title,
                         row.person?.company,
                         row.email?.subject,
@@ -885,7 +885,10 @@ function SavedCorrespondenceView({
                       ),
                   )
                   .map(([id, row]) => {
-                    const name = row.person?.name || t`Candidate details unavailable`;
+                    const name =
+                      row.person?.name ||
+                      (row.email && correspondentOf(row.email)) ||
+                      t`Candidate details unavailable`;
                     return (
                       <li key={id}>
                         <button
@@ -995,15 +998,11 @@ function SavedCorrespondenceView({
                   className="space-y-1 text-xs text-muted-foreground"
                   aria-label={t`Observed email metadata`}
                 >
-                  <p>
-                    {selected.unread === true ? (
-                      <Trans>Observed unread</Trans>
-                    ) : selected.unread === false ? (
-                      <Trans>Observed read</Trans>
-                    ) : (
-                      <Trans>Read status unknown</Trans>
-                    )}
-                  </p>
+                  {selected.unread === true ? (
+                    <p>
+                      <Trans>Unread</Trans>
+                    </p>
+                  ) : null}
                   {selected.step != null ? (
                     <p>
                       <Trans>Step</Trans> · {selected.step}
