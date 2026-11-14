@@ -12165,7 +12165,7 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
       );
-    const repeated = previous && (await calibrationRoundRepeats(tx, role.id, keys));
+    const repeated = previous && (await calibrationRoundRepeats(tx, actor, role.id, keys));
     if (repeated?.repeats.length)
       throw new RecruitingCalibrationRoundError(
         `Round ${repeated.round + 1} must show only new people, but ${repeated.repeats.length} of these ten were already returned before round ${repeated.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
