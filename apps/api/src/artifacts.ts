@@ -703,6 +703,7 @@ export function buildUserMessageBlocks(
   attachmentBlocks: ReturnType<typeof messageBlockForArtifact>[],
   correspondenceReference?: RecruitingCorrespondenceReference,
   recruitingContext?: RecruitingChatContext,
+  uiLocale?: string,
 ) {
   const blocks = [];
   const caption = text?.trim() ? text : undefined;
@@ -712,6 +713,7 @@ export function buildUserMessageBlocks(
       text: caption ?? "",
       ...(correspondenceReference ? { correspondenceReference } : {}),
       ...(recruitingContext ? { recruitingContext } : {}),
+      ...(uiLocale ? { uiLocale } : {}),
     });
   blocks.push(...attachmentBlocks);
   return blocks;

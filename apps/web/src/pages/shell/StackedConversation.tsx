@@ -1,3 +1,4 @@
+import { i18n } from "@lingui/core";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { AskAnswer, Bot, ThreadSnapshot } from "@rakazo/contracts";
 import {
@@ -172,7 +173,7 @@ export function StackedConversation({
     setActionError(null);
     try {
       await answering.current;
-      await rpc.threads.send({ groupId, text });
+      await rpc.threads.send({ groupId, text, uiLocale: i18n.locale || undefined });
       if (editRevision.current === revision) setDraft("");
       jumpToLatest();
       setPendingSince(Date.now());

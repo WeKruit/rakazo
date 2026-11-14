@@ -1,3 +1,4 @@
+import { i18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import type {
   AskAnswer,
@@ -452,6 +453,7 @@ export function useShellMessages({
                 addressing: showToolActivity ? undefined : "coordinator",
                 clientNonce,
                 text: trimmed || undefined,
+                uiLocale: i18n.locale || undefined,
                 ...(correspondenceReference ? { correspondenceReference } : {}),
                 ...(recruitingContext ? { recruitingContext } : {}),
                 mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
@@ -471,6 +473,7 @@ export function useShellMessages({
                 interrupt: true,
                 clientNonce,
                 text: trimmed || undefined,
+                uiLocale: i18n.locale || undefined,
                 ...(correspondenceReference ? { correspondenceReference } : {}),
                 ...(recruitingContext ? { recruitingContext } : {}),
                 mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
