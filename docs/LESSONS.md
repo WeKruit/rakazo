@@ -40,3 +40,8 @@ that repeats into the existing line instead of adding another.
   message in the main conversation could win, also removed the only words the role's first turn
   had, and four new-role checks asked Chinese recruiters in English. **When you exclude a source
   from a decision, test the case where it was the only source, not just the case it overruled.**
+- A first-line change let the quick reply carry the answer and told the main answer not to
+  repeat it; when nothing was left to add the answer came out empty and the runtime posted
+  "No response. Try again.", and the line parroted the prompt's example fact into every reply.
+  **When one step may now finish another's job, test the case where the second has nothing left
+  to say, and never put a concrete fact in a prompt example the model can copy.**

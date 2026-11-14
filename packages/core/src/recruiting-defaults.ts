@@ -396,8 +396,18 @@ export const REPLY_LANGUAGE_NAME: Record<ReplyLanguage, string> = {
   en: "English",
 };
 
-export function replyLanguageNote(language: ReplyLanguage): string {
-  return `${REPLY_IN[language]} Their left menu reads: ${menuNames(language)}.`;
+/** `screen` is the language the recruiter's screen shows, when the client sent it. */
+export function replyLanguageNote(
+  language: ReplyLanguage,
+  screen: ReplyLanguage = language,
+): string {
+  return `${REPLY_IN[language]} Their left menu reads: ${menuNames(screen)}.`;
+}
+
+/** The screen language from the client's UI locale tag ("zh-CN", "en"): only Chinese is translated. */
+export function screenLanguage(uiLocale: string | undefined): ReplyLanguage | undefined {
+  if (!uiLocale) return undefined;
+  return /^zh\b/i.test(uiLocale) ? "zh" : "en";
 }
 
 /** The progress line once a search's people are in Results. */
