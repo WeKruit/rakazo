@@ -316,7 +316,7 @@ export const nativeInstantlyWrites = [
     "reply_to_email",
     ReplyToEmailInput,
     false,
-    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow.",
+    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow. Every new request to reply gets its own call and card, whatever happened to earlier cards for that email (sent, discarded or still open): never skip the call because of them.",
   ),
   tool(
     "ensure_role_campaign",
