@@ -8,9 +8,9 @@ import {
   currentSuggestion,
   isActive,
   isApprovalAskBlock,
+  reopenedAskMessageIds,
   retryMessageText,
   threadTailPhase,
-  timedOutAskMessageId,
   writesChinese,
 } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
@@ -262,13 +262,13 @@ export function ShellConversation({
     if (emptyCrmChat) onAttachmentPick(files, composerDraftKey);
     else onAttachmentPick(files);
   };
-  // A card whose wait timed out still takes an answer until the recruiter says something else.
-  const timedOutAskId = timedOutAskMessageId(
+  // A timed-out question, or a connect card, still takes an answer after its wait ended.
+  const reopenedAskKey = reopenedAskMessageIds(
     activeSnapshot ? { ...activeSnapshot, messages: transcriptMessages } : null,
-  );
+  ).join(",");
   const transcriptAskIds = useMemo(
-    () => (timedOutAskId ? [...answerableAskIds, timedOutAskId] : answerableAskIds),
-    [answerableAskIds, timedOutAskId],
+    () => [...answerableAskIds, ...(reopenedAskKey ? reopenedAskKey.split(",") : [])],
+    [answerableAskIds, reopenedAskKey],
   );
   // The card after a calibration round takes votes on its people right in the chat.
   const latestAskId = inGroup && !emptyCrmChat ? transcriptAskIds.at(-1) : undefined;
