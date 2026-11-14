@@ -253,6 +253,7 @@ import {
   createRunHistoryCache,
   createSpaceForMember,
   createThreadMessageInTransaction,
+  earlierConfirmedSends,
   effectiveMemoryScope,
   executeNativeRecruitingShortlist,
   executeRecruitingApproval,
@@ -417,6 +418,7 @@ import {
   readCalBookingSnapshot,
 } from "./calendar-approval.js";
 import { preflightCalBooking } from "./calendar-preflight.js";
+import { repeatedSendRefusal } from "./campaign-send-record.js";
 import { archiveSpawnedBot, spawnBot } from "./child-bots.js";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
 import { cloudAgentsEnabled } from "./cloud-agent-factory.js";
@@ -10883,8 +10885,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       args.send_now === true,
                     )
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
+              // The same person never gets a second first email from another campaign unless the
+              // recruiter asked: without resend the send is refused, with it the card shows when.
+              const repeats =
+                approvalRoute.toolName === "native_instantly_activate_campaign" &&
+                campaignId &&
+                instantlyActivation?.recipients.length
+                  ? await earlierConfirmedSends(
+                      deps.prisma,
+                      run.spaceId,
+                      campaignId,
+                      instantlyActivation.recipients.map((r) => r.email),
+                    ).catch(() => new Map<string, string>())
+                  : new Map<string, string>();
+              if (repeats.size && instantlyActivation)
+                instantlyActivation.recipients = instantlyActivation.recipients.map((r) => {
+                  const at = repeats.get(r.email.toLowerCase());
+                  return at ? { ...r, alreadyEmailedAt: at } : r;
+                });
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
+                (repeats.size && args.resend !== true ? repeatedSendRefusal(repeats) : null) ??
                 (approvalRoute.toolName === "native_instantly_activate_campaign" && !campaignId
                   ? NO_CAMPAIGN_TO_ACTIVATE
                   : null) ??

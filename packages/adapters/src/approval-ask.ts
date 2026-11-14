@@ -258,6 +258,9 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     ...shown.flatMap((r) => [
       `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,
       ...(r.personalization ? [`  Opening: ${r.personalization}`] : []),
+      ...(r.alreadyEmailedAt
+        ? [`  Already emailed: ${r.alreadyEmailedAt.slice(0, 16).replace("T", " ")} UTC`]
+        : []),
       ...(r.firstEmail
         ? [
             `  Subject: ${r.firstEmail.subject}`,

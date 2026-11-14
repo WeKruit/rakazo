@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, type Prisma, type PrismaClient } from "./client.js";
 import { answerRunInput } from "./events.js";
 import {
+  earlierConfirmedSends,
   findSameMailReply,
   findWaitingCampaignSend,
   projectMailReplyCards,
@@ -386,6 +387,36 @@ pg("one persisted editable mail approval (PostgreSQL)", () => {
       await answerRunInput(prisma, { ...second.input, answer: { ...answer, body: "Another" } }),
     ).toBeTruthy();
   });
+  it("finds people this account already sent a confirmed first email to from another campaign", async () => {
+    const earlier = await fixture(true);
+    await prisma.externalEffect.update({
+      where: { id: earlier.effect.id },
+      data: {
+        kind: "mcp__mail__native_instantly_activate_campaign",
+        status: "completed",
+        result: {
+          structuredContent: {
+            result: {
+              activated: true,
+              campaignId: "campaign-a",
+              recipients: ["Noah@Example.test"],
+            },
+          },
+        },
+      },
+    });
+    const found = await earlierConfirmedSends(prisma, identity.spaceId, "campaign-b", [
+      "noah@example.test",
+      "ada@example.test",
+    ]);
+    expect([...found.keys()]).toEqual(["noah@example.test"]);
+    // The same campaign sending its own people again is not a second first email.
+    expect(
+      (await earlierConfirmedSends(prisma, identity.spaceId, "campaign-a", ["noah@example.test"]))
+        .size,
+    ).toBe(0);
+  });
+
   it("shows one card per campaign send: a second agent sending the same people finds the first", async () => {
     const first = await fixture();
     const second = await fixture(true);
