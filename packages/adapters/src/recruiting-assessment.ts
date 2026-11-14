@@ -309,12 +309,13 @@ export async function executeRecruitingCandidatesTool(
       };
     }
     if (input.operation === "round") {
-      if (!roleId) {
+      if (!roleId && !input.roleId) {
         succeeded = true;
         return { status: "no_current_role" as const };
       }
       const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
         threadId: trusted.threadId,
+        roleId: input.roleId,
       });
       itemCount = round?.candidates.length ?? 0;
       succeeded = true;
