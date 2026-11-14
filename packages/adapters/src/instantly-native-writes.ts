@@ -2151,6 +2151,10 @@ async function saveOwnEmail(
     throw new Error(
       `Each of these people gets this email alone, but it greets ${together} together. Greet with {{firstName}}, which is filled in for each person, then save again.`,
     );
+  if (chosen.length > 1 && greetsByName(own.body))
+    throw new Error(
+      `Each of ${who} gets this email alone, but it greets one person by name. Greet with {{firstName}}, which is filled in for each person, or save each person's own email with recipients set to that person alone, then save again.`,
+    );
   if (binding.created !== true)
     throw new Error(askAbout(who, "this role's campaign was set up outside this product"));
   const templated = isTemplated(campaign);
