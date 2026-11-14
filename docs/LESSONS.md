@@ -20,3 +20,6 @@ that repeats into the existing line instead of adding another.
 - A whole shared file was reformatted in a feature PR and collided with other threads. **Format only
   the lines you changed.**
 - New code kept going into one 20,000-line file. **Add a focused module and call it.**
+- The simulated customer reported every page as 15 s, a "missing" Word attachment and a phone send
+  failure; all three were the harness (network idle never comes with a live stream, a filename filter,
+  Enter on a touch screen). **Before routing an eval finding, check the harness could have produced it.**
