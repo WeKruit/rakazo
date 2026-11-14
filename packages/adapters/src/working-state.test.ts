@@ -315,6 +315,27 @@ describe("loadWorkingState", () => {
     expect(state.language).toBe("zh");
   });
 
+  it("takes the language from that copy when the recruiter has written nothing else", async () => {
+    // Staging 11-14 2bb9124c: with the copy left out, a new role's first question went out in
+    // English to a Chinese recruiter.
+    const state = await loadWorkingState(
+      fakePrisma({
+        recruiter: [
+          {
+            ...text("新岗位：华东区销售总监，常驻上海，医疗器械行业"),
+            clientNonce: "start-role:k",
+          },
+        ],
+        account: [],
+      }) as never,
+      scope,
+      { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
+      (t) => t,
+      now,
+    );
+    expect(state.language).toBe("zh");
+  });
+
   it("never offers the account's own team as a role team before it holds a role", async () => {
     const home = recruitingHomeGroupId(scope);
     const roleless = { id: home, thread: { activeRecruitingRoleId: null } };

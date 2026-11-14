@@ -36,3 +36,7 @@ that repeats into the existing line instead of adding another.
 - After a pooler failover a worker's database sessions went half-open and twenty jobs, a recruiter's
   search among them, waited with no error and no log for good. **Every network wait gets a
   client-side bound just past the server's own limit, so a lost reply fails instead of hanging.**
+- A fix that dropped a new role's copied message from the language decision, so a later
+  message in the main conversation could win, also removed the only words the role's first turn
+  had, and four new-role checks asked Chinese recruiters in English. **When you exclude a source
+  from a decision, test the case where it was the only source, not just the case it overruled.**
