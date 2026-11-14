@@ -144,7 +144,13 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
         .last();
       if (!(await composer.isVisible().catch(() => false))) return false;
       await composer.fill(text);
-      await composer.press("Enter");
+      // On a touch screen Enter adds a new line, as on a phone; the recruiter taps Send there.
+      const sendButton = page
+        .locator("fieldset")
+        .filter({ has: composer })
+        .getByRole("button", { name: /^(Send|发送)$/ })
+        .last();
+      if (!mobile || !(await press(sendButton))) await composer.press("Enter");
       await sleep(1_500);
       // The composer empties once the page has taken the message (it may wait in a queue while
       // Kruit is still working, so the chat itself can show it later).
