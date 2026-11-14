@@ -133,7 +133,6 @@ export function AskCard({
         connection={block.connection}
         answer={block.status === "answered" ? block.answer : undefined}
         canAnswer={canAnswer}
-        expiresAt={block.status !== "answered" ? expiresAt : null}
         onAnswer={onAnswer}
       />
     );
@@ -152,19 +151,17 @@ export function AskCard({
 
 type ConnectionState = "idle" | "connecting" | "connected" | "failed";
 
-/** Asks the user to connect an integration through the existing MCP OAuth flow,
- * then answers the same ask so the waiting run continues. */
+/** Asks the user to connect an integration through the existing MCP OAuth flow, then answers
+ * the same ask so the waiting run continues. Signing in never expires, so it has no deadline. */
 function ConnectionAskCard({
   connection,
   answer,
   canAnswer,
-  expiresAt,
   onAnswer,
 }: {
   connection: AskConnection;
   answer: string | undefined;
   canAnswer: boolean;
-  expiresAt?: string | null;
   onAnswer: (text: AskAnswer) => Promise<void>;
 }) {
   const { t } = useLingui();
@@ -227,7 +224,6 @@ function ConnectionAskCard({
           <span className="block text-[13px] text-muted-foreground">{connection.reason}</span>
         </span>
       </div>
-      {canAnswer && expiresAt ? <AskDeadline expiresAt={expiresAt} /> : null}
       {connected ? (
         <div className="mt-3">
           <SuccessPop label={t`Connected`} />

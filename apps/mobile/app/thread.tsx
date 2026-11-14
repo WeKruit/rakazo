@@ -42,6 +42,7 @@ import {
   plainTextFromMarkdown,
   projectMessageReactions,
   reconcileThreadScrollState,
+  reopenedAskMessageIds,
   replyAttachment,
   resolveComposerSendPlan,
   resolvePersonaColorDef,
@@ -52,7 +53,6 @@ import {
   stuckWorkExpiresAt,
   threadTailPhase,
   threadWindowMessages,
-  timedOutAskMessageId,
   timeSeparatorIds,
   trackWork,
   userVisibleMessages,
@@ -2076,11 +2076,8 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
   }
 
-  // A card whose wait timed out still takes an answer until the person says something else.
-  const timedOutAskId = timedOutAskMessageId(snap);
-  const answerableAskIds = timedOutAskId
-    ? [...answerableAskMessageIds(snap), timedOutAskId]
-    : answerableAskMessageIds(snap);
+  // A timed-out question, or a connect card, still takes an answer after its wait ended.
+  const answerableAskIds = [...answerableAskMessageIds(snap), ...reopenedAskMessageIds(snap)];
   const runErrorNeedsReconnect = Boolean(
     snap?.run?.error && runRecoveryAction(snap.run.error) === "model_connection",
   );
