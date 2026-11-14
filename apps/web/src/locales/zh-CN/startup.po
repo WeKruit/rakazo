@@ -1188,7 +1188,7 @@ msgstr "电脑未开启。请设置 SANDBOX_PROVIDER=docker 并提供 SANDBOX_SU
 
 #: src/pages/recruiting/shared.tsx
 msgid "Configured"
-msgstr ""
+msgstr "已配置"
 
 #: src/pages/Auth.tsx
 msgid "Confirm password"
@@ -1206,7 +1206,7 @@ msgstr "连接"
 
 #: src/pages/recruiting/shared.tsx
 msgid "Connect account"
-msgstr ""
+msgstr "连接账号"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
@@ -1836,7 +1836,7 @@ msgstr "直连 MCP"
 
 #: src/pages/recruiting/shared.tsx
 msgid "Disabled"
-msgstr ""
+msgstr "已停用"
 
 #: src/components/MailReplyAskContent.tsx
 msgid "Discard"
@@ -2050,7 +2050,7 @@ msgstr "在职规则"
 
 #: src/pages/recruiting/shared.tsx
 msgid "Enable for this role"
-msgstr ""
+msgstr "为这个岗位启用"
 
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Engagement"
@@ -5251,7 +5251,7 @@ msgstr "协作"
 
 #: src/pages/recruiting/shared.tsx
 msgid "Temporarily unavailable"
-msgstr ""
+msgstr "暂时不可用"
 
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Terminal"
