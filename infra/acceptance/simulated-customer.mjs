@@ -392,6 +392,30 @@ function guardSend(journey, card, answer, turn) {
   return "deny";
 }
 
+// A copied account holds real people (names, companies), so a contact lookup there would find
+// their real addresses and could put them in a campaign. Before playing on it, turn its lookup
+// service off through the product's own settings, and refuse to play if one is still on.
+const LOOKUP_ENDPOINTS = new Set(["https://mcp.fullenrich.com/mcp"]);
+async function withoutContactLookups(rpc) {
+  const lookups = (servers) =>
+    servers.filter((server) => server.enabled && LOOKUP_ENDPOINTS.has(server.endpoint));
+  for (const server of lookups(await rpc("mcp/servers/list", {})))
+    await rpc("mcp/servers/update", {
+      id: server.id,
+      config: {
+        slug: server.slug,
+        name: server.name,
+        description: server.description ?? "",
+        enabled: false,
+        transport: server.transport,
+        endpoint: server.endpoint,
+      },
+    });
+  const left = lookups(await rpc("mcp/servers/list", {}));
+  if (left.length)
+    throw new InfraError(`contact lookup still on for the copied account (${left.map((s) => s.slug)})`);
+}
+
 // Real sign-ups carry the recruiter's own name, so a template Kruit signs can use it.
 const ACCOUNT_NAME = "Alex Morgan";
 
@@ -401,6 +425,7 @@ async function play(journey, label, owner, mailbox, out) {
   if (journey.account === "batch") credentials = BATCH;
   if (journey.account) {
     await user.auth(...credentials);
+    if (journey.account === "batch") await withoutContactLookups(user.rpc);
     // Waiting for a reused account to go quiet watches only its working chats, not every role.
     watchFrom(user.rpc, Date.now());
     await stopAll(user.rpc);
