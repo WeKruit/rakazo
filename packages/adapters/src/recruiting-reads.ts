@@ -83,6 +83,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import { readActorArtifact } from "./artifact-read.js";
+import { sentCount } from "./campaign-send-record.js";
 import { lastUsedMailbox } from "./instantly-native-writes.js";
 import { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
@@ -872,7 +873,13 @@ export async function getRecruitingRoleCampaign(
           ? { nextLeadCursor: null }
           : {}),
       stats: {
-        sent: count(analytics?.emails_sent_count),
+        // The provider's totals lag its per-person record: everyone it has contacted was sent one.
+        sent: sentCount(
+          count(analytics?.emails_sent_count),
+          (rawLeads ?? []).filter(
+            (value) => typeof correspondenceRecord(value)?.timestamp_last_contact === "string",
+          ).length,
+        ),
         opened: count(analytics?.open_count_unique),
         replied: count(analytics?.reply_count_unique),
       },

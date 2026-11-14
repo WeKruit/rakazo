@@ -17,6 +17,7 @@ import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
+import { confirmedSends } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import {
@@ -3343,6 +3344,9 @@ export async function runInstantlyWrite(
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),
         ...(await leadDelivery(rest, campaign)),
+        ...(owned
+          ? await confirmedSends(prisma, context, String(campaign.id)).catch(() => ({}))
+          : {}),
         campaign_schedule: campaign.campaign_schedule,
         sequences: campaign.sequences,
       };
