@@ -29,9 +29,16 @@ export async function listThreadBackgroundWork(
     SELECT q.id, 'research' AS kind, 'running' AS status,
       COALESCE(r."startedAt", r."createdAt") AS "startedAt", NULL::int AS "estimateMs"
     FROM recruiting_research_tasks q
-    JOIN runs r ON r.id = q."createdByRunId"
-    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
-    JOIN recruiting_roles rr ON rr.id = q."roleId" AND rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
+    JOIN recruiting_roles rr ON rr.id = q."roleId"
+    JOIN owned o ON rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
+    -- Each task's own run by its key. Joined freely, an account with hundreds of roles had
+    -- every task scan the account's runs (about 1 s per chat open).
+    CROSS JOIN LATERAL (
+      SELECT r."startedAt", r."createdAt" FROM runs r
+      WHERE r.id = q."createdByRunId" AND r."threadId" = o.id
+        AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
+      LIMIT 1
+    ) r
     WHERE q.state = 'active'
     UNION ALL
     SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status,

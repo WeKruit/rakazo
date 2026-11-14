@@ -293,6 +293,7 @@ import {
   touchGroupUpdatedAt,
   updateRecruitingContactTags,
   upgradeRecruitingWorkspace,
+  usageRemaining,
   votePoll,
   withDatabaseActor,
 } from "@rakazo/db";
@@ -1499,7 +1500,8 @@ export function createRouter(deps: RouterDeps) {
                 limit: 200,
                 offset: input.offset ?? 0,
               }),
-          input.groupId
+          // The open chat comes with the first page only; later navigation pages discard it.
+          input.groupId && !input.offset
             ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
                 threadSnapshot(deps, target),
               )
@@ -1521,9 +1523,11 @@ export function createRouter(deps: RouterDeps) {
         ? [groupThread, []]
         : active
           ? await Promise.all([
-              resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
-                threadSnapshot(deps, target),
-              ),
+              input.offset
+                ? null
+                : resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
+                    threadSnapshot(deps, target),
+                  ),
               listRoutinesDto(deps.prisma, actor, { botId: active.id, offset: input.offset ?? 0 }),
             ])
           : [null, []];
@@ -7308,6 +7312,9 @@ export function createRouter(deps: RouterDeps) {
         summarizeUsageCosts(deps.prisma, context.actor, {
           priceTokens: estimateCatalogTokenCostUsd,
         }),
+      ),
+      remaining: authed.usage.remaining.handler(({ context }) =>
+        usageRemaining(deps.prisma, context.actor, { priceTokens: estimateCatalogTokenCostUsd }),
       ),
       internalCosts: authed.usage.internalCosts.handler(async ({ context }) => {
         if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
