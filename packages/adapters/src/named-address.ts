@@ -95,3 +95,11 @@ export async function untypedAddressRefusal(
   const ask = "ask the recruiter one question: which person they mean, by full name or email.";
   return `Nothing was saved: ${address} is not an address anyone wrote in this conversation or a saved email of this role's candidates. ${closest ? `If they mean ${closest.email}, the closest saved address, use it exactly; otherwise ${ask}` : `A${ask.slice(1)}`}`;
 }
+
+/** "Ada Chen <ada@x.test>", the usual way to write a person with their address, or one value. */
+export function recipientParts(entry: string): { value: string; name?: string } {
+  const named = /^\s*"?([^"<>]*?)"?\s*<([^<>\s]+@[^<>\s]+)>\s*$/.exec(entry);
+  return named?.[1]
+    ? { value: named[2]!.toLowerCase(), name: named[1] }
+    : { value: (named?.[2] ?? entry).trim().toLowerCase() };
+}

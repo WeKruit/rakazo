@@ -1806,6 +1806,15 @@ export class McpConnector implements ConnectorProvider {
               ).then((owned) => ({
                 campaigns: new Set(owned.campaigns),
                 mailboxes: new Set(owned.mailboxes),
+                campaignsNow: async () =>
+                  (
+                    await ownedInstantly(
+                      this.prisma,
+                      context.spaceId,
+                      credential.server.id,
+                      context.userId,
+                    )
+                  ).campaigns,
               }))
           : undefined,
       );
