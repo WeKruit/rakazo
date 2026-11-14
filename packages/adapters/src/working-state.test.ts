@@ -12,6 +12,8 @@ function fakePrisma(input: {
   groups?: Row[];
   roles?: Row[];
   recruiter?: Row[];
+  /** The account's newest recruiter messages, when they differ from this conversation's. */
+  account?: Row[];
   messagesByThread?: Record<string, Row[]>;
   runs?: Row[];
   completed?: Row[];
@@ -24,10 +26,12 @@ function fakePrisma(input: {
       count: vi.fn(async () => 1175),
     },
     message: {
-      findMany: vi.fn(async ({ where }: { where: { threadId: unknown; role?: string } }) =>
-        where.role === "user"
-          ? (input.recruiter ?? [])
-          : (input.messagesByThread?.[where.threadId as string] ?? []),
+      findMany: vi.fn(async ({ where }: { where: { threadId?: unknown; role?: string } }) =>
+        where.role !== "user"
+          ? (input.messagesByThread?.[where.threadId as string] ?? [])
+          : typeof where.threadId === "object"
+            ? (input.account ?? input.recruiter ?? [])
+            : (input.recruiter ?? []),
       ),
     },
     bot: { findMany: vi.fn(async () => [{ id: "bot-sourcer", name: "Sourcer" }]) },
@@ -187,7 +191,29 @@ describe("loadWorkingState", () => {
     );
     expect(state.language).toBe("zh");
     expect(state.text).not.toContain("Role teams");
-    expect(prisma.chatGroup.findMany).not.toHaveBeenCalled();
+  });
+
+  it("puts this conversation's own words before the account's newest", async () => {
+    const thread = { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" };
+    const zh = await loadWorkingState(
+      fakePrisma({
+        recruiter: [text("西雅图现场办公，要会普通话")],
+        account: [text("please send the new grads list to my manager now")],
+      }) as never,
+      scope,
+      thread,
+      (t) => t,
+      now,
+    );
+    expect(zh.language).toBe("zh");
+    const handedOff = await loadWorkingState(
+      fakePrisma({ recruiter: [], account: [text("候选人要会普通话")] }) as never,
+      scope,
+      thread,
+      (t) => t,
+      now,
+    );
+    expect(handedOff.language).toBe("zh");
   });
 
   it("never offers the account's own team as a role team before it holds a role", async () => {

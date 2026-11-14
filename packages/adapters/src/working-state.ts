@@ -123,37 +123,54 @@ export async function loadWorkingState(
   now = Date.now(),
 ): Promise<WorkingState> {
   const global = thread.groupId?.startsWith("recruiting-global-") ?? false;
-  const listed = global
-    ? await prisma.chatGroup.findMany({
-        where: {
-          spaceId: scope.spaceId,
-          userId: scope.userId,
-          archivedAt: null,
-          NOT: { id: { startsWith: "recruiting-global-" } },
-          thread: { isNot: null },
-        },
-        orderBy: { updatedAt: "desc" },
-        take: STATE_ROLES,
-        select: {
-          id: true,
-          name: true,
-          updatedAt: true,
-          thread: { select: { id: true, activeRecruitingRoleId: true } },
-        },
-      })
-    : [];
+  // The recruiter's most recently active conversations, Kruit's included: where their newest
+  // words are, and (for Kruit) the role teams on the card. Bounded, so a large account reads few.
+  const listed = await prisma.chatGroup.findMany({
+    where: {
+      spaceId: scope.spaceId,
+      userId: scope.userId,
+      archivedAt: null,
+      thread: { isNot: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: STATE_ROLES + 1,
+    select: {
+      id: true,
+      name: true,
+      updatedAt: true,
+      thread: { select: { id: true, activeRecruitingRoleId: true } },
+    },
+  });
+  const accountThreadIds = listed.flatMap((group) => (group.thread ? [group.thread.id] : []));
   // The account's own team with no role yet is not a role team: nothing to hand it.
-  const groups = listed.filter((group) => !isRolelessHomeTeam(scope, group));
+  const groups = global
+    ? listed
+        .filter(
+          (group) =>
+            !group.id.startsWith("recruiting-global-") && !isRolelessHomeTeam(scope, group),
+        )
+        .slice(0, STATE_ROLES)
+    : [];
   const roleThreadIds = groups.flatMap((group) => (group.thread ? [group.thread.id] : []));
   const threadIds = [thread.id, ...roleThreadIds];
   const since = new Date(now - RECEIPT_WINDOW_MS);
   const [recruiterRows, roles, recent, runs, completed, handoffs, roleTotal] = await Promise.all([
-    prisma.message.findMany({
-      where: { threadId: { in: threadIds }, role: "user", botId: null },
-      orderBy: { createdAt: "desc" },
-      take: RECRUITER_MESSAGES,
-      select: { blocks: true },
-    }),
+    // This conversation's own words first, then the account's newest: the same order the turn's
+    // own language decision uses, so every line of a turn agrees.
+    Promise.all([
+      prisma.message.findMany({
+        where: { threadId: thread.id, role: "user", botId: null },
+        orderBy: { seq: "desc" },
+        take: RECRUITER_MESSAGES,
+        select: { blocks: true },
+      }),
+      prisma.message.findMany({
+        where: { threadId: { in: accountThreadIds }, role: "user", botId: null },
+        orderBy: { createdAt: "desc" },
+        take: RECRUITER_MESSAGES,
+        select: { blocks: true },
+      }),
+    ]).then(([own, account]) => [...own, ...account]),
     global
       ? prisma.recruitingRole.findMany({
           where: { spaceId: scope.spaceId, userId: scope.userId, archivedAt: null },
