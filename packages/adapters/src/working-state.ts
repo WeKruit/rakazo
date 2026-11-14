@@ -361,6 +361,8 @@ export async function loadWorkingState(
   };
   if (!global && thread.activeRecruitingRoleId) {
     const record = records.get(thread.activeRecruitingRoleId);
+    if (record?.requirements)
+      lines.push(`- This role's requirements on record: ${record.requirements}`);
     const saved = emailLine(record);
     if (saved) lines.push(`- This role's ${saved}`);
     const campaign = campaignLine(record);

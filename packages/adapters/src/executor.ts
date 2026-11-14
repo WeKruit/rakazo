@@ -16452,7 +16452,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   resumeFromCheckpoint: takeoverResume?.checkpoint,
                   script,
-                  allowSilentEmpty: allowSilentEmptyRun,
+                  // Gate 1625bfd4: the first line already gave the answer, the answer had nothing
+                  // to add, and the recruiter got "No response. Try again." in English.
+                  allowSilentEmpty: allowSilentEmptyRun || quickReplySaid !== undefined,
                   emptyResponseText,
                   reportOwed: turnReport.enabled ? () => turnReport.owed().length > 0 : undefined,
                   executeTool: scripted ? undefined : applyTool,
@@ -17415,6 +17417,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             completionBlocks = completionMessageSegments(completionBlocks, {
               allowSilentEmpty:
                 allowSilentEmptyRun ||
+                quickReplySaid !== undefined ||
                 probeFoundNothing ||
                 publishedMidTurnUserMessage ||
                 recruitingSilent,
