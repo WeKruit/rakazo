@@ -35,6 +35,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   11: "35e16c8b9433b4281e05b4bc11349c3453f5057fe109fa0281e63a1dcdcd21b0",
   // 12: optional card flag on thread.suggestion (a suggested answer to the waiting card).
   12: "66a18eb346137eef4e42ede4c285d884685f41eab8857b9aaa55807cdc2b70ba",
+  // 13: optional interface language on user text blocks (menu names as the sender sees them).
+  13: "e90ed4b7750f6a67737fc8ce1899e683947209f2f0e06c770eecc851f32a7e66",
 };
 
 const OLD_ROWS: unknown[] = [

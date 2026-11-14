@@ -964,6 +964,7 @@ export async function sendThreadMessage(
     text?: string;
     correspondenceReference?: RecruitingCorrespondenceReference;
     recruitingContext?: RecruitingChatContext;
+    uiLocale?: string;
     artifactIds?: string[];
     addressing?: "coordinator" | "mentions";
     queueMode?: "steer" | "follow_up";
@@ -1077,6 +1078,7 @@ export async function sendThreadMessage(
             attachmentBlocks,
             input.correspondenceReference,
             input.recruitingContext,
+            input.uiLocale,
           );
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
@@ -1296,6 +1298,7 @@ export async function sendThreadMessage(
           attachmentBlocks,
           input.correspondenceReference,
           input.recruitingContext,
+          input.uiLocale,
         );
         const message = await createThreadMessageInTransaction(tx, {
           threadId: target.threadId,

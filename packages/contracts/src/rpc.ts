@@ -113,6 +113,7 @@ import {
   CanvasJsonSchema,
   ComputerCommandSchema,
   ProductEventSchema,
+  UiLocaleTag,
 } from "./events.js";
 import { Id, IsoDate, RunStatus } from "./ids.js";
 import {
@@ -330,6 +331,8 @@ const threadSendInput = threadTarget
     text: z.string().optional(),
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     recruitingContext: RecruitingChatContextSchema.optional(),
+    /** The sender's interface language, so replies can name controls as the screen shows them. */
+    uiLocale: UiLocaleTag.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
     addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Steer the current reply, or wait until it has finished speaking. */

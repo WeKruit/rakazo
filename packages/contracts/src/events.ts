@@ -539,6 +539,12 @@ export const AskBlockSchema = z
     "A form response belongs to an answered form",
   );
 
+/** A BCP 47 language tag for the interface, such as "zh-CN" or "en". */
+export const UiLocaleTag = z
+  .string()
+  .max(35)
+  .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/);
+
 export const MessageBlock = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("text"),
@@ -547,6 +553,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
     recruitingContext: RecruitingChatContextSchema.optional(),
+    /** The sender's interface language when they wrote this, such as "zh-CN" or "en". */
+    uiLocale: UiLocaleTag.optional(),
   }),
   z.object({
     kind: z.literal("card"),
@@ -925,7 +933,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 12;
+export const EVENT_FORMAT_VERSION = 13;
 
 export const ProductEventSchema = z
   .object({
