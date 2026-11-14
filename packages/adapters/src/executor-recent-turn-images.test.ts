@@ -15,6 +15,8 @@ import {
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import type * as TurnEndGuardModule from "./turn-end-guard.js";
+import { planDeclineRetry } from "./turn-end-guard.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
@@ -26,6 +28,11 @@ vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingContextModule>()),
   loadRecruitingRunContext: vi.fn(async () => undefined),
 }));
+
+vi.mock("./turn-end-guard.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof TurnEndGuardModule>();
+  return { ...actual, planDeclineRetry: vi.fn(actual.planDeclineRetry) };
+});
 
 beforeEach(() => {
   vi.mocked(loadRecruitingRunContext).mockClear();
@@ -597,6 +604,30 @@ describe("quick reply", () => {
     });
     expect(prisma.message.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "published-final" } }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  // Gate 2a73ed94 (progress-and-where): a first line, then a card that said it again.
+  it("puts an answer that ends in a question card in place of the first line", async () => {
+    vi.mocked(planDeclineRetry).mockResolvedValueOnce({
+      keep: "Nothing is saved yet.",
+      card: "Which role should I start with?",
+    } as Awaited<ReturnType<typeof planDeclineRetry>>);
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Nothing is saved yet.",
+      finalText: "Nothing is saved yet. Which role should I start with?",
+      quickReplies: true,
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "published-final" },
+        data: {
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ kind: "ask", text: "Which role should I start with?" }),
+          ]),
+        },
+      }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
   });
