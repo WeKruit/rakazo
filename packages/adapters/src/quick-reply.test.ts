@@ -105,6 +105,12 @@ describe("quick reply", () => {
     expect(cleanQuickReply("好，现在发出。")).toBe("好，这就处理。");
     expect(cleanQuickReply("Sending it now.")).toBe("On it.");
     expect(cleanQuickReply("我先看这个岗位的发信队列。")).toBe("我先看这个岗位的发信队列。");
+    // Simulated 11-14: a mention of sending is not a claim that something goes out.
+    expect(cleanQuickReply("发出的邮件和回复在「收件箱」里看。")).toBe(
+      "发出的邮件和回复在「收件箱」里看。",
+    );
+    expect(cleanQuickReply("把职位描述发给我就行。")).toBe("把职位描述发给我就行。");
+    expect(cleanQuickReply("已发出两封。")).toBe("好，这就处理。");
   });
 
   it("drops questions, long text and runtime filler", () => {

@@ -41,7 +41,11 @@ const claimedSteering: { items?: Array<{ text: string }> } = {};
 let lastPrisma: { message: { create: { mock: { calls: unknown[][] } } } } | undefined;
 let lastRuntimeRun: { mock: { calls: Array<[AgentRunRequest]> } } | undefined;
 let lastExecutorEvents:
-  | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
+  | {
+      append: ReturnType<typeof vi.fn>;
+      publishTransient: ReturnType<typeof vi.fn>;
+      finalizeRun: ReturnType<typeof vi.fn>;
+    }
   | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
@@ -256,17 +260,25 @@ async function runWithModel(
           : null,
       ),
       count: vi.fn(async () => 0),
-      findFirst: vi.fn(async (args?: { where?: { role?: string; id?: string } }) =>
-        args?.where?.role === "user" || args?.where?.id
-          ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
-              (message: { role: string; id?: string }) =>
-                message.role === "user" && (!args.where?.id || message.id === args.where.id),
-            ) ?? null)
-          : options.priorRoutineRun
-            ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
-            : null,
+      findFirst: vi.fn(
+        async (args?: { where?: { role?: string; id?: string }; orderBy?: object }) =>
+          args?.orderBy && !args.where?.role && !args.where?.id
+            ? // The thread's newest message: the last one this run posted.
+              (prisma.message.create.mock.results.at(-1)?.value ?? null)
+            : args?.where?.role === "user" || args?.where?.id
+              ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
+                  (message: { role: string; id?: string }) =>
+                    message.role === "user" && (!args.where?.id || message.id === args.where.id),
+                ) ?? null)
+              : options.priorRoutineRun
+                ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+                : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
+      update: vi.fn(async ({ where, data }: { where: { id: string }; data: object }) => ({
+        id: where.id,
+        ...data,
+      })),
     },
     recruitingRole: {
       findUnique: vi.fn(async () => ({
@@ -513,7 +525,7 @@ describe("quick reply", () => {
     expect(saysSomething([{ kind: "ask", question: "Which city?" } as never])).toBe(true);
   });
 
-  it("posts a short first reply beside setup and tells the run what it said", async () => {
+  it("posts a short first reply beside setup", async () => {
     const { runtimeRun, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       finalText: "On it.",
       quickReplies: true,
@@ -532,8 +544,25 @@ describe("quick reply", () => {
       ([call]) => call.runId === "run-1:quick-reply",
     );
     expect(quickIndex).toBeLessThan(main);
-    expect(runtimeRun.mock.calls[main]![0].prompt).toContain(
-      'You already sent the person this first line while you work: "On it."',
+  });
+
+  // Simulated 11-14: every turn read as a first line and then an answer repeating it. The
+  // answer takes the first line's place, so the person reads one reply.
+  it("puts the answer in place of the first line", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "No roles are saved yet.",
+      finalText: "No roles are saved yet. Send me a job description to start.",
+      quickReplies: true,
+    });
+    const answer = [
+      { kind: "text", text: "No roles are saved yet. Send me a job description to start." },
+    ];
+    expect(prisma.message.update).toHaveBeenCalledWith({
+      where: { id: "published-final" },
+      data: { blocks: answer },
+    });
+    expect(lastExecutorEvents?.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ blocks: [] }),
     );
   });
 
@@ -558,9 +587,23 @@ describe("quick reply", () => {
     expect(texts.some((text) => /No response/.test(text ?? ""))).toBe(false);
   });
 
-  // Simulated 11-14: a first line posted after the answer started was unknown to the answer,
-  // which then said the same thing again. A line still being written by then is never posted.
-  it("never posts a first line the answer did not know about", async () => {
+  // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
+  // showed for 18 s.
+  it("shows the fixed first line when the written one is unusable", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "Which role are you hiring for?",
+      finalText: "Hi! Send me a job description to start.",
+      quickReplies: true,
+    });
+    expect(prisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ blocks: [{ kind: "text", text: "Got it, on it." }] }),
+      }),
+    );
+  });
+
+  // A line still being written when the answer is finished is never posted after it.
+  it("never posts a first line after the answer", async () => {
     let release!: () => void;
     const holdQuick = new Promise<void>((done) => {
       release = done;
@@ -575,17 +618,15 @@ describe("quick reply", () => {
       holdQuick,
       holdMain,
     });
-    // The answer is being written when the first line arrives.
     await vi.waitFor(
       () => expect(lastRuntimeRun?.mock.calls.some(([call]) => call.runId === "run-1")).toBe(true),
       { timeout: 6_000 },
     );
+    finish();
+    const { prisma } = await pending;
+    // The first line arrives only after the answer was posted.
     release();
     await new Promise((done) => setTimeout(done, 50));
-    finish();
-    const { runtimeRun, prisma } = await pending;
-    const main = runtimeRun.mock.calls.find(([call]) => call.runId === "run-1")?.[0];
-    expect(main?.prompt).not.toContain("You already sent the person this first line");
     const posted = prisma.message.create.mock.calls.filter(
       ([args]) =>
         JSON.stringify((args as { data: { blocks: unknown } }).data.blocks) ===

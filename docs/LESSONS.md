@@ -45,3 +45,7 @@ that repeats into the existing line instead of adding another.
   "No response. Try again.", and the line parroted the prompt's example fact into every reply.
   **When one step may now finish another's job, test the case where the second has nothing left
   to say, and never put a concrete fact in a prompt example the model can copy.**
+- Two fixes told the answer to continue from the separate quick first line instead of
+  repeating it; the next gate still showed every turn as a line and then an answer saying it
+  again. **Two writers of one reply repeat each other: make them one message (the answer takes
+  the line's place) instead of instructing one about the other.**

@@ -187,12 +187,12 @@ import {
   redactSecrets,
   renderBotDirectory,
   replyLanguageNote,
-  screenLanguage,
   resolveActionApprovalDetail,
   roleOpenedNote,
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
+  screenLanguage,
   sendBodyText,
   sendRecipients,
   sendToNote,
@@ -1518,7 +1518,7 @@ const PLANNED_SEARCHES_MISSING =
 
 // The first line waits this long for the records card, then goes without it.
 const QUICK_REPLY_RECORDS_WAIT_MS = 1_000;
-// The answer's prompt waits this long for a first line still being written; a later one is dropped.
+// A finished answer waits this long for a first line still being written; a later one is dropped.
 const QUICK_REPLY_FINISH_WAIT_MS = 3_000;
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
@@ -5145,9 +5145,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // their messages, refined once history loads and moved by a message steered in.
         let turnLanguage = recruiterLanguage([quickReplyText]);
         let quickReplySaid: string | undefined;
-        // The first line is posted only before the answer's prompt is written, so the answer
-        // always knows what it said: posted and known, or never posted.
+        // The first line stands in for the answer until it is ready: the answer then takes its
+        // place in the same message, so the person reads one reply. It is posted only before the
+        // answer is finished, never after it.
         let quickReplyOpen = true;
+        let quickReplyMessageId: string | undefined;
         let quickReplyPosted: Promise<unknown> = Promise.resolve();
         // The records card, so the first line can already answer when the records do.
         let setQuickReplyRecords: (text: string | undefined) => void = () => {};
@@ -5216,7 +5218,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   if (line) fixedAckOpen = fixedAckSent = true;
                   return line;
                 })
-              : writeQuickReply(quickReplyText)
+              : // Gate 5fed6e53: "你好" got no usable line and nothing showed for 18 s. The answer
+                // takes the line's place, so a fixed one is enough when the written one is unusable.
+                writeQuickReply(quickReplyText).then((line) => line ?? fixedAck(turnLanguage))
           )
             .then(async (text) => {
               if (!text) return;
@@ -5240,14 +5244,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
                 return;
               }
-              if (!quickReplyOpen) {
-                getLogger().info("run.quick_reply.skipped", { runId, reason: "answer_started" });
+              // A run that already failed or stopped has said its last word.
+              const current = await deps.prisma.run.findUnique({
+                where: { id: runId },
+                select: { status: true },
+              });
+              if (
+                !quickReplyOpen ||
+                !(ACTIVE_RUN_STATUSES as readonly string[]).includes(current?.status ?? "")
+              ) {
+                getLogger().info("run.quick_reply.skipped", { runId, reason: "answer_finished" });
                 return;
               }
               quickReplySaid = text;
-              await publishMessage(deps, run, "bot", [
-                { kind: "text", text: redactSecrets(text, runSecrets) },
-              ]);
+              quickReplyMessageId = (
+                await publishMessage(deps, run, "bot", [
+                  { kind: "text", text: redactSecrets(text, runSecrets) },
+                ])
+              )?.id;
               getLogger().info("run.quick_reply", {
                 runId,
                 sinceSetupMs: Math.round(performance.now() - setupStartedAt),
@@ -16013,17 +16027,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           sentReplyDirectly = true;
         }
         if (sentReplyDirectly) probeFoundNothing = true;
-        await Promise.race([
-          quickReplyPosted.catch(() => undefined),
-          new Promise((resolve) => setTimeout(resolve, QUICK_REPLY_FINISH_WAIT_MS)),
-        ]);
-        quickReplyOpen = false;
         const prompt = [
           ...promptParts.filter((part) => !sentReplyDirectly || part !== approvalContinuation),
           replyOutcome,
-          quickReplySaid
-            ? `You already sent the person this first line while you work: "${quickReplySaid}". Do not repeat it or anything it said, or open with an acknowledgement such as "Absolutely" or "Sure", and write no other line about what you will check or do first: your next words continue from it with the rest of the answer, and correct it plainly if the records show otherwise.`
-            : undefined,
         ]
           .filter(Boolean)
           .join("\n\n");
@@ -17641,7 +17647,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // durable message first, then checkpoint while the run still holds its lease, and
           // finalize without a second copy. Failures still fail the run as before.
           let finalBlocks = blocks;
-          if (workspaceCheckpoint.pending && blocks.length > 0) {
+          await Promise.race([
+            quickReplyPosted.catch(() => undefined),
+            new Promise((resolve) => setTimeout(resolve, QUICK_REPLY_FINISH_WAIT_MS)),
+          ]);
+          quickReplyOpen = false;
+          // Simulated 11-14: a first line, then the answer saying the same again. When the line
+          // is still the newest message, the answer takes its place.
+          if (
+            quickReplyMessageId &&
+            blocks.length > 0 &&
+            blocks.every((block) => block.kind === "text") &&
+            (
+              await deps.prisma.message.findFirst({
+                where: { threadId: thread.id },
+                orderBy: { createdAt: "desc" },
+                select: { id: true },
+              })
+            )?.id === quickReplyMessageId
+          ) {
+            await deps.prisma.message.update({
+              where: { id: quickReplyMessageId },
+              data: { blocks: blocks as Prisma.InputJsonValue },
+            });
+            await deps.events.append({
+              spaceId: run.spaceId,
+              threadId: thread.id,
+              botId: bot.id,
+              runId,
+              type: "thread.message.updated",
+              payload: { messageId: quickReplyMessageId, role: "bot", blocks },
+            });
+            finalBlocks = [];
+          }
+          if (workspaceCheckpoint.pending && finalBlocks.length > 0) {
             if (!(await renewRunLease(deps, runId, workerId, fence))) return;
             await publishMessage(
               deps,

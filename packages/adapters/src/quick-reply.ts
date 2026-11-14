@@ -78,8 +78,10 @@ export function firstSentence(text: string): string | undefined {
   return match?.[0];
 }
 
+// A claim that something goes out now, not any mention of sending: simulated 11-14, "发出的邮件
+// 和回复去哪看" and "把职位描述发给我" were turned into 「好，这就处理。」.
 const SAYS_SENDING =
-  /(?:发出|发送|发过去|发给|寄出|已发)|\b(?:sending|sent|send(?:s)? (?:it|this|them|now|out))\b/i;
+  /(?:现在|马上|正在|这就|立即|立刻|即将|已经?)\s*(?:发|寄)|\b(?:sending|sent|send(?:s)? (?:it|this|them|now|out))\b/i;
 
 /**
  * The line in the person's language: staging 11-13, a Chinese request got "I'll draft a first
