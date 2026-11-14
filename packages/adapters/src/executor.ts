@@ -147,6 +147,7 @@ import {
   messagingDmSurfaceNote,
   missingSkillRequirement,
   NAMED_EMAILS_NOTE,
+  NAMED_SEND_ROLE_NOTE,
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
@@ -15388,7 +15389,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? REPLY_IN_ENGLISH_NOTE
               : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
-        const intakeNote =
+        const intakeSearchNote =
           intake &&
           [
             plannedNote
@@ -15399,6 +15400,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]
             .filter(Boolean)
             .join(" ");
+        // A role opened to email people the recruiter named with addresses has no search.
+        const namedSendRole = recruiterTexts.some(
+          (text) => /[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text) && asksForOutreach(text),
+        );
+        const intakeNote = intake && namedSendRole ? NAMED_SEND_ROLE_NOTE : intakeSearchNote;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`

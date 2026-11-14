@@ -874,6 +874,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Staging 11-14 sim: 「请告诉我邮件署名用什么名字。」 sat right under 「Best,」 and read as part of the email.",
   },
   {
+    rule: "a disputed send is read, not conceded",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "read the campaign first and say plainly what it shows (when its card was confirmed); never agree, apologise or call it a mistake before that read",
+    why: "Staging 11-14 send-at-night: told \"我没点确认卡\", Kruit apologised and called it 我们处理失误 without checking the record.",
+  },
+  {
+    rule: "no unasked people relayed from a role team",
+    in: "RECRUITER_LANGUAGE",
+    phrase: "Never relay a role team's people the recruiter did not ask for",
+    why: "Staging 11-14 send-at-night: after 不搜索其他人, global Kruit pasted ten searched people from the role chat.",
+  },
+  {
     rule: "a reply draft leaves fill-ins for facts it lacks",
     in: "RECRUITER_LANGUAGE",
     phrase: "never write that you will confirm and follow up: put a clear fill-in",
