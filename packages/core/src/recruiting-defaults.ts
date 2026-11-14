@@ -253,13 +253,7 @@ export function isEnglishText(text: string): boolean {
  * answer such as a company name ("Acme Test Co") keeps the language of their last sentence.
  */
 export function recruiterLanguageText(newestFirst: string[]): string {
-  return (
-    newestFirst.find(
-      (text) => isChineseText(text) || (ownWords(text).match(/[A-Za-z]{2,}/g)?.length ?? 0) >= 5,
-    ) ??
-    newestFirst[0] ??
-    ""
-  );
+  return newestFirst.find((text) => textLanguage(text)) ?? newestFirst[0] ?? "";
 }
 
 /**
@@ -332,10 +326,78 @@ function ownWords(text: string): string {
 
 export function isChineseText(text: string): boolean {
   text = ownWords(text);
+  // Korean or Japanese that quotes a Chinese word (a menu name such as 收件箱) is not Chinese.
+  if (/[\uac00-\ud7af\u3040-\u30ff]/.test(text)) return false;
   // A Han character is about a word, so compare it with English words, not letters: a Chinese
   // request naming USC, CS and AI agent is still Chinese.
   const words = text.match(/[A-Za-z]+/g)?.length ?? 0;
   return hanWeight(text) > words;
+}
+
+/** The languages Kruit replies in; anything else follows the closest of these, English by default. */
+export type ReplyLanguage = "zh" | "ko" | "ja" | "en";
+
+/**
+ * The language a message is clearly written in, or undefined when it is too short to tell ("Acme
+ * Test Co", "200-250k", "OK"). Korean and Japanese come first: they may quote a Chinese word (收件箱).
+ * A pasted English spec with the recruiter's own Chinese clause (six or more Han in a row) is Chinese.
+ */
+export function textLanguage(text: string, minEnglishWords = 5): ReplyLanguage | undefined {
+  const own = ownWords(text);
+  if (/[\uac00-\ud7af]/.test(own)) return "ko";
+  if (/[\u3040-\u30ff]/.test(own)) return "ja";
+  if (isChineseText(text) || /\p{Script=Han}{6,}/u.test(own)) return "zh";
+  // A short sentence ("ok, go ahead") is English; a short name ("Acme Test Co") says nothing.
+  const words = own.match(/[A-Za-z]{2,}/g) ?? [];
+  const lower = words.filter((word) => /^[a-z]/.test(word)).length;
+  return words.length >= minEnglishWords || (words.length >= 3 && lower >= 2) ? "en" : undefined;
+}
+
+/**
+ * The one decision of which language every recruiter-facing line of a turn uses (quick reply,
+ * fixed ack, progress notes, final reply, cards), from their messages newest first: the newest
+ * one with a clear language, else English.
+ */
+export function recruiterLanguage(newestFirst: readonly string[]): ReplyLanguage {
+  for (const text of newestFirst) {
+    const language = textLanguage(text);
+    if (language) return language;
+  }
+  return "en";
+}
+
+/** A line Kruit wrote in another clear language than the recruiter's. Short lines ("OK.") pass. */
+export function inOtherLanguage(line: string, language: ReplyLanguage): boolean {
+  const written = textLanguage(line, 3);
+  return !!written && written !== language;
+}
+
+const REPLY_IN: Record<ReplyLanguage, string> = {
+  zh: REPLY_IN_CHINESE_NOTE,
+  en: REPLY_IN_ENGLISH_NOTE,
+  ko: "The recruiter wrote in Korean: write every reply, summary, question and card of this turn in Korean. Emails and drafts to candidates stay in English unless they ask otherwise.",
+  ja: "The recruiter wrote in Japanese: write every reply, summary, question and card of this turn in Japanese. Emails and drafts to candidates stay in English unless they ask otherwise.",
+};
+
+export const REPLY_LANGUAGE_NAME: Record<ReplyLanguage, string> = {
+  zh: "Chinese",
+  ko: "Korean",
+  ja: "Japanese",
+  en: "English",
+};
+
+export function replyLanguageNote(language: ReplyLanguage): string {
+  return REPLY_IN[language];
+}
+
+/** The progress line once a search's people are in Results. */
+export function peopleFoundText(count: number, language: ReplyLanguage): string {
+  return {
+    zh: `找到 ${count} 人`,
+    ko: `${count}명을 찾았어요`,
+    ja: `${count}人見つかりました`,
+    en: `Found ${count} people`,
+  }[language];
 }
 
 /** An email signed by a team ("Best, Recruiting") instead of the person sending it. */
