@@ -6,7 +6,10 @@ export function requestedPeopleTarget(text: string): number | undefined {
   const match =
     /(?:find|get|source|search(?:\s+for)?|scale(?:\s+(?:up|out))?(?:\s+to)?|widen\s+to|找|搜|扩大到)\D{0,15}?(\d{2,4})/i.exec(
       text,
-    ) ?? /(\d{2,4})\s*(?:more\s+)?(?:people|candidates|profiles|个人|人|位)/i.exec(text);
+    ) ??
+    /(\d{2,4})\s*(?:more\s+)?(?:people|candidates|profiles|个(?![月小年])|人|位|名)/i.exec(text) ??
+    // Long-search-finishes 11-15 (aceb80c9): "最多20个" named no verb and was missed.
+    /(?:at most|up to|no more than|max(?:imum)?|最多|至多|不超过)\s*(\d{2,4})/i.exec(text);
   const target = match ? Number(match[1]) : Number.NaN;
   return Number.isFinite(target) && target >= 10 ? target : undefined;
 }
