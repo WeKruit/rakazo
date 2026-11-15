@@ -67,6 +67,7 @@ import {
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   lookedUpContactEmails,
+  releasePeopleSavedBy,
 } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_BACKGROUND_NOTICE,
@@ -1108,6 +1109,7 @@ export async function saveRecruitingPeopleSearch(
       ))
     )
       throw new IsolationError();
+    releasePeopleSavedBy(trusted.runId);
     return withoutProfileMetadata(result);
   }
   if (!rows.length)
@@ -1147,6 +1149,7 @@ export async function saveRecruitingPeopleSearch(
       },
     },
   );
+  releasePeopleSavedBy(trusted.runId);
   if (!reused.size) return withoutProfileMetadata(saved);
   const fresh = savedRows(saved).filter((row) => !reused.has(row.candidateKey));
   const candidateRows = [...reused.values(), ...fresh];
