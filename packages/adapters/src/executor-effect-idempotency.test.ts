@@ -6133,7 +6133,26 @@ describe("native recruiting assessment effect delivery", () => {
 
   // Gate 386f6a46, change-mind-mid-run: the change came while Main ran, its brief took it, and
   // the report's turn handed the same change over again, so two versions came out.
-  it("does not hand over again a message the stage just reported was handed after", async () => {
+  // Gate df83586a, change-mind#2: the stage was handed before the change, and this bot answered
+  // the change itself (the Chinese template); the report turn handed it over again (English).
+  it.each([
+    [
+      "a stage handed after it",
+      {
+        kind: "handoff",
+        fromBotId: "bot-1",
+        toBotId: "bot-2",
+        text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
+      },
+    ],
+    [
+      "this bot's own answer",
+      {
+        kind: "text",
+        text: "主题：Staff Frontend Engineer｜北京｜React\n\n你好 {{firstName}}，\n\n我想和你分享一个 Staff Frontend Engineer 的机会，工作地点在北京，主要使用 React。薪资范围是每年 70–90 万元，且每周五可远程办公。\n\n祝好，\nAlex Morgan",
+      },
+    ],
+  ])("does not hand over again a message already met by %s", async (_name, after) => {
     vi.mocked(handoffToGroupBot).mockClear();
     const f = fixture("rehand-after-report");
     const bot = await f.prisma.bot.findUniqueOrThrow();
@@ -6166,14 +6185,7 @@ describe("native recruiting assessment effect delivery", () => {
         botId: "bot-1",
         clientNonce: null,
         runId: "run-0",
-        blocks: [
-          {
-            kind: "handoff",
-            fromBotId: "bot-1",
-            toBotId: "bot-2",
-            text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
-          },
-        ],
+        blocks: [after],
         createdAt: new Date(),
       },
       {
@@ -6201,7 +6213,20 @@ describe("native recruiting assessment effect delivery", () => {
     vi.mocked(f.prisma.message.findFirst).mockImplementation((async (query: {
       where?: { role?: string; blocks?: unknown };
     }) =>
-      query?.where?.role === "user" ? rows[0] : query?.where?.blocks ? rows[1] : null) as never);
+      query?.where?.role === "user"
+        ? rows[0]
+        : query?.where?.blocks
+          ? {
+              blocks: [
+                {
+                  kind: "handoff",
+                  fromBotId: "bot-1",
+                  toBotId: "bot-2",
+                  text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
+                },
+              ],
+            }
+          : null) as never);
     let answer: unknown;
     f.runtimeRun.mockImplementation(async function* (request) {
       answer = await request.executeTool!(
