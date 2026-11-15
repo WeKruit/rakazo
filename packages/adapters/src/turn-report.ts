@@ -585,7 +585,11 @@ export function askedTemplate(request: string): boolean {
     return true;
   return (
     /\b(?:e-?mail|message|note)\b|邮件|이메일|메일|メール/i.test(request) &&
-    /\b(?:role|position|job|opening)\b|职位|岗位|포지션|직무|ポジション|求人/i.test(request) &&
+    // A role named by its title, or a first touch, is about the role too (gate 7b5230e4:
+    // 「Staff Frontend Engineer 的首次触达邮件」).
+    /\b(?:role|position|job|opening|engineer|developer|designer|manager|scientist|analyst|architect|director|first[- ]touch|outreach)s?\b|职位|岗位|工程师|经理|总监|设计师|架构师|首次|首封|触达|포지션|직무|ポジション|求人/i.test(
+      request,
+    ) &&
     !/@|\b(?:these|those|them|him|her|each|everyone|people|candidates?)\b|这些|他们|候选人|这位/i.test(
       request,
     )
