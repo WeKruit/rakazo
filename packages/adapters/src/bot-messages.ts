@@ -800,7 +800,9 @@ async function savedForRequest(
     firstNumber: listed + 1,
     // Long-search-finishes 11-15: given 19 of 20, Kruit promised to keep looking for one more
     // after the team had said the search found nobody new, and ended with paragraphs of caveats.
-    heading: `The team finished this request and is looking for nobody more. Saved for it, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. Reply with one line giving that count, then every one of them once, one line each, and nothing after the list:`,
+    // Long-search-finishes 11-15: the round's "not verified" line was dropped and the rest went
+    // out as found, so Kruit called all 20 done while the team said they were not checked yet.
+    heading: `The team finished this request and is looking for nobody more. Saved for it, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. ${listed ? `Only the round's people were checked against the requirements, with what is not verified for them in the round; these ${rest.length} are` : "These are"} not checked yet. Reply with one line giving that count and what is not checked, then every one of them once, one line each${listed ? ", the round's with their not-verified line" : ""}, and nothing after the list:`,
   });
 }
 

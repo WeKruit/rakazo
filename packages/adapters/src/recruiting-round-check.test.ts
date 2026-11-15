@@ -61,14 +61,16 @@ describe("checkRound", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("keeps what no pick's row shows off each person's note", () => {
+  // Long-search-finishes 11-15: Kubernetes and Terraform were unknown for all ten, so no note
+  // said so, and the round read as fully checked while the team called them unverified.
+  it("notes a requirement no pick's row shows on everyone", () => {
     const shown = { seattle: "shown", "prod-stack": "shown" } as const;
     const result = checkRound({
       ...base,
       keys: ["a", "b"],
       checks: { a: { ...shown, years: "unknown" }, b: { ...shown, years: "unknown" } },
     });
-    expect(result).toEqual({ ok: true, unverified: {} });
+    expect(result).toEqual({ ok: true, unverified: { a: "6+ years", b: "6+ years" } });
   });
 });
 
