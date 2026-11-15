@@ -81,9 +81,13 @@ const CLAIMS: ReadonlyArray<{
   },
 ];
 
-/** A clause that only says what will or would happen, or that it did not: no claim. */
+/**
+ * A clause that only says what will or would happen, that it did not, or what a page or feature
+ * shows in general ("例如哪些邮件已发出": gate 808f4f31 held that answer to "Sequence 页是干嘛的"
+ * as a send claim): no claim.
+ */
 const NOT_A_CLAIM =
-  /[?？]|没|未|不|尚|还(?:没|未)|一旦|之后|以后|如果|等你|会|将|要|\b(?:not|no|never|once|after|when|if|until|unless|will|would|can|could|should|before|yet)\b|n't\b/i;
+  /[?？]|没|未|不|尚|还(?:没|未)|一旦|之后|以后|如果|等你|会|将|要|例如|比如|譬如|哪些|\b(?:not|no|never|once|after|when|if|until|unless|will|would|can|could|should|before|yet|which|e\.g|for example|such as)\b|n't\b/i;
 
 const clauses = (text: string) =>
   text
