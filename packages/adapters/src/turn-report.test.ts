@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   draftAskedBeforeShown,
+  narratesRecords,
   DECLINE_RETRY_NOTE,
   declinedSentence,
   declineRetry,
@@ -846,5 +847,20 @@ describe("withoutRepastedDraft", () => {
     ["an email with no lead", email, "最终版是哪封"],
   ])("keeps %s", (_, reply, asked) => {
     expect(withoutRepastedDraft(reply, shown, asked)).toBe(reply);
+  });
+});
+
+describe("narratesRecords", () => {
+  it("catches a reply that reads out the records instead of answering", () => {
+    // Gate e7805c70: change-mind-mid-run and first-timer-no-gmail.
+    const ask = "一句话说下改了什么，确认最终版是新的";
+    expect(narratesRecords(ask, "当前记录显示岗位和邮件序列均为 0；以下是修订后的最终模板")).toBe(
+      true,
+    );
+    expect(narratesRecords("发了吗", "记录里没有这封邮件的发送。")).toBe(true);
+    expect(narratesRecords("did it send?", "The records show no campaign yet.")).toBe(true);
+    expect(narratesRecords(ask, "我把底薪改为 70万–90万元，并加了每周五远程。")).toBe(false);
+    expect(narratesRecords("约了吗", "面试记录里还没有他。")).toBe(false);
+    expect(narratesRecords("记录里有他吗", "记录里没有他。")).toBe(false);
   });
 });
