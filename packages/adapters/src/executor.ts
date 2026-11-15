@@ -7157,10 +7157,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             typeof args.roleId !== "string" ||
             !items?.length ||
             // A delegated result waking Kruit is not the recruiter asking for people.
-            run.trigger === "bot_message" ||
-            !asksForPeople(lastRecruiterText)
+            run.trigger === "bot_message"
           )
             return undefined;
+          // The recruiter sees each round once, already checked. Staging 11-15: asked "where's the
+          // new batch?" while the team prepared round 2, Kruit listed six unreviewed people from
+          // Results, then the round came with different people. While the team works, Kruit
+          // gets no rows to list, only the team's progress.
+          const working = await globalTeamProgress(args.roleId);
+          if (working)
+            return {
+              items: [],
+              total: page?.total,
+              teamWorking: `${working.note} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+            };
+          if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
             where: {
               id: args.roleId,
@@ -7181,15 +7192,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             JSON.stringify(role.currentRevision ?? {}),
             ...(await recruiterWords(deps.prisma, role.sourceThreadId)),
           ]);
-          // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
-          // the saved pool and the recruiter took it for the round, repeats from round one included.
-          const working = await globalTeamProgress(args.roleId);
           // One rule from the recruiter's seen record. Staging 11-15: asked for "only the new
           // ones", a page relisted five of round 1's ten and Kruit miscounted the new ones.
           const { shown, inRounds, farAway } = peopleToShow(items as Array<RecruiterListItem>, {
             size,
             listed: globalListed,
-            teamWorking: Boolean(working),
             ...(place ? { beyond: (location: string) => beyondCommute(location, place) } : {}),
           });
           const leftOut = {
@@ -7207,15 +7214,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!shown.length)
             return {
               ...leftOut,
-              ...(working ? { teamWorking: working.note } : {}),
               shownInChat: items.some(
                 (item) =>
                   typeof item.candidateKey === "string" && globalListed.has(item.candidateKey),
               )
                 ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
-                : working
-                  ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
-                  : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
+                : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -7250,11 +7254,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return {
             ...(result as object),
             ...leftOut,
-            ...(working
-              ? {
-                  teamWorking: `${working.note} The people listed are saved search results not yet reviewed, leaving out anyone already seen; they are not the next round, so never call them the new round.`,
-                }
-              : {}),
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
