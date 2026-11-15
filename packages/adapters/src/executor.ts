@@ -509,6 +509,7 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
+import { intakeFieldsNote } from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -1409,14 +1410,6 @@ export function modelOutageRetryDelayMs(
   const delays = silent ? [0] : [2_000, 10_000, 30_000];
   return delays[previousRetries];
 }
-
-/** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
-export function jobStatesYears(text: string): boolean {
-  return /\d+\s*\+?\s*(?:(?:-|–|to)\s*\d+\s*\+?\s*)?(?:years?|yrs?)\b|\d+\s*年/i.test(text);
-}
-
-const YEARS_OPEN_NOTE =
-  "The JD states no years of experience: one of your clarifying questions before the search is the years range, offering two or three ranges that fit the pay.";
 
 /** A JD sent as a file is read in the model's first step; nothing is written before that read. */
 const ASK_WITHOUT_ROLE =
@@ -15626,9 +15619,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             });
           // Asked to write to the people they named, the team writes to them: no question, no search.
-          const ask = writesToNamedPeople(texts.map((item) => item.text).join("\n"))
-            ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
-            : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const words = texts.map((item) => item.text).join("\n");
+          const ask = (jd: string) =>
+            writesToNamedPeople(words)
+              ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
+              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)} ${PLANNED_SEARCHES_NOTE}`;
           if (request) {
             // A role Kruit opened (start_role) is already named after it: keep that title.
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
@@ -15646,7 +15641,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!title) return undefined;
             return {
               saving: create(title, [], request),
-              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask}`,
+              note: `This role team's role is being saved now as "${title}" with no brief yet, from the recruiter's message. Do not create a role in this turn; once the recruiter has said what the role is, save its real title and requirements to this role with recruiting_role. ${ask(request)}`,
             };
           }
           try {
@@ -15668,7 +15663,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   .trim() || file.name;
               return {
                 saving: create(title, [], quote),
-                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask}${jobStatesYears(read.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
+                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask(read.text)}`,
               };
             }
             if (!block) return undefined;
@@ -15676,7 +15671,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, [], block.text),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}${jobStatesYears(pasted.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask(pasted.text)}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -15717,7 +15712,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ],
                 block.text,
               ),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}${jobStatesYears(read.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask(read.text)}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", {
