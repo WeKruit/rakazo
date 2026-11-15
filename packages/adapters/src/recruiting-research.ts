@@ -191,13 +191,19 @@ const EDUCATION_SCHEMA = {
 } as const;
 
 /** Output shape a people-search agent run returns when the request names none. */
+/**
+ * People one search run may return. The recruiter's rule: each try finds about 10 to 20 more,
+ * never a wide sweep; a bigger request is several small tries, each limited below.
+ */
+export const AGENT_RUN_MAX_PEOPLE = 20;
+
 export const AGENT_RUN_PEOPLE_SCHEMA = {
   type: "object",
   required: ["people"],
   properties: {
     people: {
       type: "array",
-      maxItems: 500,
+      maxItems: AGENT_RUN_MAX_PEOPLE,
       items: {
         type: "object",
         required: ["name", "linkedin_url", "evidence"],
@@ -271,21 +277,10 @@ export const AGENT_RUN_GRADE_SCHEMA = {
     },
   },
 } as const;
-/** Most one people-search agent run (one wave) may spend, in US dollars. */
+/** Most one grading run may spend, in US dollars. */
 export const AGENT_RUN_MAX_COST_USD = 10;
-/** Most one ultra run may spend; ultra is only for waves that ask for a thousand people or more. */
-export const AGENT_RUN_ULTRA_MAX_COST_USD = 30;
-/** People an ultra wave may return; a smaller wave stays within the default schema's 500. */
-const AGENT_RUN_ULTRA_MAX_PEOPLE = 2000;
-
-/** The largest people count a query names ("1,000", "5000"), or 0. */
-function askedPeople(query: unknown): number {
-  if (typeof query !== "string") return 0;
-  let most = 0;
-  for (const match of query.matchAll(/\b\d{1,3}(?:,\d{3})+\b|\b\d{1,6}\b/g))
-    most = Math.max(most, Number(match[0].replaceAll(",", "")));
-  return most;
-}
+/** Most one deeper search for people may spend; observed deeper runs cost $0.3 to $1.4. */
+export const AGENT_RUN_FIND_MAX_COST_USD = 2;
 /** A grading run of the same people in the same conversation is read again for this long. */
 const GRADING_REUSE_MS = 6 * 60 * 60_000;
 const FAILED_RUN_STATUSES = new Set(["failed", "cancelled", "canceled", "stopped", "expired"]);
@@ -342,23 +337,47 @@ async function earlierGradingRun(
 }
 
 /**
- * A deeper (metered) people-search run costs up to about a dollar and a half. When the role's
- * last two deeper runs in the window together added fewer than this many new people, the market
- * for the current requirements is used up and another run would pay again for nothing.
+ * Deeper (metered) searches one recruiter request may run for a role: the recruiter's rule is to
+ * relax the bar over at most three tries, then say honestly what was found.
  */
-export const DEEPER_SEARCH_MIN_NEW_PEOPLE = 5;
+export const DEEPER_SEARCH_TRIES = 3;
 const DEEPER_SEARCH_WINDOW_MS = 6 * 60 * 60 * 1000;
 /** A low-effort run is billed at about $0.025; anything at or above this was a deeper run. */
 const DEEPER_SEARCH_MIN_COST_USD = 0.1;
 
 /**
- * Circuit breaker on paid deeper searches for one role: two deeper runs that added almost nobody
- * stop further deeper runs until the role's requirements change or the window passes. Every agent
- * (Main, Sourcer, a role team) goes through this one check, so no prompt can loop on it.
+ * Budget on paid deeper searches for one role: at most three per recruiter request. The count
+ * starts again at the recruiter's latest message in this conversation, the role's latest
+ * requirement change, or after six hours. Every agent (Main, Sourcer, a role team) goes through
+ * this one check, so no prompt can loop past it.
  */
-async function requireDeeperSearchYield(prisma: PrismaClient, roleId: string): Promise<void> {
-  const since = new Date(Date.now() - DEEPER_SEARCH_WINDOW_MS);
-  const recent = await prisma.usageRecord.findMany({
+async function requireDeeperSearchBudget(
+  prisma: PrismaClient,
+  roleId: string,
+  threadId: string | undefined,
+): Promise<void> {
+  const [message, revision] = await Promise.all([
+    threadId
+      ? prisma.message.findFirst({
+          where: { threadId, role: "user" },
+          orderBy: { createdAt: "desc" },
+          select: { createdAt: true },
+        })
+      : null,
+    prisma.recruitingRoleRevision.findFirst({
+      where: { roleId },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const since = new Date(
+    Math.max(
+      Date.now() - DEEPER_SEARCH_WINDOW_MS,
+      message?.createdAt.getTime() ?? 0,
+      revision?.createdAt.getTime() ?? 0,
+    ),
+  );
+  const tries = await prisma.usageRecord.count({
     where: {
       roleId,
       model: "agent_run",
@@ -366,29 +385,10 @@ async function requireDeeperSearchYield(prisma: PrismaClient, roleId: string): P
       costUsd: { gte: DEEPER_SEARCH_MIN_COST_USD },
       createdAt: { gte: since },
     },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-    take: 2,
   });
-  if (recent.length < 2) return;
-  const from = recent[1]!.createdAt;
-  const changed = await prisma.recruitingRoleRevision.findFirst({
-    where: { roleId, createdAt: { gt: from } },
-    select: { id: true },
-  });
-  if (changed) return;
-  const seen = (observedAt: { gte: Date } | { lt: Date }) =>
-    prisma.recruitingCandidateOccurrence.findMany({
-      where: { roleId, page: { observedAt } },
-      select: { candidateKey: true },
-      distinct: ["candidateKey"],
-    });
-  const [after, before] = await Promise.all([seen({ gte: from }), seen({ lt: from })]);
-  const earlier = new Set(before.map(({ candidateKey }) => candidateKey));
-  const added = after.filter(({ candidateKey }) => !earlier.has(candidateKey)).length;
-  if (added >= DEEPER_SEARCH_MIN_NEW_PEOPLE) return;
+  if (tries < DEEPER_SEARCH_TRIES) return;
   throw new IsolationError(
-    `The last two deeper searches for this role added ${added} new ${added === 1 ? "person" : "people"} in total, so the market for these requirements is used up and another deeper search would pay for the same people again. Do not run another one or reword it. Tell the recruiter, in their language, how many people this role holds, which requirement rules out the most, and offer to loosen it or widen the area; once they change the requirements, a deeper search can run again.`,
+    `This request already ran ${tries} deeper searches for this role, the most one request may use. Do not run another one or reword it. Tell the recruiter, in their language, how many people this role holds now, which requirement rules out the most, and offer to loosen it or widen the area; their next message or a change to the requirements allows new tries.`,
   );
 }
 
@@ -443,12 +443,11 @@ export async function prepareAgentRun(
     const earlier = await earlierGradingRun(prisma, actor, server, run.threadId, toGrade);
     if (earlier) return { runId: earlier };
   }
-  // Ultra is for a wave of a thousand people or more (the recruiter's rule); smaller waves and
-  // grading use auto, which finds the same people for less.
-  const ultra = args.effort === "ultra" && !grading && askedPeople(args.query) >= 1000;
-  const effort = args.effort === "ultra" && !ultra ? "auto" : args.effort;
-  const metered = effort === "auto" || ultra;
-  const cap = ultra ? AGENT_RUN_ULTRA_MAX_COST_USD : AGENT_RUN_MAX_COST_USD;
+  // Every search is a small try of 10 to 20 people (the recruiter's rule), so ultra, which is for
+  // thousand-person sweeps, runs as auto.
+  const effort = args.effort === "ultra" ? "auto" : args.effort;
+  const metered = effort === "auto";
+  const cap = grading ? AGENT_RUN_MAX_COST_USD : AGENT_RUN_FIND_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
   const { budget: _budget, ...rest } = args;
   const prepared: Record<string, unknown> = {
@@ -465,24 +464,13 @@ export async function prepareAgentRun(
     // A grading run always returns the research row format; an agent's own schema would drop it.
     outputSchema: grading
       ? AGENT_RUN_GRADE_SCHEMA
-      : (args.outputSchema ??
-        (ultra
-          ? {
-              ...AGENT_RUN_PEOPLE_SCHEMA,
-              properties: {
-                people: {
-                  ...AGENT_RUN_PEOPLE_SCHEMA.properties.people,
-                  maxItems: AGENT_RUN_ULTRA_MAX_PEOPLE,
-                },
-              },
-            }
-          : AGENT_RUN_PEOPLE_SCHEMA)),
+      : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
   if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
-  if (metered) await requireDeeperSearchYield(prisma, roleId);
+  if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },

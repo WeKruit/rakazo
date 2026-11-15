@@ -3,10 +3,10 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
+  AGENT_RUN_FIND_MAX_COST_USD,
   AGENT_RUN_GRADE_SCHEMA,
   AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
-  AGENT_RUN_ULTRA_MAX_COST_USD,
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
@@ -70,16 +70,11 @@ describe("people-search agent runs", () => {
           { candidateKey: "email:someone" },
         ]),
       },
-      // The role's recent deeper runs, its requirement changes and who each search returned.
-      usageRecord: { findMany: vi.fn(async (): Promise<{ createdAt: Date }[]> => []) },
-      recruitingRoleRevision: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
-      recruitingCandidateOccurrence: {
-        findMany: vi.fn(
-          async ({ where }: { where: { page: { observedAt: { gte?: Date } } } }) =>
-            where.page.observedAt.gte
-              ? [{ candidateKey: "linkedin:/in/saved-person" }]
-              : [{ candidateKey: "linkedin:/in/saved-person" }],
-        ),
+      // The role's deeper runs since the recruiter's latest message or requirement change.
+      usageRecord: { count: vi.fn(async () => 0) },
+      message: { findFirst: vi.fn(async (): Promise<{ createdAt: Date } | null> => null) },
+      recruitingRoleRevision: {
+        findFirst: vi.fn(async (): Promise<{ createdAt: Date } | null> => null),
       },
     };
   }
@@ -137,72 +132,59 @@ describe("people-search agent runs", () => {
     });
   });
 
-  it("caps one wave at ten dollars and runs ultra as auto", async () => {
+  it("keeps every search a small try: 20 people, two dollars, never ultra", async () => {
     const db = fixture(null);
+    expect(AGENT_RUN_PEOPLE_SCHEMA.properties.people.maxItems).toBe(20);
     await expect(prepare(db, { query: "Find", effort: "auto" })).resolves.toMatchObject({
       effort: "auto",
-      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
+      budget: { maxCostDollars: AGENT_RUN_FIND_MAX_COST_USD },
+      outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
+    });
+    // A thousand-person sweep is no longer one run: ultra runs as auto under the same limits.
+    await expect(
+      prepare(db, { query: "Find 5,000 people", effort: "ultra", budget: { maxCostDollars: 50 } }),
+    ).resolves.toMatchObject({
+      effort: "auto",
+      budget: { maxCostDollars: 2 },
+      outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
     });
     await expect(
-      prepare(db, { query: "Find", effort: "ultra", budget: { maxCostDollars: 50 } }),
-    ).resolves.toMatchObject({ effort: "auto", budget: { maxCostDollars: 10 } });
-    await expect(
-      prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 3 } }),
-    ).resolves.toMatchObject({ budget: { maxCostDollars: 3 } });
-    // A wave of a thousand or more may run ultra, up to thirty dollars and 2000 people.
-    const big = await prepare(db, {
-      query: "Find 5,000 current USC students",
-      effort: "ultra",
-      budget: { maxCostDollars: 50 },
-    });
-    expect(big).toMatchObject({
-      effort: "ultra",
-      budget: { maxCostDollars: AGENT_RUN_ULTRA_MAX_COST_USD },
-      outputSchema: { properties: { people: { maxItems: 2000 } } },
-    });
-    await expect(
-      prepare(db, { query: "Find 1000 people", effort: "ultra" }),
-    ).resolves.toMatchObject({ effort: "ultra", budget: { maxCostDollars: 30 } });
+      prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 1.5 } }),
+    ).resolves.toMatchObject({ budget: { maxCostDollars: 1.5 } });
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");
   });
 
-  it("stops deeper searches for a role after two that added almost nobody", async () => {
+  it("allows three deeper searches per recruiter request for a role", async () => {
     const db = fixture();
-    const now = Date.now();
-    db.usageRecord.findMany.mockResolvedValue([
-      { createdAt: new Date(now - 60_000) },
-      { createdAt: new Date(now - 120_000) },
-    ]);
-    // Both runs only returned someone the role already had: nothing new, so the next one is refused.
+    db.usageRecord.count.mockResolvedValue(3);
     await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow(
-      /added 0 new people/,
+      /already ran 3 deeper searches/,
     );
-    expect(db.usageRecord.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ roleId: "role-1", model: "agent_run" }),
-        take: 2,
+    // Counted from the latest of: the recruiter's last message, the last requirement change, 6 h.
+    const message = new Date(Date.now() - 60_000);
+    db.message.findFirst.mockResolvedValue({ createdAt: message });
+    db.recruitingRoleRevision.findFirst.mockResolvedValue({
+      createdAt: new Date(Date.now() - 120_000),
+    });
+    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow();
+    expect(db.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { threadId: "thread-1", role: "user" } }),
+    );
+    expect(db.usageRecord.count).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        roleId: "role-1",
+        model: "agent_run",
+        createdAt: { gte: message },
       }),
-    );
+    });
     // Quick low runs stay available: they cost cents and fill the round of ten.
     await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
       effort: "low",
     });
-    // Once the recruiter changes the requirements, the market is new and a deeper run may go.
-    db.recruitingRoleRevision.findFirst.mockResolvedValueOnce({ id: "revision-2" });
-    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
-      effort: "auto",
-    });
-    // Runs that keep finding people keep going.
-    db.recruitingCandidateOccurrence.findMany.mockImplementation((async ({
-      where,
-    }: {
-      where: { page: { observedAt: { gte?: Date } } };
-    }) =>
-      where.page.observedAt.gte
-        ? Array.from({ length: 6 }, (_, index) => ({ candidateKey: `linkedin:/in/new-${index}` }))
-        : []) as never);
+    // Under three tries, the deeper search goes ahead.
+    db.usageRecord.count.mockResolvedValue(2);
     await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
       effort: "auto",
     });
