@@ -7091,7 +7091,7 @@ describe("approval cards on a new user message", () => {
 
 describe("people searches before the first round", () => {
   it.each([
-    ["agent_run", 2, "2 people-search agent runs already returned"],
+    ["agent_run", 3, "3 people-search agent runs already returned"],
     ["web_search_advanced_exa", 12, "12 people searches already returned"],
   ] as const)(
     "asks the recruiter after too many %s calls even before any picks are shown",
@@ -7169,7 +7169,8 @@ describe("people searches before the first round", () => {
       yield { type: "result", data: { content: [{ type: "text", text: '{"people":[]}' }] } };
     });
     f.setCalls(
-      ["low", "low", "auto", "auto"].map((effort, n) => ({
+      // The recruiter's rule: at most three tries for a short round.
+      ["low", "low", "low", "auto"].map((effort, n) => ({
         name: "mcp__people-search__agent_run",
         args: { effort, query: `Find 6 more Korean-speaking quality engineers, set ${n}` },
         executionId: `search-${n}`,
@@ -7178,10 +7179,10 @@ describe("people searches before the first round", () => {
 
     await f.run();
 
-    expect(f.results.slice(0, 2)).not.toContainEqual(
+    expect(f.results.slice(0, 3)).not.toContainEqual(
       expect.objectContaining({ error: expect.stringContaining("already returned") }),
     );
-    for (const result of f.results.slice(2))
+    for (const result of f.results.slice(3))
       expect(result).toEqual({
         error: expect.stringContaining("with everyone who fits, even fewer than ten"),
       });
