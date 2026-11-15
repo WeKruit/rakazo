@@ -5150,6 +5150,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The one language every recruiter-facing line of this turn uses: the newest clear one of
         // their messages, refined once history loads and moved by a message steered in.
         let turnLanguage = recruiterLanguage([quickReplyText]);
+        // A bare number, name or card pick (「02311」) has no language of its own: the first line
+        // keeps the recruiter's (gate 4774895e: it was English in a Chinese conversation).
+        if (quickReplyText.trim() && !textLanguage(quickReplyText))
+          turnLanguage = await recruiterLanguageNow(
+            deps.prisma,
+            { spaceId: run.spaceId, userId: run.userId },
+            thread.id,
+          ).catch(() => turnLanguage);
         let quickReplySaid: string | undefined;
         // The first line stands in for the answer until it is ready: the answer then takes its
         // place in the same message, so the person reads one reply. It is posted only before the
@@ -6603,8 +6611,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           lastProgressAt = Date.now();
         };
         // The run's reply so far (its first line, then the progress that replaced it) is the latest
-        // reply when only this run's own cards (a role link, its steps) came after it. Gate
-        // b8850911: a role link opened mid-turn left a line and an answer.
+        // reply when only this run's own cards (a role link, its steps, its message to a role team)
+        // came after it. Gate b8850911: a role link opened mid-turn left a line and an answer.
         const lineIsLatestReply = async (lineId: string) => {
           const recent = await deps.prisma.message.findMany({
             where: { threadId: thread.id },
@@ -6625,7 +6633,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   message.role === "bot" &&
                   Array.isArray(message.blocks) &&
                   (message.blocks as MessageBlock[]).every(
-                    (block) => block.kind === "role_link" || block.kind === "steps",
+                    (block) =>
+                      block.kind === "role_link" ||
+                      block.kind === "steps" ||
+                      block.kind === "bot_message_sent",
                   )),
             )
           );
