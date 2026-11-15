@@ -510,7 +510,7 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import { intakeFieldsNote } from "./intake-open-fields.js";
+import { intakeFieldsNote, settledFactAsked, settledFactNote } from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -574,7 +574,11 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
-import { peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
+import {
+  askAfterPeopleTarget,
+  peopleTargetFrom,
+  requestedPeopleTarget,
+} from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -634,6 +638,9 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
+  hasRoundReviewer,
+  ROUND_HELD_NEXT_STEP,
+  roundHeldForReview,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
@@ -6991,6 +6998,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let askDeclineBounced = false;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
+        const settledAskBounced = new Set<string>();
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -7446,7 +7454,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               request: { path: ["operation"], equals: "calibration_round" },
             },
             orderBy: { createdAt: "desc" },
-            select: { createdAt: true, result: true },
+            select: { createdAt: true, result: true, request: true },
             take: 20,
           });
           return rounds.find(
@@ -7458,6 +7466,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!thread.activeRecruitingRoleId) return undefined;
           const round = await roundRecordedThisRun();
           if (!round) return undefined;
+          // A round waiting for the Reviewer gets its card when the checked round is shown.
+          const number = (round.result as { round?: unknown } | null)?.round;
+          if (
+            typeof number === "number" &&
+            roundHeldForReview(number, (round.request as { corrects?: unknown } | null)?.corrects) &&
+            (await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
+          )
+            return undefined;
           const keys = (round.result as { candidateKeys?: unknown } | null)?.candidateKeys;
           return recruitingNextStepCard(
             turnLanguage === "zh",
@@ -12781,7 +12797,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const recorded = round as {
                   roleId?: unknown;
                   candidateKeys?: unknown;
+                  round?: unknown;
                 } | null;
+                // After the recruiter's feedback the Reviewer checks the round before it is shown.
+                const held =
+                  typeof recorded?.round === "number" &&
+                  roundHeldForReview(recorded.round, researchInput.data.corrects) &&
+                  (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
+                if (held) {
+                  await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
+                    getLogger().warn("recruiting grade schedule", { error: String(error) }),
+                  );
+                  return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
+                }
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.
@@ -15860,7 +15888,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ? `${query}. Languages: ${languages.join(", ")}`
                     : query,
                 category: "people",
-                numResults: 25,
+                numResults: 10,
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
@@ -17068,6 +17096,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
+                    // A number of people the recruiter asked for decides the next step: no card.
+                    const askedFor = recruiterTexts.map(requestedPeopleTarget).findLast(Boolean);
+                    if (askedFor && thread.activeRecruitingRoleId) {
+                      const saved = (
+                        await readRecruitingPlaybookStep(
+                          deps.prisma,
+                          thread.activeRecruitingRoleId,
+                        ).catch(() => null)
+                      )?.savedCandidates;
+                      // Below the number, only after a round: intake questions come before any search.
+                      const instead =
+                        saved !== undefined && (saved >= askedFor || (await roundRecordedThisRun()))
+                          ? askAfterPeopleTarget(askedFor, saved)
+                          : undefined;
+                      if (instead) return { instead };
+                    }
                     // A run that recorded a round asks the next-step choice, which is asked anew each round,
                     // unless the recruiter already wrote their next step after the ten appeared: then it
                     // acts on that first, and may ask its own question after reporting what it did.
@@ -17105,6 +17149,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     if (known && !knownAskBounced.has(known.key)) {
                       knownAskBounced.add(known.key);
                       return `"${known.key}" → "${known.value}"`;
+                    }
+                    // A fact the recruiter's own words state is never asked again (staging 11-15:
+                    // "6+ years" drew a years-cap card, "Seattle hybrid" a work-scope card).
+                    const settled = settledFactAsked(
+                      question,
+                      messages
+                        .filter((message) => message.role === "user")
+                        .flatMap((message) =>
+                          (message.blocks as MessageBlock[]).flatMap((block) =>
+                            block.kind === "text" ? [block.text] : [],
+                          ),
+                        )
+                        .join("\n"),
+                    );
+                    if (settled && !settledAskBounced.has(settled)) {
+                      settledAskBounced.add(settled);
+                      return { instead: settledFactNote(settled) };
                     }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (

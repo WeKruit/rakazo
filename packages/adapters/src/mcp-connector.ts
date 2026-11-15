@@ -85,6 +85,7 @@ import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { addressTypedInConversation } from "./named-address.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
+  limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
   recordAgentRunCost,
@@ -1360,12 +1361,16 @@ export class McpConnector implements ConnectorProvider {
         ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
           ? await this.instantlyCampaignScope(context, assignment.server.id)
           : null;
-      let args = await prepareAgentRun(
-        this.prisma,
-        context,
+      let args = limitPeopleSearch(
         assignment.server,
         call.route.toolName,
-        ownedArgs,
+        await prepareAgentRun(
+          this.prisma,
+          context,
+          assignment.server,
+          call.route.toolName,
+          ownedArgs,
+        ),
       );
       if (emailScope && call.route.toolName === "list_emails") {
         const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);

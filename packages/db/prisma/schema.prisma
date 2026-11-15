@@ -355,6 +355,10 @@ model DeploymentSettings {
   senderSelfSetup                 Boolean  @default(false)
   /// Where customers reach a person (credits, turning on sending, help). Null hides contact links.
   supportEmail                    String?
+  /// Recruiting defaults the startup walk last applied to every account, and the account it
+  /// reached; a null cursor under the current key means the walk finished.
+  recruitingBackfillKey           String?
+  recruitingBackfillCursor        String?
   createdAt                       DateTime @default(now())
   updatedAt                       DateTime @updatedAt
 

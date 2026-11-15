@@ -53,6 +53,8 @@ function fixture(options: {
   agentRunBots?: string[];
   /** The role's calibration rounds, latest first. */
   rounds?: Array<{ id: string; round: number; candidateKeys: string[]; createdAt: Date }>;
+  /** Whether the latest round was recorded as a correction. */
+  corrects?: boolean;
   /** Grades of the latest round's people saved since the previous round. */
   roundGrades?: Array<{ candidateKey: string; name: string; matchFields: unknown }>;
 }) {
@@ -149,7 +151,10 @@ function fixture(options: {
           ),
       ),
     },
-    externalEffect: { findMany: vi.fn(async () => []) },
+    externalEffect: {
+      findMany: vi.fn(async () => []),
+      findUnique: vi.fn(async () => ({ request: { corrects: options.corrects } })),
+    },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
   };
   const enqueue = vi.fn(async () => undefined);
@@ -200,7 +205,8 @@ describe("startRecruitingGrading", () => {
         },
       ],
     };
-    const f = fixture(options);
+    // A correction is the checked round itself, already shown.
+    const f = fixture({ ...options, corrects: true });
     f.prisma.chatGroupMember.findMany.mockResolvedValue([
       { botId: "sourcer", bot: { name: "Sourcer", spawnKey: null } },
       { botId: "lead", bot: { name: "Main", spawnKey: null } },
@@ -215,13 +221,52 @@ describe("startRecruitingGrading", () => {
     expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
     expect(promptOf(f)).not.toContain("Fits:");
     // Nobody is swapped while a round person still waits for a grade made with the feedback.
-    const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
+    const waiting = fixture({
+      ...options,
+      corrects: true,
+      roundGrades: options.roundGrades.slice(1),
+    });
     await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
     expect(
       (waiting.runCreate.mock.calls as unknown as [{ data: { clientNonce: string } }][]).map(
         ([call]) => call.data.clientNonce,
       ),
     ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
+  });
+
+  it("has the lead show a round held for the Reviewer once everyone in it is checked", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const f = fixture({
+      found: [person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
+      }),
+    });
+    expect(promptOf(f)).toContain("Everyone in it fits.");
+    // Without the Reviewer nothing holds the round, so nothing is started for it.
+    const solo = fixture({
+      found: [person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    await startRecruitingGrading(solo.deps, { threadId: "thread" }, now);
+    expect(solo.runCreate).not.toHaveBeenCalled();
   });
 
   it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {

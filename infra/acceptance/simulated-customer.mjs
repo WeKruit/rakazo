@@ -43,6 +43,7 @@ import {
   messagesOf,
   openCards,
   requestCount,
+  retireRoutines,
   send,
   settle,
   sleep,
@@ -300,7 +301,7 @@ function render(chats) {
         `## ${group.name}\n${messages
           .map(
             (m) =>
-              `[${m.at.slice(11, 19)}] ${m.role === "user" ? "Recruiter" : "Kruit"}${m.card ? " (card)" : ""}: ${m.text}`,
+              `[${m.at.slice(11, 19)}] ${m.role === "user" ? "Recruiter" : "Kruit"}${m.card ? " (card)" : ""}: ${m.text}${m.controls ? `\n${m.controls}` : ""}`,
           )
           .join("\n")}`,
     )
@@ -668,7 +669,10 @@ async function play(journey, label, owner, mailbox, out) {
         .filter((group) => !groupsBefore.has(group.id) && group.name?.includes(tag))
         .map((group) => group.id);
       if (made.length) await archiveRoles(credentials, made, label);
-    }
+    } else
+      await retireRoutines(rpc).catch((error) =>
+        log(`${label}: routines not stopped: ${error.message}`),
+      );
   }
 }
 /** Archives the roles one play opened on a reused account, through the shared archive script. */

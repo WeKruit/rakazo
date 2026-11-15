@@ -392,6 +392,34 @@ async function requireDeeperSearchBudget(
   );
 }
 
+/**
+ * People one quick people search may return. Ten is what the search's base price covers (each
+ * result beyond ten is billed extra), and it keeps every search a small try, the recruiter's rule.
+ */
+export const PEOPLE_SEARCH_MAX_RESULTS = 10;
+
+/** A quick people search asks for at most ten people, however the agent or a plan sized it. */
+export function limitPeopleSearch(
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    toolName !== "web_search_advanced_exa" ||
+    args.category !== "people" ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return args;
+  const asked = Number(args.numResults);
+  const numResults =
+    Number.isFinite(asked) && asked >= 1
+      ? Math.min(Math.floor(asked), PEOPLE_SEARCH_MAX_RESULTS)
+      : PEOPLE_SEARCH_MAX_RESULTS;
+  return { ...args, numResults };
+}
+
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -462,9 +490,7 @@ export async function prepareAgentRun(
         }
       : {}),
     // A grading run always returns the research row format; an agent's own schema would drop it.
-    outputSchema: grading
-      ? AGENT_RUN_GRADE_SCHEMA
-      : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
+    outputSchema: grading ? AGENT_RUN_GRADE_SCHEMA : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
   if (grading) return prepared;

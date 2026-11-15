@@ -23,7 +23,8 @@ that repeats into the existing line instead of adding another.
 - The simulated customer reported every page as 15 s, a "missing" Word attachment and a phone send
   failure; all three were the harness (network idle never comes with a live stream, a filename filter,
   Enter on a touch screen); later "stuck loading" pages were a snapshot taken on an unrecognised loading
-  line, and "unsigned" emails came from a placeholder account name. **Before routing an eval finding,
+  line, and "unsigned" emails came from a placeholder account name; a "card with no button" was a text
+  transcript that never listed any card's buttons. **Before routing an eval finding,
   check the harness could have produced it: read the page's own wording and the account's setup.**
 - A scrubbed account copy rewrote emails but kept real LinkedIn URLs, so a simulated batch send let
   Kruit look up six real people's addresses and add them to a draft campaign. **A test copy keeps no
@@ -64,3 +65,6 @@ that repeats into the existing line instead of adding another.
 - 2026-11-15 — "#6 and #8 are off, find me more like the rest" was recorded as accepting the
   calibration round, so the next people skipped the round check and the Reviewer. **A message that
   turns some of the round down is feedback for the next round, not acceptance of this one.**
+- The worker's startup account walk redid every account on every boot and was cut off by each
+  deploy, logging thousands of pool errors as staging accumulated test accounts. **A backfill
+  runs once per change, records where it got, and stops with the process.**

@@ -10,6 +10,7 @@ import {
   bestLookedUpEmail,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
+  limitPeopleSearch,
   lookedUpContacts,
   prepareAgentRun,
   projectRecruitingCandidateReport,
@@ -188,6 +189,25 @@ describe("people-search agent runs", () => {
     await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
       effort: "auto",
     });
+  });
+
+  it("asks each quick people search for at most ten people", () => {
+    // Long-search-finishes 11-15: four searches of 25 saved 64 people for a request of 20.
+    expect(
+      limitPeopleSearch(server, "web_search_advanced_exa", { category: "people", numResults: 25 }),
+    ).toMatchObject({ numResults: 10 });
+    expect(
+      limitPeopleSearch(server, "web_search_advanced_exa", { category: "people" }),
+    ).toMatchObject({ numResults: 10 });
+    expect(
+      limitPeopleSearch(server, "web_search_advanced_exa", { category: "people", numResults: 5 }),
+    ).toMatchObject({ numResults: 5 });
+    // Other searches and other servers are left as they are.
+    const company = { category: "company", numResults: 25 };
+    expect(limitPeopleSearch(server, "web_search_advanced_exa", company)).toBe(company);
+    const other = { ...server, endpoint: "https://example.com/mcp" };
+    const people = { category: "people", numResults: 25 };
+    expect(limitPeopleSearch(other, "web_search_advanced_exa", people)).toBe(people);
   });
 
   it("grades given people with the grade format and leaves them in", async () => {
