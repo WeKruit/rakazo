@@ -53,3 +53,4 @@ that repeats into the existing line instead of adding another.
 - One role ran 18 paid deeper searches in a row that each found nobody (about $10), because the
   prompt said a short target is "never a reason to stop early" and nothing in code counted
   results. **Every paid loop gets a stop in code on what it returned, not a sentence in a prompt.**
+- 2026-11-15: a thread branch reused after squash merges was merged with `-X ours`, which brought back a hunk another PR had removed and broke the stage type check. Merge an old thread branch with `-s ours` and typecheck after the merge, before pushing.

@@ -629,8 +629,13 @@ describe("native saved candidate reads", () => {
     db.roleId.mockResolvedValueOnce("role");
     db.candidates.mockResolvedValue({
       roleId: "role",
-      items: [{ candidateKey: "shown" }, { candidateKey: "rejected" }, { candidateKey: "fresh" }],
-      total: 3,
+      items: [
+        { candidateKey: "shown" },
+        { candidateKey: "rejected" },
+        { candidateKey: "fresh" },
+        { candidateKey: "found" },
+      ],
+      total: 4,
       nextCursor: null,
     });
     db.seen.mockResolvedValueOnce({
@@ -644,6 +649,7 @@ describe("native saved candidate reads", () => {
         ["shown", { round: 1, seenBeforeLatestRound: true }],
         ["rejected", { round: 1, seenBeforeLatestRound: true, verdict: "not_fit" }],
         ["fresh", { seenBeforeLatestRound: false }],
+        ["found", { seenBeforeLatestRound: true }],
       ]),
     });
     const result = await executeRecruitingCandidatesTool(
@@ -654,21 +660,27 @@ describe("native saved candidate reads", () => {
     );
     expect(db.seen).toHaveBeenCalledWith(f.deps.prisma, actor, {
       roleId: "role",
-      candidateKeys: ["shown", "rejected", "fresh"],
+      candidateKeys: ["shown", "rejected", "fresh", "found"],
     });
     expect(result).toMatchObject({
       latestRound: { round: 1, people: 10, accepted: false },
       items: [
-        { candidateKey: "shown", shownInRound: 1, alreadySeen: true },
+        { candidateKey: "shown", shownInRound: 1, alreadySeen: "shown in round 1" },
         {
           candidateKey: "rejected",
           shownInRound: 1,
-          alreadySeen: true,
+          alreadySeen: "shown in round 1",
           recruiterVerdict: "not_fit",
         },
         { candidateKey: "fresh" },
+        // Staging 11-15: a person found before round 1 but never shown was called "in the first ten".
+        {
+          candidateKey: "found",
+          alreadySeen: "found before round 1 and never shown in a round: not a repeat of any round",
+        },
       ],
     });
+    expect((result as { items: object[] }).items[3]).not.toHaveProperty("shownInRound");
     expect((result as { items: object[] }).items[2]).not.toHaveProperty("alreadySeen");
   });
 
