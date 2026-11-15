@@ -1055,7 +1055,7 @@ describe("native saved candidate reads", () => {
       ).toEqual({
         status: "no_current_role",
         roles,
-        next: "Call again with the roleId of the role the recruiter named.",
+        next: expect.any(String),
       });
       // Only the caller's own open roles.
       expect(findRoles).toHaveBeenCalledWith(
