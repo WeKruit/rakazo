@@ -172,6 +172,13 @@ export function checkRound(input: {
    * unknown on what the recruiter just raised no longer keeps a person out ("fails" still does).
    */
   relaxed?: boolean;
+  /**
+   * The Reviewer checks this round from each person's full profile before it shows (a held round,
+   * or the lead's turn after that check): a pick's own "fails" still keeps them out, but a missing
+   * or unknown verdict is the Reviewer's to settle. Staging 11-15: refusals for missing verdicts
+   * and for rows that did not show a newly raised point cost the held round 25 s to 4 minutes.
+   */
+  reviewed?: boolean;
   /** What to do when fewer than ten fit. */
   shortOfTen: string;
 }): RoundCheckResult {
@@ -181,7 +188,7 @@ export function checkRound(input: {
   const missing = input.keys.filter((key) =>
     input.criteria.some((criterion) => !verdictOf(key, criterion.id)),
   );
-  if (missing.length)
+  if (missing.length && !input.reviewed)
     return {
       ok: false,
       asked: [],
@@ -201,7 +208,7 @@ export function checkRound(input: {
     if (unknown.length)
       unverified[key] = unknown.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
-    if (raised.length && !input.relaxed && !input.asked.has(key))
+    if (raised.length && !input.relaxed && !input.reviewed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
   }
   if (!failing.length && !newlyUnknown.length) return { ok: true, unverified };

@@ -477,8 +477,12 @@ export async function startRecruitingGrading(
       }
     }
   }
+  // While the recruiter waits on a held round, a batch holds only that round's people: padding it
+  // with the pool made the check of one regraded person take a whole batch (staging 11-15).
+  const roundOnly = review?.held === true;
   for (const row of ordered) {
     if (people.size >= batchSize) break;
+    if (roundOnly && !unreviewed.has(row.candidateKey)) break;
     if (!row.linkedinUrl || skip.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
     skip.add(row.candidateKey);
     people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });

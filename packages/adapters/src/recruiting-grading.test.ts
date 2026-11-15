@@ -239,6 +239,27 @@ describe("startRecruitingGrading", () => {
       ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
   });
 
+  it("grades only the held round's people while the recruiter waits for it", async () => {
+    // Staging 11-15: one round person left to grade was padded with nine from the pool, and the
+    // recruiter waited a whole extra batch for the checked round.
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const f = fixture({
+      found: [person("pool"), person("left"), person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits", "linkedin:/in/left"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(promptOf(f)).toContain("in/left");
+    expect(promptOf(f)).not.toContain("in/pool");
+  });
+
   it("has the lead show a round held for the Reviewer once everyone in it is checked", async () => {
     const team = [
       { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },

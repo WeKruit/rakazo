@@ -51,6 +51,19 @@ describe("checkRound", () => {
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
   });
 
+  it("leaves missing and unknown verdicts to the Reviewer on a round it checks", () => {
+    // Staging 11-15: a held round took one to three refusals before the Reviewer checked it anyway.
+    const checks = { a: all("unknown"), b: all("fails") };
+    expect(checkRound({ ...base, keys: ["a", "c"], checks, reviewed: true })).toEqual({
+      ok: true,
+      unverified: { a: "6+ years; shows production Spark and Kafka work" },
+    });
+    // A pick's own "fails" still keeps them out.
+    expect(checkRound({ ...base, keys: ["a", "b"], checks, reviewed: true })).toMatchObject({
+      ok: false,
+    });
+  });
+
   it("lets an unknown on a newly raised criterion through once a top-up came back short", () => {
     const result = checkRound({
       ...base,
