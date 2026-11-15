@@ -23,7 +23,6 @@ import {
   completedRunBlocks,
   completedRunSummary,
   createPendingSteeringRun,
-  declineConnectionAskInTransaction,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
@@ -36,6 +35,7 @@ import {
   publishTransientThreadEvent,
   queueTransient,
   sendUserMessage,
+  waitingAskTakesText,
 } from "./events.js";
 import { RunHistoryWriteError } from "./messages.js";
 import { IsolationError } from "./scope.js";
@@ -5952,17 +5952,12 @@ describe("connect card answers", () => {
     expect(f.run.status).toBe("waiting_input");
   });
 
-  it("closes as not connected when the recruiter writes past it", async () => {
+  // Gate eec6adf0, one-off-email: each message typed past the card closed it, and every reply
+  // brought a new card under a closed one that showed only 「暂不」.
+  it("stays open when the recruiter writes past it; the message gets its own turn", async () => {
     const f = connectFixture({ secretId: "secret-1" }, true);
-    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(true);
-    expect(f.run.status).toBe("queued");
-    expect(card(f)).toMatchObject({ status: "answered", answer: "not_connected" });
-    expect(prompt(f)).toContain("Instantly is still not connected.");
-  });
-
-  it("leaves other cards for their own answer", async () => {
-    const f = ordinaryAnswerFixture();
-    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(false);
+    expect(await waitingAskTakesText(f.tx as never, f.input)).toBe(false);
     expect(f.run.status).toBe("waiting_input");
+    expect(card(f)).toMatchObject({ status: "pending" });
   });
 });

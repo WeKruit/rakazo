@@ -95,9 +95,10 @@ describe("request_connection", () => {
 
   it("returns the pending ask instead of opening a second card for the same server", async () => {
     const f = fixture({ pendingRun: "run-0" });
-    expect(await requestConnection(f.db, scope, args, f.pause)).toEqual({
+    expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
       status: "pending",
       askId: "ask-1",
+      message: expect.stringContaining("Do not show another"),
     });
     expect(f.pause).not.toHaveBeenCalled();
   });
