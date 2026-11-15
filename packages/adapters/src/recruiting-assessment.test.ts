@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
+  peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
 
@@ -1463,5 +1464,26 @@ describe("native cross-role recruiting reads", () => {
       counts: { messages: 2, people: 1, complete: false },
       nextCursor: "next-role",
     });
+  });
+});
+
+describe("peopleToShow", () => {
+  // Staging 11-15: asked for "only the new ones", Kruit's page relisted five of round 1's ten.
+  it("never relists people shown in a round, and holds back the unshown pool while a round is prepared", () => {
+    const items = [
+      { candidateKey: "a", shownInRound: 1, alreadySeen: "shown in round 1" },
+      { candidateKey: "b" },
+      { candidateKey: "c", alreadySeen: "found before round 2 and never shown in a round" },
+      { candidateKey: "d", recruiterVerdict: "not_fit" as const },
+      { candidateKey: "e" },
+    ];
+    expect(peopleToShow(items, { size: 10, listed: new Set(["e"]), teamWorking: false })).toEqual({
+      shown: [items[1], items[2]],
+      inRounds: 1,
+    });
+    expect(peopleToShow(items, { size: 10, listed: new Set(), teamWorking: true }).shown).toEqual([
+      items[1],
+      items[4],
+    ]);
   });
 });

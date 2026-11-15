@@ -103,6 +103,27 @@ export type RecruiterListItem = {
   decision?: string | null;
 };
 
+/**
+ * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round
+ * or already listed in this reply, and, while the team prepares a round, nobody seen before.
+ * `inRounds` counts the people left out because a round already showed them.
+ */
+export function peopleToShow<T extends RecruiterListItem>(
+  items: readonly T[],
+  input: { size: number; listed: ReadonlySet<string>; teamWorking: boolean },
+): { shown: T[]; inRounds: number } {
+  const page = items.slice(0, input.size);
+  const shown = page.filter(
+    (item) =>
+      item.recruiterVerdict !== "not_fit" &&
+      item.decision !== "pass" &&
+      item.shownInRound === undefined &&
+      !(input.teamWorking && item.alreadySeen) &&
+      !(typeof item.candidateKey === "string" && input.listed.has(item.candidateKey)),
+  );
+  return { shown, inRounds: page.filter((item) => item.shownInRound !== undefined).length };
+}
+
 export async function executeRecruitingCandidatesTool(
   deps: {
     prisma: PrismaClient;

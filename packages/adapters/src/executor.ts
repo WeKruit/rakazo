@@ -611,6 +611,7 @@ import type { RecruiterListItem } from "./recruiting-assessment.js";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
+  peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
 import { checkinToolRefusal, checkinTools } from "./recruiting-checkin.js";
@@ -7072,18 +7073,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
           // the saved pool and the recruiter took it for the round, repeats from round one included.
           const working = await globalTeamProgress(args.roleId);
-          // One rule from the recruiter's seen record: people they turned down never come back, and
-          // while the team prepares a round, a page never passes off people already seen as new.
-          const shown = (items as Array<RecruiterListItem>).slice(0, size).filter(
-            (item) =>
-              item.recruiterVerdict !== "not_fit" &&
-              item.decision !== "pass" &&
-              !(working && item.alreadySeen) &&
-              // Staging 11-15: pages 1 and 2 read moments apart listed the same six people twice.
-              !(typeof item.candidateKey === "string" && globalListed.has(item.candidateKey)),
-          );
+          // One rule from the recruiter's seen record. Staging 11-15: asked for "only the new
+          // ones", a page relisted five of round 1's ten and Kruit miscounted the new ones.
+          const { shown, inRounds } = peopleToShow(items as Array<RecruiterListItem>, {
+            size,
+            listed: globalListed,
+            teamWorking: Boolean(working),
+          });
+          const leftOut = inRounds
+            ? {
+                leftOutAsShownInRounds: `${inRounds} on this page were already shown in a round and are left out; everyone listed is new to the recruiter.`,
+              }
+            : {};
           if (!shown.length)
             return {
+              ...leftOut,
               ...(working ? { teamWorking: working.note } : {}),
               shownInChat: items.some(
                 (item) =>
@@ -7092,7 +7096,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
                 : working
                   ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
-                  : "Nobody on this page is left to show: the recruiter already turned them all down. Say so in one line, or read the next page.",
+                  : "Nobody on this page is left to show: the recruiter already saw them in a round or turned them down. Read the next page, or say so in one line.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -7126,6 +7130,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
           return {
             ...(result as object),
+            ...leftOut,
             ...(working
               ? {
                   teamWorking: `${working.note} The people listed are saved search results not yet reviewed, leaving out anyone already seen; they are not the next round, so never call them the new round.`,
