@@ -6,6 +6,7 @@ import {
   roundCriteria,
   roundListedNotRecorded,
   roundPeopleNamed,
+  roundRepeats,
 } from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
@@ -267,5 +268,37 @@ describe("roundPeopleNamed", () => {
     await expect(
       roundPeopleNamed(prismaFor("ryan is off, find more", new Date()), input),
     ).resolves.toBeNull();
+  });
+});
+
+describe("roundRepeats", () => {
+  const person = (key: string) => ({ candidateKey: key, name: key.toUpperCase() });
+  const rounds = (earlier: Array<{ round: number; candidateKeys: string[] }>) =>
+    ({
+      recruitingCalibrationRound: { findMany: vi.fn(async () => earlier) },
+    }) as unknown as PrismaClient;
+
+  it("names who a topped-up round kept from the round before (staging 11-15)", async () => {
+    // Round 3 was round 2's eight plus two new; Kruit was told a round never repeats anyone,
+    // saw the people marked as shown before, and could not answer "any repeats?".
+    const text = await roundRepeats(
+      rounds([
+        { round: 1, candidateKeys: ["r1"] },
+        { round: 2, candidateKeys: ["a", "b"] },
+      ]),
+      { roleId: "role", round: 3, candidates: ["a", "b", "c"].map(person) },
+    );
+    expect(text).toContain("A, B (round 2)");
+    expect(text).toContain("C");
+    expect(text).toContain("nobody from round 1");
+  });
+
+  it("says nobody repeats when no earlier round holds them", async () => {
+    const text = await roundRepeats(rounds([{ round: 1, candidateKeys: ["r1"] }]), {
+      roleId: "role",
+      round: 2,
+      candidates: ["a"].map(person),
+    });
+    expect(text).toMatch(/^none/);
   });
 });
