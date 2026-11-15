@@ -400,6 +400,24 @@ export async function stopAll(rpc) {
   }
 }
 
+/**
+ * A throwaway test account is done after its play: turn its routines off (restorable), so test
+ * accounts do not pile up scheduled runs that slow the shared environment. Returns how many.
+ */
+export async function retireRoutines(rpc) {
+  let stopped = 0;
+  for (const bot of await rpc("bots/list"))
+    for (let offset = 0; ; offset += 200) {
+      const page = await rpc("routines/list", { botId: bot.id, offset });
+      for (const routine of page.filter((item) => item.active)) {
+        await rpc("routines/update", { routineId: routine.id, active: false });
+        stopped += 1;
+      }
+      if (page.length < 200) break;
+    }
+  return stopped;
+}
+
 // Role chats: every chat but Kruit that has messages (the crew's empty "Recruiting" chat is not a role).
 export async function roleChats(rpc) {
   const chats = [];
