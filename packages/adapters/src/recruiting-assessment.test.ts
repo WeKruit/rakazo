@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
+  NOTHING_SAVED_IS_NO_BLOCKER,
   peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
@@ -873,7 +874,7 @@ describe("native saved candidate reads", () => {
     );
     expect(result).toMatchObject({
       items: [],
-      next: "No saved person matched this query. To list the role's people, call again without query.",
+      next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
   });
 
