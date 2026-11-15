@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { runWithLogContext } from "./context.js";
 import { requestLogging } from "./hono.js";
-import { outgoingCorrelationHeaders, parseTraceparent } from "./index.js";
+import { outgoingCorrelationHeaders, parseTraceparent, recordJobStatement } from "./index.js";
 import { createLogger } from "./logger.js";
 import { createTestSink } from "./test-sink.js";
 import type { Logger } from "./types.js";
@@ -17,6 +17,11 @@ function appWith(logger: Logger) {
   });
   app.get("/bad", (c) => c.json({ error: "nope" }, 400));
   app.get("/crash", (c) => c.json({ error: "down" }, 500));
+  app.get("/reads", (c) => {
+    recordJobStatement("db/src/roles.ts:10", 20);
+    recordJobStatement("db/src/roles.ts:10", 22);
+    return c.json({ ok: true });
+  });
   return app;
 }
 
@@ -68,6 +73,19 @@ describe("hono request logging", () => {
     });
     expect(typeof sink.events[0]?.["http.duration_ms"]).toBe("number");
     expect(JSON.stringify(sink.events[0])).not.toContain("secret=1");
+  });
+
+  it("reports each request's database round trips on its completion", async () => {
+    const sink = createTestSink();
+    const app = appWith(createLogger({ service: "rakazo-api", sinks: [sink] }));
+    await app.request("/reads");
+    await app.request("/health");
+    expect(sink.events[0]).toMatchObject({
+      "db.statements": 2,
+      "db.ms": 42,
+      "db.sites": "db/src/roles.ts:10 ×2 42ms",
+    });
+    expect(sink.events[1]).not.toHaveProperty("db.statements");
   });
 
   it("uses info, warn, and error by status class", async () => {
