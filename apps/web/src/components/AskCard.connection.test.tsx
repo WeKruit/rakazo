@@ -161,7 +161,34 @@ it("keeps the answered state after a remount", () => {
   render({ ...block, status: "answered", answer: "connected" });
   expect(container.textContent).toContain("Connected");
   expect(button("Connect")).toBeUndefined();
+  // Not connected stays pressable where the transcript offers it (a reopened card).
   render({ ...block, status: "answered", answer: "not_connected" });
-  expect(container.textContent).toContain("Not now");
+  expect(button("Connect")).toBeDefined();
   expect(button("Not now")).toBeUndefined();
+});
+
+// 11-15 gate: the recruiter's typed question closed the card as not connected, and Kruit then
+// told them to press a button the card no longer showed.
+it("keeps Connect on a card that typing closed as not connected", async () => {
+  begin.mockResolvedValue({ status: "already_connected" });
+  const onAnswer = render({ ...block, status: "answered", answer: "not_connected" });
+  expect(button("Not now")).toBeUndefined();
+  act(() => button("Connect").click());
+  await flush();
+  expect(onAnswer).toHaveBeenCalledWith("connected");
+  expect(container.textContent).toContain("Connected");
+});
+
+it("shows a closed card's choice without buttons where it cannot be pressed", () => {
+  act(() =>
+    root.render(
+      <AskCard
+        block={{ ...block, status: "answered", answer: "not_connected" }}
+        canAnswer={false}
+        onAnswer={vi.fn()}
+      />,
+    ),
+  );
+  expect(container.querySelector("button")).toBeNull();
+  expect(container.textContent).toContain("Not now");
 });

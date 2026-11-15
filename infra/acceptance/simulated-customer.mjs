@@ -300,7 +300,7 @@ function render(chats) {
         `## ${group.name}\n${messages
           .map(
             (m) =>
-              `[${m.at.slice(11, 19)}] ${m.role === "user" ? "Recruiter" : "Kruit"}${m.card ? " (card)" : ""}: ${m.text}`,
+              `[${m.at.slice(11, 19)}] ${m.role === "user" ? "Recruiter" : "Kruit"}${m.card ? " (card)" : ""}: ${m.text}${m.controls ? `\n${m.controls}` : ""}`,
           )
           .join("\n")}`,
     )

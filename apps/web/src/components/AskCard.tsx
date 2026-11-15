@@ -14,6 +14,7 @@ import {
   askFormContent,
   askFormDefaults,
   askFormOptions,
+  connectCardOpen,
   isApprovalAskBlock,
   isSecretAskBlock,
   multiSelectAskAnswer,
@@ -133,7 +134,7 @@ export function AskCard({
       <ConnectionAskCard
         connection={block.connection}
         answer={block.status === "answered" ? block.answer : undefined}
-        canAnswer={canAnswer}
+        canAnswer={canAnswer && connectCardOpen(block)}
         onAnswer={onAnswer}
       />
     );
@@ -181,7 +182,11 @@ function ConnectionAskCard({
         return;
       }
       setState("connected");
-      await onAnswer("connected" satisfies ConnectionAskAnswer);
+      // A card closed earlier records the sign-in only when no other work is running; the
+      // connection itself is made either way.
+      await onAnswer("connected" satisfies ConnectionAskAnswer).catch((error: unknown) => {
+        if (answer === undefined) throw error;
+      });
     } catch {
       setState("failed");
     }
@@ -199,7 +204,7 @@ function ConnectionAskCard({
     }
   }
 
-  const connected = answer === "connected" || (answer === undefined && state === "connected");
+  const connected = answer === "connected" || state === "connected";
   return (
     <fieldset
       data-testid="connection-ask-card"
@@ -229,7 +234,7 @@ function ConnectionAskCard({
         <div className="mt-3">
           <SuccessPop label={t`Connected`} />
         </div>
-      ) : answer !== undefined ? (
+      ) : answer !== undefined && !canAnswer ? (
         <div className="mt-3 text-[13px] text-muted-foreground">
           <Trans>Not now</Trans>
         </div>
@@ -248,14 +253,16 @@ function ConnectionAskCard({
             <Button className="rounded-full" disabled={busy} onClick={() => void connect()}>
               {state === "connecting" ? <Trans>Connecting…</Trans> : <Trans>Connect</Trans>}
             </Button>
-            <Button
-              variant="ghost"
-              className="rounded-full text-muted-foreground"
-              disabled={busy}
-              onClick={() => void decline()}
-            >
-              <Trans>Not now</Trans>
-            </Button>
+            {answer === undefined ? (
+              <Button
+                variant="ghost"
+                className="rounded-full text-muted-foreground"
+                disabled={busy}
+                onClick={() => void decline()}
+              >
+                <Trans>Not now</Trans>
+              </Button>
+            ) : null}
           </div>
         </>
       )}

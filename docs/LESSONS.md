@@ -23,7 +23,8 @@ that repeats into the existing line instead of adding another.
 - The simulated customer reported every page as 15 s, a "missing" Word attachment and a phone send
   failure; all three were the harness (network idle never comes with a live stream, a filename filter,
   Enter on a touch screen); later "stuck loading" pages were a snapshot taken on an unrecognised loading
-  line, and "unsigned" emails came from a placeholder account name. **Before routing an eval finding,
+  line, and "unsigned" emails came from a placeholder account name; a "card with no button" was a text
+  transcript that never listed any card's buttons. **Before routing an eval finding,
   check the harness could have produced it: read the page's own wording and the account's setup.**
 - A scrubbed account copy rewrote emails but kept real LinkedIn URLs, so a simulated batch send let
   Kruit look up six real people's addresses and add them to a draft campaign. **A test copy keeps no
