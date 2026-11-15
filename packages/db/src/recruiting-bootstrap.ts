@@ -1075,14 +1075,15 @@ export async function ensureRecruitingWorkspace(
  * already uses it, skips a disabled one, and adds only missing links. It does not wait for runs,
  * because adding a tool changes nothing an active run already holds.
  */
+const PLATFORM_SERVICE_SLUGS = ["people-search", "fullenrich", "instantly"] as const;
+
 export async function ensurePlatformServices(
   prisma: PrismaClient,
   actor: Actor,
   options: { sandboxKind?: string } = {},
 ): Promise<void> {
   await ensureReviewer(prisma, actor, options.sandboxKind);
-  for (const slug of ["people-search", "fullenrich", "instantly"])
-    await ensurePlatformService(prisma, actor, slug);
+  for (const slug of PLATFORM_SERVICE_SLUGS) await ensurePlatformService(prisma, actor, slug);
   await ensureAddedTools(prisma, actor);
   await ensureSchedulingCalendar(prisma, actor);
   await ensureOutreachGmail(prisma, actor);
@@ -1261,16 +1262,47 @@ async function ensureReviewer(
   });
 }
 
+/** Bump when a backfill step changes what it applies without changing the defaults it reads. */
+const BACKFILL_REVISION = 1;
+const BACKFILL_SAVE_EVERY = 50;
+const backfillKey = (options: { sandboxKind: string; firstPartyMcpUrl?: string }) =>
+  digest([
+    BACKFILL_REVISION,
+    catalogDigest(options.firstPartyMcpUrl),
+    legacyDigest(options.firstPartyMcpUrl),
+    ADDED_TOOLS,
+    PLATFORM_SERVICE_SLUGS,
+    options.sandboxKind,
+  ]);
+
 /**
  * Bring every private account to the current recruiting defaults now, including accounts without a crew,
  * instead of waiting for each person to open the app. Each account is independent: one that
  * fails is logged by the caller's handler and the rest continue.
+ *
+ * The walk runs once per set of defaults, like a data migration: it saves the account it reached,
+ * so a restart resumes there and a finished walk costs one read. Accounts created later are set
+ * up when they sign up. Returns the accounts brought up to date in this pass.
  */
 export async function backfillRecruitingCrews(
   prisma: PrismaClient,
-  options: { sandboxKind: string; firstPartyMcpUrl?: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string; signal?: AbortSignal },
   onError: (error: unknown) => void,
 ): Promise<number> {
+  const key = backfillKey(options);
+  const progress = await prisma.deploymentSettings.findUnique({
+    where: { id: "default" },
+    select: { recruitingBackfillKey: true, recruitingBackfillCursor: true },
+  });
+  const resumeAfter =
+    progress?.recruitingBackfillKey === key ? progress.recruitingBackfillCursor : "";
+  if (resumeAfter === null) return 0;
+  // Never create the settings row: the first sign-up creates it with the deployment's sign-up policy.
+  const save = (cursor: string | null) =>
+    prisma.deploymentSettings.updateMany({
+      where: { id: "default" },
+      data: { recruitingBackfillKey: key, recruitingBackfillCursor: cursor },
+    });
   const memberships = await prisma.spaceMember.findMany({
     where: { role: "owner", space: { isDefault: true, deletingAt: null } },
     select: {
@@ -1299,8 +1331,20 @@ export async function backfillRecruitingCrews(
       })
     ).map((user) => [user.id, user.email]),
   );
+  const position = (lead: { spaceId: string; userId: string }) => `${lead.spaceId}:${lead.userId}`;
+  const pending = leads
+    .filter((lead) => position(lead) > resumeAfter)
+    .sort((a, b) => (position(a) < position(b) ? -1 : 1));
   let done = 0;
-  for (const lead of leads) {
+  let reached = resumeAfter;
+  for (const [index, lead] of pending.entries()) {
+    // Stop with the pool, not after it: the rest would only fail, one logged error each.
+    if (options.signal?.aborted) {
+      await save(reached);
+      return done;
+    }
+    if (index && index % BACKFILL_SAVE_EVERY === 0) await save(reached);
+    reached = position(lead);
     const email = emails.get(lead.userId);
     if (!email) continue;
     const actor: Actor = {
@@ -1366,6 +1410,7 @@ export async function backfillRecruitingCrews(
       onError(error);
     }
   }
+  await save(null);
   return done;
 }
 
