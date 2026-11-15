@@ -7134,25 +7134,43 @@ export function createRunExecutor(deps: ExecutorDeps) {
               spaceId: run.spaceId,
               userId: run.userId,
             },
-            select: { title: true, sourceThreadId: true },
+            select: {
+              title: true,
+              sourceThreadId: true,
+              currentRevision: { select: { brief: true, criteria: true } },
+            },
           });
           if (!role) return undefined;
           const size = typeof args.limit === "number" ? args.limit : SHOWN_ROLE_PEOPLE;
+          // Staging 11-15: a Bay Area role's page listed two people in Texas whom the search
+          // had left out for living beyond commuting distance; the page uses the same city.
+          const place = localRolePlace([
+            JSON.stringify(role.currentRevision ?? {}),
+            ...(await recruiterWords(deps.prisma, role.sourceThreadId)),
+          ]);
           // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
           // the saved pool and the recruiter took it for the round, repeats from round one included.
           const working = await globalTeamProgress(args.roleId);
           // One rule from the recruiter's seen record. Staging 11-15: asked for "only the new
           // ones", a page relisted five of round 1's ten and Kruit miscounted the new ones.
-          const { shown, inRounds } = peopleToShow(items as Array<RecruiterListItem>, {
+          const { shown, inRounds, farAway } = peopleToShow(items as Array<RecruiterListItem>, {
             size,
             listed: globalListed,
             teamWorking: Boolean(working),
+            ...(place ? { beyond: (location: string) => beyondCommute(location, place) } : {}),
           });
-          const leftOut = inRounds
-            ? {
-                leftOutAsShownInRounds: `${inRounds} on this page were already shown in a round and are left out; everyone listed is new to the recruiter.`,
-              }
-            : {};
+          const leftOut = {
+            ...(inRounds
+              ? {
+                  leftOutAsShownInRounds: `${inRounds} on this page were already shown in a round and are left out; everyone listed is new to the recruiter.`,
+                }
+              : {}),
+            ...(farAway && place
+              ? {
+                  leftOutFarAway: `${farAway} on this page live over ${COMMUTE_MILES} miles from ${place.label} and are left out; never list or count them.`,
+                }
+              : {}),
+          };
           if (!shown.length)
             return {
               ...leftOut,
@@ -7164,7 +7182,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
                 : working
                   ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
-                  : "Nobody on this page is left to show: the recruiter already saw them in a round or turned them down. Read the next page, or say so in one line.",
+                  : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined

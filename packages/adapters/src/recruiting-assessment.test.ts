@@ -1480,10 +1480,29 @@ describe("peopleToShow", () => {
     expect(peopleToShow(items, { size: 10, listed: new Set(["e"]), teamWorking: false })).toEqual({
       shown: [items[1], items[2]],
       inRounds: 1,
+      farAway: 0,
     });
     expect(peopleToShow(items, { size: 10, listed: new Set(), teamWorking: true }).shown).toEqual([
       items[1],
       items[4],
     ]);
+  });
+
+  // Staging 11-15: a page for a Bay Area role listed two people in Texas whom the search had
+  // left out for living beyond commuting distance.
+  it("leaves out people beyond commuting distance of a local role", () => {
+    const items = [
+      { candidateKey: "a", location: "Austin, Texas" },
+      { candidateKey: "b", location: "San Jose, California" },
+      { candidateKey: "c", location: null },
+    ];
+    expect(
+      peopleToShow(items, {
+        size: 10,
+        listed: new Set(),
+        teamWorking: false,
+        beyond: (location) => location.includes("Texas"),
+      }),
+    ).toEqual({ shown: [items[1], items[2]], inRounds: 0, farAway: 1 });
   });
 });
