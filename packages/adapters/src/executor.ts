@@ -639,6 +639,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
   roundHeldForReview,
   scheduleRecruitingGrading,
@@ -7454,7 +7455,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               request: { path: ["operation"], equals: "calibration_round" },
             },
             orderBy: { createdAt: "desc" },
-            select: { createdAt: true, result: true, request: true },
+            select: { createdAt: true, result: true },
             take: 20,
           });
           return rounds.find(
@@ -7470,7 +7471,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const number = (round.result as { round?: unknown } | null)?.round;
           if (
             typeof number === "number" &&
-            roundHeldForReview(number, (round.request as { corrects?: unknown } | null)?.corrects) &&
+            roundHeldForReview(number, run.clientNonce) &&
             (await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
           )
             return undefined;
@@ -8331,6 +8332,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
+          // Keeping earlier people is for the round the Reviewer checked; after feedback the next
+          // round is new people.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            args.corrects === true &&
+            !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+          )
+            return {
+              error:
+                "Not recorded: after the recruiter's feedback the next round holds only new people, so record it without corrects: people who fit, none shown before or turned down. If fewer than ten fit, record the ones who do.",
+            };
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -12802,7 +12815,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // After the recruiter's feedback the Reviewer checks the round before it is shown.
                 const held =
                   typeof recorded?.round === "number" &&
-                  roundHeldForReview(recorded.round, researchInput.data.corrects) &&
+                  roundHeldForReview(recorded.round, run.clientNonce) &&
                   (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
                 if (held) {
                   await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>

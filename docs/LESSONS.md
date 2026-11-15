@@ -68,3 +68,7 @@ that repeats into the existing line instead of adding another.
 - The worker's startup account walk redid every account on every boot and was cut off by each
   deploy, logging thousands of pool errors as staging accumulated test accounts. **A backfill
   runs once per change, records where it got, and stops with the process.**
+- 2026-11-15 — `corrects: true` was added for recruiter swaps and later reused to mark the
+  Reviewer's checked round. The team then used it to slip round-1 people back in and to skip the
+  check. **An escape flag has one owner: key a bypass on who is calling (the run), not on an
+  argument the model can set.**

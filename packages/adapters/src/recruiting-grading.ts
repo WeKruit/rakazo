@@ -715,11 +715,9 @@ async function roundUnderReview(
   if (!round || round.approvedAt) return null;
   const recorded = await prisma.externalEffect.findUnique({
     where: { id: round.effectId },
-    select: { request: true },
+    select: { run: { select: { clientNonce: true } } },
   });
-  const held =
-    reviewer &&
-    roundHeldForReview(round.round, (recorded?.request as { corrects?: unknown } | null)?.corrects);
+  const held = reviewer && roundHeldForReview(round.round, recorded?.run?.clientNonce);
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId,
@@ -751,10 +749,10 @@ async function roundUnderReview(
 /**
  * A round recorded after the recruiter's feedback waits for the Reviewer before it is shown, so
  * the recruiter never sees people who break what they just said. The first round shows at once,
- * and so does a correction (corrects), which is the checked or swapped round itself.
+ * and so does the round the lead records after the check (its run carries the review nonce).
  */
-export function roundHeldForReview(round: number, corrects: unknown): boolean {
-  return round >= 2 && corrects !== true;
+export function roundHeldForReview(round: number, recordedByNonce: string | null | undefined) {
+  return round >= 2 && !recordedByNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX);
 }
 
 /** Whether this conversation's team has the Reviewer, who checks a held round. */
