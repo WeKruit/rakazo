@@ -1,4 +1,4 @@
-import { INSTANTLY_MCP_ENDPOINT } from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, sendRecipients } from "@rakazo/core";
 import {
   connectAskBlock,
   findPendingConnectAsk,
@@ -102,12 +102,26 @@ async function resolveProvider(prisma: PrismaClient, scope: Scope, provider: str
   }
 }
 
+/**
+ * A mail connect card names the addresses the recruiter typed, so it confirms the send they asked
+ * for (gate 9fd9c2ff, one-off email: the card never showed the address).
+ */
+function withTypedRecipients(reason: string, recruiterText: string) {
+  const missing = sendRecipients({ text: recruiterText }).filter(
+    (address) => !reason.toLowerCase().includes(address),
+  );
+  if (!missing.length) return reason;
+  const list = missing.join(", ");
+  return /\p{Script=Han}/u.test(reason) ? `${reason}（发给 ${list}）` : `${reason} (to ${list})`;
+}
+
 /** request_connection: connected → result; otherwise one pending connect card per server and thread. */
 export async function requestConnection(
   prisma: PrismaClient,
   scope: Scope,
   args: Record<string, unknown>,
   pause: (block: ConnectBlock) => Promise<void>,
+  recruiterText = "",
 ) {
   let serverId = typeof args.serverId === "string" ? args.serverId.trim() : "";
   const provider = typeof args.provider === "string" ? args.provider.trim() : "";
@@ -139,6 +153,13 @@ export async function requestConnection(
       askId: pending.askId,
       message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: answer what they asked in your reply, and if it needs ${server.name}, say in one line to press Connect on that card.`,
     };
-  await pause(connectAskBlock({ serverId, name: server.name.slice(0, 80), reason }));
+  const mail = key(server.slug ?? "") === "gmail" || key(server.name) === "gmail";
+  await pause(
+    connectAskBlock({
+      serverId,
+      name: server.name.slice(0, 80),
+      reason: mail ? withTypedRecipients(reason, recruiterText) : reason,
+    }),
+  );
   return undefined;
 }
