@@ -1361,7 +1361,9 @@ export class McpConnector implements ConnectorProvider {
         ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
           ? await this.instantlyCampaignScope(context, assignment.server.id)
           : null;
-      let args = limitPeopleSearch(
+      let args = await limitPeopleSearch(
+        this.prisma,
+        context,
         assignment.server,
         call.route.toolName,
         await prepareAgentRun(

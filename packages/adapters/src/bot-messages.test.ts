@@ -719,6 +719,39 @@ describe("delegating to a role team in another conversation", () => {
     );
   });
 
+  it("returns the result of a role opened from Kruit's chat there", async () => {
+    // Long-search-finishes 11-15: "找20个人，找完告诉我" opened the role from Kruit's chat; the
+    // team finished in the role's chat and Kruit never told the recruiter.
+    const harness = team({ later: [said("已找到 20 位，搜索完成。")] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.message!.findFirst = vi.fn(
+      async (args: { where: { clientNonce?: unknown; id?: string } }) =>
+        args.where.id === "message-asked"
+          ? { threadId: "thread-global" }
+          : args.where.clientNonce
+            ? {
+                id: "message-started",
+                seq: 3,
+                createdAt: new Date("2026-11-15T10:06:21Z"),
+                blocks: [{ kind: "text", text: "找20个人，找完告诉我" }],
+                clientNonce: "start-role:message-asked",
+                sourceRuns: [{ botId: "bot-main" }],
+              }
+            : null,
+    );
+    prisma.thread!.findUnique = vi.fn(async () => ({ spaceId: run.spaceId, userId: run.userId }));
+    prisma.bot!.findFirst = vi.fn(async () => ({ name: "Kruit" }));
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([
+      expect.objectContaining({
+        kind: "bot_message_received",
+        fromBotName: "SUI Engineer team",
+        text: "已找到 20 位，搜索完成。",
+        intent: "result",
+      }),
+    ]);
+  });
+
   it("is not held back by a card the role was already waiting on before the request", async () => {
     // Staging 11-13: the intake turn's next-step card waited the whole time, so the Mandarin
     // check Kruit asked for finished in the role's chat and never came back to Kruit.

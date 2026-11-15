@@ -670,7 +670,7 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkRound, roundCriteria, roundPeopleNamed } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import { lookedUpContacts, mcpObject, peopleRoomForRequest } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -15879,6 +15879,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             words,
           );
           const place = localRolePlace([...planned.data.queries, ...words]);
+          // The searches run together, so they share what the recruiter's number still allows.
+          const room = thread.activeRecruitingRoleId
+            ? await peopleRoomForRequest(deps.prisma, thread.activeRecruitingRoleId, thread.id)
+            : undefined;
+          const searchCount = planned.data.queries.length;
+          const perSearch = Math.max(
+            1,
+            Math.min(10, Math.ceil((room ?? 10 * searchCount) / searchCount)),
+          );
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -15888,7 +15897,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ? `${query}. Languages: ${languages.join(", ")}`
                     : query,
                 category: "people",
-                numResults: 10,
+                numResults: perSearch,
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
@@ -17097,7 +17106,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
                     // A number of people the recruiter asked for decides the next step: no card.
-                    const askedFor = recruiterTexts.map(requestedPeopleTarget).findLast(Boolean);
+                    // Newest first; a role opened from Kruit's chat starts with a copy of their words.
+                    const askedFor = [...recruiterTexts, ...roleStartTexts]
+                      .map(requestedPeopleTarget)
+                      .find(Boolean);
                     if (askedFor && thread.activeRecruitingRoleId) {
                       const saved = (
                         await readRecruitingPlaybookStep(
