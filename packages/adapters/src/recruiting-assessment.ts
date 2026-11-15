@@ -101,6 +101,7 @@ const PAGE_SIZE = 10;
 /** The fields of a listed person that say what the recruiter already saw of them. */
 export type RecruiterListItem = {
   candidateKey?: unknown;
+  location?: string | null;
   shownInRound?: number;
   /** What the recruiter saw of them, in words; absent for someone new. */
   alreadySeen?: string;
@@ -109,24 +110,36 @@ export type RecruiterListItem = {
 };
 
 /**
- * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round
- * or already listed in this reply, and, while the team prepares a round, nobody seen before.
- * `inRounds` counts the people left out because a round already showed them.
+ * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round,
+ * already listed in this reply or, for a local role, living beyond commuting distance, and, while
+ * the team prepares a round, nobody seen before. `inRounds` and `farAway` count the people left
+ * out because a round already showed them or they live too far.
  */
 export function peopleToShow<T extends RecruiterListItem>(
   items: readonly T[],
-  input: { size: number; listed: ReadonlySet<string>; teamWorking: boolean },
-): { shown: T[]; inRounds: number } {
+  input: {
+    size: number;
+    listed: ReadonlySet<string>;
+    teamWorking: boolean;
+    beyond?: (location: string) => boolean;
+  },
+): { shown: T[]; inRounds: number; farAway: number } {
   const page = items.slice(0, input.size);
+  const far = (item: T) => Boolean(item.location && input.beyond?.(item.location));
   const shown = page.filter(
     (item) =>
       item.recruiterVerdict !== "not_fit" &&
       item.decision !== "pass" &&
       item.shownInRound === undefined &&
+      !far(item) &&
       !(input.teamWorking && item.alreadySeen) &&
       !(typeof item.candidateKey === "string" && input.listed.has(item.candidateKey)),
   );
-  return { shown, inRounds: page.filter((item) => item.shownInRound !== undefined).length };
+  return {
+    shown,
+    inRounds: page.filter((item) => item.shownInRound !== undefined).length,
+    farAway: page.filter((item) => item.shownInRound === undefined && far(item)).length,
+  };
 }
 
 export async function executeRecruitingCandidatesTool(
