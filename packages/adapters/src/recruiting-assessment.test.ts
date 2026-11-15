@@ -704,6 +704,51 @@ describe("native saved candidate reads", () => {
     expect(result).toMatchObject({ status: "found", round });
   });
 
+  it("says with the round that it repeats no one and what the recruiter said about the last one", async () => {
+    // Staging 11-15: global Kruit called two round-1 people repeats in round 2, and could not find
+    // the feedback the recruiter gave in the role's chat.
+    const f = fixture();
+    const findRounds = vi.fn(async () => [
+      { round: 1, createdAt: new Date("2026-11-15T02:04:00Z") },
+    ]);
+    const findEffects = vi.fn(async () => [
+      {
+        request: {
+          target: "candidate",
+          fit: "not_fit",
+          intent: { quote: "garrett is a software engineer, not data eng" },
+        },
+      },
+    ]);
+    Object.assign(f.deps.prisma, {
+      recruitingCalibrationRound: { findMany: findRounds },
+      externalEffect: { findMany: findEffects },
+    });
+    db.roleId.mockResolvedValueOnce(null);
+    const round = {
+      round: 2,
+      createdAt: "2026-11-15T02:07:00.000Z",
+      candidates: [{ candidateKey: "c1" }],
+    };
+    db.round.mockResolvedValue({ roleId: "role-named", round });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "round", roleId: "role-named" },
+      context,
+    );
+    expect(result).toMatchObject({
+      status: "found",
+      round: {
+        round: 2,
+        repeats: expect.stringContaining("none"),
+        feedbackBeforeThisRound: [
+          { said: "garrett is a software engineer, not data eng", fit: "not_fit" },
+        ],
+      },
+    });
+  });
+
   it.each([
     ["list", "succeeded"],
     ["list", "error"],
