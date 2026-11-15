@@ -437,7 +437,7 @@ describe("account recruiting reads", () => {
       "inbox",
       undefined,
       undefined,
-      { limit: 50, cursor: "200" },
+      expect.objectContaining({ ...{ limit: 50, cursor: "200" }, workspace: expect.anything() }),
       expect.anything(),
       expect.anything(),
     );
@@ -457,7 +457,7 @@ describe("account recruiting reads", () => {
       "interview",
       undefined,
       undefined,
-      { limit: 200, cursor: "200" },
+      expect.objectContaining({ ...{ limit: 200, cursor: "200" }, workspace: expect.anything() }),
       expect.anything(),
       expect.anything(),
     );
@@ -490,6 +490,22 @@ describe("account recruiting reads", () => {
     await expect(
       readRecruitingAccountView(deps, actor, { view: "shortlist", roleId: "b", limit: 20 }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it("still skips a moved conversation when its workspace read, started alongside, also fails", async () => {
+    const { deps } = fixture();
+    vi.mocked(db.createRepos).mockReturnValue({
+      getBot: async (_actor: Actor, id: string) => ({
+        id,
+        thread: { id: id === "bot-b" ? "thread-moved" : `thread-${id.slice(4)}` },
+      }),
+    } as never);
+    const workspace = vi.mocked(db.getRecruitingWorkspace).getMockImplementation()!;
+    vi.mocked(db.getRecruitingWorkspace).mockImplementation(async (prisma, owner, input) => {
+      if (input.threadId === "thread-b") throw new Error("isolation");
+      return workspace(prisma, owner, input);
+    });
+    const result = await readRecruitingAccountView(deps, actor, { view: "shortlist", limit: 20 });
+    expect(result.items.map((item) => item.roleId)).toEqual(["a", "c"]);
   });
   it("filters shortlist dates before paging instead of hiding rows after the page", async () => {
     const { deps } = fixture();

@@ -1304,6 +1304,8 @@ export async function getRecruitingCorrespondence(
     message?: RecruitingCorrespondence["emails"][number];
     /** Internal: return every contact in one read instead of one page. */
     allContacts?: boolean;
+    /** The workspace this same request just read for the thread, so it is not read again. */
+    workspace?: Awaited<ReturnType<typeof recruiting.getRecruitingWorkspace>>;
     savedReceipts?: {
       /** Worker-only exact receipt selection; the canonical owner/thread fences still apply. */
       effectId?: string;
@@ -1324,9 +1326,10 @@ export async function getRecruitingCorrespondence(
     )
       throw new ORPCError("BAD_REQUEST");
     timer?.mark("mailBeforeMs");
-    const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
-      threadId: target.threadId,
-    });
+    const workspace =
+      page.workspace !== undefined
+        ? page.workspace
+        : await recruiting.getRecruitingWorkspace(prisma, actor, { threadId: target.threadId });
     timer?.mark("mailWorkspaceMs");
     const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
     const servers = await prisma.mcpServer.findMany({
@@ -1433,19 +1436,18 @@ export async function getRecruitingCorrespondence(
       const contactEmails: string[] = [];
       if (workspace && crmReads && view === "interview") {
         // Every contacts read builds the whole list, so take it once rather than page by page.
-        const saved = await getRecruitingCorrespondence(
+        // It is independent of the CRM read below, so the two run together.
+        const savedContacts = getRecruitingCorrespondence(
           prisma,
           actor,
           target,
           "contacts",
           productIdentity,
           oauth,
-          { allContacts: true },
+          { allContacts: true, workspace },
           crmReads,
         );
-        // Contacts only pick which calendar events belong to the role. Saved mail is often
-        // incomplete by design (selected Gmail reads), which says nothing about the calendar.
-        output.contacts.push(...saved.contacts);
+        savedContacts.catch(() => undefined);
         if (workspace.crmTarget) {
           const bound = workspace.crmTarget.target;
           try {
@@ -1471,6 +1473,9 @@ export async function getRecruitingCorrespondence(
             output.partial = true;
           }
         }
+        // Contacts only pick which calendar events belong to the role. Saved mail is often
+        // incomplete by design (selected Gmail reads), which says nothing about the calendar.
+        output.contacts.push(...(await savedContacts).contacts);
       }
       timer?.mark("mailInterviewContactsMs");
       if (workspace && crmReads)
