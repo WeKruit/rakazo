@@ -298,6 +298,20 @@ test("answering with the recruiter's own words is not a repeat; the same acknowl
   assert.deepEqual(failures, ['repeats itself: "我会按这个偏好处理候选人邮件。"']);
 });
 
+test("the recap a recruiter asks for may restate a sentence; an unasked repeat still fails", () => {
+  const changed = "已将年薪调整为人民币70万–90万元，并加入每周五远程办公。";
+  const before = [
+    user("base改70-90万，另外加一条每周五remote"),
+    bot(`${changed}\n\nSubject: Staff Frontend Engineer`),
+    user("一句话说下改了什么"),
+    bot(changed),
+  ];
+  const repeats = (messages) =>
+    conversationChecks(messages).filter((failure) => failure.startsWith("repeats"));
+  assert.deepEqual(repeats(before), []);
+  assert.equal(repeats([...before, user("好的"), bot(changed)]).length, 1);
+});
+
 test("a lone question mark has no language, so either reply language passes", () => {
   for (const reply of ["你想问哪个职位？", "Which role do you mean?"])
     assert(!conversationChecks([user("？"), bot(reply)]).some((f) => f.startsWith("language")));
