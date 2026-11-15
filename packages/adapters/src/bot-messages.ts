@@ -21,7 +21,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
-import { ROUND_HEADING } from "./recruiting-round-check.js";
+import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -470,10 +470,7 @@ export function teamWorkingFor(
  * "where are they?" is answered with progress instead of "still in progress".
  */
 export async function teamProgress(
-  prisma: Pick<
-    PrismaClient,
-    "run" | "thread" | "recruitingCandidateOccurrence" | "recruitingCalibrationRound"
-  >,
+  prisma: PrismaClient,
   input: { threadId: string; returnThreadId: string; roleId?: string },
 ): Promise<{ name: string; minutes: number; peopleFound: number; note: string } | null> {
   const working = await teamWorkingFor(prisma, input);
@@ -503,6 +500,14 @@ export async function teamProgress(
           .catch(() => null),
       ])
     : [0, null];
+  // Staging 11-15: listed in the role's chat 23 s before its record was written, the new round
+  // read as "not ready" in between.
+  const listed =
+    roleId && !recorded
+      ? await Promise.resolve()
+          .then(() => roundListedNotRecorded(prisma, { roleId, after: since.toISOString() }))
+          .catch(() => null)
+      : null;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"}`;
@@ -512,9 +517,11 @@ export async function teamProgress(
     peopleFound,
     // Staging 11-15: asked twice to "just show me the new ten" mid-round, Kruit only repeated the
     // count; the people found so far can be listed, marked as not yet reviewed.
-    note: recorded
-      ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-      : `${working.bot.name} has been working on the recruiter's request for ${started} and has found ${found} so far; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.${roleId ? ` When the recruiter asks to see people now, list them with recruiting_candidates list and roleId ${roleId}: the page shows only people the recruiter has not seen, as search results not yet reviewed, never as the round.` : ""}`,
+    note: listed
+      ? `The next round (${listed.people} people) is already listed in the role's chat and its record is being written now; ${working.bot.name} has found ${found} since the request. Tell the recruiter it is there and confirmed in a moment; never say it is not ready.`
+      : recorded
+        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+        : `${working.bot.name} has been working on the recruiter's request for ${started} and has found ${found} so far; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.${roleId ? ` When the recruiter asks to see people now, list them with recruiting_candidates list and roleId ${roleId}: the page shows only people the recruiter has not seen, as search results not yet reviewed, never as the round.` : ""}`,
   };
 }
 
