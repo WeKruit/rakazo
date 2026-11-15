@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  draftAskedBeforeShown,
   DECLINE_RETRY_NOTE,
   declinedSentence,
   declineRetry,
@@ -771,5 +772,19 @@ describe("quotesMessage", () => {
       quotesMessage("Goal: find contacts for the ten people above", "给 Wei Zhang 写封邮件"),
     ).toBe(false);
     expect(quotesMessage("Goal: 好的，继续", "好")).toBe(false);
+  });
+});
+
+describe("draftAskedBeforeShown", () => {
+  it("holds a question until the email asked for is written", () => {
+    // Gates 808f4f31, df83586a, aceb80c9: questions about the role came before any draft.
+    const ask = "帮我给 Wei Zhang 写封邮件，fintech 那个职位";
+    expect(draftAskedBeforeShown(ask, "我先为 Wei Zhang 起草邮件。")).toBe(true);
+    expect(draftAskedBeforeShown(ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
+    expect(draftAskedBeforeShown("帮我回复 Wei Zhang 的邮件", "")).toBe(false);
+    expect(draftAskedBeforeShown("给前 10 个人发邮件", "")).toBe(false);
+    expect(draftAskedBeforeShown("Draft an email to Wei Zhang", "")).toBe(true);
+    expect(draftAskedBeforeShown("草稿还在吗", "")).toBe(false);
+    expect(draftAskedBeforeShown("is the draft still there?", "")).toBe(false);
   });
 });

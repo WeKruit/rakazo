@@ -14,6 +14,7 @@ const {
   gradingToolRefusal,
   gradingTools,
   nextRoundHeld,
+  roundAwaitingReview,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
@@ -265,6 +266,11 @@ describe("startRecruitingGrading", () => {
     await expect(held(`${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`)).resolves.toBe(
       false,
     );
+    // Kruit's chat lists none of Results while the round waits (staging 11-15), unless it waited long.
+    const waiting = (at: number) =>
+      roundAwaitingReview(f.deps.prisma, { threadId: "thread", roleId: "role" }, at);
+    await expect(waiting(now)).resolves.toBe(2);
+    await expect(waiting(now + 60 * 60_000)).resolves.toBeNull();
     // Without the Reviewer nothing holds the round, so nothing is started for it.
     const solo = fixture({
       found: [person("fits")],
@@ -279,6 +285,9 @@ describe("startRecruitingGrading", () => {
     await expect(
       nextRoundHeld(solo.deps.prisma, { threadId: "thread", roleId: "role", clientNonce: null }),
     ).resolves.toBe(false);
+    await expect(
+      roundAwaitingReview(solo.deps.prisma, { threadId: "thread", roleId: "role" }, now),
+    ).resolves.toBeNull();
   });
 
   it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {

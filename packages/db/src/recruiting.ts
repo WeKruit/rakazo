@@ -7907,7 +7907,7 @@ export async function saveRecruitingCandidatePeopleSearch(
             searchedBy: { userId: actor.userId, runId: run.id },
             observedAt: observedAt.toISOString(),
           },
-          /** People never returned before for this role; only they may fill a later round. */
+          /** People never returned before for this role. */
           profileFactsVersion: 1,
           newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
@@ -12197,7 +12197,7 @@ export async function saveRecruitingCalibrationRound(
       ));
     if (repeated?.repeats.length)
       throw new RecruitingCalibrationRoundError(
-        `Round ${repeated.round + 1} must show only new people, but ${repeated.repeats.length} of these ten were already returned before round ${repeated.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
+        `Round ${repeated.round + 1} must show only people the recruiter has not seen, but ${repeated.repeats.join(", ")} ${repeated.repeats.length === 1 ? "was" : "were"} already shown in an earlier round or turned down. Replace them with saved people no round has shown (recruiting_candidates list) or people from a new quick search, and record the round again.`,
       );
     const round = await tx.recruitingCalibrationRound.create({
       data: {

@@ -644,6 +644,7 @@ import {
   nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
+  roundAwaitingReview,
   roundHeldForReview,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
@@ -836,6 +837,8 @@ import { chooseTurnModel, effortThinkingLevel, resolveEffortMode } from "./turn-
 import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
+  DRAFT_BEFORE_ASKING,
+  draftAskedBeforeShown,
   questionStatesWork,
   CLAIMS_CARD_PENDING,
   readsOnly,
@@ -1434,6 +1437,10 @@ export const questionAlreadyWaiting = (question: string) =>
 
 export const globalAskBeforeRole = (latest: string) =>
   `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team takes it from there in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
+
+/** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
+const GLOBAL_OPEN_ROLE_FIRST =
+  "Not asked: the recruiter brought a new role (a JD file or a role they described). Call start_role now with a short title; its team searches from the JD as written and asks any open fact beside the first ten, so nothing is asked here.";
 
 const ROLE_NOT_SAVED_NOTE =
   "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then issue the four calibration people searches from what they wrote (the recruiter sees the first ten before any question; ask first only when they named no title, place or requirement at all). Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
@@ -6924,6 +6931,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // gets a plain answer, never a card, until the recruiter's role is saved.
         // Kruit's first question in a turn is checked once against opening a role instead.
         let globalAskChecked = false;
+        let globalRoleBounces = 0;
         let roleStartedInTurn = false;
         // Role conversations start_role opened this run: handing work to one is not another role.
         const groupsStartedInTurn = new Set<string>();
@@ -7143,6 +7151,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               })
             : null;
         };
+        const globalRoundAwaitingReview = async (roleId: string) => {
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { sourceThreadId: true },
+          });
+          return role
+            ? roundAwaitingReview(deps.prisma, { threadId: role.sourceThreadId, roleId })
+            : null;
+        };
         // A plain list of one role's people in Kruit's conversation. A name or
         // profile lookup finds one person; it is not a list to show.
         const isGlobalRoleList = (args: Record<string, unknown>) =>
@@ -7173,11 +7190,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Results, then the round came with different people. While the team works, Kruit
           // gets no rows to list, only the team's progress.
           const working = await globalTeamProgress(args.roleId);
-          if (working)
+          const held = working ? null : await globalRoundAwaitingReview(args.roleId);
+          if (working || held)
             return {
               items: [],
               total: page?.total,
-              teamWorking: `${working.note} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
             };
           if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
@@ -8555,12 +8573,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 picked,
               ),
             ]);
-            // The round record refuses anyone already shown or returned before the last round, so
+            // The round record refuses anyone a round already showed or the recruiter turned down, so
             // the list on screen leaves them out too instead of changing once the round is recorded.
             const repeats = new Set(repeated?.repeats);
             const left = [
               repeats.size &&
-                `${[...repeats].join(", ")}: already returned before round ${repeated?.round}; a later round takes only people returned since, whose alreadyInPool is false.`,
+                `${[...repeats].join(", ")}: already shown in an earlier round or turned down; a later round takes only people no round has shown.`,
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
               beyond.size &&
@@ -17169,6 +17187,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       movedElsewhere = true;
                       return { instead: askAfterNewerMessage(moved) };
                     }
+                    // Gate aceb80c9, jd-upload-pdf: after the check, Kruit's own chat still asked about
+                    // an attached JD's language and no role opened. A JD file or a described role opens
+                    // the role; its team searches first.
+                    if (
+                      globalAskChecked &&
+                      !roleStartedInTurn &&
+                      globalRoleBounces < 2 &&
+                      Boolean(thread.groupId?.startsWith("recruiting-global-")) &&
+                      !asksForOutreach(recruiterTexts[0] ?? "") &&
+                      (currentTurnMessage?.blocks.some((block) => block.kind === "file") ||
+                        describesRole(recruiterTexts[0] ?? ""))
+                    ) {
+                      globalRoleBounces++;
+                      return { instead: GLOBAL_OPEN_ROLE_FIRST };
+                    }
                     if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                       askDeclineBounced = true;
                       return { instead: ASK_DECLINES };
@@ -20051,20 +20084,6 @@ export function gmailCardNeedsDraft(
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );
 }
-
-/** A question asked while the email the recruiter asked to be written is not shown yet. */
-export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
-  return (
-    asksForOutreach(recruiterText) &&
-    /写|起草|草稿|模板|\b(?:write|draft|template)\b/i.test(recruiterText) &&
-    !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
-    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
-  );
-}
-
-/** Model-facing: the email comes first; a question waits beside it. */
-export const DRAFT_BEFORE_ASKING =
-  "Not asked: the recruiter asked you to write an email, and they see the draft before any question. Write the full email now (Subject: and body) from their words and anything saved, for the person they name, with no saved role, profile or address needed and without inventing facts they did not give. Then ask, beside the draft, only the one fact a send still needs (such as the address).";
 
 /** Model-facing: a message the person typed instead of pressing Connect is answered first. */
 export const connectAnswerFirst = (message: string) =>

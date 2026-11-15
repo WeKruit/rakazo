@@ -18,6 +18,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   savedContactLookups,
+  settlePeopleSearch,
 } from "./recruiting-research.js";
 import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
@@ -73,7 +74,13 @@ describe("people-search agent runs", () => {
         count: vi.fn(async () => 2),
       },
       recruitingCandidateOccurrence: {
-        findMany: vi.fn(async (): Promise<Array<{ candidateKey: string }>> => []),
+        findMany: vi.fn(async (_query?: unknown): Promise<Array<{ candidateKey: string }>> => []),
+      },
+      // Searches still running at the provider, by their countdowns.
+      externalEffect: {
+        findMany: vi.fn(
+          async (): Promise<Array<{ idempotencyKey: string; request: unknown }>> => [],
+        ),
       },
       // The role's deeper runs since the recruiter's latest message or requirement change.
       usageRecord: { count: vi.fn(async () => 0) },
@@ -232,9 +239,14 @@ describe("people-search agent runs", () => {
           blocks: [{ kind: "text", text: "Senior SRE，Austin。找20个人，找完告诉我" }],
         },
       ]);
-      const found = (n: number) =>
-        db.recruitingCandidateOccurrence.findMany.mockResolvedValue(
-          Array.from({ length: n }, (_, i) => ({ candidateKey: `k${i}` })),
+      const keys = (from: number, to: number) =>
+        Array.from({ length: to - from }, (_, i) => ({ candidateKey: `k${from + i}` }));
+      // Since the request the search saved people 0..n; `before` were already in the role.
+      const found = (n: number, before = 0) =>
+        db.recruitingCandidateOccurrence.findMany.mockImplementation(async (query: unknown) =>
+          (query as { where: { page: { observedAt: { lt?: Date } } } }).where.page.observedAt.lt
+            ? keys(0, before)
+            : keys(0, n),
         );
       const limit = () =>
         limitPeopleSearch(db as never, actor, server, "web_search_advanced_exa", {
@@ -248,6 +260,18 @@ describe("people-search agent runs", () => {
       expect(
         sizes.map((size) => (size.status === "fulfilled" ? size.value.numResults : 0)),
       ).toEqual([10, 10, 0, 0]);
+      // Staging 7b5230e4: searches that failed, and an agent run, held the 20 and the role
+      // stayed at 0. A failed search gives its share back; an agent run reserves nothing.
+      vi.setSystemTime(new Date("2026-11-15T10:10:00Z"));
+      const failed = [await limit(), await limit()];
+      for (const args of failed) settlePeopleSearch(args, "failed");
+      await prepare(db, { query: "Find 20 people", effort: "low" });
+      const retried = await limit();
+      expect(retried).toMatchObject({ numResults: 10 });
+      // A finished search keeps its share only while its people are saved.
+      settlePeopleSearch(retried, "done");
+      vi.setSystemTime(new Date("2026-11-15T10:10:40Z"));
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
       // Later, 14 are saved from this request: 6 more at most, for a search or an agent run.
       vi.setSystemTime(new Date("2026-11-15T10:20:00Z"));
       db.recruitingCandidate.count.mockResolvedValue(14);
@@ -271,9 +295,41 @@ describe("people-search agent runs", () => {
       db.recruitingCandidate.count.mockResolvedValue(45);
       found(5);
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // Staging 11-15: "继续找 10 位" on a role of 24 is 10 more, even when the search finds 4 of
+      // those 24 again (the approve result said 34 while the quick searches were refused).
+      vi.setSystemTime(new Date("2026-11-15T11:00:00Z"));
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: new Date("2026-11-15T10:50:00Z"),
+          blocks: [{ kind: "text", text: "继续找 10 位" }],
+        },
+      ]);
+      db.recruitingCandidate.count.mockResolvedValue(24);
+      found(4, 24);
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("starts no second search while one for the role is still running", async () => {
+    // Staging 11-15: one "继续找 10 位" started two paid runs side by side.
+    const db = fixture();
+    db.externalEffect.findMany.mockResolvedValue([
+      { idempotencyKey: "work_estimate:agent_run_other_role", request: { roleId: "role-2" } },
+      { idempotencyKey: "work_estimate:agent_run_busy", request: { roleId: "role-1" } },
+    ]);
+    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow(
+      /agent_run_busy/,
+    );
+    // Collecting the running one, and grading, still go through.
+    await expect(prepare(db, { runId: "agent_run_mine" })).resolves.toEqual({
+      runId: "agent_run_mine",
+    });
+    db.externalEffect.findMany.mockResolvedValue([]);
+    await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
+      query: "Find 10 more",
+    });
   });
 
   it("grades given people with the grade format and leaves them in", async () => {

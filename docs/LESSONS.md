@@ -83,3 +83,4 @@ that repeats into the existing line instead of adding another.
   thread loaded before the run saved the role. **A limit on a total is checked and reserved in
   one step at the shared boundary, and in-run state is read fresh, not from the run's snapshot.**
 - 11-15: #1381 held rounds after feedback, but the round's first picks and streamed round arguments still reached chat before the hold, so the recruiter saw two lists. Rule: a hold on showing something covers every path that posts it (streams, early picks), not only the final record.
+- 11-15: The judge still told new roles to ask before searching after the product moved to search-first, so it vetoed correct replies as "asked again" and blocked prod. Rule: when a product decision changes the expected behaviour, update the judge's rule in the same hour and re-grade saved plays with `--calibrate` before the next gate.

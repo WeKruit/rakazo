@@ -182,7 +182,9 @@ export async function executeRecruitingCandidatesTool(
         take: 30,
         select: { id: true, title: true },
       }),
-      next: "Call again with the roleId of the role the recruiter named.",
+      // Gate 71a2cac2 (one-off-email): with no fintech role saved, "直接发" became a request for the
+      // role's title or JD instead of the send.
+      next: `If one of these roles is the one the recruiter named, call again with its roleId. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
     if (input.operation === "resolve") {
       const result = roleId
@@ -411,8 +413,8 @@ export async function executeRecruitingCandidatesTool(
               ? { email: { address: email.address, type: email.type, status: email.status } }
               : {}),
             ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
-            // A later round may not show them: shown in a round or returned before the latest one.
-            // Said in words, so a person only found is never called a repeat of a round.
+            // A later round may not show people a round showed. Said in words, so a person only
+            // found (who a later round may show) is never called a repeat of a round.
             // Staging 11-15: "shown in round 2" on round 2's own people read as repeats.
             ...(person?.round !== undefined
               ? {

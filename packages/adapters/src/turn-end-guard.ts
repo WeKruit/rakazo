@@ -20,8 +20,10 @@ import type { DeclineRetry } from "./turn-report.js";
 import {
   askedTemplate,
   candidateVoiceDraft,
+  DRAFT_FIRST_RETRY,
   declinedSentence,
   declineRetry,
+  draftAskedBeforeShown,
   draftVariables,
   droppedDay,
   questionCard,
@@ -769,6 +771,27 @@ export async function planDeclineRetry(
       : undefined;
   if (claim && (await recentContinues()) < 1)
     return { sentence: claim.sentence, note: unbackedClaimNote(claim) };
+  // Gates 808f4f31, df83586a, aceb80c9 (one-off-email): "给 Wei Zhang 写封邮件" ended on a reply
+  // asking for the JD and a LinkedIn link, with no email written. The email comes first.
+  if (
+    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
+    draftAskedBeforeShown(
+      input.personRequest ?? input.request,
+      [
+        input.reply,
+        ...(
+          await deps.prisma.message.findMany({
+            where: { threadId: input.run.threadId, role: "bot" },
+            orderBy: { seq: "desc" },
+            take: 12,
+            select: { blocks: true },
+          })
+        ).map((message) => JSON.stringify(message.blocks)),
+      ].join("\n"),
+    ) &&
+    (await recentContinues()) < 1
+  )
+    return { sentence: "", note: DRAFT_FIRST_RETRY };
   // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
   // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;

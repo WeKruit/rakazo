@@ -9,6 +9,9 @@ describe("requested people target", () => {
     ["找100个", 100],
     ["scale up to 200", 200],
     ["I need 30 more candidates", 30],
+    // Long-search-finishes 11-15: no verb before the number.
+    ["帮我找个 Senior SRE，Austin 坐班，6年以上，base 170-210k。最多20个，找完告诉我", 20],
+    ["Senior SRE in Austin, up to 20, tell me when done", 20],
   ])("%s → %s", (text, target) => {
     expect(requestedPeopleTarget(text)).toBe(target);
   });
@@ -19,6 +22,7 @@ describe("requested people target", () => {
     "Run another round",
     "find 5",
     "Look up full work history, education and photo for these 11 people",
+    "Senior SRE，Austin，6年以上，base 170-210k，入职 3个月内",
   ])("%s has no search target", (text) => {
     expect(requestedPeopleTarget(text)).toBeUndefined();
   });
@@ -29,6 +33,8 @@ describe("requested people target", () => {
     ["find 50 total", 69, 50],
     ["一共找100个", 120, 100],
     ["再找20个人", 10, 30],
+    ["继续找 10 位", 24, 34],
+    ["多找10个", 24, 34],
     ["find 30 more candidates", 40, 70],
   ])("%s with %s saved → %s", (text, before, target) => {
     expect(peopleTargetFrom(text, before)).toBe(target);
