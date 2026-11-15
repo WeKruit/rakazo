@@ -706,6 +706,7 @@ import {
   startRoleFromRecruiterMessage,
   TEMPLATE_NOT_ROLE_NOTE,
   templateOnlyRequest,
+  writesToNamedPeople,
 } from "./role-start.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
@@ -15436,7 +15437,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          // Asked to write to the people they named, the team writes to them: no question, no search.
+          const ask = writesToNamedPeople(texts.map((item) => item.text).join("\n"))
+            ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
+            : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           if (request) {
             // A role Kruit opened (start_role) is already named after it: keep that title.
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
