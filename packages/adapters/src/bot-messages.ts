@@ -698,7 +698,9 @@ export async function returnDelegatedTeamOutcome(
       roleId: thread.activeRecruitingRoleId,
       since: delegated.createdAt,
     }));
-  if (saved) text = text ? `${text}\n\n${saved}` : saved;
+  // Gate 71a2cac2: beside the record, the team's "profiles show 6+ years" left Kruit squaring a
+  // retelling with the record, and it contradicted itself. The record is the whole answer.
+  if (saved) text = round ? `${round}\n\n${saved}` : saved;
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
@@ -750,7 +752,7 @@ async function savedForRequest(
     candidateKeys: rest,
     brief: true,
     firstNumber: listed + 1,
-    heading: `Saved for this request, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. List every one of them once:`,
+    heading: `The team finished this request. Saved for it, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. List every one of them once:`,
   });
 }
 
