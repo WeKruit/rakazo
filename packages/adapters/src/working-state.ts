@@ -1,8 +1,9 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import type { ReplyLanguage } from "@rakazo/core";
-import { REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
+import { GMAIL_MCP_ENDPOINT, REPLY_LANGUAGE_NAME, recruiterLanguage } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingHomeGroupId } from "@rakazo/db";
+import { ownMailboxSendingAllowed } from "./instantly-senders.js";
 import type { RoleRecord } from "./role-records.js";
 import { loadRoleRecords } from "./role-records.js";
 import { referredRole } from "./role-reference.js";
@@ -37,8 +38,38 @@ const HANDOFF_CALLS = 30;
 
 type StatePrisma = Pick<
   PrismaClient,
-  "chatGroup" | "recruitingRole" | "message" | "bot" | "run" | "event" | "externalEffect"
+  | "chatGroup"
+  | "recruitingRole"
+  | "message"
+  | "bot"
+  | "run"
+  | "event"
+  | "externalEffect"
+  | "user"
+  | "mcpServer"
 >;
+
+/**
+ * An account that sends from the recruiter's own Gmail, with none connected: nothing can go out,
+ * so no line may read as going ahead with a send (gate ecebc59b: 「好，这就处理。」 after 「直接发吧」,
+ * then the Connect card 22 s later).
+ */
+async function ownGmailLine(prisma: StatePrisma, scope: { spaceId: string; userId: string }) {
+  if (!(await ownMailboxSendingAllowed(prisma, scope))) return undefined;
+  const gmail = await prisma.mcpServer.findFirst({
+    where: {
+      spaceId: scope.spaceId,
+      userId: scope.userId,
+      enabled: true,
+      secretId: { not: null },
+      OR: [{ slug: "gmail" }, { endpoint: GMAIL_MCP_ENDPOINT }],
+    },
+    select: { id: true },
+  });
+  return gmail
+    ? undefined
+    : "- Recruiter's own Gmail: not connected, so no email can go out yet. Each email goes out from it once they press Connect Gmail and then Send on its card.";
+}
 
 export type WorkingStateThread = {
   id: string;
@@ -200,6 +231,7 @@ export async function loadWorkingState(
   now = Date.now(),
 ): Promise<WorkingState> {
   const global = thread.groupId?.startsWith("recruiting-global-") ?? false;
+  const gmailLine = ownGmailLine(prisma, scope).catch(() => undefined);
   // The recruiter's most recently active conversations, Kruit's included: where their newest
   // words are, and (for Kruit) the role teams on the card. Bounded, so a large account reads few.
   const listed = await prisma.chatGroup.findMany({
@@ -392,6 +424,9 @@ export async function loadWorkingState(
     lines.push(
       `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat stays in this conversation as the email above (the one a send card takes up), but is in no role, campaign or mailbox draft until a save tool returns it.`,
     );
+
+  const gmail = await gmailLine;
+  if (gmail) lines.push(gmail);
 
   const own = receiptLine(receiptsOf(thread.id), now);
   lines.push(
