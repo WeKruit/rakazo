@@ -285,6 +285,11 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       name: "Person second-0",
       linkedinUrl: "https://www.linkedin.com/in/second-0",
     });
+    // Staging 11-15: a grade saved after the round named another employer, and the page showed it
+    // while the round's list in chat showed the employer the search returned.
+    await savePage([keys("second")[0] ?? ""], ["Renamed by a later grade"]);
+    const again = await recruiting.readRecruitingCalibrationRound(prisma, actor, { threadId });
+    expect(again.round?.candidates[0]?.name).toBe("Person second-0");
 
     // Staging 11-15: the recruiter asked to swap two people of round 2, and the kept eight were
     // refused as repeats, so the corrected ten could not be shown. A correction keeps them.
