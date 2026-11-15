@@ -163,6 +163,11 @@ export function checkRound(input: {
   checks: RoundChecks | undefined;
   criteria: readonly RoundCriterion[];
   asked: ReadonlySet<string>;
+  /**
+   * A top-up search already came back and the round is still short: the bar relaxes, so an
+   * unknown on what the recruiter just raised no longer keeps a person out ("fails" still does).
+   */
+  relaxed?: boolean;
   /** What to do when fewer than ten fit. */
   shortOfTen: string;
 }): RoundCheckResult {
@@ -195,7 +200,7 @@ export function checkRound(input: {
     if (personal.length)
       unverified[key] = personal.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
-    if (raised.length && !input.asked.has(key))
+    if (raised.length && !input.relaxed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
   }
   if (!failing.length && !newlyUnknown.length) return { ok: true, unverified };

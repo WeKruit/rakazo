@@ -1532,12 +1532,12 @@ const PLANNED_SEARCH_WAIT_MS = 6_000;
 const PLANNED_SEARCH_GRACE_MS = 3_000;
 /** With this many new people from the planned searches, the first ten come from them. */
 /** People-search agent runs one turn starts to fill its ten before asking the recruiter. */
-const MAX_AGENT_RUNS_BEFORE_ROUND = 2;
+const MAX_AGENT_RUNS_BEFORE_ROUND = 3;
 /**
  * When fewer than ten fit, the recruiter is told the quick search came up short and one deeper
  * search runs; the round then holds everyone who fits, even fewer than ten.
  */
-const SHORT_OF_TEN = `unless this turn already ran a people-search agent run, first fill the places left with one (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results) and add the people from it who fit; then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most. Never pick someone who does not fit to fill it, and run no deeper search before the round: the next-step card offers one, and it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
+const SHORT_OF_TEN = `fill the places left in at most three tries in all, counting the people-search agent runs this turn already ran for the round: each try is one agent_run with effort "low" and a query that starts "Find N more people" (N the places left, never more than 20) with the role, the location scope, every hard requirement and the round feedback; it leaves out everyone already in Results. Each try relaxes the bar: after the first, a requirement a row says nothing about is unknown, not failed, even one the recruiter just raised, and the person is recorded with it marked "unknown" in checks; the third also leaves preferences that are not hard requirements out of its query. Only a row that contradicts a hard requirement ("fails") never fills a place. Then record the round with calibration_round with everyone who fits, even fewer than ten, and say in one line, in the recruiter's language, how many short of ten it is and which requirement rules out the most. Run no deeper search before the round: the next-step card offers one, and it runs only when the recruiter asks (then one people-search agent run with effort "auto" and a query that starts "Find N more people" with the role, the location scope and every hard requirement, its people recorded as the next round)`;
 /** Quick people searches a turn may run for one round, beside the planned ones, before it asks. */
 const MAX_QUICK_SEARCHES_BEFORE_ROUND = 12;
 const PLANNED_POOL_ENOUGH = 30;
@@ -7914,11 +7914,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
             peopleSearchesRun = Math.max(peopleSearchesRun, 8);
             return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed, except one the recruiter raised since the last round, which a row meets only when it shows it. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed, except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
-          // Each agent run takes most of a minute: after two that still leave the ten short, the
+          // Each agent run takes most of a minute: after three that still leave the ten short, the
           // recruiter decides whether to relax a requirement or search deeper, instead of the turn
           // running one after another while they wait. Reading a started run's result is free.
           // Quick searches are capped the same way. The first round counts from the start, before
@@ -8220,6 +8220,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (criterion) => !languageRequirement || !languageFilters([criterion.statement]).length,
               ),
               asked: gapAsked,
+              // The recruiter's rule: a short round relaxes the bar over at most three tries.
+              relaxed: agentRunsBeforeRound > 0,
               shortOfTen: SHORT_OF_TEN,
             });
             if (!checked.ok) {
@@ -8408,7 +8410,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (

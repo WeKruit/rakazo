@@ -44,6 +44,16 @@ describe("checkRound", () => {
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
   });
 
+  it("lets an unknown on a newly raised criterion through once a top-up came back short", () => {
+    const result = checkRound({
+      ...base,
+      keys: ["c"],
+      checks: { c: all("unknown") },
+      relaxed: true,
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("keeps what no pick's row shows off each person's note", () => {
     const shown = { seattle: "shown", "prod-stack": "shown" } as const;
     const result = checkRound({
