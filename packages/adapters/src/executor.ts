@@ -6566,6 +6566,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // not a replay of the handoff the run made before it arrived.
         let steeredMessageId: string | undefined;
         let steeredText: string | undefined;
+        // The person wrote into this run and nothing has been said to them since.
+        let steeredUnanswered = false;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
         // A reply-card tool ran this turn, so what the turn says about that card came from it.
@@ -6773,6 +6775,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )?.id;
           midTurnUserTexts.push(narration);
           publishedMidTurnUserMessage = true;
+          steeredUnanswered = false;
         };
         const formatObservation = (
           observation: Awaited<ReturnType<SandboxProvider["observe"]>>,
@@ -6808,6 +6811,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gmailDraftAsked = false;
         // Like request_secret: an unconnected MCP server pauses on a native connect card.
         const requestConnectionTool = async (args: Record<string, unknown>) => {
+          // Gate 398accae, one-off-email: each message typed past the card ("草稿还在吗") got only
+          // a new card, because the turn's one action was this call. The message is answered first.
+          if (
+            hideVendors &&
+            steeredUnanswered &&
+            steeredText?.trim() &&
+            !assembled.trim() &&
+            !currentTextSegment.trim()
+          ) {
+            steeredUnanswered = false;
+            return { error: connectAnswerFirst(steeredText) };
+          }
           // Staging 11-13: the Gmail card said "the email is above" when no email had been shown.
           if (
             hideVendors &&
@@ -14318,6 +14333,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )?.id;
             midTurnUserTexts.push(text);
             publishedMidTurnUserMessage = true;
+            steeredUnanswered = false;
             return finish(
               truncated
                 ? {
@@ -17087,6 +17103,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         if (personSteering) {
                           steeredMessageId = personSteering.messageId;
                           steeredText = personSteering.text;
+                          if (!personSteering.earlier) steeredUnanswered = true;
                         }
                         // A new message from the person is this turn's to answer, whoever had the
                         // request before it (gate 493e9f2e: its reply was dropped as handed off).
@@ -19749,6 +19766,10 @@ export function gmailCardNeedsDraft(
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );
 }
+
+/** Model-facing: a message the person typed instead of pressing Connect is answered first. */
+export const connectAnswerFirst = (message: string) =>
+  `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
 
 /** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
 export const GMAIL_DRAFT_FIRST_NOTE =
