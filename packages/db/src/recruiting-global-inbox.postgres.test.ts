@@ -266,7 +266,7 @@ suite("stored global Inbox projection", () => {
         .attachments,
     ).toBeUndefined();
   });
-  it("searches outbound text within an incoming thread while keeping its incoming card and excluding sent-only threads", async () => {
+  it("searches outbound text within an incoming thread while keeping its incoming card, and lists sent-only threads", async () => {
     await projectRecruitingInboxMessages(prisma, actor, {
       roleId,
       observedAt: new Date(),
@@ -285,9 +285,19 @@ suite("stored global Inbox projection", () => {
       ],
     });
     const page = await read({ query: "outboundUniqueNeedle" });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]?.email.id).toBe("search-incoming");
-    expect(page.items[0]?.email.body).toBe("Incoming reply");
+    expect(page.items.map((row) => row.email.id).sort()).toEqual([
+      "search-incoming",
+      "search-sent-only",
+    ]);
+    expect(page.items.find((row) => row.email.id === "search-incoming")?.email.body).toBe(
+      "Incoming reply",
+    );
+    // A sent email nobody has answered is in the list, but never counts as unread.
+    expect(
+      (await read({ query: "outboundUniqueNeedle", unreadOnly: true })).items.map(
+        (row) => row.email.id,
+      ),
+    ).not.toContain("search-sent-only");
   });
   it("never returns another owner or space, and rolls back a projection whose authorization was revoked", async () => {
     expect((await read({}, actors[1]!)).items).toEqual([]);

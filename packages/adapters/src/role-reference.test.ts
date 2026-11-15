@@ -17,6 +17,16 @@ describe("referredRole", () => {
     expect(referredRole(texts, roles)).toMatchObject({ kind: "saved", role: { id: "r303" } });
   });
 
+  // Sim 11-15 send-at-night: 「…Senior Data Engineer 02311…」 gave the number without "ref", so a
+  // follow-up 「为啥还没发」 was answered for another Seattle data engineer role (Ref 21351).
+  it("finds a role by its ref number written without the word ref", () => {
+    const texts = [
+      "为啥还没发 现在就发",
+      "新岗位 西雅图 Senior Data Engineer 0303 客户在西雅图 hybrid 一周三天",
+    ];
+    expect(referredRole(texts, roles)).toMatchObject({ kind: "saved", role: { id: "r303" } });
+  });
+
   // Sim 11-14: 「新岗位 … ref 0232」 went to the only saved role.
   it("names a new role by a ref no saved role has", () => {
     const text = "新岗位 Senior Data Engineer，Seattle，ref 0232，写首封邮件，两个都发";
