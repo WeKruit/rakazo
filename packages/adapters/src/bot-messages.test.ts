@@ -7,7 +7,6 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
-  showRoundInDelegatingChat,
   teamProgress,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
@@ -95,11 +94,7 @@ function deps(
           ],
         ),
     },
-    message: {
-      findUnique: messageFindUnique,
-      findMany: vi.fn().mockResolvedValue([]),
-      count: vi.fn().mockResolvedValue(0),
-    },
+    message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn(async (args?: { where?: { trigger?: string } }) =>
@@ -809,39 +804,6 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).toEqual([
       expect.objectContaining({ text: `Round 2 is posted.\n\n${round}` }),
     ]);
-  });
-
-  it("shows a recorded round in the conversation that asked for it, as posted", async () => {
-    // Staging 11-15: round 2 sat in the role's chat while Kruit retold it with wrong counts.
-    const harness = team();
-    const round = "10 people this round:\n\n1. **Hima Y** · Sr Data Engineer · Starbucks";
-    await showRoundInDelegatingChat(harness.deps, roleRun, { text: round, key: "effect-1" });
-    expect(harness.tx.message.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        threadId: "thread-global",
-        role: "bot",
-        botId: "bot-main",
-        blocks: [{ kind: "text", text: `SUI Engineer · ${round}` }],
-        clientNonce: "delegated-round:effect-1",
-      }),
-    });
-    expect(harness.notify).toHaveBeenCalledWith("thread-global", 7);
-  });
-
-  it("shows nothing when no other conversation is waiting on the round", async () => {
-    const harness = team({ root: { ...delegation, intent: "result" } });
-    await showRoundInDelegatingChat(harness.deps, roleRun, { text: "10 people", key: "e" });
-    expect(harness.tx.message.create).not.toHaveBeenCalled();
-  });
-
-  it("does not bring back a round already shown in the delegating conversation", async () => {
-    const round = "10 people this round:\n\n1. **Hima Y** · Sr Data Engineer · Starbucks";
-    const harness = team({ later: [said(round), said("Round 2 is posted.")] });
-    (harness.deps.prisma.message.count as ReturnType<typeof vi.fn>).mockResolvedValue(1);
-    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
-    const [returned] = returnedTo(harness) as Array<{ text: string }>;
-    expect(returned?.text).not.toContain("Hima Y");
-    expect(returned?.text).toContain("already listed in your conversation");
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {
