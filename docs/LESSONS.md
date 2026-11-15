@@ -53,3 +53,7 @@ that repeats into the existing line instead of adding another.
 - One role ran 18 paid deeper searches in a row that each found nobody (about $10), because the
   prompt said a short target is "never a reason to stop early" and nothing in code counted
   results. **Every paid loop gets a stop in code on what it returned, not a sentence in a prompt.**
+- The round check counted a requirement as "new since the last round" by when it was saved, and
+  the brief is saved seconds after round one, so every brief field (base pay included) looked new
+  and round two came up five short. **Date a requirement by when the person said it, not when the
+  record was written.**

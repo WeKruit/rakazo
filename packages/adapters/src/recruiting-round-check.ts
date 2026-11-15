@@ -20,43 +20,73 @@ function statementOf(expression: RecruitingCriterionExpression): string {
   return expression.items.map(statementOf).join(expression.kind === "all" ? " and " : " or ");
 }
 
-function hardCriteria(criteria: unknown): { id: string; statement: string }[] {
-  if (!Array.isArray(criteria)) return [];
-  return (criteria as RecruitingCriterion[])
-    .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
-    .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) }));
+/** The recruiter messages a requirement cites ("human-message:<id>" or a message anchor). */
+function citedMessages(refs: unknown): string[] {
+  if (!Array.isArray(refs)) return [];
+  return refs.flatMap((ref) => {
+    const id = typeof ref === "string" ? ref : (ref as { id?: unknown } | null)?.id;
+    const anchor = (ref as { anchor?: { messageId?: unknown } } | null)?.anchor?.messageId;
+    const fromId = typeof id === "string" ? /^human-message:(.+)$/.exec(id)?.[1] : undefined;
+    return [fromId, typeof anchor === "string" ? anchor : undefined].filter(
+      (value): value is string => !!value,
+    );
+  });
 }
 
-type BriefField = { key?: unknown; value?: unknown; state?: unknown; origin?: unknown };
+type Requirement = { id: string; statement: string; messages: string[] };
 
-/** The brief fields the recruiter stated themselves, as requirements keyed by field. */
-function statedFields(brief: unknown): Map<string, string> {
+function hardCriteria(criteria: unknown): Requirement[] {
+  if (!Array.isArray(criteria)) return [];
+  return (criteria as (RecruitingCriterion & { sourceRefs?: unknown })[])
+    .filter((criterion) => criterion?.priority === "hard" && criterion.expression)
+    .map((criterion) => ({
+      id: criterion.id,
+      statement: statementOf(criterion.expression),
+      messages: citedMessages(criterion.sourceRefs),
+    }));
+}
+
+type BriefField = {
+  key?: unknown;
+  value?: unknown;
+  state?: unknown;
+  origin?: unknown;
+  sourceRefIds?: unknown;
+};
+
+/** The brief fields the recruiter stated themselves, as requirements in their words. */
+function statedFields(brief: unknown): Requirement[] {
   const fields = (brief as { fields?: unknown } | null)?.fields;
-  const stated = new Map<string, string>();
-  if (!Array.isArray(fields)) return stated;
-  for (const field of fields as BriefField[])
-    if (
-      typeof field?.key === "string" &&
-      typeof field.value === "string" &&
-      field.state === "known" &&
-      field.origin === "user_instruction"
-    )
-      stated.set(field.key, field.value);
-  return stated;
+  if (!Array.isArray(fields)) return [];
+  return (fields as BriefField[]).flatMap((field) =>
+    typeof field?.key === "string" &&
+    typeof field.value === "string" &&
+    field.state === "known" &&
+    field.origin === "user_instruction"
+      ? [
+          {
+            id: `brief:${field.key}`,
+            statement: `${field.key}: ${field.value}`,
+            messages: citedMessages(field.sourceRefIds),
+          },
+        ]
+      : [],
+  );
 }
 
 /**
  * Everything the recruiter asked for, as the requirements every pick gets a verdict on: the brief
  * fields in their own words, the role's hard criteria, and each reason they turned people down
- * (the recorded recruiting_feedback, so nothing has to be saved first). Each is marked when it is
- * new or changed since the last round was recorded, which is where their feedback lands.
+ * (the recorded recruiting_feedback, so nothing has to be saved first). One is new when the
+ * recruiter said it after the last round was recorded: the message it cites, or the turn-down
+ * itself. When it was saved does not count, since the brief is often saved just after a round.
  */
 export async function roundCriteria(
   prisma: PrismaClient,
   input: { roleId: string; spaceId: string },
 ): Promise<RoundCriterion[]> {
   const { roleId } = input;
-  const [role, last] = await Promise.all([
+  const [role, last, turnedDown] = await Promise.all([
     prisma.recruitingRole.findUnique({
       where: { id: roleId },
       select: { currentRevision: { select: { criteria: true, brief: true } } },
@@ -66,15 +96,6 @@ export async function roundCriteria(
       orderBy: { round: "desc" },
       select: { createdAt: true },
     }),
-  ]);
-  const [before, turnedDown] = await Promise.all([
-    last
-      ? prisma.recruitingRoleRevision.findFirst({
-          where: { roleId, createdAt: { lte: last.createdAt } },
-          orderBy: { revision: "desc" },
-          select: { criteria: true, brief: true },
-        })
-      : null,
     prisma.externalEffect.findMany({
       where: {
         spaceId: input.spaceId,
@@ -90,17 +111,21 @@ export async function roundCriteria(
       take: 10,
     }),
   ]);
-  const earlierFields = statedFields(before?.brief);
-  const fields = [...statedFields(role?.currentRevision.brief)].map(([key, value]) => ({
-    id: `brief:${key}`,
-    statement: `${key}: ${value}`,
-    added: !!last && earlierFields.get(key) !== value,
-  }));
-  const earlier = new Set(hardCriteria(before?.criteria).map((criterion) => criterion.id));
-  const criteria = hardCriteria(role?.currentRevision.criteria).map((criterion) => ({
-    ...criterion,
-    added: !!last && !earlier.has(criterion.id),
-  }));
+  const stated = [
+    ...statedFields(role?.currentRevision.brief),
+    ...hardCriteria(role?.currentRevision.criteria),
+  ];
+  const cited = [...new Set(stated.flatMap((requirement) => requirement.messages))];
+  const saidAfter = new Set(
+    last && cited.length
+      ? (
+          await prisma.message.findMany({
+            where: { id: { in: cited }, createdAt: { gt: last.createdAt } },
+            select: { id: true },
+          })
+        ).map((message) => message.id)
+      : [],
+  );
   const reasons = turnedDown.reverse().flatMap((effect) => {
     const summary = (effect.request as { summary?: unknown } | null)?.summary;
     return typeof summary === "string" && summary.trim()
@@ -113,7 +138,14 @@ export async function roundCriteria(
         ]
       : [];
   });
-  return [...fields, ...criteria, ...reasons];
+  return [
+    ...stated.map(({ id, statement, messages }) => ({
+      id,
+      statement,
+      added: messages.some((message) => saidAfter.has(message)),
+    })),
+    ...reasons,
+  ];
 }
 
 export type RoundCheckResult =
@@ -155,8 +187,13 @@ export function checkRound(input: {
     const unknown = input.criteria.filter(
       (criterion) => verdictOf(key, criterion.id) === "unknown",
     );
-    if (unknown.length)
-      unverified[key] = unknown.map((criterion) => criterion.statement).join("; ");
+    // Something no pick's row shows (base pay, say) is not about the person, so it stays off
+    // each person's note.
+    const personal = unknown.filter((criterion) =>
+      input.keys.some((other) => verdictOf(other, criterion.id) !== "unknown"),
+    );
+    if (personal.length)
+      unverified[key] = personal.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
     if (raised.length && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
