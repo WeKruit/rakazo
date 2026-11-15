@@ -228,6 +228,49 @@ export function checkRound(input: {
 export const ROUND_REPEATS =
   "none: a recorded round never holds anyone shown in an earlier round or turned down";
 
+/**
+ * Who in a round was already in an earlier one, read from the recorded rounds. Staging 11-15: a
+ * short round topped up to ten was recorded again with the eight already shown; Kruit was told a
+ * round never repeats anyone, saw them marked as shown before, and could not answer "any repeats?".
+ */
+export async function roundRepeats(
+  prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
+  input: {
+    roleId: string;
+    round: number;
+    candidates: readonly { candidateKey: string; name: string | null }[];
+  },
+): Promise<string> {
+  const earlier = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId: input.roleId, round: { lt: input.round } },
+    orderBy: { round: "asc" },
+    select: { round: true, candidateKeys: true },
+  });
+  // Each person under the latest earlier round that held them.
+  const shownIn = new Map<string, number>();
+  for (const round of earlier) for (const key of round.candidateKeys) shownIn.set(key, round.round);
+  const name = (person: { candidateKey: string; name: string | null }) =>
+    person.name ?? person.candidateKey;
+  const byRound = new Map<number, string[]>();
+  const fresh: string[] = [];
+  for (const person of input.candidates) {
+    const round = shownIn.get(person.candidateKey);
+    if (round === undefined) fresh.push(name(person));
+    else byRound.set(round, [...(byRound.get(round) ?? []), name(person)]);
+  }
+  if (!byRound.size) return ROUND_REPEATS;
+  const kept = [...byRound].map(([round, names]) => `${names.join(", ")} (round ${round})`);
+  const untouched = earlier.map((round) => round.round).filter((round) => !byRound.has(round));
+  return [
+    `round ${input.round} keeps people already shown: ${kept.join("; ")}.`,
+    fresh.length ? `New in it: ${fresh.join(", ")}.` : "Nobody in it is new.",
+    untouched.length ? `It has nobody from round ${untouched.join(" or ")}.` : "",
+    "Answer a question about repeats with exactly this.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** A role team's round list starts with this heading, in either language. */
 export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
 

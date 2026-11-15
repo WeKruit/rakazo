@@ -47,6 +47,7 @@ import {
   listedBeforeRound,
   ROUND_REPEATS,
   roundListedNotRecorded,
+  roundRepeats,
 } from "./recruiting-round-check.js";
 import {
   rememberResolvedContactEmails,
@@ -484,7 +485,11 @@ export async function executeRecruitingCandidatesTool(
         status: "found" as const,
         round: {
           ...round,
-          repeats: ROUND_REPEATS,
+          repeats: await roundRepeats(deps.prisma, {
+            roleId: roundRoleId ?? input.roleId ?? "",
+            round: round.round,
+            candidates: round.candidates,
+          }).catch(() => ROUND_REPEATS),
           ...nextListed,
           ...(feedback.length ? { feedbackBeforeThisRound: feedback } : {}),
           ...(listed.length
