@@ -477,9 +477,11 @@ export async function limitPeopleSearch(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
+  // Staging acd31504: the plain web search was used for people, ran uncapped five times, and
+  // save_search put 30 of them in Results for "最多20个". Its people count like the people search's.
+  const plain = toolName === "web_search_exa";
   if (
-    toolName !== "web_search_advanced_exa" ||
-    args.category !== "people" ||
+    !(plain || (toolName === "web_search_advanced_exa" && args.category === "people")) ||
     server.transport !== "streamable_http" ||
     !server.endpoint ||
     new URL(server.endpoint).host !== "mcp.exa.ai"
@@ -493,8 +495,10 @@ export async function limitPeopleSearch(
     Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
     PEOPLE_SEARCH_MAX_RESULTS,
   );
-  if (room === undefined || !roleId) return { ...args, numResults: wanted };
+  if (room === undefined || !roleId) return plain ? args : { ...args, numResults: wanted };
   const { granted, entry } = takePeople(roleId, room, wanted, true);
+  // Its people reach Results only when save_search saves them, so its share stays held until then.
+  if (entry && plain && actor.runId) entry.untilSavedBy = actor.runId;
   if (granted <= 0) throw new IsolationError(room > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
   const limited = { ...args, numResults: granted };
   if (entry) reservationOf.set(limited, { roleId, entry });
@@ -510,7 +514,7 @@ export async function limitPeopleSearch(
 const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
 /** An agent run searches longer; it holds its people until it finishes or this runs out. */
 const AGENT_RUN_HOLD_MS = 10 * 60 * 1000;
-type PeopleReservation = { people: number; until: number };
+type PeopleReservation = { people: number; until: number; untilSavedBy?: string };
 type HeldPeople = { roleId: string; entry: PeopleReservation };
 const peopleReserved = new Map<string, PeopleReservation[]>();
 const reservationOf = new WeakMap<object, HeldPeople>();
@@ -570,9 +574,19 @@ export function settlePeopleSearch(
   // A failed read of a run says nothing about the run itself.
   if (typeof named === "string" && outcome === "failed") return;
   if (typeof named === "string") heldByAgentRun.delete(named);
+  if (outcome === "done" && held.entry.untilSavedBy) return;
   const left = (peopleReserved.get(held.roleId) ?? []).filter((entry) => entry !== held.entry);
   if (left.length) peopleReserved.set(held.roleId, left);
   else peopleReserved.delete(held.roleId);
+}
+
+/** save_search saved this run's plain web searches: the people they held are in Results now. */
+export function releasePeopleSavedBy(runId: string): void {
+  for (const [roleId, entries] of peopleReserved) {
+    const left = entries.filter((entry) => entry.untilSavedBy !== runId);
+    if (left.length) peopleReserved.set(roleId, left);
+    else peopleReserved.delete(roleId);
+  }
 }
 
 /** Most saved people sent as one agent run's exclusion list. */

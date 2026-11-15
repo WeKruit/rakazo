@@ -15,6 +15,7 @@ import {
   prepareAgentRun,
   projectRecruitingCandidateReport,
   recordAgentRunCost,
+  releasePeopleSavedBy,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   savedContactLookups,
@@ -343,6 +344,28 @@ describe("people-search agent runs", () => {
     await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
       query: "Find 10 more",
     });
+  });
+
+  it("counts the plain web search's people until save_search saves them", async () => {
+    // Staging acd31504: five plain web searches of ten for "最多20个", then save_search kept 30.
+    const db = fixture("role-plain");
+    db.message.findMany.mockResolvedValue([
+      { createdAt: new Date(), blocks: [{ kind: "text", text: "Senior SRE，Austin。最多20个" }] },
+    ]);
+    db.recruitingCandidate.count.mockResolvedValue(0);
+    const plain = () =>
+      limitPeopleSearch(db as never, actor, server, "web_search_exa", {
+        query: "Senior SRE Austin",
+        numResults: 10,
+      });
+    const first = [await plain(), await plain()];
+    expect(first.map((args) => args.numResults)).toEqual([10, 10]);
+    // Finished, but its people are not in Results until save_search runs.
+    for (const args of first) settlePeopleSearch(args, "done");
+    await expect(plain()).rejects.toThrow(/already running/);
+    releasePeopleSavedBy(actor.runId);
+    db.recruitingCandidate.count.mockResolvedValue(13);
+    await expect(plain()).resolves.toMatchObject({ numResults: 7 });
   });
 
   it("grades given people with the grade format and leaves them in", async () => {
