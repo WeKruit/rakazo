@@ -30,6 +30,8 @@ export const GRADE_IN_FLIGHT = 4;
 const IN_FLIGHT_MS = 2 * 60 * 60_000;
 /** After a grading request that never started research, the next batch waits this long. */
 const NOT_STARTED_HOLD_MS = 30 * 60_000;
+/** Recent grading requests in a row that ended unsaved, after which grading stops retrying. */
+const GRADE_FAILURES_STOP = 4;
 const RESEARCH_MCP = "https://api.autumn.ai/mcp";
 const PEOPLE_SEARCH_MCP = "https://mcp.exa.ai/";
 const RESEARCH_WAKE_PREFIX = "recruiting-research-wake:";
@@ -319,20 +321,42 @@ export async function startRecruitingGrading(
       : [],
   );
   const started = (id: string) => researchByRun.has(id) || savedRuns.has(id);
+  const grader = await researchTeammate(deps.prisma, thread);
   // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
   // an hour; the wake that saves a batch's grades schedules the next one. A request that never
   // started research holds the next batch for half an hour, so a failing grading turn can't
-  // repeat every few minutes.
+  // repeat every few minutes, and this check comes back when the hold ends. The Reviewer grades
+  // within its own turn, so its first turn in a row that ended unsaved is retried at once.
+  // Staging 11-15: one unsaved Reviewer turn left all 19 people of a search unscored for good.
   const latest = requests[0];
   const latestAge = latest ? now - latest.createdAt.getTime() : Number.POSITIVE_INFINITY;
-  if (latest && !started(latest.id) && latestAge < NOT_STARTED_HOLD_MS) return skipped("hold");
+  const lastStarted = requests.findIndex(
+    (request) => started(request.id) || now - request.createdAt.getTime() >= IN_FLIGHT_MS,
+  );
+  const failedInARow = lastStarted === -1 ? requests.length : lastStarted;
+  if (failedInARow >= GRADE_FAILURES_STOP) return skipped("failing");
+  if (
+    latest &&
+    !started(latest.id) &&
+    latestAge < NOT_STARTED_HOLD_MS &&
+    !(grader?.tool === "self" && failedInARow === 1)
+  ) {
+    await deps.jobs
+      .enqueue(
+        laterGradingStart(
+          { threadId: thread.id },
+          latest.createdAt.getTime() + NOT_STARTED_HOLD_MS,
+        ),
+      )
+      .catch(() => undefined);
+    return skipped("hold");
+  }
   const recent = requests.flatMap((request) => {
     const task = researchByRun.get(request.id);
     return task && now - request.createdAt.getTime() < IN_FLIGHT_MS ? [task] : [];
   });
   // An agent run grades its batch within its own turn, so earlier research requests that are
   // still out never hold it up.
-  const grader = await researchTeammate(deps.prisma, thread);
   if (grader?.tool === "research" && recent.length >= GRADE_IN_FLIGHT) {
     const saved = await deps.prisma.run.findMany({
       where: {
@@ -682,6 +706,7 @@ async function startLeadRun(
 }
 
 export { RECRUITING_ROUND_REVIEW_NONCE_PREFIX };
+
 /** Tiers the Reviewer gives someone who misses a hard requirement or whose current work doesn't fit. */
 const NOT_FIT_TIERS = new Set(["Partial"]);
 
