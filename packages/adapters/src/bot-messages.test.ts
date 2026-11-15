@@ -843,6 +843,46 @@ describe("delegating to a role team in another conversation", () => {
     expect(returned?.text).not.toContain("Saved 20; 4 more");
   });
 
+  it("holds the result while the round it made waits for the Reviewer (staging 2026-11-15)", async () => {
+    // A team turn ended right after recording round 2; its unchecked ten went back to Kruit, which
+    // listed them, and the checked round with three people swapped never came back.
+    const harness = team({
+      roleId: "role-1",
+      later: [said("10 people this round:\n\n1. **Hima Y** · Sr Data Engineer")],
+    });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.recruitingCalibrationRound = {
+      findFirst: vi.fn(async () => ({
+        round: 2,
+        createdAt: new Date(Date.now() - 60_000),
+        approvedAt: null,
+        effectId: "effect",
+      })),
+      findMany: vi.fn(async () => []),
+    };
+    prisma.externalEffect = {
+      findUnique: vi.fn(async () => ({ run: { clientNonce: null } })),
+      findMany: vi.fn(async () => []),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    const findUnique = prisma.thread!.findUnique as ((args: unknown) => unknown) | undefined;
+    prisma.thread!.findUnique = vi.fn(async (args: unknown) =>
+      (args as { select?: { groupId?: boolean } }).select?.groupId
+        ? { spaceId: run.spaceId, userId: run.userId, botId: "bot-main", groupId: "g" }
+        : findUnique?.(args),
+    );
+    prisma.chatGroupMember = {
+      findMany: vi.fn(async () => [
+        {
+          botId: "rv",
+          bot: { name: "Reviewer", spawnKey: "recruiting:reviewer", archivedAt: null },
+        },
+      ]),
+    };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([]);
+  });
+
   it("stops at the recruiter's own next message in the role conversation", async () => {
     const harness = team({
       later: [
@@ -1261,6 +1301,50 @@ describe("teamProgress", () => {
     });
     expect(progress?.note).toContain("Round 2 is already recorded");
     expect(progress?.note).not.toContain("comes back here when it is picked");
+  });
+
+  it("says a recorded round still waiting for the Reviewer is being checked (staging 2026-11-15)", async () => {
+    // Told "Round 2 is already recorded and shown in the role's chat", Kruit sent the recruiter to
+    // the role while round 2 was still held for the Reviewer and nothing was shown anywhere.
+    const startedAt = new Date(Date.now() - 3 * 60_000);
+    const prisma = {
+      run: {
+        findFirst: vi.fn(async () => ({ createdAt: startedAt, startedAt, bot: { name: "Lead" } })),
+      },
+      thread: {
+        findUnique: vi.fn(async () => ({
+          spaceId: "s",
+          userId: "u",
+          botId: "lead",
+          groupId: "g",
+        })),
+      },
+      chatGroupMember: {
+        findMany: vi.fn(async () => [
+          {
+            botId: "rv",
+            bot: { name: "Reviewer", spawnKey: "recruiting:reviewer", archivedAt: null },
+          },
+        ]),
+      },
+      externalEffect: { findUnique: vi.fn(async () => ({ run: { clientNonce: null } })) },
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => [{ candidateKey: "a" }]) },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({
+          round: 2,
+          createdAt: new Date(Date.now() - 60_000),
+          approvedAt: null,
+          effectId: "effect",
+        })),
+      },
+    } as unknown as PrismaClient;
+    const progress = await teamProgress(prisma, {
+      threadId: "role-thread",
+      returnThreadId: "global",
+      roleId: "role",
+    });
+    expect(progress?.note).toContain("being checked");
+    expect(progress?.note).not.toContain("shown in the role's chat");
   });
 
   it("counts a team turn requeued after a follow-up as still working (staging 2026-11-15)", async () => {

@@ -21,6 +21,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
+import { roundAwaitingReview } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
 import { recruitingRoundListText } from "./turn-end-guard.js";
@@ -518,6 +519,14 @@ export async function teamProgress(
           .then(() => roundListedNotRecorded(prisma, { roleId, after: since.toISOString() }))
           .catch(() => null)
       : null;
+  // Staging 11-15: told round 2 was "already shown in the role's chat" while the Reviewer still
+  // held it, Kruit sent the recruiter to the role, where nothing was shown yet.
+  const held =
+    roleId && recorded
+      ? (await roundAwaitingReview(prisma, { threadId: input.threadId, roleId }).catch(
+          () => null,
+        )) === recorded.round
+      : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"}`;
@@ -529,9 +538,11 @@ export async function teamProgress(
     // count; the people found so far can be listed, marked as not yet reviewed.
     note: listed
       ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
-      : recorded
-        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-        : `${working.bot.name} has been working on the recruiter's request for ${started}${peopleFound ? ` and has found ${found} so far` : " and is searching now"}; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.`,
+      : recorded && held
+        ? `Round ${recorded.round} is picked and being checked by the Reviewer; it is shown here once, already checked (${started} on this request, ${found} found). Never list, name or count its people before it comes, never send the recruiter to another chat, and say in one line that the checked round is on its way.`
+        : recorded
+          ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+          : `${working.bot.name} has been working on the recruiter's request for ${started}${peopleFound ? ` and has found ${found} so far` : " and is searching now"}; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.`,
   };
 }
 
@@ -674,6 +685,16 @@ export async function returnDelegatedTeamOutcome(
     (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
   )
     return;
+  // Staging 11-15: a team turn ended right after recording round 2, its unchecked ten went back
+  // and were listed, and the checked round never followed. The Reviewer's turn returns it.
+  if (
+    thread.activeRecruitingRoleId &&
+    (await roundAwaitingReview(deps.prisma, {
+      threadId: run.threadId,
+      roleId: thread.activeRecruitingRoleId,
+    }).catch(() => null)) !== null
+  )
+    return;
   // The team's replies since the request, up to the recruiter's next own message there.
   const later = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, seq: { gt: delegated.seq } },
@@ -743,12 +764,16 @@ async function savedForRequest(
 ) {
   const [keys, rounds] = await Promise.all([
     listRecruitingPeopleFoundSince(prisma, input),
+    // A checked round replaces its held record in place and keeps the older time, so the
+    // request's round is found by its people, not by when it was first recorded.
     prisma.recruitingCalibrationRound.findMany({
-      where: { roleId: input.roleId, createdAt: { gte: input.since } },
+      where: { roleId: input.roleId },
       select: { round: true, candidateKeys: true },
     }),
   ]);
-  if (rounds.some((round) => round.round > 1)) return "";
+  const found = new Set(keys);
+  if (rounds.some((round) => round.round > 1 && round.candidateKeys.some((key) => found.has(key))))
+    return "";
   const inRound = new Set(rounds.flatMap((round) => round.candidateKeys));
   const rest = keys.filter((key) => !inRound.has(key));
   if (!rest.length) return "";
