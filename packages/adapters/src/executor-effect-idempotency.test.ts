@@ -6512,6 +6512,54 @@ describe("native recruiting assessment effect delivery", () => {
     ]);
   });
 
+  // Gate 14d33ed1, jd-upload-pdf: a one-page JD named no title of its own, so no role was saved
+  // and the team's searches had no role to be saved to.
+  it("saves a short attached JD under the role chat's name", async () => {
+    const f = fixture("short-attached-jd-role");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    Object.assign(f.thread, { groupId: "role-abc" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({
+          id: "role-abc",
+          name: "Staff Machine Learning Engineer",
+          members: [],
+        })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "short-attached-jd-role",
+        blocks: [
+          { kind: "text", text: "这是一个新的岗位，我们来找一下候选人" },
+          {
+            kind: "file",
+            artifactId: "jd-file",
+            name: "JD - Staff ML Engineer.pdf",
+            mimeType: "application/pdf",
+            size: 883,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({
+      text: "Staff ML Engineer, Austin TX onsite. 8+ years ML, PyTorch, fraud detection.",
+    } as never);
+    f.setCalls([]);
+    await f.run();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      operation: "create",
+      title: "Staff Machine Learning Engineer",
+    });
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("fraud detection");
+  });
+
   it("reads a JD attached in Kruit's conversation once, before the model's first step", async () => {
     const f = fixture("kruit-attached-jd");
     vi.mocked(executeRecruitingRoleTool).mockClear();

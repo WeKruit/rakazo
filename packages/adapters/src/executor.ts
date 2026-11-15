@@ -1438,6 +1438,10 @@ export const questionAlreadyWaiting = (question: string) =>
 export const globalAskBeforeRole = (latest: string) =>
   `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team takes it from there in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
 
+/** Model-facing: a research save the server refused, never a reason to ask for the JD again. */
+export const RESEARCH_SAVE_REFUSED =
+  "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
+
 /** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
 const GLOBAL_OPEN_ROLE_FIRST =
   "Not asked: the recruiter brought a new role (a JD file or a role they described). Call start_role now with a short title; its team searches from the JD as written and asks any open fact beside the first ten, so nothing is asked here.";
@@ -13100,10 +13104,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });
-              if (error instanceof IsolationError)
-                return finish({
-                  error: "Recruiting research or source is unavailable",
+              // Gate 14d33ed1, jd-upload-pdf: "source is unavailable" read as the JD file being
+              // unreadable, and the team asked for the JD again though it had read it. Say what
+              // failed, and log where, so the cause is found instead of guessed.
+              if (error instanceof IsolationError) {
+                getLogger().warn("recruiting.research.rejected", {
+                  runId,
+                  operation: researchInput.data.operation,
+                  message: error.message,
+                  at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
+                return finish({ error: RESEARCH_SAVE_REFUSED });
+              }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (error instanceof Error && error.name === "ZodError")
@@ -15799,8 +15811,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
               : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)}`;
           };
-          if (request) {
-            // A role Kruit opened (start_role) is already named after it: keep that title.
+          // A role Kruit opened (start_role) is already named after it: keep that title.
+          const roleChatName = async () => {
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
               ? (
                   await deps.prisma.chatGroup.findUnique({
@@ -15809,8 +15821,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   })
                 )?.name.trim()
               : undefined;
-            const title =
-              named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : requestTitle(request);
+            return named && named !== NEW_ROLE_TITLE ? named.slice(0, 120) : undefined;
+          };
+          if (request) {
+            const named = await roleChatName();
+            const title = named ?? requestTitle(request);
             // A greeting or a question is not a role: the model saves one only once the recruiter
             // has described it, so no empty role appears and no search runs for it.
             if (!title) return undefined;
@@ -15825,9 +15840,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (file) {
               const read = await readAttachedFile(file);
               // Only a file that reads as a JD; a candidate list or other file stays with the model.
+              // Gate 14d33ed1: a one-page PDF JD was too short to name its own title, so no role
+              // was saved and the searches had nowhere to land; the role chat's name stands in.
               const title =
                 typeof read?.text === "string" && !/csv|sheet|excel/i.test(file.mimeType)
-                  ? pastedJobTitle(read.text)
+                  ? (pastedJobTitle(read.text) ?? (read.text.trim() ? await roleChatName() : null))
                   : null;
               if (!title || typeof read.text !== "string") return undefined;
               filesInNotes.add(file.artifactId);
