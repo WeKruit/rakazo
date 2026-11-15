@@ -319,8 +319,15 @@ async function runWithModel(
                     },
                     { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
                   ]
-                : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
-                  ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
+                : options.teammateResult && args.take === 12
+                  ? [
+                      {
+                        role: "bot",
+                        botId: "bot-main",
+                        blocks: [{ kind: "text", text: options.teammateResult }],
+                      },
+                      { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                    ]
                   : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
                     ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
                     : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
@@ -1065,6 +1072,20 @@ describe("handed-in stage", () => {
       finalText: "Here is the updated template, signed Alex Morgan.",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
+  });
+
+  // Gate 0f20231b, mobile-first-look: the teammate said where Contacts is, then Main said it
+  // again in other words.
+  it("posts nothing after a finished teammate already answered the message", async () => {
+    const report = handoff("bot-1");
+    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: report,
+      teammateResult: "可以在手机上打开工作区，点「候选人」查看候选人和联系信息。",
+      finalText: "手机上打开工作区，进入「候选人」查看。具体按钮位置我无法从这里确认。",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("按钮位置");
   });
 
   // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported
