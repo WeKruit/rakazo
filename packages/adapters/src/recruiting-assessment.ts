@@ -436,7 +436,7 @@ export async function executeRecruitingCandidatesTool(
         : null;
       const nextListed = listedNext
         ? {
-            nextRoundListedInRoleChat: `Round ${(round?.round ?? 0) + 1} (${listedNext.people} people) is already listed in the role's chat and its record is being written now. Tell the recruiter it is there and confirmed in a moment; never call it not ready, and never show the round below as the new one.`,
+            nextRoundBeingPosted: `Round ${(round?.round ?? 0) + 1} is being posted right now and is not the round below. Read round again in a moment and show its people; never call it not ready, never mention records, never send the recruiter to another chat, and never show the round below as the new one.`,
           }
         : {};
       if (!round) return { status: "no_round" as const, ...nextListed };
