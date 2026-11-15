@@ -6197,6 +6197,54 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(first)).toContain("Not shown yet");
   });
 
+  // Gate f25185df, one-off-email: the turn taking a teammate's report paused on a connect card,
+  // and its answers to 「草稿还在吗」 were dropped as a quiet report's narration.
+  it("shows the answer to a message typed into a turn taking a teammate's report", async () => {
+    const f = fixture("quiet-report-steered");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "report-1" });
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "report-1",
+        seq: 1,
+        role: "bot",
+        botId: "bot-2",
+        runId: "run-2",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: "bot-2",
+            toBotId: "bot-1",
+            report: "completed",
+            text: "Finished the stage you handed me.",
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-4",
+        messageId: "message-4",
+        text: "草稿还在吗",
+        blocks: [{ kind: "text", text: "草稿还在吗" }],
+      },
+    ]);
+    const executionId = JSON.stringify(["pi-tool", "main", "search"]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.claimSteering!([]);
+      yield { type: "text" as const, text: "草稿还在上面，点连接 Gmail 就能发。" };
+      yield { type: "tool" as const, name: "web_search", args: { query: "x" }, executionId };
+      yield { type: "done" as const, text: "" };
+    });
+    await f.run();
+    expect(JSON.stringify(f.published)).toContain("草稿还在上面");
+  });
+
   async function firstMessageRole(groupId: string, groupName: string | null) {
     const f = fixture(`first-message-${groupId}`);
     vi.mocked(executeRecruitingRoleTool).mockClear();

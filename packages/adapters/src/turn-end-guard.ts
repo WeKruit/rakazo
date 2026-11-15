@@ -25,6 +25,7 @@ import {
   draftVariables,
   droppedDay,
   questionCard,
+  repastedDraft,
   retryReason,
   sequenceForOneEmail,
   teamSignedDraft,
@@ -788,15 +789,40 @@ export async function planDeclineRetry(
             .join("\n"),
         ),
       ));
+  // An email the conversation already shows is pointed to, not pasted again.
+  const repasted = async () =>
+    repastedDraft(
+      input.reply,
+      (
+        await deps.prisma.message.findMany({
+          // This turn's own reply may already sit in its line; only earlier turns count.
+          where: {
+            threadId: input.run.threadId,
+            role: "bot",
+            ...(input.since ? { NOT: { runId: input.since.runId } } : {}),
+          },
+          orderBy: { seq: "desc" },
+          take: 6,
+          select: { blocks: true },
+        })
+      ).map((message) =>
+        (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+          .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+          .join("\n"),
+      ),
+      asked,
+    );
   const variables = template
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??
       templateBlanks(input.reply) ??
       teamSignedDraft(input.reply) ??
-      droppedDay(input.reply, asked))
+      droppedDay(input.reply, asked) ??
+      (await repasted()))
     : (draftVariables(input.reply) ??
       teamSignedDraft(input.reply) ??
-      droppedDay(input.reply, asked));
+      droppedDay(input.reply, asked) ??
+      (await repasted()));
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
   const reason = !input.request.trim()

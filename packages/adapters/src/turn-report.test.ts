@@ -15,6 +15,7 @@ import {
   turnReportText,
   turnWork,
   droppedDay,
+  repastedDraft,
   quotesMessage,
 } from "./turn-report.js";
 
@@ -702,6 +703,26 @@ describe("droppedDay", () => {
     expect(droppedDay(draft("It is remote every Friday."), "邮件里加每周五远程")).toBeUndefined();
     expect(droppedDay(draft("It is on site five days a week."), "每周五天坐班")).toBeUndefined();
     expect(droppedDay("好的，已记下每周五远程。", "每周五远程")).toBeUndefined();
+  });
+});
+
+// Gate f25185df, change-mind-mid-run: 「一句话说下改了啥，最终版是哪封」 got the line and the whole
+// email pasted again.
+describe("repastedDraft", () => {
+  const email =
+    "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\n• Working remotely every Friday\n\nBest,\nAlex";
+  it("retries a reply that pastes an email already shown", () => {
+    expect(
+      repastedDraft(
+        `改为 base 70–90万，加入每周五远程；最终版如下：\n\n${email.replace("•", "-")}`,
+        [`${email}\n\nIf you'd rather not hear from me, just reply.`],
+        "一句话说下改了啥，最终版是哪封",
+      ),
+    ).toMatchObject({ note: expect.stringContaining("already shown") });
+  });
+  it("keeps a changed email, and one the recruiter asked to see again", () => {
+    expect(repastedDraft(email.replace("Friday", "Monday"), [email], "改成周一")).toBeUndefined();
+    expect(repastedDraft(email, [email], "把完整版再发一遍")).toBeUndefined();
   });
 });
 

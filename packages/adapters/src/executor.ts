@@ -5585,7 +5585,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           peerMessage?.repliesToRequest,
         );
         // Answering a teammate's mid-stage check-in stays quiet unless the user needs to know.
-        const quietRun =
+        let quietRun =
           runAllowsSilentEmpty(run.trigger) ||
           isQuietStageReport(
             run.trigger,
@@ -5593,7 +5593,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks,
             bot.id,
           );
-        const allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
+        let allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
         // Someone waits on this turn: its consequential work ends with a visible report.
         const turnReport = new TurnReportLedger(
           !quietRun && !allowSilentPeerMessage && !isBackgroundRunTrigger(run.trigger),
@@ -17196,7 +17196,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                         // A new message from the person is this turn's to answer, whoever had the
                         // request before it (gate 493e9f2e: its reply was dropped as handed off).
-                        if (freshHumanSteering && !freshHumanSteering.internal) handedOff = false;
+                        if (freshHumanSteering && !freshHumanSteering.internal) {
+                          handedOff = false;
+                          // Nor is a teammate's report quiet once the person writes into it (gate
+                          // f25185df: its answers to 「草稿还在吗」 were dropped).
+                          if (quietRun) {
+                            quietRun = false;
+                            allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun;
+                          }
+                        }
                         // Replies follow the language of the recruiter's newest message, also when
                         // it arrives while the turn runs (an English JD, then 「远程也可以」).
                         const steeringLanguageNote = (text: string) => {
