@@ -5213,7 +5213,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !pinError &&
           runModelProvider &&
           runModelId &&
-          (run.trigger === "user" || nativeSources?.currentAnswer) &&
+          // Gate 0f20231b: a run paused on a card resumes for each new message, and its first
+          // line for the original request went out again at every resume.
+          ((run.trigger === "user" && !runTiming.resumedAt) || nativeSources?.currentAnswer) &&
           quickReplyText.trim()
         )
           // A card answer gets the fixed line at once; only a new request gets a written one.
@@ -7394,28 +7396,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return false;
           }
         };
-        /** The result a finished teammate posted just before its report: what the report points to. */
-        const handbackResultText = async () => {
-          if (!handback) return undefined;
+        /**
+         * The finished teammate already answered the recruiter's latest message: its result is
+         * shown above its report, so this bot's own text would be a second answer. Gate 0f20231b,
+         * mobile-first-look: the teammate said where Contacts is, then Main said it again.
+         * A question for the recruiter still goes out.
+         */
+        const handbackAnswered = async (reply: string) => {
+          if (!handback || /[?？]\s*$/.test(reply)) return false;
           try {
-            const rows = await deps.prisma.message.findMany({
-              where: { threadId: thread.id, botId: handback.fromBotId, role: "bot" },
+            const recent = await deps.prisma.message.findMany({
+              where: { threadId: thread.id },
               orderBy: { seq: "desc" },
-              take: 4,
-              select: { blocks: true },
+              take: 12,
+              select: { role: true, botId: true, blocks: true, clientNonce: true },
             });
-            for (const row of rows) {
-              const text = (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
-                .flatMap((block) =>
-                  block.kind === "text" && block.text.trim() ? [block.text] : [],
+            for (const message of recent) {
+              if (message.role === "user" && !message.clientNonce?.startsWith("autocontinue:"))
+                return false;
+              if (
+                message.botId === handback.fromBotId &&
+                message.role === "bot" &&
+                (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
+                  (block) => block.kind === "text" && block.text.trim().length > 0,
                 )
-                .join("\n");
-              if (text) return text;
+              )
+                return true;
             }
           } catch {
-            return undefined;
+            return false;
           }
-          return undefined;
+          return false;
         };
         const lastOwnReplyText = async () => {
           try {
@@ -17851,7 +17862,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // went on in the background may have sent that update before it resumed, so the
           // run's last saved message counts too.
           // A teammate's report relayed after this bot already said the same adds nothing either,
-          // and neither does repeating the result a finished teammate just posted.
+          // and neither does a second answer after a finished teammate's result.
           if (
             blocks.some((block) => block.kind === "text") &&
             blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
@@ -17859,7 +17870,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
               : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
                 restatesUpdate(text, await lastRunMessageText()) ||
-                restatesUpdate(text, await handbackResultText()) ||
+                (await handbackAnswered(text)) ||
                 (await handbackSuperseded()))
           ) {
             text = "";

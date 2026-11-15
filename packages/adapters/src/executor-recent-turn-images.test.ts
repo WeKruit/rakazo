@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** The run already started once and is resuming, as a run paused on a card does. */
+    resumed?: boolean;
     /** A teammate already answered the recruiter's latest message with a line. */
     replyAfterTurn?: boolean;
     /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
@@ -174,6 +176,7 @@ async function runWithModel(
     sourceMessageId: options.sourceMessage?.id ?? null,
     leaseFence: 0,
     createdAt: new Date(),
+    ...(options.resumed ? { startedAt: new Date(0) } : {}),
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
   let request: AgentRunRequest | undefined;
@@ -230,7 +233,8 @@ async function runWithModel(
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.ackFromEndedRun && args?.where?.id === "run-0" ? { status: "completed" } : run,
       ),
-      findUniqueOrThrow: vi.fn(async () => run),
+      // A fresh row each read, as the database returns.
+      findUniqueOrThrow: vi.fn(async () => ({ ...run })),
       count: vi.fn(async () => 0),
       // The running run, as the unread-message check reads it.
       findFirst: vi.fn(async () =>
@@ -319,8 +323,15 @@ async function runWithModel(
                     },
                     { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
                   ]
-                : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
-                  ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
+                : options.teammateResult && args.take === 12
+                  ? [
+                      {
+                        role: "bot",
+                        botId: "bot-main",
+                        blocks: [{ kind: "text", text: options.teammateResult }],
+                      },
+                      { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                    ]
                   : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
                     ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
                     : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
@@ -627,6 +638,17 @@ describe("quick reply", () => {
       ([call]) => call.runId === "run-1:quick-reply",
     );
     expect(quickIndex).toBeLessThan(main);
+  });
+
+  // Gate 0f20231b, one-off-email: a run paused on the Connect card resumed for each new message
+  // and posted its first line for 「发吧」 again every time.
+  it("posts no first line again when a paused run resumes", async () => {
+    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "On it.",
+      quickReplies: true,
+      resumed: true,
+    });
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply")).toBe(false);
   });
 
   // Simulated 11-14: every turn read as a first line and then an answer repeating it. The
@@ -1065,6 +1087,20 @@ describe("handed-in stage", () => {
       finalText: "Here is the updated template, signed Alex Morgan.",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
+  });
+
+  // Gate 0f20231b, mobile-first-look: the teammate said where Contacts is, then Main said it
+  // again in other words.
+  it("posts nothing after a finished teammate already answered the message", async () => {
+    const report = handoff("bot-1");
+    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: report,
+      teammateResult: "可以在手机上打开工作区，点「候选人」查看候选人和联系信息。",
+      finalText: "手机上打开工作区，进入「候选人」查看。具体按钮位置我无法从这里确认。",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("按钮位置");
   });
 
   // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported
@@ -1582,7 +1618,7 @@ describe("streaming progress is transient", () => {
           summary: "Reviewing candidates",
           at: "2026-10-23T00:00:00.000Z",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     );
@@ -1611,7 +1647,7 @@ describe("streaming progress is transient", () => {
           text: "Looking",
           streaming: true,
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
       expect.objectContaining({
@@ -1621,7 +1657,7 @@ describe("streaming progress is transient", () => {
           activity: true,
           phase: "compacting",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     ]);
