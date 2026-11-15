@@ -406,7 +406,9 @@ async function runWithModel(
           ? { createdAt: new Date(0) }
           : options.newerBrief && args?.where?.id === options.sourceMessage?.id
             ? { seq: options.sourceMessage?.seq }
-            : null,
+            : args?.where?.id === "published-final"
+              ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
+              : null,
       ),
       count: vi.fn(async () => 0),
       findFirst: vi.fn(
@@ -432,6 +434,7 @@ async function runWithModel(
                   : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
+      delete: vi.fn(async () => ({})),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: object }) => ({
         id: where.id,
         ...data,
@@ -521,6 +524,7 @@ async function runWithModel(
     append: vi.fn(async () => undefined),
     publishTransient: vi.fn(async () => undefined),
     notify: vi.fn(async () => undefined),
+    pauseRunForInput: vi.fn(async () => true),
     finalizeRun,
   };
   lastExecutorEvents = events;
@@ -876,6 +880,74 @@ describe("quick reply", () => {
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  // Gate 960ca37a: 「草稿还在吗」 got 「收到，马上处理。」 and a Connect card: the answer written
+  // before the card was dropped as a progress note, three times over.
+  it("keeps the answer written just before a connect card", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "收到，马上处理。",
+      currentText: "草稿还在吗",
+      finalText: "",
+      quickReplies: true,
+      recruitingRoleId: "role-1",
+      holdMain,
+      events: [
+        { type: "text", text: "还没发出，草稿还在上面；点下面的 Connect Gmail 就行。" },
+        { type: "tool", name: "request_connection", args: {}, executionId: "c1" },
+      ],
+    });
+    await vi.waitFor(
+      () => expect(lastPrisma?.message.create.mock.calls.length).toBeGreaterThan(0),
+      {
+        timeout: 6_000,
+      },
+    );
+    release();
+    const { prisma } = await pending;
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [{ kind: "text", text: expect.stringContaining("草稿还在上面") }],
+        }),
+      }),
+    );
+  });
+
+  // Gate 960ca37a: 「先发我职位描述…」 as the first line, then a card asking the same thing.
+  it("lets a question card take the first line's place", async () => {
+    let release!: () => void;
+    const holdMain = new Promise<void>((done) => {
+      release = done;
+    });
+    const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      quickText: "先发我职位描述，我就能开始帮你找人。",
+      currentText: "那我要先做啥 才能找到人",
+      finalText: "",
+      quickReplies: true,
+      recruitingRoleId: "role-1",
+      holdMain,
+      events: [
+        {
+          type: "ask",
+          text: "先把职位描述发来，还是给我职位名称和地点？",
+          actions: [{ id: "jd", label: "发职位描述" }],
+        } as never,
+      ],
+    });
+    await vi.waitFor(
+      () => expect(lastPrisma?.message.create.mock.calls.length).toBeGreaterThan(0),
+      {
+        timeout: 6_000,
+      },
+    );
+    release();
+    const { prisma } = await pending;
+    expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "published-final" } });
   });
 
   // Gate 5fed6e53: "你好" got a question as its first line, which is dropped, and nothing
