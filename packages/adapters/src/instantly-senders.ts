@@ -863,3 +863,56 @@ async function refreshMailbox(rest: InstantlyRest, email: string, displayName: s
   }
   return { ...state, displayName };
 }
+
+/** What a campaign's mailboxes have left of their daily sending limits on the provider's day. */
+export type SendingToday = { limit: number; sent: number; left: number; resetsAt: string };
+
+/**
+ * The provider stops a mailbox at its daily limit and counts the day in UTC, so people queued
+ * after it is used up wait for the next day however the campaign is set. Null when it cannot tell.
+ */
+export async function sendingToday(
+  rest: InstantlyRest,
+  mailboxes: unknown,
+  now = new Date(),
+): Promise<SendingToday | null> {
+  const wanted = new Set(
+    (Array.isArray(mailboxes) ? mailboxes : []).flatMap((email) =>
+      typeof email === "string" ? [email.toLowerCase()] : [],
+    ),
+  );
+  if (!wanted.size) return null;
+  const day = now.toISOString().slice(0, 10);
+  const listed = (value: Record<string, unknown>) =>
+    Array.isArray(value.items) ? (value.items as Record<string, unknown>[]) : [];
+  try {
+    const [accounts, daily] = await Promise.all([
+      rest("GET", "/accounts?limit=100"),
+      rest("GET", `/accounts/analytics/daily?start_date=${day}&end_date=${day}`),
+    ]);
+    let limit = 0;
+    const found = new Set<string>();
+    for (const account of listed(accounts)) {
+      const email = typeof account.email === "string" ? account.email.toLowerCase() : "";
+      if (!wanted.has(email)) continue;
+      if (typeof account.daily_limit !== "number" || account.daily_limit <= 0) return null;
+      limit += account.daily_limit;
+      found.add(email);
+    }
+    if (found.size !== wanted.size) return null;
+    let sent = 0;
+    for (const row of listed(daily))
+      if (
+        row.date === day &&
+        typeof row.email_account === "string" &&
+        wanted.has(row.email_account.toLowerCase())
+      )
+        sent += Number(row.sent) || 0;
+    const next = new Date(`${day}T00:00:00.000Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    return { limit, sent, left: Math.max(0, limit - sent), resetsAt: next.toISOString() };
+  } catch {
+    // Knowing the limit improves the estimate; it never holds a send back.
+    return null;
+  }
+}

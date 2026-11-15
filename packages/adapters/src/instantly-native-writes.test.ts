@@ -313,6 +313,61 @@ describe("native campaign analytics", () => {
   });
 });
 
+it("says queued people wait for the mailbox's daily limit once it is used up today", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2030-01-01T03:40:00.000Z"));
+  const id = "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a70";
+  try {
+    const rest = vi.fn(async (_method: string, path: string) => {
+      if (path === `/campaigns/${id}`)
+        return {
+          id,
+          status: 1,
+          email_gap: 1,
+          email_list: ["sender@example.test"],
+          campaign_schedule: {
+            schedules: [
+              {
+                name: "Any time",
+                timing: { from: "00:00", to: "23:59" },
+                days: { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true },
+                timezone: "America/Chicago",
+              },
+            ],
+          },
+        };
+      if (path === "/accounts?limit=100")
+        return { items: [{ email: "sender@example.test", daily_limit: 30 }] };
+      if (path.startsWith("/accounts/analytics/daily"))
+        return { items: [{ date: "2030-01-01", email_account: "sender@example.test", sent: 30 }] };
+      return {
+        items: [
+          { email: "a@example.test", status: 1, timestamp_created: "2030-01-01T02:32:00.000Z" },
+          { email: "b@example.test", status: 1, timestamp_created: "2030-01-01T02:32:00.000Z" },
+        ],
+      };
+    });
+    const result = (await runInstantlyWrite(
+      {} as never,
+      rest,
+      context,
+      "server",
+      "native_instantly_get_campaign",
+      { campaign_id: id },
+    )) as Record<string, unknown>;
+    expect(result.sendingToday).toEqual({
+      limit: 30,
+      sent: 30,
+      left: 0,
+      resetsAt: "2030-01-02T00:00:00.000Z",
+    });
+    expect(String(result.next)).toContain("daily limit");
+    expect(String(result.next)).not.toContain("at the latest");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("timestamps a campaign GET before slower lead reads finish", async () => {
   vi.useFakeTimers();
   const started = "2030-01-01T00:00:00.000Z";
@@ -347,6 +402,22 @@ describe("shared mail account isolation", () => {
     vi.fn(async (method: string, path: string) =>
       method === "POST" && path === "/campaigns" ? { id: NEW } : { ok: true, path },
     );
+
+  it("shows only this account's own mailboxes in the daily sending counts", async () => {
+    const rest = vi.fn(async () => ({
+      items: [
+        { email_account: "mine@example.test", sent: 3 },
+        { email_account: "theirs@example.test", sent: 9 },
+      ],
+    }));
+    const own = ownedInstantlyRest(rest as never, {
+      campaigns: new Set(),
+      mailboxes: new Set(["mine@example.test"]),
+    });
+    await expect(
+      own("GET", "/accounts/analytics/daily?start_date=2030-01-01&end_date=2030-01-01"),
+    ).resolves.toEqual({ items: [{ email_account: "mine@example.test", sent: 3 }] });
+  });
 
   it("reads and changes only this account's own campaigns", async () => {
     const rest = account();
