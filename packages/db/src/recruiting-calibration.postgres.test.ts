@@ -324,7 +324,15 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       })
     ).id;
     try {
+      const held = await prisma.recruitingCalibrationRound.findFirstOrThrow({
+        where: { roleId, round: 2 },
+      });
       await expect(recordRound(swapped, true)).resolves.toMatchObject({ round: 2 });
+      // Shown now: messages written while it was held come before it.
+      const checked = await prisma.recruitingCalibrationRound.findFirstOrThrow({
+        where: { roleId, round: 2 },
+      });
+      expect(checked.createdAt.getTime()).toBeGreaterThan(held.createdAt.getTime());
       // A second correction from a check is a later round: the recruiter saw the checked one.
       await savePage(["swap-2"]);
       await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).resolves.toMatchObject({
