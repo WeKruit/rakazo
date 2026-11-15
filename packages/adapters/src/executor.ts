@@ -6699,9 +6699,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
          */
         const cardTakesLinesPlace = async (fixedOnly: boolean) => {
           const lineId = quickReplyMessageId;
-          // A teammate's fixed line goes too when this bot's card answers it (gate 71a2cac2:
-          // 「好，这就处理。」 stood alone for 25 s, then the handed-in Connect card came under it).
-          if (!hideVendors || !lineId || (lineFromTeammate && !fixedOnly)) return;
+          // A teammate's fixed line goes too when this bot's card answers it (gates 71a2cac2,
+          // acd31504: 「好，这就处理。」 stood alone, then the handed-in card came under it).
+          if (!hideVendors || !lineId) return;
           const line = await deps.prisma.message.findUnique({
             where: { id: lineId },
             select: { botId: true, clientNonce: true, blocks: true },
@@ -6713,7 +6713,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (!lineFromTeammate && line.botId !== bot.id) ||
             line.clientNonce ||
             !oneLineNote(text) ||
-            (fixedOnly && !isFixedAck(text)) ||
+            ((fixedOnly || lineFromTeammate) && !isFixedAck(text)) ||
             !(await lineIsLatestReply(lineId))
           )
             return;

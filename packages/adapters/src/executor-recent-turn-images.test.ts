@@ -1296,14 +1296,24 @@ describe("handed-in stage", () => {
 
   // Gate 71a2cac2, one-off-email: after 「直接发吧」 the coordinator's 「好，这就处理。」 stood alone
   // for 25 s, and the teammate's Connect card came under it instead of in its place.
-  it("lets a handed-in connect card take the coordinator's fixed line's place", async () => {
+  // Gate acd31504: after 「发给他」 the same line stood above the teammate's question card.
+  it.each([
+    [
+      "connect card",
+      { toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]] },
+    ],
+    [
+      "question card",
+      { events: [{ type: "ask", text: "Wei Zhang 的邮箱是什么？", actions: [] } as never] },
+    ],
+  ] as const)("lets a handed-in %s take the coordinator's fixed line's place", async (_, card) => {
     const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
       sourceMessage: handoff("bot-1"),
       briefAfterLine: "好，这就处理。",
       recruitingRoleId: "role-1",
       finalText: "",
-      toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]],
+      ...(card as object),
     });
     expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
   });
