@@ -1450,6 +1450,13 @@ describe("planDeclineRetry", () => {
     ).toBe(true);
     expect(askedTemplate("후보자는 아직 없으니 {{firstName}} 자리표시자로 쓰세요")).toBe(true);
     expect(askedTemplate("採用メールのテンプレートをお願いします")).toBe(true);
+    // Gate 7b5230e4 change-mind: a first-touch email for a role title names no person, and the
+    // variables check sent the writer off to ask for candidate details.
+    expect(
+      askedTemplate("帮我写封 Staff Frontend Engineer 的首次触达邮件，React，北京，base 60-80万"),
+    ).toBe(true);
+    expect(askedTemplate("Write a first-touch email for a Senior Data Engineer, NYC")).toBe(true);
+    expect(askedTemplate("帮我给 Wei Zhang 写封邮件")).toBe(false);
   });
 
   it("keeps {{firstName}} when the recruiter edits a template they asked for (2026-11-13 staging)", async () => {

@@ -190,14 +190,17 @@ export const Transcript = memo(function Transcript({
     [messages],
   );
   // Keep the original waiting cards at hand after later group replies; render each card once.
-  const reactionView = useMemo(
-    () =>
-      projectMessageReactions([
-        ...messages.filter((message) => !answerableAskMessageIds.includes(message.id)),
-        ...messages.filter((message) => answerableAskMessageIds.includes(message.id)),
-      ]),
-    [messages, answerableAskMessageIds],
-  );
+  // A connect card stays where it was asked: it stays open while the recruiter talks past it,
+  // and moved under each later answer it read as posted again (gate df83586a).
+  const reactionView = useMemo(() => {
+    const atHand = (message: (typeof messages)[number]) =>
+      answerableAskMessageIds.includes(message.id) &&
+      !message.blocks.some((block) => block.kind === "ask" && block.connection);
+    return projectMessageReactions([
+      ...messages.filter((message) => !atHand(message)),
+      ...messages.filter(atHand),
+    ]);
+  }, [messages, answerableAskMessageIds]);
   const traceAnchors = new Map<string, string>();
   if (showToolActivity)
     for (const message of reactionView.visibleMessages) {
