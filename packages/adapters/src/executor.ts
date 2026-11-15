@@ -637,10 +637,6 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
-  hasRoundReviewer,
-  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
-  ROUND_HELD_NEXT_STEP,
-  roundHeldForReview,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
@@ -7470,14 +7466,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!thread.activeRecruitingRoleId) return undefined;
           const round = await roundRecordedThisRun();
           if (!round) return undefined;
-          // A round waiting for the Reviewer gets its card when the checked round is shown.
-          const number = (round.result as { round?: unknown } | null)?.round;
-          if (
-            typeof number === "number" &&
-            roundHeldForReview(number, run.clientNonce) &&
-            (await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
-          )
-            return undefined;
           const keys = (round.result as { candidateKeys?: unknown } | null)?.candidateKeys;
           return recruitingNextStepCard(
             turnLanguage === "zh",
@@ -8335,13 +8323,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
-          // Keeping earlier people is for the round the Reviewer checked; after feedback the next
-          // round is new people.
+          // After feedback the next round is new people, never earlier ones kept.
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
-            args.corrects === true &&
-            !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+            args.corrects === true
           )
             return {
               error:
@@ -12813,19 +12799,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const recorded = round as {
                   roleId?: unknown;
                   candidateKeys?: unknown;
-                  round?: unknown;
                 } | null;
-                // After the recruiter's feedback the Reviewer checks the round before it is shown.
-                const held =
-                  typeof recorded?.round === "number" &&
-                  roundHeldForReview(recorded.round, run.clientNonce) &&
-                  (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
-                if (held) {
-                  await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
-                    getLogger().warn("recruiting grade schedule", { error: String(error) }),
-                  );
-                  return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
-                }
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.
