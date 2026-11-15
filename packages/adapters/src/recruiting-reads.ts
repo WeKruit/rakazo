@@ -2972,8 +2972,10 @@ async function hydrateRecruitingCandidateReports(
   deps: RecruitingReadDeps,
   actor: Actor,
   roleId: string,
-  sources: Omit<RecruitingCandidateSource, "crmImports">[],
+  all: Omit<RecruitingCandidateSource, "crmImports">[],
 ) {
+  // Rows saved with their report need no page read; older rows read the saved page.
+  const sources = all.filter((source) => !source.report);
   const artifacts = new Map<string, Awaited<ReturnType<typeof readActorArtifact>>>();
   const readReport = createRecruitingCandidateReportReader(deps, actor, roleId, { artifacts });
   const byArtifact = new Map<string, typeof sources>();
