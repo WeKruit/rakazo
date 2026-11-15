@@ -78,6 +78,15 @@ export function referredRole(
       if (NEW_ROLE.test(text)) return { kind: "new", ref };
       continue;
     }
+    // A saved role's ref written as a bare number ("Senior Data Engineer 02311") names it too.
+    const byNumber = roles.filter((saved) => {
+      const own = saved.title ? roleRef(saved.title) : undefined;
+      return own && /\d{3,}/.test(own) && mentions(text, own);
+    });
+    if (byNumber.length === 1 && byNumber[0]) {
+      const own = roleRef(byNumber[0].title ?? "");
+      return { kind: "saved", role: byNumber[0], by: `ref ${own}` };
+    }
     const scored = roles
       .map((role) => {
         const words = distinctive(role.title ?? "");
