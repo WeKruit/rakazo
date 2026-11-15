@@ -111,16 +111,14 @@ export type RecruiterListItem = {
 
 /**
  * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round,
- * already listed in this reply or, for a local role, living beyond commuting distance, and, while
- * the team prepares a round, nobody seen before. `inRounds` and `farAway` count the people left
- * out because a round already showed them or they live too far.
+ * already listed in this reply or, for a local role, living beyond commuting distance. `inRounds`
+ * and `farAway` count the people left out because a round already showed them or they live too far.
  */
 export function peopleToShow<T extends RecruiterListItem>(
   items: readonly T[],
   input: {
     size: number;
     listed: ReadonlySet<string>;
-    teamWorking: boolean;
     beyond?: (location: string) => boolean;
   },
 ): { shown: T[]; inRounds: number; farAway: number } {
@@ -132,7 +130,6 @@ export function peopleToShow<T extends RecruiterListItem>(
       item.decision !== "pass" &&
       item.shownInRound === undefined &&
       !far(item) &&
-      !(input.teamWorking && item.alreadySeen) &&
       !(typeof item.candidateKey === "string" && input.listed.has(item.candidateKey)),
   );
   return {
@@ -411,8 +408,14 @@ export async function executeRecruitingCandidatesTool(
             ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
             // A later round may not show them: shown in a round or returned before the latest one.
             // Said in words, so a person only found is never called a repeat of a round.
+            // Staging 11-15: "shown in round 2" on round 2's own people read as repeats.
             ...(person?.round !== undefined
-              ? { alreadySeen: `shown in round ${person.round}` }
+              ? {
+                  alreadySeen:
+                    person.round > 1 && person.round === seen.latestRound?.round
+                      ? `in round ${person.round}, the latest round, and in no earlier round: not a repeat`
+                      : `shown in round ${person.round}`,
+                }
               : person?.seenBeforeLatestRound
                 ? {
                     alreadySeen: `found before round ${seen.latestRound?.round ?? 1} and never shown in a round: not a repeat of any round`,
