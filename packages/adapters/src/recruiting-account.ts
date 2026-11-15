@@ -302,11 +302,12 @@ export async function readRecruitingAccountView(
         return { kind: "bot", botId: bot.id, threadId: thread.id };
       };
       if (input.view === "roles") return { roleId: row.id, status: statuses.get(row.id) };
+      // Each database round trip is slow, so the workspace read starts with the check; the check's
+      // answer still comes first, so a role whose conversation moved is skipped as before.
+      const reading = getRecruitingWorkspace(deps.prisma, actor, { threadId: thread.id });
+      reading.catch(() => undefined);
       const target = await authorize();
-      timer.mark("authorizeMs");
-      const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
-        threadId: thread.id,
-      });
+      const workspace = await reading;
       timer.mark("workspaceMs");
       if (workspace?.role.id !== row.id) throw new ORPCError("NOT_FOUND");
       const bound = workspace.crmTarget?.target;
@@ -476,6 +477,7 @@ export async function readRecruitingAccountView(
               : undefined),
           deps.oauth,
           {
+            workspace,
             // The inbox shows its newest mail first and pages the rest.
             limit: input.view === "inbox" ? 50 : 200,
             ...(input.itemCursor && (input.view === "inbox" || input.view === "interview")

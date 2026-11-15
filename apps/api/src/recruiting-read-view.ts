@@ -18,11 +18,13 @@ export async function readRecruitingView(
   stillAuthorized?: () => Promise<boolean>,
 ) {
   const readWorkspace = async () => {
-    const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
-      threadId: input.threadId,
-    });
     // Combining RPCs must not lose the session recheck previously performed by each request.
-    if (stillAuthorized && !(await stillAuthorized())) throw new ORPCError("UNAUTHORIZED");
+    // Both are answered before any data read starts; they run together to save a round trip.
+    const [workspace, allowed] = await Promise.all([
+      getRecruitingWorkspace(deps.prisma, actor, { threadId: input.threadId }),
+      stillAuthorized?.() ?? true,
+    ]);
+    if (!allowed) throw new ORPCError("UNAUTHORIZED");
     return workspace;
   };
   const matches = (workspace: Awaited<ReturnType<typeof getRecruitingWorkspace>>) =>
