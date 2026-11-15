@@ -868,7 +868,8 @@ export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): strin
 }
 
 /** The reply's sentences with their end marks, in order. */
-const sentencesOf = (text: string) => text.match(/[^。！？!?\n]+(?:[。！？!?]+|\n+|$)/g) ?? [];
+const sentencesOf = (text: string) =>
+  text.match(/[^。！？!?；;\n]+(?:[。！？!?；;]+|\n+|$)/g) ?? [];
 
 /**
  * The reply without a closing line this bot already ended an earlier reply on (gate 19bf5552:
@@ -881,7 +882,12 @@ export function withoutRepeatedClosing(reply: string, earlier: readonly string[]
   if (sentences.length < 2 || !closing || /[?？]/.test(closing)) return reply;
   const said = earlier.flatMap((text) => sentencesOf(text).map((sentence) => sentence.trim()));
   if (!said.some((sentence) => sameSentence(closing, sentence))) return reply;
-  const rest = sentences.slice(0, -1).join("").trimEnd();
+  // A clause after 「；」 leaves the sentence before it to end the reply.
+  const rest = sentences
+    .slice(0, -1)
+    .join("")
+    .trimEnd()
+    .replace(/[；;]$/, "。");
   return rest.length >= 20 ? rest : reply;
 }
 
@@ -891,7 +897,8 @@ function sameSentence(a: string, b: string): boolean {
   if (x.size < 4 || y.size < 4) return false;
   let shared = 0;
   for (const word of x) if (y.has(word)) shared += 1;
-  return shared / (x.size + y.size - shared) >= 0.6;
+  // Gate 8cc8cc5b: the same invitation reworded each time (「发来」/「把…发给我」) overlaps by half.
+  return shared / (x.size + y.size - shared) >= 0.5;
 }
 
 /** The same message again, apart from spacing. */
