@@ -69,6 +69,9 @@ type HistoryMessage = {
   clientNonce?: string;
 };
 
+/** The recruiter's current message and an earlier one of theirs, when a test sets them. */
+const recruiterTexts: { current?: string; earlier?: string } = {};
+
 function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
   return [
     {
@@ -77,7 +80,7 @@ function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
       seq: 2,
       role: "user",
       runId: "run-1",
-      blocks: [{ kind: "text", text: "what was in the screenshot?" }],
+      blocks: [{ kind: "text", text: recruiterTexts.current ?? "what was in the screenshot?" }],
       replyToMessageId: null,
       replyQuote: null,
       replyTo: null,
@@ -93,6 +96,21 @@ function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
       replyQuote: null,
       replyTo: null,
     },
+    ...(recruiterTexts.earlier
+      ? [
+          {
+            id: "earlier-text",
+            threadId: "thread-1",
+            seq: 0,
+            role: "user",
+            runId: "run-0",
+            blocks: [{ kind: "text" as const, text: recruiterTexts.earlier }],
+            replyToMessageId: null,
+            replyQuote: null,
+            replyTo: null,
+          },
+        ]
+      : []),
     ...extra,
   ];
 }
@@ -135,6 +153,9 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** The recruiter's message, and an earlier one, in place of the default history. */
+    currentText?: string;
+    earlierText?: string;
     /** The run already started once and is resuming, as a run paused on a card does. */
     resumed?: boolean;
     /** A teammate already answered the recruiter's latest message with a line. */
@@ -149,6 +170,8 @@ async function runWithModel(
     newerBrief?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
     teammateResult?: string;
+    /** The coordinator's first line, then its brief handing this bot the request. */
+    briefAfterLine?: string;
     /** This bot's last text in the thread, from an earlier run, with no person writing since. */
     ownLastText?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
@@ -165,6 +188,8 @@ async function runWithModel(
   } = {},
 ) {
   claimedSteering.items = undefined;
+  recruiterTexts.current = options.currentText;
+  recruiterTexts.earlier = options.earlierText;
   const run = {
     id: "run-1",
     botId: "bot-1",
@@ -213,6 +238,26 @@ async function runWithModel(
     blocks: [{ kind: "text", text: options.endedRunLine ?? "收到，马上处理。" }],
     createdAt: new Date(),
   };
+  const coordinatorRows = options.briefAfterLine
+    ? [
+        {
+          id: "handoff-1",
+          botId: "bot-main",
+          runId: "run-0",
+          role: "bot",
+          blocks: [{ kind: "handoff", fromBotId: "bot-main", toBotId: "bot-1", text: "Answer" }],
+          createdAt: new Date(),
+        },
+        {
+          id: "line-main",
+          botId: "bot-main",
+          runId: "run-0",
+          role: "bot",
+          blocks: [{ kind: "text", text: options.briefAfterLine }],
+          createdAt: new Date(),
+        },
+      ]
+    : [];
   const hiddenRow = {
     id: "continue-0",
     runId: "run-0",
@@ -270,6 +315,7 @@ async function runWithModel(
       })),
       findMany: vi.fn(async () => []),
     },
+    chatGroup: { findMany: vi.fn(async () => []) },
     attempt: {
       create: vi.fn(async () => ({ id: "attempt-1" })),
       update: vi.fn(),
@@ -324,31 +370,36 @@ async function runWithModel(
                     .reverse(),
                   ...(options.hiddenContinuation ? [hiddenRow] : []),
                   ...(options.ackFromEndedRun ? [endedRunAck] : []),
+                  ...coordinatorRows,
                 ]
-              : options.ackFromEndedRun && args.take === 4
-                ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
-                : options.replyAfterTurn && args.take === 8 && !args.select?.runId
-                  ? [
-                      {
-                        role: "bot",
-                        blocks: [{ kind: "text", text: "I'm writing the template now." }],
-                      },
-                      { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
-                    ]
-                  : options.teammateResult && args.take === 12
+              : options.briefAfterLine && args.take === 4
+                ? coordinatorRows
+                : options.ackFromEndedRun && args.take === 4
+                  ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
+                  : options.replyAfterTurn && args.take === 8 && !args.select?.runId
                     ? [
                         {
                           role: "bot",
-                          botId: "bot-main",
-                          blocks: [{ kind: "text", text: options.teammateResult }],
+                          blocks: [{ kind: "text", text: "I'm writing the template now." }],
                         },
                         { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
                       ]
-                    : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-                      ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                      : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-                        ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                        : [],
+                    : options.teammateResult && args.take === 12
+                      ? [
+                          {
+                            role: "bot",
+                            botId: "bot-main",
+                            blocks: [{ kind: "text", text: options.teammateResult }],
+                          },
+                          { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                        ]
+                      : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                        ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                        : options.answeredElsewhere &&
+                            args.where?.role === "bot" &&
+                            !args.where.runId
+                          ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                          : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
@@ -754,14 +805,31 @@ describe("quick reply", () => {
     expect(vi.mocked(planDeclineRetry).mock.calls.at(-1)?.[1].request).toBe("连上之后草稿还在吗");
   });
 
+  // Gate 4774895e, send-at-night: the recruiter answered 「02311」 and the first line was English.
+  it("writes the first line for a bare number in the recruiter's language", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      currentText: "02311",
+      earlierText: "为啥还没发 现在就发",
+      quickText: "",
+      quickReplies: true,
+    });
+    expect(JSON.stringify(prisma.message.create.mock.calls)).toContain("收到，马上处理。");
+  });
+
   // Gate b8850911: a role link opened mid-turn came between the first line and the answer.
   it("puts the answer in place of the first line after the run's own role link", async () => {
     const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       quickText: "Remote works too.",
       finalText: "Remote works too. The role team has it.",
       quickReplies: true,
+      // Gate 4774895e, send-at-night: the run messaged the role team too, and its answer came
+      // as a second reply under 「Got it, on it.」.
       cardsAfterLine: [
         { runId: "run-1", blocks: [{ kind: "role_link", groupId: "g", title: "R" }] },
+        {
+          runId: "run-1",
+          blocks: [{ kind: "bot_message_sent", toBotId: "bot-2", toBotName: "R", text: "Status" }],
+        },
       ],
     });
     expect(prisma.message.update).toHaveBeenCalledWith(
@@ -1096,6 +1164,24 @@ describe("handed-in stage", () => {
     expect(prisma.message.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "ack-0" } }),
     );
+  });
+
+  // Gate 4774895e, first-timer-no-gmail: the coordinator's first line already answered, it handed
+  // the question on, and the teammate's answer came as a second reply.
+  it("puts a handed-in answer in place of the coordinator's line for the same message", async () => {
+    const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      briefAfterLine: "不连邮箱也不能直接给候选人发邮件。",
+      finalText: "不能。要实际发送，需要先连接发件邮箱。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "line-main" },
+        data: expect.objectContaining({ botId: "bot-1", runId: "run-1" }),
+      }),
+    );
+    expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
   });
 
   // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the

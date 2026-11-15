@@ -5150,12 +5150,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The one language every recruiter-facing line of this turn uses: the newest clear one of
         // their messages, refined once history loads and moved by a message steered in.
         let turnLanguage = recruiterLanguage([quickReplyText]);
+        // A bare number, name or card pick (「02311」) has no language of its own: the first line
+        // keeps the recruiter's (gate 4774895e: it was English in a Chinese conversation).
+        if (quickReplyText.trim() && !textLanguage(quickReplyText))
+          turnLanguage = await recruiterLanguageNow(
+            deps.prisma,
+            { spaceId: run.spaceId, userId: run.userId },
+            thread.id,
+          ).catch(() => turnLanguage);
         let quickReplySaid: string | undefined;
         // The first line stands in for the answer until it is ready: the answer then takes its
         // place in the same message, so the person reads one reply. It is posted only before the
         // answer is finished, never after it.
         let quickReplyOpen = true;
         let quickReplyMessageId: string | undefined;
+        // The reply slot is a teammate's line this bot took over: the answer becomes this bot's.
+        let lineFromTeammate = false;
         let quickReplyPosted: Promise<unknown> = Promise.resolve();
         // The records card, so the first line can already answer when the records do.
         let setQuickReplyRecords: (text: string | undefined) => void = () => {};
@@ -5501,12 +5511,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 createdAt: true,
               },
             });
+            // A teammate's brief handing this bot the request it had just put a line under: the
+            // answer takes that line's place too (gate 4774895e, first-timer-no-gmail: the line
+            // answered, and the handed-in answer came as a second reply).
+            const brief = recent.find(
+              (message) =>
+                message.id === run.sourceMessageId &&
+                (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
+                  (block) => block.kind === "handoff" && block.toBotId === bot.id && !block.report,
+                ),
+            );
             const newest = recent.find(
-              (message) => !message.clientNonce?.startsWith("autocontinue:"),
+              (message) =>
+                !message.clientNonce?.startsWith("autocontinue:") && message.id !== brief?.id,
             );
             const blocks = (Array.isArray(newest?.blocks) ? newest.blocks : []) as MessageBlock[];
             const line = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
             if (
+              brief &&
+              recent[0]?.id === brief.id &&
+              newest?.role === "bot" &&
+              newest.botId === brief.botId &&
+              newest.runId === brief.runId &&
+              line &&
+              oneLineNote(line) &&
+              !/[?？]\s*$/.test(line)
+            ) {
+              // The line's run handed off: it writes nothing more there.
+              quickReplyMessageId = newest.id;
+              lineFromTeammate = true;
+              fixedAckSent = true;
+            } else if (
               newest?.botId === bot.id &&
               newest.role === "bot" &&
               newest.runId &&
@@ -6576,8 +6611,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           lastProgressAt = Date.now();
         };
         // The run's reply so far (its first line, then the progress that replaced it) is the latest
-        // reply when only this run's own cards (a role link, its steps) came after it. Gate
-        // b8850911: a role link opened mid-turn left a line and an answer.
+        // reply when only this run's own cards (a role link, its steps, its message to a role team)
+        // came after it. Gate b8850911: a role link opened mid-turn left a line and an answer.
         const lineIsLatestReply = async (lineId: string) => {
           const recent = await deps.prisma.message.findMany({
             where: { threadId: thread.id },
@@ -6592,11 +6627,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (message) =>
                 // The server's continuation prompt is hidden: the person never sees it.
                 message.clientNonce?.startsWith("autocontinue:") ||
+                // So is the brief that handed this bot the request under a teammate's line.
+                (lineFromTeammate && message.id === run.sourceMessageId) ||
                 (message.runId === runId &&
                   message.role === "bot" &&
                   Array.isArray(message.blocks) &&
                   (message.blocks as MessageBlock[]).every(
-                    (block) => block.kind === "role_link" || block.kind === "steps",
+                    (block) =>
+                      block.kind === "role_link" ||
+                      block.kind === "steps" ||
+                      block.kind === "bot_message_sent",
                   )),
             )
           );
@@ -6607,7 +6647,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!quickReplyMessageId || !(await lineIsLatestReply(quickReplyMessageId))) return false;
           await deps.prisma.message.update({
             where: { id: quickReplyMessageId },
-            data: { blocks: blocks as Prisma.InputJsonValue, clientNonce },
+            data: {
+              blocks: blocks as Prisma.InputJsonValue,
+              clientNonce,
+              ...(lineFromTeammate ? { botId: bot.id, runId } : {}),
+            },
           });
           await deps.events.append({
             spaceId: run.spaceId,
