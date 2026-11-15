@@ -5213,7 +5213,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           !pinError &&
           runModelProvider &&
           runModelId &&
-          (run.trigger === "user" || nativeSources?.currentAnswer) &&
+          // Gate 0f20231b: a run paused on a card resumes for each new message, and its first
+          // line for the original request went out again at every resume.
+          ((run.trigger === "user" && !runTiming.resumedAt) || nativeSources?.currentAnswer) &&
           quickReplyText.trim()
         )
           // A card answer gets the fixed line at once; only a new request gets a written one.

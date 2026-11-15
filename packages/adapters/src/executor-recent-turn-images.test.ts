@@ -135,6 +135,8 @@ async function runWithModel(
     quickText?: string;
     /** Another run of this bot already answered the steered message. */
     answeredElsewhere?: boolean;
+    /** The run already started once and is resuming, as a run paused on a card does. */
+    resumed?: boolean;
     /** A teammate already answered the recruiter's latest message with a line. */
     replyAfterTurn?: boolean;
     /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
@@ -174,6 +176,7 @@ async function runWithModel(
     sourceMessageId: options.sourceMessage?.id ?? null,
     leaseFence: 0,
     createdAt: new Date(),
+    ...(options.resumed ? { startedAt: new Date(0) } : {}),
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
   let request: AgentRunRequest | undefined;
@@ -230,7 +233,8 @@ async function runWithModel(
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.ackFromEndedRun && args?.where?.id === "run-0" ? { status: "completed" } : run,
       ),
-      findUniqueOrThrow: vi.fn(async () => run),
+      // A fresh row each read, as the database returns.
+      findUniqueOrThrow: vi.fn(async () => ({ ...run })),
       count: vi.fn(async () => 0),
       // The running run, as the unread-message check reads it.
       findFirst: vi.fn(async () =>
@@ -634,6 +638,17 @@ describe("quick reply", () => {
       ([call]) => call.runId === "run-1:quick-reply",
     );
     expect(quickIndex).toBeLessThan(main);
+  });
+
+  // Gate 0f20231b, one-off-email: a run paused on the Connect card resumed for each new message
+  // and posted its first line for 「发吧」 again every time.
+  it("posts no first line again when a paused run resumes", async () => {
+    const { runtimeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      finalText: "On it.",
+      quickReplies: true,
+      resumed: true,
+    });
+    expect(runtimeRun.mock.calls.some(([call]) => call.runId === "run-1:quick-reply")).toBe(false);
   });
 
   // Simulated 11-14: every turn read as a first line and then an answer repeating it. The
@@ -1603,7 +1618,7 @@ describe("streaming progress is transient", () => {
           summary: "Reviewing candidates",
           at: "2026-10-23T00:00:00.000Z",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     );
@@ -1632,7 +1647,7 @@ describe("streaming progress is transient", () => {
           text: "Looking",
           streaming: true,
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
       expect.objectContaining({
@@ -1642,7 +1657,7 @@ describe("streaming progress is transient", () => {
           activity: true,
           phase: "compacting",
           activeSince: expect.any(String),
-          resumedAt: expect.any(String),
+          resumedAt: null,
         },
       }),
     ]);
