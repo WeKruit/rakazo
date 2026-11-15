@@ -15,6 +15,7 @@ import {
   turnReportText,
   turnWork,
   droppedDay,
+  quotesMessage,
 } from "./turn-report.js";
 
 describe("turnWork", () => {
@@ -701,5 +702,26 @@ describe("droppedDay", () => {
     expect(droppedDay(draft("It is remote every Friday."), "邮件里加每周五远程")).toBeUndefined();
     expect(droppedDay(draft("It is on site five days a week."), "每周五天坐班")).toBeUndefined();
     expect(droppedDay("好的，已记下每周五远程。", "每周五远程")).toBeUndefined();
+  });
+});
+
+// Gate 95185659: after the teammate reported, the coordinator handed it the same recruiter
+// message again, and the second answer contradicted the first.
+describe("quotesMessage", () => {
+  it("finds the recruiter's words in a brief that quotes them", () => {
+    const message = "给 Wei Zhang 写封邮件，fintech 那个职位 wei.zhang.test@example.com";
+    expect(quotesMessage(`Goal: “${message}”。Where: this shared thread`, message)).toBe(true);
+    expect(
+      quotesMessage(
+        "Goal: 更新模板，用户补充“base改70-90万 另外加一条每周五remote”。",
+        "等等 base改70-90万 另外加一条每周五remote",
+      ),
+    ).toBe(true);
+  });
+  it("does not match a brief about something else, or a message too short to tell", () => {
+    expect(
+      quotesMessage("Goal: find contacts for the ten people above", "给 Wei Zhang 写封邮件"),
+    ).toBe(false);
+    expect(quotesMessage("Goal: 好的，继续", "好")).toBe(false);
   });
 });
