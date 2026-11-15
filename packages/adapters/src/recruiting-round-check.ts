@@ -219,6 +219,61 @@ export function checkRound(input: {
 export const ROUND_REPEATS =
   "none: a recorded round never holds anyone shown in an earlier round or turned down";
 
+/** A role team's round list starts with this heading, in either language. */
+export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
+
+/**
+ * Round people this conversation listed before the round as saved, unreviewed results (a page of
+ * the pool, never a round list), so a question about repeats is answered from what was shown.
+ */
+export async function listedBeforeRound(
+  prisma: PrismaClient,
+  input: {
+    threadId: string;
+    roleId: string;
+    round: number;
+    createdAt: string;
+    candidates: ReadonlyArray<{ name: string | null; linkedinUrl: string | null }>;
+  },
+): Promise<string[]> {
+  const slugs = input.candidates.flatMap((person) => {
+    const slug = /\/in\/([^/?#\s)]+)/.exec(person.linkedinUrl ?? "")?.[1];
+    return slug && person.name ? [{ name: person.name, slug }] : [];
+  });
+  if (!slugs.length) return [];
+  const previous = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId: input.roleId, round: { lt: input.round } },
+    orderBy: { round: "desc" },
+    take: 1,
+    select: { createdAt: true },
+  });
+  const messages = await prisma.message.findMany({
+    where: {
+      threadId: input.threadId,
+      role: "bot",
+      createdAt: { gt: previous[0]?.createdAt ?? new Date(0), lt: new Date(input.createdAt) },
+    },
+    orderBy: { seq: "asc" },
+    take: 100,
+    select: { blocks: true },
+  });
+  const listed = messages
+    .flatMap((message) =>
+      Array.isArray(message.blocks)
+        ? (message.blocks as Array<{ kind?: unknown; text?: unknown }>).flatMap((block) =>
+            block.kind === "text" && typeof block.text === "string" ? [block.text] : [],
+          )
+        : [],
+    )
+    .filter((text) => !ROUND_HEADING.test(text))
+    .join("\n");
+  return slugs
+    .filter(({ slug }) =>
+      new RegExp(`/in/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(listed),
+    )
+    .map(({ name }) => name);
+}
+
 /**
  * The recruiter's own words on people and the round between the previous round and this one, so
  * the global conversation can say what changed without the role's chat in its history.

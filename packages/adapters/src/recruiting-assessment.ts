@@ -42,7 +42,7 @@ import {
   createRecruitingCandidateReportReader,
   lookedUpContactEmails,
 } from "./recruiting-research.js";
-import { feedbackBeforeRound, ROUND_REPEATS } from "./recruiting-round-check.js";
+import { feedbackBeforeRound, listedBeforeRound, ROUND_REPEATS } from "./recruiting-round-check.js";
 import {
   rememberResolvedContactEmails,
   resolveRecruitingContact,
@@ -408,12 +408,26 @@ export async function executeRecruitingCandidatesTool(
         round: round.round,
         createdAt: round.createdAt,
       }).catch(() => []);
+      // Staging 11-15: Kruit listed saved people while the round was prepared, the round then
+      // picked four of them, and Kruit called them repeats of round 1 and had them dropped.
+      const listed = await listedBeforeRound(deps.prisma, {
+        threadId: trusted.threadId,
+        roleId: roundRoleId ?? input.roleId ?? "",
+        round: round.round,
+        createdAt: round.createdAt,
+        candidates: round.candidates,
+      }).catch(() => []);
       return {
         status: "found" as const,
         round: {
           ...round,
           repeats: ROUND_REPEATS,
           ...(feedback.length ? { feedbackBeforeThisRound: feedback } : {}),
+          ...(listed.length
+            ? {
+                listedInThisChatBeforeTheRound: `${listed.join(", ")}: listed in this chat before round ${round.round} as saved, unreviewed results, never in an earlier round. Say exactly that; they are not repeats of any round.`,
+              }
+            : {}),
         },
       };
     }
