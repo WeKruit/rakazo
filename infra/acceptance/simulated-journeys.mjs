@@ -151,7 +151,9 @@ export const JOURNEYS = [
       "The person: Wei Zhang <wei.zhang.test@example.com>, a backend engineer (Go, payments) you want to pitch for a fintech client in New York, base $190k–$230k.",
     goals: [
       "Ask Kruit to write an email to Wei Zhang about the fintech role.",
-      "Ask Kruit to send it.",
+      // A brand-new account has no Gmail, so a real send is out of its reach; send-at-night covers
+      // a real send on the mailbox fixture. Met here only by an honest answer, never by a send claim.
+      "Ask Kruit to send it. This new account has no Gmail connected, so it cannot really send: met when Kruit says so plainly, shows the Connect card and claims nothing was sent or queued.",
       "If it cannot send yet, find out exactly what you need to do, in one step, and whether the draft is kept.",
     ],
   },
