@@ -196,13 +196,10 @@ export function checkRound(input: {
     const unknown = input.criteria.filter(
       (criterion) => verdictOf(key, criterion.id) === "unknown",
     );
-    // Something no pick's row shows (base pay, say) is not about the person, so it stays off
-    // each person's note.
-    const personal = unknown.filter((criterion) =>
-      input.keys.some((other) => verdictOf(other, criterion.id) !== "unknown"),
-    );
-    if (personal.length)
-      unverified[key] = personal.map((criterion) => criterion.statement).join("; ");
+    // Something no pick's row shows is still unverified for each of them; the round list says
+    // it once when every note is the same.
+    if (unknown.length)
+      unverified[key] = unknown.map((criterion) => criterion.statement).join("; ");
     const raised = unknown.filter((criterion) => criterion.added);
     if (raised.length && !input.relaxed && !input.asked.has(key))
       newlyUnknown.push(`${key} (${raised.map((criterion) => criterion.statement).join("; ")})`);
