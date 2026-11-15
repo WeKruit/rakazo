@@ -78,6 +78,7 @@ function deps(
     },
     event: { create: vi.fn().mockResolvedValue({ seq: 7 }) },
     thread: { update: vi.fn().mockResolvedValue({}) },
+    steeringMessage: { create: vi.fn().mockResolvedValue({ id: "steer-1" }) },
   };
   let transactionAttempts = 0;
   const prisma = {
@@ -543,6 +544,8 @@ describe("delegating to a role team in another conversation", () => {
       bots: mainBot,
       addressedThread: { id: "thread-role" },
       teamWorking: {
+        id: "run-team",
+        botId: "bot-sourcer",
         createdAt: new Date(Date.now() - 5 * 60_000),
         startedAt: new Date(Date.now() - 3 * 60_000),
         bot: { name: "Sourcer" },
@@ -555,6 +558,12 @@ describe("delegating to a role team in another conversation", () => {
     });
     expect(sent).toMatchObject({ ok: true });
     if (!sent.ok) throw new Error("not sent");
+    // Staging 11-15: queued behind the round, the request ran a second paid search after it.
+    expect(harness.tx.steeringMessage.create).toHaveBeenCalledWith({
+      data: { messageId: "message-1", botId: "bot-sourcer", userId: "user-1", runId: "run-team" },
+    });
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.enqueue).not.toHaveBeenCalled();
     expect(sent.note).toContain(
       "Sourcer has been working on the recruiter's request for 3 min and has found 2 people so far",
     );
