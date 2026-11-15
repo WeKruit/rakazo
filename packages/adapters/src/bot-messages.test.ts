@@ -838,6 +838,9 @@ describe("delegating to a role team in another conversation", () => {
     expect(returned?.text).toContain("2. **[Bo B](https://www.linkedin.com/in/bo)** · SRE · Visa");
     expect(returned?.text).toContain("3. **[Cy C](https://www.linkedin.com/in/cy)**");
     expect(returned?.text.split("Amy A")).toHaveLength(2);
+    // Gate 71a2cac2: Kruit squared the team's "profiles show 6+ years" with the record and
+    // contradicted it. The record is the whole answer; the team's retelling stays in its chat.
+    expect(returned?.text).not.toContain("Saved 20; 4 more");
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {
