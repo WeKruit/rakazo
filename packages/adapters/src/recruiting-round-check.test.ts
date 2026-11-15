@@ -1,5 +1,6 @@
+import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
-import { checkRound } from "./recruiting-round-check.js";
+import { checkRound, roundCriteria } from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
   // From a staging feedback round: Seattle and Spark/Kafka from the JD, then "no production
@@ -41,5 +42,66 @@ describe("checkRound", () => {
       checks: { a: { seattle: "shown", years: "unknown", "prod-stack": "shown" } },
     });
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
+  });
+});
+
+describe("roundCriteria", () => {
+  // The staging role had no criteria: its must-haves lived only in the brief, so the round check
+  // had nothing to hold the picks to.
+  const field = (key: string, value: string, origin = "user_instruction") => ({
+    key,
+    value,
+    origin,
+    state: "known",
+  });
+  const roundAt = new Date("2026-11-15T00:18:00Z");
+  const prisma = {
+    recruitingRole: {
+      findUnique: async () => ({
+        currentRevision: {
+          criteria: [],
+          brief: {
+            fields: [
+              field("production technologies", "Spark and Kafka in production"),
+              field("location", "Seattle metro, hybrid"),
+              field("language", "none", "inferred"),
+            ],
+          },
+        },
+      }),
+    },
+    recruitingCalibrationRound: { findFirst: async () => ({ createdAt: roundAt }) },
+    recruitingRoleRevision: {
+      findFirst: async () => ({
+        criteria: [],
+        brief: { fields: [field("production technologies", "Spark and Kafka in production")] },
+      }),
+    },
+    externalEffect: {
+      findMany: async () => [
+        {
+          id: "fb-1",
+          createdAt: new Date("2026-11-15T00:19:30Z"),
+          request: { summary: "William Z. is a generic software engineer, not hands-on data eng" },
+        },
+      ],
+    },
+  } as unknown as PrismaClient;
+
+  it("holds the brief in the recruiter's words and each turn-down reason, marking what is new", async () => {
+    expect(await roundCriteria(prisma, { roleId: "r", spaceId: "s" })).toEqual([
+      {
+        id: "brief:production technologies",
+        statement: "production technologies: Spark and Kafka in production",
+        added: false,
+      },
+      { id: "brief:location", statement: "location: Seattle metro, hybrid", added: true },
+      {
+        id: "turned-down:fb-1",
+        statement:
+          "not what the recruiter turned down: William Z. is a generic software engineer, not hands-on data eng",
+        added: true,
+      },
+    ]);
   });
 });
