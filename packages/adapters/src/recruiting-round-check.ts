@@ -371,3 +371,59 @@ export async function feedbackBeforeRound(
     ];
   });
 }
+
+/**
+ * People of the latest unapproved round that the recruiter's message names, by a name of theirs
+ * or their number in the round ("#6"). A message that names some of them is usually turning them
+ * down, which is feedback for the next round rather than acceptance of this one.
+ */
+export async function roundPeopleNamed(
+  prisma: PrismaClient,
+  input: { threadId: string; messageId: string },
+): Promise<{ round: number; named: string[] } | null> {
+  const [thread, message] = await Promise.all([
+    prisma.thread.findUnique({
+      where: { id: input.threadId },
+      select: { activeRecruitingRoleId: true },
+    }),
+    prisma.message.findUnique({ where: { id: input.messageId }, select: { blocks: true } }),
+  ]);
+  const roleId = thread?.activeRecruitingRoleId;
+  if (!roleId || !message) return null;
+  const text = (Array.isArray(message.blocks) ? message.blocks : [])
+    .flatMap((block) => {
+      const { kind, text } = (block ?? {}) as { kind?: unknown; text?: unknown };
+      return kind === "text" && typeof text === "string" ? [text] : [];
+    })
+    .join("\n");
+  const round = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    orderBy: { round: "desc" },
+    select: { round: true, candidateKeys: true, approvedAt: true },
+  });
+  if (!text || !round || round.approvedAt) return null;
+  const people = await prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
+    distinct: ["candidateKey"],
+    select: { candidateKey: true, name: true },
+  });
+  const said = text.toLowerCase();
+  const numbers = new Set(
+    [...said.matchAll(/(?:#|\bno\.?\s*|\bnumber\s+)(\d{1,2})\b/g)].map((match) => Number(match[1])),
+  );
+  const named = round.candidateKeys.flatMap((key, index) => {
+    const name = people.find((person) => person.candidateKey === key)?.name?.trim();
+    const words = (name ?? "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length >= 4);
+    const byName = words.some((word) =>
+      new RegExp(
+        `(?<![\\p{L}])${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`,
+        "u",
+      ).test(said),
+    );
+    return byName || numbers.has(index + 1) ? [name ?? `#${index + 1}`] : [];
+  });
+  return named.length ? { round: round.round, named } : null;
+}

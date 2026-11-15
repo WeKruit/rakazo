@@ -58,3 +58,6 @@ that repeats into the existing line instead of adding another.
   the brief is saved seconds after round one, so every brief field (base pay included) looked new
   and round two came up five short. **Date a requirement by when the person said it, not when the
   record was written.**
+- 2026-11-15 — "#6 and #8 are off, find me more like the rest" was recorded as accepting the
+  calibration round, so the next people skipped the round check and the Reviewer. **A message that
+  turns some of the round down is feedback for the next round, not acceptance of this one.**
