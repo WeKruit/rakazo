@@ -1,6 +1,11 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { checkRound, listedBeforeRound, roundCriteria } from "./recruiting-round-check.js";
+import {
+  checkRound,
+  listedBeforeRound,
+  roundCriteria,
+  roundListedNotRecorded,
+} from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
   // From a staging feedback round: Seattle and Spark/Kafka from the JD, then "no production
@@ -186,5 +191,36 @@ describe("listedBeforeRound", () => {
         }),
       }),
     );
+  });
+});
+
+describe("roundListedNotRecorded", () => {
+  // Staging 11-15: the role's chat showed the new ten at 04:51:03 but the round was recorded at
+  // 04:51:26; in between Kruit read round 1, reposted it and said the new round was not ready.
+  it("counts the people of a round list the role's chat posted after the latest recorded round", async () => {
+    const findMany = vi.fn(async () => [
+      { blocks: [{ kind: "text", text: "Here's what changed." }] },
+      { blocks: [{ kind: "text", text: "10 people this round:\n\n1. **[A](x)**\n2. **[B](y)**" }] },
+    ]);
+    const prisma = {
+      recruitingRole: { findFirst: vi.fn(async () => ({ sourceThreadId: "thread-role" })) },
+      message: { findMany },
+    } as unknown as PrismaClient;
+    await expect(
+      roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
+    ).resolves.toEqual({ people: 10 });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadId: "thread-role",
+          role: "bot",
+          createdAt: { gt: new Date("2026-11-15T04:48:02Z") },
+        }),
+      }),
+    );
+    findMany.mockResolvedValueOnce([]);
+    await expect(
+      roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
+    ).resolves.toBeNull();
   });
 });

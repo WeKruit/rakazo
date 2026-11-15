@@ -228,6 +228,42 @@ export const ROUND_REPEATS =
 export const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
 
 /**
+ * A round list the role's chat posted after the latest recorded round: the next round is shown
+ * there and its record is still being written (a refused record is retried).
+ */
+export async function roundListedNotRecorded(
+  prisma: PrismaClient,
+  input: { roleId: string; after: string },
+): Promise<{ people: number } | null> {
+  const role = await prisma.recruitingRole.findFirst({
+    where: { id: input.roleId },
+    select: { sourceThreadId: true },
+  });
+  if (!role?.sourceThreadId) return null;
+  const messages = await prisma.message.findMany({
+    where: { threadId: role.sourceThreadId, role: "bot", createdAt: { gt: new Date(input.after) } },
+    orderBy: { seq: "desc" },
+    take: 20,
+    select: { blocks: true },
+  });
+  for (const message of messages) {
+    const blocks = Array.isArray(message.blocks)
+      ? (message.blocks as Array<{ kind?: unknown; text?: unknown }>)
+      : [];
+    const list = blocks.find(
+      (block) =>
+        block.kind === "text" && typeof block.text === "string" && ROUND_HEADING.test(block.text),
+    );
+    const count =
+      typeof list?.text === "string"
+        ? /^(?:(\d+) (?:people|person)|本轮 (\d+) 人)/.exec(list.text)
+        : null;
+    if (count) return { people: Number(count[1] ?? count[2]) };
+  }
+  return null;
+}
+
+/**
  * Round people this conversation listed before the round as saved, unreviewed results (a page of
  * the pool, never a round list), so a question about repeats is answered from what was shown.
  */

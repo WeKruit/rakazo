@@ -42,7 +42,12 @@ import {
   createRecruitingCandidateReportReader,
   lookedUpContactEmails,
 } from "./recruiting-research.js";
-import { feedbackBeforeRound, listedBeforeRound, ROUND_REPEATS } from "./recruiting-round-check.js";
+import {
+  feedbackBeforeRound,
+  listedBeforeRound,
+  ROUND_REPEATS,
+  roundListedNotRecorded,
+} from "./recruiting-round-check.js";
 import {
   rememberResolvedContactEmails,
   resolveRecruitingContact,
@@ -420,7 +425,21 @@ export async function executeRecruitingCandidatesTool(
       );
       itemCount = round?.candidates.length ?? 0;
       succeeded = true;
-      if (!round) return { status: "no_round" as const };
+      // Staging 11-15: the role's chat showed the new ten 23 s before their record was written;
+      // Kruit read the older round in between, reposted it and said the new one was not ready.
+      const listedRoleId = roundRoleId ?? input.roleId;
+      const listedNext = listedRoleId
+        ? await roundListedNotRecorded(deps.prisma, {
+            roleId: listedRoleId,
+            after: round?.createdAt ?? new Date(0).toISOString(),
+          }).catch(() => null)
+        : null;
+      const nextListed = listedNext
+        ? {
+            nextRoundListedInRoleChat: `Round ${(round?.round ?? 0) + 1} (${listedNext.people} people) is already listed in the role's chat and its record is being written now. Tell the recruiter it is there and confirmed in a moment; never call it not ready, and never show the round below as the new one.`,
+          }
+        : {};
+      if (!round) return { status: "no_round" as const, ...nextListed };
       // Staging 11-15: asked about repeats and their feedback, global Kruit read round labels
       // wrong and could not find what the recruiter said in the role's chat.
       const feedback = await feedbackBeforeRound(deps.prisma, {
@@ -443,6 +462,7 @@ export async function executeRecruitingCandidatesTool(
         round: {
           ...round,
           repeats: ROUND_REPEATS,
+          ...nextListed,
           ...(feedback.length ? { feedbackBeforeThisRound: feedback } : {}),
           ...(listed.length
             ? {
