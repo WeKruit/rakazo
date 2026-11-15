@@ -255,22 +255,21 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       }),
     ).resolves.toMatchObject({ action: "continued" });
 
-    // Already returned before round 1, even though never shown: refused.
-    await expect(
-      recordRound([...keys("first").slice(0, 8), "spare-0", "spare-1"]),
-    ).rejects.toBeInstanceOf(recruiting.RecruitingCalibrationRoundError);
+    // Shown in round 1: refused.
+    await expect(recordRound([...keys("first").slice(0, 8), "spare-0", "spare-1"])).rejects.toThrow(
+      /already shown in an earlier round or turned down/,
+    );
     await savePage([...keys("second").slice(0, 8)]);
-    await expect(
-      recordRound([...keys("second").slice(0, 8), "spare-0", "spare-1"]),
-    ).rejects.toThrow(/2 of these ten were already returned before round 1/);
-    // The picks shown in chat use the same rule, so a list on screen never changes on record.
+    // Staging 11-15: saved before round 1 but never shown is new to the recruiter, so a later
+    // round may show them; refusing them left round 2 with 2 of 10. The picks shown in chat use
+    // the same rule, so a list on screen never changes on record.
     await expect(
       recruiting.calibrationRoundRepeats(prisma, actor, roleId, [
         ...keys("second").slice(0, 8),
         "spare-0",
         keys("first")[0] ?? "",
       ]),
-    ).resolves.toEqual({ round: 1, repeats: ["spare-0", keys("first")[0]] });
+    ).resolves.toEqual({ round: 1, repeats: [keys("first")[0]] });
 
     await savePage(keys("second").slice(8));
     const second = await recordRound(keys("second"));
@@ -295,14 +294,16 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     // refused as repeats, so the corrected ten could not be shown. A correction keeps them.
     await savePage(["swap-0", "swap-1"]);
     const swapped = [...keys("second").slice(0, 8), "swap-0", "swap-1"];
-    await expect(recordRound(swapped)).rejects.toThrow(/8 of these ten were already returned/);
+    await expect(recordRound(swapped)).rejects.toThrow(
+      /already shown in an earlier round or turned down/,
+    );
     await expect(recordRound(["swap-0", "swap-1"], true)).rejects.toThrow(
       /record them as a new round/,
     );
     // Only the kept people are exempt: someone from round 1 is still refused.
     await expect(
       recordRound([...swapped.slice(0, 9), keys("first")[0] ?? ""], true),
-    ).rejects.toThrow(/1 of these ten were already returned/);
+    ).rejects.toThrow(/already shown in an earlier round or turned down/);
   });
 
   it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {

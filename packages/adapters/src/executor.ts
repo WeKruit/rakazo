@@ -8576,12 +8576,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 picked,
               ),
             ]);
-            // The round record refuses anyone already shown or returned before the last round, so
+            // The round record refuses anyone a round already showed or the recruiter turned down, so
             // the list on screen leaves them out too instead of changing once the round is recorded.
             const repeats = new Set(repeated?.repeats);
             const left = [
               repeats.size &&
-                `${[...repeats].join(", ")}: already returned before round ${repeated?.round}; a later round takes only people returned since, whose alreadyInPool is false.`,
+                `${[...repeats].join(", ")}: already shown in an earlier round or turned down; a later round takes only people no round has shown.`,
               regionOnly.size &&
                 `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
               beyond.size &&

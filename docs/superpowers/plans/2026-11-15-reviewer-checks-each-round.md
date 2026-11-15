@@ -72,3 +72,12 @@ The 808f4f31 run still showed two lists: the round's first picks (`show_picks`) 
 `calibration_round` arguments reached chat before the round was recorded and held. Neither now
 posts in a turn whose round will be held (a round exists, unapproved, the team has the Reviewer,
 and the turn is not the lead's run after the check).
+
+## Update: later rounds may show saved people no round has shown
+
+In the aceb80c9 feedback play, round 2 came back with 2 people. The Reviewer's swap then left 1,
+because every person returned before the last round was refused as a repeat. Each wave of quick
+searches returns about 40 rows, and only 10 of them are shown, so the role soon holds dozens of
+people the recruiter has never seen. Later searches return mostly those same people. A repeat is
+now someone a round showed or someone the recruiter turned down. Saved people that no round has
+shown count as new, which also follows "reuse saved findings instead of repeating paid research".
