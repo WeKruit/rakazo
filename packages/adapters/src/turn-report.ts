@@ -636,6 +636,36 @@ export function teamSignedDraft(reply: string): DeclineRetry | undefined {
   return signature ? { sentence: signature.trim(), note: TEAM_SIGNED_DRAFT_NOTE } : undefined;
 }
 
+// A day the recruiter named, as they wrote it, and its English name. 「每周五天」 is a count.
+const NAMED_DAYS = (
+  [
+    ["一", "Monday"],
+    ["二", "Tuesday"],
+    ["三", "Wednesday"],
+    ["四", "Thursday"],
+    ["五", "Friday"],
+    ["六", "Saturday"],
+    ["[日天]", "Sunday"],
+  ] as const
+).map(
+  ([zh, en]) => [new RegExp(`(?:周|星期|礼拜)${zh}(?![天个])|\\b${en}s?\\b`, "i"), en] as const,
+);
+
+/** Model-facing: the draft says the day the recruiter named, in the email's own language. */
+export const droppedDayNote = (said: string, day: string) =>
+  `The recruiter said 「${said}」, and your draft does not name ${day}. Write that detail as they gave it (${day}, not a count of days), keep everything else, and show the whole draft again.`;
+
+/** A drafted email that lost a weekday the recruiter named ("每周五远程" → "one remote day"). */
+export function droppedDay(reply: string, asked: string): DeclineRetry | undefined {
+  if (!/Subject\s*[:：]|主题\s*[:：]|\{\{\s*firstName/i.test(reply)) return undefined;
+  for (const [named, day] of NAMED_DAYS) {
+    const said = named.exec(asked)?.[0];
+    if (said && !named.test(reply))
+      return { sentence: said, note: droppedDayNote(asked.trim().slice(0, 120), day) };
+  }
+  return undefined;
+}
+
 /** Model-facing: a template with [bracketed] blanks is written again with real details. */
 export const TEMPLATE_BLANKS_NOTE =
   "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";

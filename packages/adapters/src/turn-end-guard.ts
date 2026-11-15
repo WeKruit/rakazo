@@ -23,6 +23,7 @@ import {
   declinedSentence,
   declineRetry,
   draftVariables,
+  droppedDay,
   questionCard,
   retryReason,
   sequenceForOneEmail,
@@ -791,8 +792,11 @@ export async function planDeclineRetry(
     ? (candidateVoiceDraft(input.reply) ??
       sequenceForOneEmail(input.reply, asked) ??
       templateBlanks(input.reply) ??
-      teamSignedDraft(input.reply))
-    : (draftVariables(input.reply) ?? teamSignedDraft(input.reply));
+      teamSignedDraft(input.reply) ??
+      droppedDay(input.reply, asked))
+    : (draftVariables(input.reply) ??
+      teamSignedDraft(input.reply) ??
+      droppedDay(input.reply, asked));
   // After a send went out or its card was answered, a reply that talks about that work ("已发送给
   // Noah") owes no card; only an actual refusal is retried.
   const reason = !input.request.trim()
