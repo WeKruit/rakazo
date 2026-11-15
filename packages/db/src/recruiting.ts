@@ -12165,7 +12165,23 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         "The recruiter already approved the calibration. Continue with finding more people instead of another calibration round.",
       );
-    const repeated = previous && (await calibrationRoundRepeats(tx, actor, role.id, keys));
+    // A correction keeps the people of the latest round the recruiter did not turn down and
+    // swaps in new ones; it is recorded as the next round so the swapped-out people stay seen.
+    const kept = new Set(
+      input.corrects ? keys.filter((key) => previous?.candidateKeys.includes(key)) : [],
+    );
+    if (input.corrects && !kept.size)
+      throw new RecruitingCalibrationRoundError(
+        `corrects is for swapping some people of round ${previous?.round ?? 1} after the recruiter's feedback: keep the ones they did not turn down and add the replacements. None of these people were in that round, so record them as a new round without corrects.`,
+      );
+    const repeated =
+      previous &&
+      (await calibrationRoundRepeats(
+        tx,
+        actor,
+        role.id,
+        keys.filter((key) => !kept.has(key)),
+      ));
     if (repeated?.repeats.length)
       throw new RecruitingCalibrationRoundError(
         `Round ${repeated.round + 1} must show only new people, but ${repeated.repeats.length} of these ten were already returned before round ${repeated.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
