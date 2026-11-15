@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
 
 /** Instantly writes that change what a role's campaign sends: they belong to that role's team. */
 const ROLE_CAMPAIGN_WRITES = new Set([
@@ -10,6 +11,22 @@ const ROLE_CAMPAIGN_WRITES = new Set([
   "native_instantly_add_leads",
   "native_instantly_add_shortlist_leads",
 ]);
+
+/** The people-search tools: their people belong in a role's Results. */
+const PEOPLE_SEARCH_TOOLS = new Set(["web_search_exa", "web_search_advanced_exa", "agent_run"]);
+
+/**
+ * In Kruit's account-wide conversation, people are found by a role's team, which saves, checks and
+ * remembers them. Staging 11-15: asked "show me people", Kruit ran people searches itself and
+ * hand-wrote four lists before any role existed. A lookup of one profile link stays with Kruit.
+ */
+export function globalPeopleSearchRefusal(
+  toolName: string,
+  args: Record<string, unknown>,
+): string | undefined {
+  if (!PEOPLE_SEARCH_TOOLS.has(toolName) || linkedinPersonKey(args.query)) return undefined;
+  return "Not run: people are found by a role's team, never in this conversation. For a new role, call start_role now with a short title; its team searches from the recruiter's words and shows the first ten there. For a role that exists, pass the recruiter's request to its team with delegate_to_role. For a general question that is not about finding people, use web_search.";
+}
 
 /**
  * In Kruit's account-wide conversation, a write to a role's campaign goes to that role's team,

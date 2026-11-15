@@ -490,7 +490,11 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
-import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  globalPeopleSearchRefusal,
+  globalRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -9996,6 +10000,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args: connectorCall.args,
             });
             if (roleWrite) return { error: roleWrite };
+            const search = globalPeopleSearchRefusal(
+              connectorCall.route.toolName,
+              connectorCall.args,
+            );
+            if (search) return { error: search };
           }
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
