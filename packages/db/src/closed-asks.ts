@@ -1,7 +1,12 @@
 import type { AskAnswer, MessageBlock } from "@rakazo/contracts";
 import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import type { ClosedAskAnswer } from "@rakazo/core";
-import { ACTIVE_RUN_STATUSES, closedAskAnswer, isOpenAskBlock } from "@rakazo/core";
+import {
+  ACTIVE_RUN_STATUSES,
+  closedAskAnswer,
+  connectCardOpen,
+  isOpenAskBlock,
+} from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
 import { appendEventInTransaction } from "./events.js";
 
@@ -153,8 +158,13 @@ export async function recordClosedAskAnswer(
   return committed?.seq ?? null;
 }
 
-/** The card's unanswered ask, whether its wait expired or the run simply ended. */
+/**
+ * The card's unanswered ask, whether its wait expired or the run simply ended, or a connect card
+ * not signed in yet.
+ */
 function closedCardAsk(blocks: readonly MessageBlock[]) {
-  const ask = blocks.find((block) => block.kind === "ask" && block.status !== "answered");
+  const ask = blocks.find(
+    (block) => block.kind === "ask" && (block.status !== "answered" || connectCardOpen(block)),
+  );
   return ask?.kind === "ask" ? ask : null;
 }

@@ -289,6 +289,9 @@ describe("closed cards", () => {
       recorded: "connected",
     });
     expect(closedAskAnswer(connect, "not_connected")).toBeNull();
+    const notNow = { ...connect, status: "answered" as const, answer: "not_connected" };
+    expect(closedAskAnswer(notNow, "connected")).toMatchObject({ recorded: "connected" });
+    expect(closedAskAnswer({ ...notNow, answer: "connected" }, "connected")).toBeNull();
   });
 });
 
@@ -381,11 +384,11 @@ describe("timedOutAskMessageId", () => {
 });
 
 describe("reopenedAskMessageIds", () => {
-  const connect = (id: string, status = "expired", serverId = "gmail") => ({
+  const connect = (id: string, status = "expired", serverId = "gmail", answer?: string) => ({
     id,
     role: "bot",
     runId: `run-${id}`,
-    blocks: [{ kind: "ask", status, connection: { serverId } }],
+    blocks: [{ kind: "ask", status, answer, connection: { serverId } }],
   });
   const said = { id: "u", role: "user", blocks: [{ kind: "text" }] };
 
@@ -397,10 +400,12 @@ describe("reopenedAskMessageIds", () => {
     ).toEqual(["c", "a"]);
   });
 
-  it("drops a connect card once it is answered, and defers to a card that still waits", () => {
-    expect(reopenedAskMessageIds({ messages: [connect("a"), connect("b", "answered")] })).toEqual(
-      [],
-    );
+  it("drops a connect card once signed in, and defers to a card that still waits", () => {
+    expect(
+      reopenedAskMessageIds({
+        messages: [connect("a"), connect("b", "answered", "gmail", "connected")],
+      }),
+    ).toEqual([]);
     expect(
       reopenedAskMessageIds({
         messages: [
@@ -410,6 +415,16 @@ describe("reopenedAskMessageIds", () => {
         activeRuns: [{ id: "run-w", status: "waiting_input" }],
       }),
     ).toEqual([]);
+  });
+
+  // 11-15 gate: each question the recruiter typed closed the card as not connected, and Kruit
+  // then told them to press a button the card no longer had.
+  it("keeps a connect card pressable after typing or Not now closed it unconnected", () => {
+    expect(
+      reopenedAskMessageIds({
+        messages: [connect("a", "answered", "gmail", "not_connected"), said],
+      }),
+    ).toEqual(["a"]);
   });
 
   it("still reopens the newest timed-out question", () => {

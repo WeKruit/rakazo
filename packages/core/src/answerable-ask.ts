@@ -16,6 +16,23 @@ export function isOpenAskBlock(block: { kind: string; status?: string }): boolea
 }
 
 /**
+ * A connect card a person can still press: signing in never goes stale, so only a finished
+ * sign-in closes it. "Not now", or a typed message that closed it as not connected, leaves it open.
+ */
+export function connectCardOpen(block: {
+  kind: string;
+  status?: string;
+  answer?: unknown;
+  connection?: unknown;
+}): boolean {
+  return (
+    block.kind === "ask" &&
+    Boolean(block.connection) &&
+    !(block.status === "answered" && block.answer === "connected")
+  );
+}
+
+/**
  * A card still marked pending whose run no longer waits (stopped, failed or finished) reads as
  * closed, the way an expired card reads, so history never presents it as waiting. A connect card
  * stays pressable after its wait ends (`reopenedAskMessageIds`), so it reads as open until answered.
@@ -52,12 +69,12 @@ export function closedAskClientNonce(messageId: string): string {
  * is never replayed, and a secret is never message text. A connect card only reports success.
  */
 export function closedAskAnswer(block: AskBlock, answer: AskAnswer): ClosedAskAnswer | null {
-  if (block.status === "answered") return null;
   // The sign-in itself happened in the person's browser; only its success becomes a message.
   if (block.connection)
-    return answer === "connected"
+    return answer === "connected" && connectCardOpen(block)
       ? { text: `Connected ${block.connection.name}.`, recorded: "connected" }
       : null;
+  if (block.status === "answered") return null;
   if (block.approvalEffectId || block.input === "secret" || block.credential) return null;
   if (block.requestedSchema) {
     let formResponse: AskFormResponse;
@@ -280,7 +297,8 @@ export function waitingApprovalNote(titles: readonly string[]): string | undefin
 
 /**
  * Cards that still take a press although their wait ended: the newest timed-out question, and
- * the newest connect card per service, since signing in never goes stale. None while a card waits.
+ * the newest connect card per service until a sign-in finishes (`connectCardOpen`). None while a
+ * card waits.
  */
 export function reopenedAskMessageIds(snapshot: AskSnapshot | null): string[] {
   if (!snapshot || answerableAskMessageIds(snapshot).length) return [];
@@ -294,7 +312,7 @@ export function reopenedAskMessageIds(snapshot: AskSnapshot | null): string[] {
     const service = (ask?.connection as { serverId?: unknown } | undefined)?.serverId;
     if (!ask || services.has(service)) continue;
     services.add(service);
-    if (ask.status !== "answered" && !ids.includes(message.id)) ids.push(message.id);
+    if (connectCardOpen(ask) && !ids.includes(message.id)) ids.push(message.id);
   }
   return ids;
 }

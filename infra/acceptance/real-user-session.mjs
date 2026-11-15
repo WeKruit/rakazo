@@ -282,10 +282,50 @@ const asSeen = (text, chinese) =>
   chinese
     ? text.replace(/^([^\n→]+?)(?= → |$)/gm, (title) => ZH_UI.get(title.trim()) ?? title)
     : text;
+// What a card offers on the page, so a reader of the text transcript knows which buttons exist.
+// The newest connect card per service keeps Connect until a sign-in finishes, as the app shows it.
+function cardControls(message, newestConnect, chinese) {
+  const label = (text) => (chinese ? (ZH_UI.get(text) ?? text) : text);
+  const buttons = (labels) => `[buttons: ${labels.map(label).join(" | ")}]`;
+  const controls = [];
+  for (const block of message.blocks ?? []) {
+    if (block.kind !== "ask") continue;
+    if (block.connection) {
+      if (block.status === "answered" && block.answer === "connected")
+        controls.push(`[${label("Connected")}]`);
+      else if (newestConnect.has(message.id))
+        controls.push(buttons(block.status === "pending" ? ["Connect", "Not now"] : ["Connect"]));
+      else controls.push(`[${label("Not now")}]`);
+    } else if (block.status === "pending") {
+      const actions = (block.actions ?? []).map((action) => action.label);
+      controls.push(
+        actions.length
+          ? buttons(actions)
+          : block.requestedSchema
+            ? buttons(["Submit"])
+            : "[answer box]",
+      );
+    } else if (block.status === "answered")
+      controls.push(
+        `[answered: ${(block.actions ?? []).find((a) => a.id === block.answer)?.label ?? block.answer ?? ""}]`,
+      );
+    else controls.push(`[${label("No longer active")}]`);
+  }
+  return controls.join(" ");
+}
 export async function transcripts(rpc, since, chinese = false) {
   const chats = [];
   for (const group of await activeGroupsOf(rpc)) {
-    const messages = (await messagesOf(rpc, group.id))
+    const all = await messagesOf(rpc, group.id);
+    const newestConnect = new Set();
+    const services = new Set();
+    for (const message of [...all].reverse()) {
+      const ask = (message.blocks ?? []).find((block) => block.kind === "ask" && block.connection);
+      if (!ask || services.has(ask.connection.serverId)) continue;
+      services.add(ask.connection.serverId);
+      newestConnect.add(message.id);
+    }
+    const messages = all
       .filter(
         (message) =>
           !message.internal && !handoff(message) && Date.parse(message.createdAt) >= since,
@@ -297,6 +337,7 @@ export async function transcripts(rpc, since, chinese = false) {
           ? asSeen(botText(message), chinese)
           : botText(message),
         card: (message.blocks ?? []).some((block) => block.kind === "ask"),
+        controls: cardControls(message, newestConnect, chinese),
         sendCard: (message.blocks ?? []).some((block) => block.approvalEffectId),
         at: message.createdAt,
       }));

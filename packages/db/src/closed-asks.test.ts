@@ -99,6 +99,28 @@ describe("closed cards", () => {
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
 
+  it("records a sign-in on a connect card that typing closed as not connected", async () => {
+    const connect = {
+      kind: "ask",
+      text: "Connect Gmail",
+      status: "answered",
+      answer: "not_connected",
+      connection: { serverId: "server-1", name: "Gmail", reason: "Send the email" },
+    };
+    const { prisma, blocks } = client({ runStatus: "completed", blocks: [connect] });
+    const found = await findClosedAskAnswer(prisma as unknown as PrismaClient, {
+      ...target,
+      answer: "connected",
+    });
+    expect(found).toEqual({ botId: "sourcer", text: "Connected Gmail.", recorded: "connected" });
+    await recordClosedAskAnswer(prisma as unknown as PrismaClient, { ...target, answer: found! });
+    expect(blocks()).toEqual([{ ...connect, answer: "connected" }]);
+    // Signed in: nothing more to record.
+    await expect(
+      findClosedAskAnswer(prisma as unknown as PrismaClient, { ...target, answer: "connected" }),
+    ).resolves.toBeNull();
+  });
+
   it("records the answer on the card exactly as a live answer does", async () => {
     const { prisma, events, blocks } = client({ runStatus: "cancelled" });
     await expect(
