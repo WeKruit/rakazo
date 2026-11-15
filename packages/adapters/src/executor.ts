@@ -641,6 +641,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  listsPeople,
   nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
@@ -7150,6 +7151,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundHeldThisTurn: Promise<boolean> | undefined;
         // A round recorded and held this turn: the turn's own reply says only that it is coming.
         let roundHeldRecorded = false;
+        // A round an earlier turn held is still waiting for the Reviewer's check: this turn lists
+        // none of its people either. Staging 11-15: the recruiter's follow-ups started a turn
+        // before the check, which wrote round 2 out; the checked round then swapped three of them.
+        const roundAwaitingCheck =
+          thread.activeRecruitingRoleId &&
+          !isBackgroundRunTrigger(run.trigger) &&
+          !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+            ? roundAwaitingReview(deps.prisma, {
+                threadId: thread.id,
+                roleId: thread.activeRecruitingRoleId,
+              }).catch(() => null)
+            : Promise.resolve(null);
         const roundHeld = (roleId: string) =>
           (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
             threadId: run.threadId,
@@ -17505,7 +17518,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // A held round's check runs in this conversation once this turn ends, so
                         // newer messages start the next turn instead of keeping this one open.
                         // Staging 11-15: two steered follow-ups held the turn for six minutes.
-                        if (roundHeldRecorded) return [];
+                        if (roundHeldRecorded || (await roundAwaitingCheck) !== null) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,
@@ -18324,7 +18337,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
           // Staging 11-15: after holding round 2, the reply described its people and their grades
           // before the check, so the recruiter read the round twice. It says only that it comes.
-          if (roundHeldRecorded && !handedOff)
+          if (
+            !handedOff &&
+            (roundHeldRecorded ||
+              ((await roundAwaitingCheck) !== null && listsPeople(blocksText(blocks))))
+          )
             blocks = [
               {
                 kind: "text",

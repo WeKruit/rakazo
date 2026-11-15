@@ -13,6 +13,7 @@ const {
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   gradingTools,
+  listsPeople,
   nextRoundHeld,
   roundAwaitingReview,
   RECRUITING_GRADE_NONCE_PREFIX,
@@ -744,5 +745,20 @@ describe("gradingTools", () => {
       "connectors_search_tools",
       "connectors_execute_tool",
     ]);
+  });
+});
+
+describe("listsPeople", () => {
+  it("finds a reply that lists people, not one that names a single profile", () => {
+    // Staging 11-15: a turn before the check wrote round 2 out as a numbered list of profiles.
+    expect(
+      listsPeople(
+        "1. [A](https://www.linkedin.com/in/a-1) 2. [B](https://www.linkedin.com/in/b-2)",
+      ),
+    ).toBe(true);
+    expect(listsPeople("https://www.linkedin.com/in/a-1 and again linkedin.com/in/A-1/ here")).toBe(
+      false,
+    );
+    expect(listsPeople("The checked round comes in a minute or two.")).toBe(false);
   });
 });
