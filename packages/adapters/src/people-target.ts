@@ -21,3 +21,16 @@ export function peopleTargetFrom(text: string, totalBefore: number): number | un
   if (/\b(?:total|in all|altogether|overall)\b|总共|一共|总数|合计/i.test(text)) return asked;
   return /\bmore\b|再/i.test(text) || totalBefore >= asked ? totalBefore + asked : asked;
 }
+
+/**
+ * Long-search-finishes 11-15: the recruiter wrote "find 20, tell me when done", the role already
+ * held 64, and the turn still asked "report, or 20 more?". A number the recruiter asked for is
+ * their decision: once Results hold it the turn reports instead of asking, and below it the turn
+ * keeps going instead of asking.
+ */
+export function askAfterPeopleTarget(target: number | undefined, saved: number | undefined) {
+  if (!target || saved === undefined) return undefined;
+  return saved >= target
+    ? `Not asked: the recruiter asked for ${target} people and the role now holds ${saved}, so their request is done. Do not offer more or ask how to go on: tell them in one short message, in their language, how many people this role holds and that the search is finished, then end the turn.`
+    : `Not asked: the recruiter asked for ${target} people and the role holds ${saved}, so keep searching toward ${target} without asking (each search is a small try), then report the count when it is reached or the tries run out.`;
+}
