@@ -7989,30 +7989,65 @@ export async function saveRecruitingCandidateGrades(
     const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
     if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
       throw new RecruitingConflictError();
-    const rows = input.rows.map((grade, rowIndex) => {
+    const typed = input.rows.map((grade) => {
       const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
       if (grade.current_title) row.current_title = grade.current_title;
       if (grade.current_company) row.current_company = grade.current_company;
       if (grade.location) row.location = grade.location;
       return {
-        rowIndex,
         row,
         matchFields: { match_score: grade.match_score, match_tier: grade.match_tier },
         candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
       };
     });
-    const keys = rows.map((row) => row.candidateKey);
-    const saved = await tx.recruitingCandidate.count({
-      where: { roleId: role.id, candidateKey: { in: keys.filter((key) => key !== null) } },
-    });
-    if (
-      keys.some((key) => key === null) ||
-      new Set(keys).size !== keys.length ||
-      saved !== keys.length
-    )
-      throw new RecruitingGradeRowsError(
-        "Grade only people already saved for this role, each once, with their saved LinkedIn profile link.",
+    const saved = new Set(
+      (
+        await tx.recruitingCandidate.findMany({
+          where: {
+            roleId: role.id,
+            candidateKey: {
+              in: typed.flatMap((row) => (row.candidateKey ? [row.candidateKey] : [])),
+            },
+          },
+          select: { candidateKey: true },
+        })
+      ).map((candidate) => candidate.candidateKey),
+    );
+    // A grade whose link was mistyped is matched to the one saved person with that name.
+    // Staging 11-15: one misspelled link refused every grade of the batch, again and again, and
+    // the search's people stayed unscored.
+    const mistyped = typed.filter((row) => !row.candidateKey || !saved.has(row.candidateKey));
+    const named = mistyped.length
+      ? await tx.recruitingCandidateOccurrence.findMany({
+          where: {
+            roleId: role.id,
+            linkedinUrl: { not: null },
+            OR: mistyped.map((row) => ({
+              name: { equals: row.row.name?.trim() ?? "", mode: "insensitive" as const },
+            })),
+          },
+          distinct: ["candidateKey"],
+          select: { candidateKey: true, name: true, linkedinUrl: true },
+        })
+      : [];
+    const unmatched: string[] = [];
+    for (const row of mistyped) {
+      const same = named.filter(
+        (person) => person.name?.trim().toLowerCase() === row.row.name?.trim().toLowerCase(),
       );
+      const only = same.length === 1 ? same[0] : undefined;
+      if (only?.linkedinUrl) {
+        row.row.linkedin_url = only.linkedinUrl;
+        row.candidateKey = only.candidateKey;
+      } else unmatched.push(`${row.row.name} (${row.row.linkedin_url})`);
+    }
+    if (unmatched.length)
+      throw new RecruitingGradeRowsError(
+        `Grade only people already saved for this role, with their saved LinkedIn profile link. Not saved for this role: ${unmatched.join("; ")}. Copy their link exactly from the list you were given, or leave them out, and save the grades again.`,
+      );
+    // A person graded twice keeps the last grade.
+    const last = new Map(typed.map((row) => [row.candidateKey, row]));
+    const rows = [...last.values()].map((row, rowIndex) => ({ rowIndex, ...row }));
     const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)));
     const file = captured.outputArtifact;
     if (

@@ -558,6 +558,37 @@ describe("startRecruitingGrading", () => {
     const later = fixture({ found: [person("a")], requests: [old] });
     await startRecruitingGrading(later.deps, { threadId: "thread" }, now);
     expect(later.runCreate).toHaveBeenCalledOnce();
+    // Staging 11-15: nothing came back after the hold, so a search's people stayed unscored.
+    expect(recent.enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ availableAt: new Date(now - 60_000 + 30 * 60_000) }),
+    );
+    // The Reviewer grades within its own turn: its first unsaved turn is retried at once, a
+    // second waits out the hold, and after four in a row grading stops trying on its own.
+    const reviewer = [
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const tries = (count: number) => {
+      const f = fixture({
+        found: [person("a")],
+        requests: Array.from({ length: count }, (_, index) => ({
+          ...request,
+          id: `request-${index}`,
+        })),
+      });
+      f.prisma.chatGroupMember.findMany.mockResolvedValue(reviewer as never);
+      return f;
+    };
+    const once = tries(1);
+    await startRecruitingGrading(once.deps, { threadId: "thread" }, now);
+    expect(once.runCreate).toHaveBeenCalledOnce();
+    const twice = tries(2);
+    await startRecruitingGrading(twice.deps, { threadId: "thread" }, now);
+    expect(twice.runCreate).not.toHaveBeenCalled();
+    expect(twice.enqueue).toHaveBeenCalledOnce();
+    const stopped = tries(4);
+    await startRecruitingGrading(stopped.deps, { threadId: "thread" }, now);
+    expect(stopped.runCreate).not.toHaveBeenCalled();
+    expect(stopped.enqueue).not.toHaveBeenCalled();
   });
 
   it("does nothing when everyone is graded or no teammate has the research service", async () => {
