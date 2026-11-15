@@ -12610,7 +12610,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   );
                 }
                 return round && typeof round === "object" && !Array.isArray(round)
-                  ? { ...round, next: RECRUITING_ROUND_NEXT_STEP }
+                  ? {
+                      ...round,
+                      ...(feedbackNotCriteria.length
+                        ? { criteriaToSave: feedbackCriteriaToSave(feedbackNotCriteria) }
+                        : {}),
+                      next: RECRUITING_ROUND_NEXT_STEP,
+                    }
                   : round;
               }
               if (researchInput.data.operation === "save_search") {
