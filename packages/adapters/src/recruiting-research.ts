@@ -466,6 +466,48 @@ async function runRole(
     : null;
 }
 
+/** Model-facing: a people search in the main chat before the role it is for was opened. */
+export const PEOPLE_SEARCH_NEEDS_ROLE =
+  "Not searched: people searches run inside a role, where the recruiter's number caps them and their people are saved. Call start_role now with a short title; its team searches from the JD as written and shows the first ten.";
+/** Model-facing: a people search in a role chat whose role is not saved yet. */
+export const PEOPLE_SEARCH_NEEDS_SAVED_ROLE =
+  "Not searched: this role is not saved yet, so the people found would have nowhere to go. Save it first with recruiting_role create (title and the JD's requirements), then search again.";
+
+/**
+ * People searches run only inside a saved role: the role's cap and autosave both need it. Staging
+ * acd31504: the main chat ran five uncapped people searches before start_role; 14d33ed1: a role
+ * chat searched before its role was saved and save_search was refused.
+ */
+export async function requireRoleForPeopleSearch(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const people =
+    (toolName === "web_search_advanced_exa" && args.category === "people") ||
+    (toolName === "web_search_exa" && /\bcategory:\s*people\b/i.test(String(args.query ?? ""))) ||
+    (toolName === "agent_run" && args.runId === undefined);
+  if (
+    !people ||
+    !actor.runId ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return;
+  const run = await prisma.run.findFirst({
+    where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+    select: { thread: { select: { activeRecruitingRoleId: true, groupId: true } } },
+  });
+  if (!run || run.thread.activeRecruitingRoleId) return;
+  if (run.thread.groupId?.startsWith("recruiting-global-"))
+    throw new IsolationError(PEOPLE_SEARCH_NEEDS_ROLE);
+  if (run.thread.groupId?.startsWith("role-"))
+    throw new IsolationError(PEOPLE_SEARCH_NEEDS_SAVED_ROLE);
+}
+
 /**
  * A quick people search asks for at most ten people, however the agent or a plan sized it, and
  * never for more than the recruiter's number still allows.

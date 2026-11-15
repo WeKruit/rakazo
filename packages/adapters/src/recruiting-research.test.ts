@@ -17,6 +17,7 @@ import {
   recordAgentRunCost,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
+  requireRoleForPeopleSearch,
   savedContactLookups,
   settlePeopleSearch,
 } from "./recruiting-research.js";
@@ -204,6 +205,45 @@ describe("people-search agent runs", () => {
     await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
       effort: "auto",
     });
+  });
+
+  it("runs people searches only inside a saved role", async () => {
+    // Staging acd31504: the main chat ran five uncapped people searches before start_role.
+    const inChat = (groupId: string, roleId: string | null = null) => ({
+      run: {
+        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId, groupId } })),
+      },
+    });
+    const check = (db: unknown, tool: string, args: Record<string, unknown>) =>
+      requireRoleForPeopleSearch(db as never, actor, server, tool, args);
+    const people = { category: "people", query: "Senior SRE Austin" };
+    await expect(
+      check(inChat("recruiting-global-u"), "web_search_advanced_exa", people),
+    ).rejects.toThrow(/Call start_role now/);
+    await expect(
+      check(inChat("recruiting-global-u"), "web_search_exa", {
+        query: "category:people SRE Austin",
+      }),
+    ).rejects.toThrow(/Call start_role now/);
+    await expect(
+      check(inChat("recruiting-global-u"), "agent_run", { query: "SRE" }),
+    ).rejects.toThrow(/Call start_role now/);
+    await expect(check(inChat("role-abc"), "web_search_advanced_exa", people)).rejects.toThrow(
+      /recruiting_role create/,
+    );
+    // A saved role, a company search, reading a running agent run, or another chat go ahead.
+    await expect(
+      check(inChat("role-abc", "role-1"), "web_search_advanced_exa", people),
+    ).resolves.toBeUndefined();
+    await expect(
+      check(inChat("recruiting-global-u"), "web_search_exa", { query: "Austin SaaS companies" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      check(inChat("recruiting-global-u"), "agent_run", { runId: "r1" }),
+    ).resolves.toBeUndefined();
+    await expect(
+      check(inChat("team-x"), "web_search_advanced_exa", people),
+    ).resolves.toBeUndefined();
   });
 
   it("asks each quick people search for at most ten people", async () => {
