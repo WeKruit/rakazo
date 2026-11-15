@@ -962,6 +962,10 @@ async function researchTeammate(
 export const ROUND_HELD_NEXT_STEP =
   "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
 
+/** A people search after this turn recorded a held round: the check starts when the turn ends. */
+export const ROUND_HELD_SEARCH_REFUSAL =
+  "Not run: this turn recorded the round, and it is shown once the Reviewer has checked it, which starts when this turn ends. A request for the next ten is answered by that round. Save the brief if not saved yet, then end the turn with one short line saying the checked people come in a few minutes.";
+
 /** Whether a reply lists people: two or more distinct LinkedIn profiles. */
 export function listsPeople(text: string): boolean {
   const profiles = new Set(

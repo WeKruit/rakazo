@@ -13,7 +13,11 @@ const ROLE_CAMPAIGN_WRITES = new Set([
 ]);
 
 /** The people-search tools: their people belong in a role's Results. */
-const PEOPLE_SEARCH_TOOLS = new Set(["web_search_exa", "web_search_advanced_exa", "agent_run"]);
+export const PEOPLE_SEARCH_TOOLS: ReadonlySet<string> = new Set([
+  "web_search_exa",
+  "web_search_advanced_exa",
+  "agent_run",
+]);
 
 /**
  * In Kruit's account-wide conversation, people are found by a role's team, which saves, checks and
