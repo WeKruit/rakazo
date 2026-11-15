@@ -13271,6 +13271,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalTeamProgress(args.roleId)
                   : null;
+              // Staging 11-15: one second after the team recorded round 2, Kruit read it here and
+              // listed its unchecked ten; the checked round came later with other people.
+              const found = result as { status?: unknown; round?: { round?: unknown } } | null;
+              const held =
+                !shown &&
+                args.operation === "round" &&
+                found?.status === "found" &&
+                typeof args.roleId === "string" &&
+                thread.groupId?.startsWith("recruiting-global-")
+                  ? await globalRoundAwaitingReview(args.roleId)
+                  : null;
+              if (held && found?.round?.round === held)
+                return finish({
+                  status: "held",
+                  teamWorking:
+                    `${progress?.note ?? ""} Round ${held} is being checked and is shown here once, already checked: never list, name or count its people before it comes. Asked to see them now, say in one line that the checked round arrives here in a minute or two.`.trim(),
+                });
               return finish(
                 redactConnectorPayload(
                   shown ??

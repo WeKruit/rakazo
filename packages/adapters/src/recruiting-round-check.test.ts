@@ -156,6 +156,7 @@ describe("listedBeforeRound", () => {
   it("names round people this chat listed before the round, outside any round list", async () => {
     const findMany = vi.fn(async () => [
       {
+        updatedAt: new Date("2026-11-15T03:45:00Z"),
         blocks: [
           {
             kind: "text",
@@ -164,6 +165,7 @@ describe("listedBeforeRound", () => {
         ],
       },
       {
+        updatedAt: new Date("2026-11-15T03:46:00Z"),
         blocks: [
           {
             kind: "text",
@@ -199,6 +201,32 @@ describe("listedBeforeRound", () => {
         }),
       }),
     );
+  });
+
+  // Staging 11-15: Kruit's reply began before round 2 was recorded and listed the round once it
+  // was; read back as "listed before the round", Kruit told the recruiter its new ten were repeats.
+  it("leaves out a reply finished after the round was recorded", async () => {
+    const prisma = {
+      recruitingCalibrationRound: { findMany: vi.fn(async () => []) },
+      message: {
+        findMany: vi.fn(async () => [
+          {
+            updatedAt: new Date("2026-11-15T18:08:25Z"),
+            blocks: [
+              { kind: "text", text: "1. **Joel** · [LinkedIn](https://www.linkedin.com/in/joel)" },
+            ],
+          },
+        ]),
+      },
+    } as unknown as PrismaClient;
+    const listed = await listedBeforeRound(prisma, {
+      threadId: "thread-global",
+      roleId: "role-1",
+      round: 2,
+      createdAt: "2026-11-15T18:08:14Z",
+      candidates: [{ name: "Joel", linkedinUrl: "https://www.linkedin.com/in/joel" }],
+    });
+    expect(listed).toEqual([]);
   });
 });
 
