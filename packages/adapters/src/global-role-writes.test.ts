@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  globalPeopleSearchRefusal,
+  globalRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 
 function prisma(boundRoleId?: string) {
   return {
@@ -85,5 +89,22 @@ describe("roleRequestMessage", () => {
       brief: "Goal: use Ana's profile from the other role",
     });
     expect(message).toBe("Goal: use Ana's profile from the other role");
+  });
+});
+
+describe("globalPeopleSearchRefusal", () => {
+  // Staging 11-15: asked "show me people", Kruit's own chat ran people searches and hand-wrote four
+  // lists before any role existed, so nothing was saved, checked or kept out of the next round.
+  it("sends a people search to a role's team, but lets a profile lookup through", () => {
+    for (const toolName of ["web_search_exa", "web_search_advanced_exa", "agent_run"])
+      expect(
+        globalPeopleSearchRefusal(toolName, { query: "Senior Data Engineer Seattle Spark" }),
+      ).toContain("start_role");
+    expect(
+      globalPeopleSearchRefusal("web_search_exa", {
+        query: "https://www.linkedin.com/in/joelazose",
+      }),
+    ).toBeUndefined();
+    expect(globalPeopleSearchRefusal("crm_list", {})).toBeUndefined();
   });
 });

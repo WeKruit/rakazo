@@ -953,3 +953,49 @@ async function researchTeammate(
 /** What the team does after recording a round that waits for the Reviewer. */
 export const ROUND_HELD_NEXT_STEP =
   "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
+
+/** Whether a reply lists people: two or more distinct LinkedIn profiles. */
+export function listsPeople(text: string): boolean {
+  const profiles = new Set(
+    [...text.matchAll(/linkedin\.com\/in\/([^\s/)?#\]]+)/gi)].map((match) =>
+      (match[1] ?? "").toLowerCase(),
+    ),
+  );
+  return profiles.size >= 2;
+}
+
+/** The people of the round waiting for the Reviewer's check, or null when no round waits. */
+export async function heldRoundPeople(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string },
+  now = Date.now(),
+): Promise<Array<{ name: string | null; linkedinUrl: string | null }> | null> {
+  if ((await roundAwaitingReview(prisma, input, now)) === null) return null;
+  const round = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { candidateKeys: true },
+  });
+  return prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId: input.roleId, candidateKey: { in: round?.candidateKeys ?? [] } },
+    distinct: ["candidateKey"],
+    select: { name: true, linkedinUrl: true },
+  });
+}
+
+/**
+ * Whether a reply talks about two or more of these people, by name or profile. Staging 11-15: a
+ * turn's summary of a held round's grades named its people without links, before the round showed.
+ */
+export function mentionsPeople(
+  text: string,
+  people: ReadonlyArray<{ name: string | null; linkedinUrl: string | null }>,
+): boolean {
+  const lower = text.toLowerCase();
+  const named = people.filter((person) => {
+    const name = person.name?.trim().toLowerCase();
+    const slug = person.linkedinUrl?.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase();
+    return (name && name.length >= 4 && lower.includes(name)) || (slug && lower.includes(slug));
+  });
+  return named.length >= 2;
+}

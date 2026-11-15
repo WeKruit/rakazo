@@ -21,9 +21,11 @@ import {
   askedTemplate,
   candidateVoiceDraft,
   DRAFT_FIRST_RETRY,
+  RECORDS_NARRATED_RETRY,
   declinedSentence,
   declineRetry,
   draftAskedBeforeShown,
+  narratesRecords,
   draftVariables,
   droppedDay,
   questionCard,
@@ -792,6 +794,12 @@ export async function planDeclineRetry(
     (await recentContinues()) < 1
   )
     return { sentence: "", note: DRAFT_FIRST_RETRY };
+  if (
+    !input.blocks.some((block) => CARD_KINDS.has(block.kind)) &&
+    narratesRecords(input.personRequest ?? input.request, input.reply) &&
+    (await recentContinues()) < 1
+  )
+    return { sentence: "", note: RECORDS_NARRATED_RETRY };
   // A template the recruiter asked for keeps {{firstName}} but no [bracketed] blanks, and it is
   // the recruiter's email to the candidate, never the candidate's note to an interviewer.
   const asked = input.personRequest ?? input.request;

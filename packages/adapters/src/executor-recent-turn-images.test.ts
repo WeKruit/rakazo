@@ -1333,19 +1333,21 @@ describe("handed-in stage", () => {
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
   });
 
-  // Gate 71a2cac2, one-off-email: after 「直接发吧」 the coordinator's 「好，这就处理。」 stood alone
-  // for 25 s, and the teammate's Connect card came under it instead of in its place.
-  // Gate acd31504: after 「发给他」 the same line stood above the teammate's question card.
+  // Gate acd31504: after 「发给他」 the coordinator's 「好，这就处理。」 stood above the teammate's
+  // question card. A connect card keeps the line instead (gate 9fd9c2ff, one-off-email: with the
+  // line gone, the first reply came only with the card, 30 s in).
   it.each([
     [
       "connect card",
       { toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]] },
+      false,
     ],
     [
       "question card",
       { events: [{ type: "ask", text: "Wei Zhang 的邮箱是什么？", actions: [] } as never] },
+      true,
     ],
-  ] as const)("lets a handed-in %s take the coordinator's fixed line's place", async (_, card) => {
+  ] as const)("a handed-in %s and the coordinator's fixed line", async (_, card, replaces) => {
     const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
       sourceMessage: handoff("bot-1"),
@@ -1354,7 +1356,9 @@ describe("handed-in stage", () => {
       finalText: "",
       ...(card as object),
     });
-    expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
+    if (replaces)
+      expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
+    else expect(prisma.message.delete).not.toHaveBeenCalledWith({ where: { id: "line-main" } });
   });
 
   // Gate acd31504, one-off-email: the Gmail card was refused for want of the email, and the

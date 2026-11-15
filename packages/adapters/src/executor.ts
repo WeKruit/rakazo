@@ -92,6 +92,7 @@ import {
   applyJudgeDecision,
   asksAboutThesePeople,
   asksForPeople,
+  asksForTemplate,
   asksForOutreach,
   asksToSendTo,
   assertTransition,
@@ -490,7 +491,11 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
-import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
+import {
+  globalPeopleSearchRefusal,
+  globalRoleWriteRefusal,
+  roleRequestMessage,
+} from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -641,6 +646,9 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  heldRoundPeople,
+  listsPeople,
+  mentionsPeople,
   nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
@@ -846,6 +854,7 @@ import {
   quotesMessage,
   restatesUpdate,
   withoutRepeatedClosing,
+  withoutRepastedDraft,
   sameWords,
   TurnReportLedger,
   turnReportText,
@@ -1442,6 +1451,10 @@ export const globalAskBeforeRole = (latest: string) =>
 /** Model-facing: a research save the server refused, never a reason to ask for the JD again. */
 export const RESEARCH_SAVE_REFUSED =
   "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
+
+/** Model-facing: a one-email template naming no one is written in the coordinator's own reply. */
+const TEMPLATE_WRITE_YOURSELF =
+  "Not handed off: an email template that names no one is yours to write. Write it in this reply now, from the recruiter to the candidate: Subject: and the full body, {{firstName}} for the name, the real role details from the conversation including any change the recruiter just made, and signed with the recruiter's name. Show only the latest version.";
 
 /** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
 const GLOBAL_OPEN_ROLE_FIRST =
@@ -6591,6 +6604,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A reply-card tool ran this turn, so what the turn says about that card came from it.
         let mailReplyAttempted = false;
         let intakeHandoffRefused = false;
+        let templateHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -6696,9 +6710,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         /**
          * A card is the turn's answer, so it takes the place of the first line that stood in for
          * it (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
-         * only the service: there a written line stays and only the fixed one goes.
+         * only the service, so it never replaces the first line (gate 9fd9c2ff).
          */
-        const cardTakesLinesPlace = async (fixedOnly: boolean) => {
+        const cardTakesLinesPlace = async () => {
           const lineId = quickReplyMessageId;
           // A teammate's fixed line goes too when this bot's card answers it (gates 71a2cac2,
           // acd31504: 「好，这就处理。」 stood alone, then the handed-in card came under it).
@@ -6714,7 +6728,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (!lineFromTeammate && line.botId !== bot.id) ||
             line.clientNonce ||
             !oneLineNote(text) ||
-            ((fixedOnly || lineFromTeammate) && !isFixedAck(text)) ||
+            (lineFromTeammate && !isFixedAck(text)) ||
             !(await lineIsLatestReply(lineId))
           )
             return;
@@ -6897,9 +6911,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 leaseLost = true;
                 return;
               }
-              await cardTakesLinesPlace(true).catch((error) =>
-                getLogger().warn("first line kept beside the card", { error: String(error) }),
-              );
+              // The first line stays: it is the quick reply, and the card only names the service.
               await workspaceCheckpoint.flush();
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
@@ -6920,6 +6932,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 threadId: thread.id,
               });
             },
+            [lastRecruiterText, steeredText ?? ""].join("\n"),
           );
           if (result) return result;
           approvalPausePending = true;
@@ -7150,6 +7163,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let roundHeldThisTurn: Promise<boolean> | undefined;
         // A round recorded and held this turn: the turn's own reply says only that it is coming.
         let roundHeldRecorded = false;
+        // A round an earlier turn held is still waiting for the Reviewer's check: this turn lists
+        // none of its people either. Staging 11-15: the recruiter's follow-ups started a turn
+        // before the check, which wrote round 2 out; the checked round then swapped three of them.
+        // Read when used, since another turn may hold a round while this one runs (staging 11-15:
+        // the opening turn took the feedback, a teammate's turn held round 2, and the opening
+        // turn's reply then summarized round 2's grades).
+        const roundAwaitingCheck = async () =>
+          thread.activeRecruitingRoleId &&
+          !isBackgroundRunTrigger(run.trigger) &&
+          !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+            ? heldRoundPeople(deps.prisma, {
+                threadId: thread.id,
+                roleId: thread.activeRecruitingRoleId,
+              }).catch(() => null)
+            : null;
         const roundHeld = (roleId: string) =>
           (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
             threadId: run.threadId,
@@ -7617,6 +7645,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
          * The recruiter's newest message is in this brief, and a teammate was already handed it or
          * this bot already answered it.
          */
+        let sameStageRefusals = 0;
+        /** Whether the person has written nothing since this thread message. */
+        const nothingNewSince = async (seq: number | undefined) => {
+          if (seq === undefined) return false;
+          const latest = await deps.prisma.message
+            .findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                OR: [
+                  { clientNonce: null },
+                  { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { seq: true },
+            })
+            .catch(() => null);
+          return latest !== null && latest.seq < seq;
+        };
         const messageAlreadyHanded = async (brief: string) => {
           try {
             const latest = await deps.prisma.message.findFirst({
@@ -9975,6 +10024,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args: connectorCall.args,
             });
             if (roleWrite) return { error: roleWrite };
+            const search = globalPeopleSearchRefusal(
+              connectorCall.route.toolName,
+              connectorCall.args,
+            );
+            if (search) return { error: search };
           }
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
@@ -15099,6 +15153,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               intakeHandoffRefused = true;
               return finish({ error: INTAKE_ASK_FIRST });
             }
+            // Gate 9fd9c2ff, change-mind-mid-run: a one-email template went to the writer, and
+            // only "I'll write a version first" showed before the recruiter changed the pay.
+            if (
+              !templateHandoffRefused &&
+              recruitingBotKey(bot) === "main" &&
+              recruiterTexts.slice(0, 3).some(asksForTemplate)
+            ) {
+              templateHandoffRefused = true;
+              return finish({ error: TEMPLATE_WRITE_YOURSELF });
+            }
             // Gate 91a438c4: the teammate posted the template and reported back, and the same
             // brief went to it twice more, so one request got three answers.
             if (handback) {
@@ -15109,7 +15173,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   blocks: { array_contains: [{ kind: "handoff", toBotId: handback.fromBotId }] },
                 },
                 orderBy: { seq: "desc" },
-                select: { blocks: true },
+                select: { seq: true, blocks: true },
               });
               const brief = ((asked?.blocks ?? []) as MessageBlock[]).find(
                 (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
@@ -15117,9 +15181,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )?.text;
               // Gate 95185659: the brief worded differently, but it carried the same recruiter
               // message a teammate was already handed, and the second answer contradicted the first.
+              // Gate 48d5887e, change-mind: reworded again with nothing new from the recruiter since
+              // the brief it finished; refused once, so a concrete undone part can still be handed.
               if (
                 restatesUpdate(String(args.message ?? ""), brief) ||
-                (await messageAlreadyHanded(String(args.message ?? "")))
+                (await messageAlreadyHanded(String(args.message ?? ""))) ||
+                (sameStageRefusals === 0 &&
+                  (args.bot_id
+                    ? String(args.bot_id) === handback.fromBotId
+                    : !args.confirm_name ||
+                      (
+                        await deps.prisma.bot
+                          .findUnique({ where: { id: handback.fromBotId }, select: { name: true } })
+                          .catch(() => null)
+                      )?.name === String(args.confirm_name)) &&
+                  (await nothingNewSince(asked?.seq)) &&
+                  sameStageRefusals++ === 0)
               )
                 return finish({
                   error: `Not handed off: this is the request it just finished, and its result is shown above. Reply exactly ${NO_RESPONSE}, or hand it only the concrete part that is still undone.`,
@@ -17471,7 +17548,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         // A held round's check runs in this conversation once this turn ends, so
                         // newer messages start the next turn instead of keeping this one open.
                         // Staging 11-15: two steered follow-ups held the turn for six minutes.
-                        if (roundHeldRecorded) return [];
+                        if (roundHeldRecorded || (await roundAwaitingCheck()) !== null) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,
@@ -17810,7 +17887,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
-              await cardTakesLinesPlace(false).catch((error) =>
+              await cardTakesLinesPlace().catch((error) =>
                 getLogger().warn("first line kept beside the card", { error: String(error) }),
               );
               if (
@@ -18290,7 +18367,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
           // Staging 11-15: after holding round 2, the reply described its people and their grades
           // before the check, so the recruiter read the round twice. It says only that it comes.
-          if (roundHeldRecorded && !handedOff)
+          const heldPeople = roundHeldRecorded || handedOff ? null : await roundAwaitingCheck();
+          const replyText = blocksText(blocks);
+          if (
+            !handedOff &&
+            (roundHeldRecorded ||
+              (heldPeople !== null &&
+                (listsPeople(replyText) || mentionsPeople(replyText, heldPeople))))
+          )
             blocks = [
               {
                 kind: "text",
@@ -18476,8 +18560,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 )
                 .catch(() => []),
             );
-            if (closed !== text) {
-              text = closed;
+            // Gate e7805c70, change-mind: asked what changed, the reply pasted the email above again.
+            const shown = await deps.prisma.message
+              .findMany({
+                where: { threadId: thread.id, role: "bot", NOT: { runId } },
+                orderBy: { seq: "desc" },
+                take: 6,
+                select: { blocks: true },
+              })
+              .then((rows) =>
+                rows.map((row) =>
+                  (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
+                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                    .join("\n"),
+                ),
+              )
+              .catch(() => []);
+            const pointed = withoutRepastedDraft(closed, shown, steeredText ?? askedNow);
+            if (pointed !== text) {
+              text = pointed;
               blocks = blocks.map((block) => (block.kind === "text" ? { ...block, text } : block));
             }
           }

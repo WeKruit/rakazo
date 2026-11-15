@@ -12275,7 +12275,8 @@ export async function saveRecruitingCalibrationRound(
       );
     // The checked version of a round held for the Reviewer takes that round's place: the recruiter
     // never saw the held list, so it is not a round of its own. Staging 11-15: the checked round 2
-    // was labelled round 3 after the recruiter had seen only round 1.
+    // was labelled round 3 after the recruiter had seen only round 1. It is shown now, so it dates
+    // from now: what the recruiter wrote while it was held came before it, not after.
     const heldRecordedBy =
       input.corrects &&
       previous &&
@@ -12295,7 +12296,7 @@ export async function saveRecruitingCalibrationRound(
       replacesHeld && previous
         ? await tx.recruitingCalibrationRound.update({
             where: { id: previous.id },
-            data: { candidateKeys: [...keys], effectId: saving.id },
+            data: { candidateKeys: [...keys], effectId: saving.id, createdAt: new Date() },
           })
         : await tx.recruitingCalibrationRound.create({
             data: {
