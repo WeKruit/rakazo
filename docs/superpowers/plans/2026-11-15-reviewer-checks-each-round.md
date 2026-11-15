@@ -55,10 +55,15 @@ a `corrects` correction) is therefore held when the team has the Reviewer:
   recording posts the list and the next-step card through the existing path.
 - Round 1 still shows at once, and a correction (`corrects`) is the checked round itself.
 
-## Decision (11-15): one shot, the picker's own check
+## Update: one showing, checked fast
 
-The recruiter chose to keep the picker's self-check. Each round is a quick list shown once, ending
-with the feedback question. A Reviewer pass that arrives minutes later would make them look twice.
-So the hold (#1372) and the swap after showing (#1356) are removed. The Reviewer keeps grading in
-the background, with the round's people first and the recruiter's words as requirements, and that
-changes nothing already shown. Round quality has to come from the picking step itself.
+The recruiter should see each round once. A list followed a few minutes later by a revised list is
+confusing, so a round that is already shown is never swapped afterwards. The hold stays for rounds
+after feedback, and the wait is cut instead:
+
+- The held round's grading starts with no settle delay, and a busy conversation is retried every
+  3 seconds instead of 30 while a round is held.
+- The Reviewer's grading prompt asks for short grades and no other calls between the profile
+  reads and the save. In the eec6adf0 run, about 90 of the check's ~130 seconds went to writing
+  long grades and to lookups between the reads and the save.
+- Round 1 is still shown at once with the feedback question.
