@@ -119,7 +119,7 @@ const GOING_AHEAD: Record<ReplyLanguage, string> = {
 };
 
 /** One sentence the chat can show as-is, or null when the model gave nothing usable. */
-export function cleanQuickReply(raw: string): string | null {
+export function cleanQuickReply(raw: string, asked = ""): string | null {
   if (/^(?:I hit a problem:|Unknown model |No response\. Try again\.)/i.test(raw.trim()))
     return null;
   const line = (firstSentence(raw) ?? raw)
@@ -130,7 +130,10 @@ export function cleanQuickReply(raw: string): string | null {
   if (/[?？]$/.test(line) || withoutNudge(line) !== line) return null;
   // Staging 11-13: "发吧" got 「好，现在发出。」 and then no mailbox was connected. A send can
   // still need a connection or a card, so the first line never says it is going out.
-  if (SAYS_SENDING.test(line)) return GOING_AHEAD[textLanguage(line, 1) ?? "en"];
+  // A question about the send ("发出去了吗？") is answered by the run: the going-ahead line
+  // answers nothing (gate 71a2cac2).
+  if (SAYS_SENDING.test(line))
+    return /[?？]|[吗呢]/.test(asked) ? null : GOING_AHEAD[textLanguage(line, 1) ?? "en"];
   return line;
 }
 
@@ -189,7 +192,7 @@ export function quickReply(input: {
     const settle = (text: string) => {
       if (settled) return;
       settled = true;
-      const line = inPersonLanguage(cleanQuickReply(text), language);
+      const line = inPersonLanguage(cleanQuickReply(text, input.userText), language);
       if (!line)
         getLogger().info("quick_reply.dropped", {
           runId: input.runId,

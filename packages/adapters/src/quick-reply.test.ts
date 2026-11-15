@@ -112,6 +112,12 @@ describe("quick reply", () => {
     );
     expect(cleanQuickReply("把职位描述发给我就行。")).toBe("把职位描述发给我就行。");
     expect(cleanQuickReply("已发出两封。")).toBe("好，这就处理。");
+    // Gate 71a2cac2 one-off-email: 「所以发出去了吗？我现在要做啥」 got 「好，这就处理。」, which
+    // answers no question; the run's own answer comes instead.
+    expect(
+      cleanQuickReply("邮件已发出前需要先连接 Gmail。", "所以发出去了吗？我现在要做啥"),
+    ).toBeNull();
+    expect(cleanQuickReply("好，现在发出。", "直接发吧")).toBe("好，这就处理。");
   });
 
   it("drops questions, long text and runtime filler", () => {

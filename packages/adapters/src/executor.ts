@@ -580,11 +580,7 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
-import {
-  askAfterPeopleTarget,
-  peopleTargetFrom,
-  requestedPeopleTarget,
-} from "./people-target.js";
+import { askAfterPeopleTarget, peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -6692,7 +6688,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
          */
         const cardTakesLinesPlace = async (fixedOnly: boolean) => {
           const lineId = quickReplyMessageId;
-          if (!hideVendors || !lineId || lineFromTeammate) return;
+          // A teammate's fixed line goes too when this bot's card answers it (gate 71a2cac2:
+          // 「好，这就处理。」 stood alone for 25 s, then the handed-in Connect card came under it).
+          if (!hideVendors || !lineId || (lineFromTeammate && !fixedOnly)) return;
           const line = await deps.prisma.message.findUnique({
             where: { id: lineId },
             select: { botId: true, clientNonce: true, blocks: true },
@@ -6701,7 +6699,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const text = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
           if (
             !line ||
-            line.botId !== bot.id ||
+            (!lineFromTeammate && line.botId !== bot.id) ||
             line.clientNonce ||
             !oneLineNote(text) ||
             (fixedOnly && !isFixedAck(text)) ||
@@ -8425,10 +8423,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               keys,
               checks,
               // The language check owns a required language; its criterion takes no verdict here.
-              criteria: (
-                await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })
-              ).filter(
-                (criterion) => !languageRequirement || !languageFilters([criterion.statement]).length,
+              criteria: (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).filter(
+                (criterion) =>
+                  !languageRequirement || !languageFilters([criterion.statement]).length,
               ),
               asked: gapAsked,
               // The recruiter's rule: a short round relaxes the bar over at most three tries.
@@ -12879,8 +12876,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
                 if (held) {
                   // No settle wait: the check starts seconds after this turn ends.
-                  await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch((error) =>
-                    getLogger().warn("recruiting grade schedule", { error: String(error) }),
+                  await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch(
+                    (error) =>
+                      getLogger().warn("recruiting grade schedule", { error: String(error) }),
                   );
                   return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
                 }
@@ -16263,14 +16261,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             })
             .catch(() => []));
         const roleIsTarget = async (roleId: string, target: { threadId: string }) =>
-          (
-            await deps.prisma.recruitingRole
-              .findFirst({ where: { id: roleId, sourceThreadId: target.threadId }, select: { id: true } })
-              .catch(() => ({ id: roleId }))
-          ) !== null ||
+          (await deps.prisma.recruitingRole
+            .findFirst({
+              where: { id: roleId, sourceThreadId: target.threadId },
+              select: { id: true },
+            })
+            .catch(() => ({ id: roleId }))) !== null ||
           (
             await deps.prisma.thread
-              .findUnique({ where: { id: target.threadId }, select: { activeRecruitingRoleId: true } })
+              .findUnique({
+                where: { id: target.threadId },
+                select: { activeRecruitingRoleId: true },
+              })
               .catch(() => null)
           )?.activeRecruitingRoleId === roleId;
         const roleReferenceOverruled = new Set<string>();
