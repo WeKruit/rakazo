@@ -15,6 +15,7 @@ import {
 import { RetiredModelCredentialError } from "./pi-oauth.js";
 import type * as RecruitingContextModule from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
+import type * as RequestConnectionModule from "./request-connection.js";
 import type * as TurnEndGuardModule from "./turn-end-guard.js";
 import { planDeclineRetry } from "./turn-end-guard.js";
 
@@ -27,6 +28,24 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
 vi.mock("./recruiting-context.js", async (importOriginal) => ({
   ...(await importOriginal<typeof RecruitingContextModule>()),
   loadRecruitingRunContext: vi.fn(async () => undefined),
+}));
+
+// The card's own effects (lease, pause) are covered elsewhere; this file checks what the chat shows.
+vi.mock("./request-connection.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof RequestConnectionModule>()),
+  requestConnection: vi.fn(
+    async (_prisma: unknown, _scope: unknown, _args: unknown, pause: (block: never) => unknown) => {
+      await Promise.resolve(
+        pause({
+          kind: "ask",
+          status: "pending",
+          text: "Connect Calendar",
+          connection: { name: "Calendar", reason: "book the call" },
+        } as never),
+      ).catch(() => undefined);
+      return { status: "paused" };
+    },
+  ),
 }));
 
 vi.mock("./turn-end-guard.js", async (importOriginal) => {
@@ -172,6 +191,8 @@ async function runWithModel(
     teammateResult?: string;
     /** The coordinator's first line, then its brief handing this bot the request. */
     briefAfterLine?: string;
+    /** Tools the run calls, with their arguments. */
+    toolCalls?: Array<[string, Record<string, unknown>]>;
     /** This bot's last text in the thread, from an earlier run, with no person writing since. */
     ownLastText?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
@@ -222,6 +243,8 @@ async function runWithModel(
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
     for (const event of options.events ?? []) yield event;
+    for (const [name, args] of options.toolCalls ?? [])
+      await next.executeTool?.(name, args, `${name}-call`);
     yield {
       type: "done" as const,
       text:
@@ -406,9 +429,11 @@ async function runWithModel(
           ? { createdAt: new Date(0) }
           : options.newerBrief && args?.where?.id === options.sourceMessage?.id
             ? { seq: options.sourceMessage?.seq }
-            : args?.where?.id === "published-final"
-              ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
-              : null,
+            : options.briefAfterLine && args?.where?.id === "line-main"
+              ? coordinatorRows[1]
+              : args?.where?.id === "published-final"
+                ? ((await prisma.message.create.mock.results.at(-1)?.value) ?? null)
+                : null,
       ),
       count: vi.fn(async () => 0),
       findFirst: vi.fn(
@@ -1267,6 +1292,20 @@ describe("handed-in stage", () => {
       }),
     );
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
+  });
+
+  // Gate 71a2cac2, one-off-email: after 「直接发吧」 the coordinator's 「好，这就处理。」 stood alone
+  // for 25 s, and the teammate's Connect card came under it instead of in its place.
+  it("lets a handed-in connect card take the coordinator's fixed line's place", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      briefAfterLine: "好，这就处理。",
+      recruitingRoleId: "role-1",
+      finalText: "",
+      toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]],
+    });
+    expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
   });
 
   // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the
