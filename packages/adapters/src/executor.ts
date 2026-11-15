@@ -510,7 +510,7 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import { intakeFieldsNote } from "./intake-open-fields.js";
+import { intakeFieldsNote, settledFactAsked, settledFactNote } from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -6991,6 +6991,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let askDeclineBounced = false;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
+        const settledAskBounced = new Set<string>();
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -17105,6 +17106,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     if (known && !knownAskBounced.has(known.key)) {
                       knownAskBounced.add(known.key);
                       return `"${known.key}" → "${known.value}"`;
+                    }
+                    // A fact the recruiter's own words state is never asked again (staging 11-15:
+                    // "6+ years" drew a years-cap card, "Seattle hybrid" a work-scope card).
+                    const settled = settledFactAsked(
+                      question,
+                      messages
+                        .filter((message) => message.role === "user")
+                        .flatMap((message) =>
+                          (message.blocks as MessageBlock[]).flatMap((block) =>
+                            block.kind === "text" ? [block.text] : [],
+                          ),
+                        )
+                        .join("\n"),
+                    );
+                    if (settled && !settledAskBounced.has(settled)) {
+                      settledAskBounced.add(settled);
+                      return { instead: settledFactNote(settled) };
                     }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (

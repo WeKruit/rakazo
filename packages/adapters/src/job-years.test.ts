@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { intakeFields, jobStatesYears } from "./intake-open-fields.js";
+import { intakeFields, jobStatesYears, settledFactAsked } from "./intake-open-fields.js";
 
 describe("jobStatesYears", () => {
   it("finds a stated years requirement", () => {
@@ -33,7 +33,43 @@ describe("intakeFields", () => {
   });
 
   it("leaves the work mode, years and a named language open when the JD does not settle them", () => {
-    const fields = intakeFields("R&D Engineer, Dallas TX. Mandarin a plus. $80K–100K.");
+    const fields = intakeFields("R&D Engineer, Dallas TX. Mandarin speakers welcome. $80K–100K.");
     expect(fields.open).toHaveLength(3);
+  });
+});
+
+describe("settledFactAsked", () => {
+  const seattle =
+    "Senior Data Engineer — Seattle, WA (hybrid, 3 days on site). Requirements: 6+ years of data engineering.";
+  const shanghai =
+    "新岗位：华东区销售总监，常驻上海，10年以上销售经验。必须会说普通话和英语，必须有三甲医院渠道资源。";
+
+  // The cards staging gate 2e9712be still showed for these JDs.
+  it("finds a question about a fact the recruiter's words settle", () => {
+    expect(
+      settledFactAsked(
+        "For the required 6+ years in data engineering, what upper experience range should I target?",
+        seattle,
+      ),
+    ).toBe("years");
+    expect(settledFactAsked("你更希望把岗位设为哪个工作范围？", seattle)).toBe("location");
+    expect(
+      settledFactAsked(
+        "这个岗位的普通话和英语，您希望都作为必须条件，还是英语优先即可？",
+        shanghai,
+      ),
+    ).toBe("language");
+  });
+
+  it("lets a question about an open fact through", () => {
+    expect(
+      settledFactAsked(
+        "这个岗位的工作地点和办公方式是什么？",
+        "奥斯汀 backend 工程师，要会 Go，五年以上经验",
+      ),
+    ).toBeUndefined();
+    expect(
+      settledFactAsked("Which peer companies should I target first?", seattle),
+    ).toBeUndefined();
   });
 });
