@@ -6,6 +6,7 @@ import { recruitingBotKey } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { listRecruitingCandidates, RECRUITING_GRADE_NONCE_PREFIX } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { roundCriteria } from "./recruiting-round-check.js";
 
 export { RECRUITING_GRADE_NONCE_PREFIX };
 /** Newly saved searches settle this long before grading starts, so one request covers them. */
@@ -172,8 +173,19 @@ export const NOT_GRADING_TASK = {
 export function recruitingGradePrompt(
   people: readonly { name: string; url: string }[],
   service: GradingService,
+  asked: readonly string[] = [],
 ) {
-  const list = people.map((person) => `- ${person.name}: ${person.url}`);
+  // What the recruiter said for the round they are reviewing are hard requirements too.
+  const list = [
+    ...(asked.length
+      ? [
+          "The recruiter also asked for these; grade each as a hard requirement (someone like the people they turned down is not_met):",
+          ...asked.map((statement) => `* ${statement}`),
+          "",
+        ]
+      : []),
+    ...people.map((person) => `- ${person.name}: ${person.url}`),
+  ];
   if (service.tool === "self")
     return [
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
@@ -378,10 +390,53 @@ export async function startRecruitingGrading(
       select: { candidateKey: true, name: true, linkedinUrl: true },
     }),
   ]);
-  const skip = new Set(graded.map((row) => row.candidateKey));
+  // The round the recruiter is reviewing is graded first, against what they said since the last one.
+  const review = await roundUnderReview(deps.prisma, role.id);
+  const unreviewed = new Set(
+    review?.round.candidateKeys.filter((key) => !review.grades.has(key)) ?? [],
+  );
+  const skip = new Set(
+    graded.flatMap((row) => (unreviewed.has(row.candidateKey) ? [] : [row.candidateKey])),
+  );
   const people = new Map<string, { name: string; url: string }>();
   const batchSize = grader?.tool === "self" ? SELF_GRADE_BATCH : GRADE_BATCH;
-  for (const row of found) {
+  const ordered = [
+    ...found.filter((row) => unreviewed.has(row.candidateKey)),
+    ...found.filter((row) => !unreviewed.has(row.candidateKey)),
+  ];
+  const roundUrls = new Set(
+    ordered.flatMap((row) =>
+      unreviewed.has(row.candidateKey) && row.linkedinUrl ? [row.linkedinUrl] : [],
+    ),
+  );
+  if (review && ![...roundUrls].some((url) => waiting.has(url) || !sent.has(url))) {
+    const misfits = review.round.candidateKeys.flatMap((key) => {
+      const grade = review.grades.get(key);
+      return grade && NOT_FIT_TIERS.has(String(grade.tier)) ? [{ key, ...grade }] : [];
+    });
+    if (misfits.length) {
+      const latest = await deps.prisma.message.findFirst({
+        where: { threadId: thread.id, role: "user" },
+        orderBy: { seq: "desc" },
+        select: { id: true },
+      });
+      // Once per recruiter message, so the corrected round is never corrected again on its own.
+      const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
+      const runId = await startLeadRun(deps, thread, clientNonce, async () =>
+        roundReviewPrompt(review.round.round, misfits),
+      );
+      if (runId) {
+        getLogger().info("recruiting.round.review", {
+          runId,
+          roleId: role.id,
+          round: review.round.round,
+          misfits: misfits.length,
+        });
+        return;
+      }
+    }
+  }
+  for (const row of ordered) {
     if (people.size >= batchSize) break;
     if (!row.linkedinUrl || skip.has(row.candidateKey) || sent.has(row.linkedinUrl)) continue;
     skip.add(row.candidateKey);
@@ -396,7 +451,12 @@ export async function startRecruitingGrading(
     return skipped("nobody to grade");
   }
   if (!grader) return skipped("no research teammate");
-  const prompt = recruitingGradePrompt([...people.values()], grader);
+  const asked = review
+    ? (await roundCriteria(deps.prisma, { roleId: role.id, spaceId: thread.spaceId })).map(
+        (criterion) => criterion.statement,
+      )
+    : [];
+  const prompt = recruitingGradePrompt([...people.values()], grader, asked);
   // A retry of the same people after a request that never started research is a new request.
   const batch = createHash("sha256")
     .update([String(requests.length), ...people.keys()].join("\n"))
@@ -529,6 +589,28 @@ async function reportGradedRole(
 ): Promise<void> {
   const people = await deps.prisma.recruitingCandidate.count({ where: { roleId } });
   if (people < GRADE_REPORT_MIN_PEOPLE) return;
+  const clientNonce = `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}${thread.id}:${lastBatch.id}`;
+  const prompt = async () => gradeReportPrompt(await gradedSummary(deps.prisma, thread, roleId));
+  const runId = await startLeadRun(deps, thread, clientNonce, prompt);
+  if (runId) getLogger().info("recruiting.grade.report", { runId, roleId, people });
+}
+
+/**
+ * Starts one turn of the conversation's lead with this prompt, once per nonce, only while the
+ * conversation is idle. Returns the run id, or null when it was already started or is busy.
+ */
+async function startLeadRun(
+  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  thread: {
+    id: string;
+    spaceId: string;
+    userId: string;
+    botId: string | null;
+    groupId: string | null;
+  },
+  clientNonce: string,
+  prompt: () => Promise<string>,
+): Promise<string | null> {
   const lead = thread.groupId
     ? (
         await deps.prisma.chatGroupMember.findMany({
@@ -538,14 +620,13 @@ async function reportGradedRole(
         })
       ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
     : thread.botId;
-  if (!lead) return;
-  const clientNonce = `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}${thread.id}:${lastBatch.id}`;
-  const reported = await deps.prisma.run.findFirst({
+  if (!lead) return null;
+  const started = await deps.prisma.run.findFirst({
     where: { spaceId: thread.spaceId, clientNonce },
     select: { id: true },
   });
-  if (reported) return;
-  const prompt = gradeReportPrompt(await gradedSummary(deps.prisma, thread, roleId));
+  if (started) return null;
+  const text = await prompt();
   const runId = await deps.prisma.$transaction(async (tx) => {
     const locked = await tx.thread.updateMany({
       where: { id: thread.id, spaceId: thread.spaceId },
@@ -566,7 +647,7 @@ async function reportGradedRole(
         botId: lead,
         threadId: thread.id,
         userId: thread.userId,
-        prompt,
+        prompt: text,
         status: "queued",
       },
     });
@@ -584,11 +665,85 @@ async function reportGradedRole(
     });
     return run.id;
   });
-  if (!runId) return;
-  getLogger().info("recruiting.grade.report", { runId, roleId, people });
+  if (!runId) return null;
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
-    getLogger().warn("recruiting grade report deferred to reconciliation");
+    getLogger().warn("recruiting lead run deferred to reconciliation");
   });
+  return runId;
+}
+
+/** Run nonce of the lead's swap of a round's people the Reviewer found not to fit. */
+export const RECRUITING_ROUND_REVIEW_NONCE_PREFIX = "recruiting-round-review:";
+/** Tiers the Reviewer gives someone who misses a hard requirement or whose current work doesn't fit. */
+const NOT_FIT_TIERS = new Set(["Partial"]);
+
+type RoundGrade = {
+  name: string | null;
+  title: string | null;
+  company: string | null;
+  tier: unknown;
+};
+
+/**
+ * The latest calibration round while the recruiter has not approved it, with each of its people's
+ * newest grade saved after the previous round was recorded, i.e. made with their feedback.
+ */
+async function roundUnderReview(
+  prisma: PrismaClient,
+  roleId: string,
+): Promise<{
+  round: { id: string; round: number; candidateKeys: string[] };
+  grades: Map<string, RoundGrade>;
+} | null> {
+  const [round, previous] = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId },
+    orderBy: { round: "desc" },
+    take: 2,
+    select: { id: true, round: true, candidateKeys: true, createdAt: true, approvedAt: true },
+  });
+  if (!round || round.approvedAt) return null;
+  const rows = await prisma.recruitingCandidateOccurrence.findMany({
+    where: {
+      roleId,
+      candidateKey: { in: round.candidateKeys },
+      page: {
+        ...(previous ? { observedAt: { gt: previous.createdAt } } : {}),
+        effect: {
+          OR: GRADE_SAVE_OPERATIONS.map((operation) => ({
+            request: { path: ["operation"], equals: operation },
+          })),
+        },
+      },
+    },
+    orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+    select: { candidateKey: true, name: true, title: true, company: true, matchFields: true },
+  });
+  const grades = new Map<string, RoundGrade>();
+  for (const row of rows)
+    if (!grades.has(row.candidateKey))
+      grades.set(row.candidateKey, {
+        name: row.name,
+        title: row.title,
+        company: row.company,
+        tier: (row.matchFields as { match_tier?: unknown } | null)?.match_tier,
+      });
+  return { round, grades };
+}
+
+/** The lead's turn that swaps out the round's people the Reviewer graded as not fitting. */
+export function roundReviewPrompt(
+  round: number,
+  misfits: readonly (RoundGrade & { key: string })[],
+) {
+  return [
+    `The Reviewer graded round ${round} from each person's full profile. ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:`,
+    ...misfits.map((person) => {
+      const role = [person.title, person.company].filter(Boolean).join(" at ");
+      return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
+    }),
+    "",
+    "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). Swap exactly these people out of the round the way a recruiter's turn-down of them is handled: one quick search for that many new people who fit every requirement, then record calibration_round with corrects: true, keeping the round's other people and adding the replacements; when fewer are found, record the ones found. Then post one short message to the recruiter naming who was replaced, each with the one-line reason, and the corrected round. Change no one else and ask no question.",
+  ].join("\n");
 }
 
 /** Who grades a batch: the quality check itself, or a teammate's search service. */
