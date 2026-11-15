@@ -17162,6 +17162,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         instead: globalAskBeforeRole(recruiterTexts[0] ?? ""),
                       };
                     }
+                    if (!senderRead && asksSenderCompanyName(question))
+                      return { instead: SENDER_READ_FIRST };
+                    // One question at a time: a card already waiting here is answered first.
+                    const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
+                    if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
+                    // Workloop: work running behind the conversation never asks the person after
+                    // they moved on; a newer message another reply answers wins.
+                    const moved = await newerMessageAnsweredElsewhere();
+                    if (moved !== undefined) {
+                      movedElsewhere = true;
+                      return { instead: askAfterNewerMessage(moved) };
+                    }
                     // Gate aceb80c9, jd-upload-pdf: after the check, Kruit's own chat still asked about
                     // an attached JD's language and no role opened. A JD file or a described role opens
                     // the role; its team searches first.
@@ -17176,18 +17188,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ) {
                       globalRoleBounces++;
                       return { instead: GLOBAL_OPEN_ROLE_FIRST };
-                    }
-                    if (!senderRead && asksSenderCompanyName(question))
-                      return { instead: SENDER_READ_FIRST };
-                    // One question at a time: a card already waiting here is answered first.
-                    const waiting = hideVendors ? await openQuestionElsewhere() : undefined;
-                    if (waiting !== undefined) return { instead: questionAlreadyWaiting(waiting) };
-                    // Workloop: work running behind the conversation never asks the person after
-                    // they moved on; a newer message another reply answers wins.
-                    const moved = await newerMessageAnsweredElsewhere();
-                    if (moved !== undefined) {
-                      movedElsewhere = true;
-                      return { instead: askAfterNewerMessage(moved) };
                     }
                     if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                       askDeclineBounced = true;

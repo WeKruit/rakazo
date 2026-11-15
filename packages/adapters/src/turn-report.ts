@@ -889,7 +889,7 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
 export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
   return (
     asksForOutreach(recruiterText) &&
-    /写|起草|草稿|模板|\b(?:write|draft|template)\b/i.test(recruiterText) &&
+    /写(?:一?[封个份])?(?:邮件|信|模板)|起草|模板|\b(?:write|draft)\s+(?:(?:me|up)\s+)?(?:an?\s+|the\s+)?(?:e-?mail|message|note|outreach|template)|\btemplate\b/i.test(recruiterText) &&
     !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );

@@ -784,5 +784,7 @@ describe("draftAskedBeforeShown", () => {
     expect(draftAskedBeforeShown("帮我回复 Wei Zhang 的邮件", "")).toBe(false);
     expect(draftAskedBeforeShown("给前 10 个人发邮件", "")).toBe(false);
     expect(draftAskedBeforeShown("Draft an email to Wei Zhang", "")).toBe(true);
+    expect(draftAskedBeforeShown("草稿还在吗", "")).toBe(false);
+    expect(draftAskedBeforeShown("is the draft still there?", "")).toBe(false);
   });
 });
