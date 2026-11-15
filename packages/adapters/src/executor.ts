@@ -6968,6 +6968,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           | undefined;
         let globalListSort: string | undefined;
+        // People this turn already listed in Kruit's chat: a later page never lists them again.
+        const globalListed = new Set<string>();
         /** The role team's live progress on this conversation's request, for a named role. */
         const globalTeamProgress = async (roleId: string) => {
           const role = await deps.prisma.recruitingRole.findFirst({
@@ -7023,20 +7025,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const working = await globalTeamProgress(args.roleId);
           // One rule from the recruiter's seen record: people they turned down never come back, and
           // while the team prepares a round, a page never passes off people already seen as new.
-          const shown = (items as Array<RecruiterListItem>)
-            .slice(0, size)
-            .filter(
-              (item) =>
-                item.recruiterVerdict !== "not_fit" &&
-                item.decision !== "pass" &&
-                !(working && item.alreadySeen),
-            );
+          const shown = (items as Array<RecruiterListItem>).slice(0, size).filter(
+            (item) =>
+              item.recruiterVerdict !== "not_fit" &&
+              item.decision !== "pass" &&
+              !(working && item.alreadySeen) &&
+              // Staging 11-15: pages 1 and 2 read moments apart listed the same six people twice.
+              !(typeof item.candidateKey === "string" && globalListed.has(item.candidateKey)),
+          );
           if (!shown.length)
             return {
               ...(working ? { teamWorking: working.note } : {}),
-              shownInChat: working
-                ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
-                : "Nobody on this page is left to show: the recruiter already turned them all down. Say so in one line, or read the next page.",
+              shownInChat: items.some(
+                (item) =>
+                  typeof item.candidateKey === "string" && globalListed.has(item.candidateKey),
+              )
+                ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
+                : working
+                  ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
+                  : "Nobody on this page is left to show: the recruiter already turned them all down. Say so in one line, or read the next page.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -7064,6 +7071,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!text) return undefined;
           await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+          for (const item of shown)
+            if (typeof item.candidateKey === "string") globalListed.add(item.candidateKey);
           const start = first ?? 1;
           const shownRange = `${start}–${start + shown.length - 1}${total !== undefined ? ` of ${total}` : ""}`;
           return {
@@ -12623,9 +12632,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? {
                       ...round,
-                      ...(feedbackNotCriteria.length
-                        ? { criteriaToSave: feedbackCriteriaToSave(feedbackNotCriteria) }
-                        : {}),
                       next: RECRUITING_ROUND_NEXT_STEP,
                     }
                   : round;
