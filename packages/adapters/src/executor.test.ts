@@ -3967,4 +3967,22 @@ describe("gmailCardNeedsDraft", () => {
     expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
     expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
   });
+
+  // Gate 14d33ed1 one-off-email: the role details came after a generic first draft, and the card
+  // came with no email that had them.
+  it("waits for the revised email when the recruiter added facts the shown one lacks", () => {
+    const generic =
+      "**Subject: Exploring a Fintech Opportunity**\n\nHi Wei,\n\nI'm reaching out about an opportunity in fintech.\n\nBest,\nAlex Morgan";
+    const facts = "wei.zhang.test@example.com，后端 Go 做支付，纽约 fintech，base 190-230k";
+    expect(gmailCardNeedsDraft("gmail", facts, "", generic)).toBe(true);
+    expect(
+      gmailCardNeedsDraft("gmail", facts, "", `${generic} Go payments, base $190k-$230k`),
+    ).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", "直接发出去", "", generic)).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", "Send it via Gmail now", "", generic)).toBe(false);
+    expect(gmailCardNeedsDraft("gmail", "她的邮箱 wei.zhang.test@example.com", "", generic)).toBe(
+      false,
+    );
+    expect(gmailCardNeedsDraft("gmail", facts, "**Subject:** Go payments", generic)).toBe(false);
+  });
 });

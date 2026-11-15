@@ -6846,17 +6846,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args.provider,
               lastRecruiterText,
               [...midTurnUserTexts, assembled].join("\n"),
-            ) &&
-            // An email already shown earlier in this conversation is not written out again.
-            !(await deps.prisma.message
-              .findMany({
-                where: { threadId: thread.id, role: "bot" },
-                orderBy: { seq: "desc" },
-                take: 12,
-                select: { blocks: true },
-              })
-              .then((messages) => /Subject\s*[:：]|主题\s*[:：]/i.test(JSON.stringify(messages)))
-              .catch(() => false))
+              // An email already shown earlier in this conversation is not written out again,
+              // unless the recruiter has since given facts it lacks.
+              await deps.prisma.message
+                .findMany({
+                  where: { threadId: thread.id, role: "bot" },
+                  orderBy: { seq: "desc" },
+                  take: 12,
+                  select: { blocks: true },
+                })
+                .then((messages) =>
+                  messages
+                    .map((message) =>
+                      (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                        .join("\n"),
+                    )
+                    .find((text) => /Subject\s*[:：]|主题\s*[:：]/i.test(text)),
+                )
+                .catch(() => ""),
+            )
           ) {
             gmailDraftAsked = true;
             return { error: GMAIL_DRAFT_FIRST_NOTE };
@@ -20077,13 +20086,25 @@ export function gmailCardNeedsDraft(
   provider: unknown,
   recruiterText: string,
   shown: string,
+  /** The latest email already shown in this conversation, if any. */
+  earlierDraft?: string,
 ): boolean {
-  return (
-    /gmail/i.test(String(provider ?? "")) &&
-    asksForOutreach(recruiterText) &&
-    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
+  if (!/gmail/i.test(String(provider ?? "")) || DRAFT_SUBJECT.test(shown)) return false;
+  if (earlierDraft === undefined) return asksForOutreach(recruiterText);
+  // A send, connect or status ask ("send it via Gmail", "发出去了吗") is about the shown email.
+  if (/发|寄|连|\b(?:send|sent|connect)|[?？吗呢]/i.test(recruiterText)) return false;
+  // Gate 14d33ed1: a generic first draft does not stand for the email once the recruiter gave
+  // the role's facts; their names and numbers are compared, the address alone adds none.
+  const draft = earlierDraft.toLowerCase();
+  return (recruiterText.replace(/[^\s@，,]+@[^\s@，,]+/g, " ").match(/[a-z]{2,}|\d+/gi) ?? []).some(
+    (fact) =>
+      !new RegExp(
+        /\d/.test(fact) ? `(?<!\\d)${fact}(?!\\d)` : `(?<![a-z])${fact.toLowerCase()}(?![a-z])`,
+      ).test(draft),
   );
 }
+
+const DRAFT_SUBJECT = /Subject\s*[:：]|主题\s*[:：]/i;
 
 /** Model-facing: a message the person typed instead of pressing Connect is answered first. */
 export const connectAnswerFirst = (message: string) =>
