@@ -18,6 +18,7 @@ import {
   turnWork,
   droppedDay,
   repastedDraft,
+  withoutRepastedDraft,
   sequenceForOneEmail,
   quotesMessage,
 } from "./turn-report.js";
@@ -821,5 +822,29 @@ describe("draftAskedBeforeShown", () => {
     expect(draftAskedBeforeShown("Draft an email to Wei Zhang", "")).toBe(true);
     expect(draftAskedBeforeShown("草稿还在吗", "")).toBe(false);
     expect(draftAskedBeforeShown("is the draft still there?", "")).toBe(false);
+  });
+});
+
+// Gate e7805c70, change-mind: asked for one line on what changed, the reply pasted the same
+// email again under its lead, and the recruiter had to ask a second time.
+describe("withoutRepastedDraft", () => {
+  const email =
+    "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\n- Remote every Friday\n\nBest,\nAlex";
+  const shown = [`已将薪资改为 70–90万，并加入每周五远程：\n\n${email}`];
+  it("keeps only the lead of a reply that pastes an email already shown", () => {
+    expect(
+      withoutRepastedDraft(
+        `改为 base 70–90万，并加入每周五远程；最终版就是上面那封。以下是最终模板：\n\n${email}`,
+        shown,
+        "一句话说下改了什么，确认最终版是新的",
+      ),
+    ).toBe("改为 base 70–90万，并加入每周五远程；最终版就是上面那封。");
+  });
+  it.each([
+    ["a changed email", `改了签名：\n\n${email.replace("Alex", "David")}`, "签名改成 David"],
+    ["one asked for again", `完整版：\n\n${email}`, "把完整版再发一遍"],
+    ["an email with no lead", email, "最终版是哪封"],
+  ])("keeps %s", (_, reply, asked) => {
+    expect(withoutRepastedDraft(reply, shown, asked)).toBe(reply);
   });
 });
