@@ -1221,10 +1221,23 @@ describe("handed-in stage", () => {
 
   // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter changed the base,
   // and the corrected one followed; the run that took the newer message hands the change on.
-  it("posts no result for a brief the recruiter has written past", async () => {
+  // Gate c8855b72: the same, from the server's retry of the handed-in turn that asked instead.
+  it.each([
+    ["brief", () => handoff("bot-1")],
+    [
+      "retry of a brief",
+      () => ({
+        ...handoff("bot-1"),
+        role: "user",
+        botId: null,
+        clientNonce: "autocontinue:run-0:decline",
+        blocks: [{ kind: "text", text: "Not shown: write the email." }],
+      }),
+    ],
+  ] as const)("posts no result for a %s the recruiter has written past", async (_, source) => {
     const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
-      sourceMessage: handoff("bot-1"),
+      sourceMessage: source() as never,
       recruitingRoleId: "role-1",
       finalText:
         "Subject: Staff Frontend Engineer\n\nHi {{firstName}}, the base is RMB 600,000–800,000.",

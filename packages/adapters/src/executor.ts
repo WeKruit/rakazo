@@ -7797,6 +7797,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 role: "user",
                 botId: null,
                 createdAt: { gt: run.createdAt },
+                // The server's own continuation prompt is not the person's message.
+                AND: [
+                  {
+                    OR: [
+                      { clientNonce: null },
+                      { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
+                    ],
+                  },
+                ],
                 OR: [
                   { sourceRuns: { some: { id: { not: runId } } } },
                   {
@@ -18373,9 +18382,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   (await handbackAnswered(text)) ||
                   (await handbackSuperseded()) ||
                   // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter
-                  // changed the base; the coordinator hands the change on with the request.
+                  // changed the base; the coordinator hands the change on with the request. The
+                  // server's retry of a turn is past it too (gate c8855b72).
                   (hideVendors &&
-                    handedIn &&
+                    (handedIn ||
+                      historyMessages.find((message) => message.id === run.sourceMessageId)
+                        ?.internal === true) &&
                     (await newerMessageAnsweredElsewhere()) !== undefined)))
           ) {
             text = "";
