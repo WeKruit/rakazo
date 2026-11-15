@@ -1329,6 +1329,77 @@ describe("stage report of a finished request", () => {
     expect(f.results[0]).toMatchObject({ error: expect.stringContaining("just finished") });
     expect(handoffToGroupBot).not.toHaveBeenCalled();
   });
+
+  // Gate 48d5887e, change-mind: the teammate posted the revised email and reported, and Main
+  // handed it the same request again in new words (no message from the recruiter in between),
+  // so a second version came 22 s later.
+  it.each([
+    ["reworded with nothing new from the recruiter", 3, 1],
+    ["after the recruiter wrote again", 8, 0],
+  ] as const)("refuses a re-handoff %s only once", async (_, personSeq, refused) => {
+    const f = fixture(`report-reworded-${personSeq}`);
+    const report = {
+      id: "stage-report",
+      seq: 7,
+      role: "bot",
+      botId: "bot-2",
+      runId: "teammate-run",
+      createdAt: new Date(1),
+      blocks: [
+        {
+          kind: "handoff",
+          fromBotId: "bot-2",
+          toBotId: "bot-1",
+          text: "Finished the stage you handed me.",
+          hop: 1,
+          report: "completed",
+        },
+      ],
+    };
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: {
+        findUnique: vi.fn(async () => ({ id: "group-1", name: "Team", members: [] })),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
+    f.prisma.message.findMany.mockResolvedValue([report]);
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: {
+      where?: { blocks?: unknown; role?: string };
+    }) =>
+      query?.where?.blocks
+        ? {
+            seq: 6,
+            blocks: [
+              {
+                kind: "handoff",
+                fromBotId: "bot-1",
+                toBotId: "bot-2",
+                text: "Goal: 写封首次outreach邮件模板，并按最新更正改成 base 70-90万、每周五remote。",
+                hop: 0,
+              },
+            ],
+          }
+        : query?.where?.role === "user"
+          ? { seq: personSeq, blocks: [{ kind: "text", text: "等下，base改70-90万" }] }
+          : null) as unknown as typeof findFirst);
+    const again = {
+      name: "handoff_to_bot",
+      args: {
+        bot_id: "bot-2",
+        message: "Goal: 完成首次 outreach 邮件模板，用最新信息：base 70-90万。",
+      },
+    };
+    f.setCalls([
+      { ...again, executionId: "h1" },
+      { ...again, executionId: "h2" },
+    ]);
+    await f.run();
+    const refusals = f.results.filter((result) => JSON.stringify(result).includes("just finished"));
+    expect(refusals).toHaveLength(refused);
+  });
 });
 
 describe("computer that will not start", () => {

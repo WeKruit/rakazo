@@ -7617,6 +7617,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
          * The recruiter's newest message is in this brief, and a teammate was already handed it or
          * this bot already answered it.
          */
+        let sameStageRefusals = 0;
+        /** Whether the person has written nothing since this thread message. */
+        const nothingNewSince = async (seq: number | undefined) => {
+          if (seq === undefined) return false;
+          const latest = await deps.prisma.message
+            .findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                OR: [
+                  { clientNonce: null },
+                  { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { seq: true },
+            })
+            .catch(() => null);
+          return latest !== null && latest.seq < seq;
+        };
         const messageAlreadyHanded = async (brief: string) => {
           try {
             const latest = await deps.prisma.message.findFirst({
@@ -15109,7 +15130,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   blocks: { array_contains: [{ kind: "handoff", toBotId: handback.fromBotId }] },
                 },
                 orderBy: { seq: "desc" },
-                select: { blocks: true },
+                select: { seq: true, blocks: true },
               });
               const brief = ((asked?.blocks ?? []) as MessageBlock[]).find(
                 (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
@@ -15117,9 +15138,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )?.text;
               // Gate 95185659: the brief worded differently, but it carried the same recruiter
               // message a teammate was already handed, and the second answer contradicted the first.
+              // Gate 48d5887e, change-mind: reworded again with nothing new from the recruiter since
+              // the brief it finished; refused once, so a concrete undone part can still be handed.
               if (
                 restatesUpdate(String(args.message ?? ""), brief) ||
-                (await messageAlreadyHanded(String(args.message ?? "")))
+                (await messageAlreadyHanded(String(args.message ?? ""))) ||
+                (sameStageRefusals === 0 &&
+                  (args.bot_id
+                    ? String(args.bot_id) === handback.fromBotId
+                    : !args.confirm_name ||
+                      (
+                        await deps.prisma.bot
+                          .findUnique({ where: { id: handback.fromBotId }, select: { name: true } })
+                          .catch(() => null)
+                      )?.name === String(args.confirm_name)) &&
+                  (await nothingNewSince(asked?.seq)) &&
+                  sameStageRefusals++ === 0)
               )
                 return finish({
                   error: `Not handed off: this is the request it just finished, and its result is shown above. Reply exactly ${NO_RESPONSE}, or hand it only the concrete part that is still undone.`,
