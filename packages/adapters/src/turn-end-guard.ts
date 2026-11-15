@@ -245,6 +245,8 @@ export async function recruitingRoundListText(
     firstNumber?: number;
     /** The recruiter writes Chinese: the server's own words follow. */
     chinese?: boolean;
+    /** Name, title, company and location only, so a long list fits one message. */
+    brief?: boolean;
   },
 ) {
   const people = await recruitingRoundPeople(prisma, input);
@@ -270,7 +272,7 @@ export async function recruitingRoundListText(
     const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
-    const passage = roundPassage(person?.snippet);
+    const passage = input.brief ? undefined : roundPassage(person?.snippet);
     const unknown = shared ? undefined : input.unverified?.[key]?.trim();
     const unverifiedLabel = input.chinese ? "未核实：" : "Not verified: ";
     return `${(input.firstNumber ?? 1) + index}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   ${unverifiedLabel}${unknown}` : ""}`;
