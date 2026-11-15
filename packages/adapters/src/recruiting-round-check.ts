@@ -343,9 +343,12 @@ export async function listedBeforeRound(
     },
     orderBy: { seq: "asc" },
     take: 100,
-    select: { blocks: true },
+    select: { blocks: true, updatedAt: true },
   });
+  const recorded = new Date(input.createdAt).getTime();
   const listed = messages
+    // A reply still being written when the round was recorded may be listing that very round.
+    .filter((message) => message.updatedAt.getTime() < recorded)
     .flatMap((message) =>
       Array.isArray(message.blocks)
         ? (message.blocks as Array<{ kind?: unknown; text?: unknown }>).flatMap((block) =>
