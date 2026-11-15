@@ -271,6 +271,34 @@ describe("loadWorkingState", () => {
     );
   });
 
+  // Staging 11-15 gate 398accae jd-en: a JD stating "Seattle, WA (hybrid, 3 days on site)" got
+  // "should I treat Seattle hybrid as required, and what commute radius?" The server already holds
+  // a local role's people to a commute of that city; nothing told the agent so.
+  it("states a local role's place and commute bound as settled from the recruiter's words", async () => {
+    const quote = "Senior Data Engineer — Seattle, WA (hybrid, 3 days on site). 6+ years.";
+    const revisions = [
+      {
+        id: "role-1",
+        currentRevision: {
+          criteria: [],
+          preferences: [],
+          sourceRefs: [{ kind: "original_material", quote }],
+        },
+      },
+    ];
+    const card = (
+      await loadWorkingState(
+        fakePrisma({ revisions }) as never,
+        scope,
+        { id: "t1", groupId: "g1", activeRecruitingRoleId: "role-1" },
+        (t) => t,
+        now,
+      )
+    ).text;
+    expect(card).toContain("- This role's location is settled: Seattle, WA");
+    expect(card).toContain("within 50 miles");
+  });
+
   it("says a confirmed send is not a delivery, and that a campaign with no confirmed send emailed nobody", async () => {
     const lead = { leadId: "l", email: "a@x.test" };
     const bindings = [

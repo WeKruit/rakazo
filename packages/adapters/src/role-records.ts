@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { COMMUTE_MILES, localRolePlace } from "./recruiting-location.js";
 
 /**
  * What a role holds on record, for the working-state card: the requirements saved on its current
@@ -15,6 +16,8 @@ const RUNS_READ = 60;
 
 export type RoleRecord = {
   requirements?: string;
+  /** A local role's place as the recruiter's words name it; the server holds its people to it. */
+  place?: string;
   savedEmail?: { steps: number; first: string; at: Date };
   /** The role's campaign as this product recorded it; delivery itself is the provider's to say. */
   campaign?: { people: number; waiting: number; adopted: boolean; confirmedAt?: Date };
@@ -57,12 +60,16 @@ export function requirementsText(criteria: unknown, preferences: unknown): strin
   return all.length ? capped(all.join("; "), REQUIREMENTS_CHARS) : undefined;
 }
 
-/** Before any requirement is saved, the recruiter's own words the role was opened from. */
-function sourceWords(sourceRefs: unknown): string | undefined {
-  const quotes = (Array.isArray(sourceRefs) ? sourceRefs : []).flatMap((ref) => {
+function sourceQuotes(sourceRefs: unknown): string[] {
+  return (Array.isArray(sourceRefs) ? sourceRefs : []).flatMap((ref) => {
     const { kind, quote } = ref as { kind?: unknown; quote?: unknown };
     return kind === "original_material" && typeof quote === "string" && quote.trim() ? [quote] : [];
   });
+}
+
+/** Before any requirement is saved, the recruiter's own words the role was opened from. */
+function sourceWords(sourceRefs: unknown): string | undefined {
+  const quotes = sourceQuotes(sourceRefs);
   return quotes.length
     ? `the recruiter's words: "${capped(quotes.join(" / "), REQUIREMENTS_CHARS)}"`
     : undefined;
@@ -95,7 +102,18 @@ export async function loadRoleRecords(
     const requirements =
       requirementsText(role.currentRevision?.criteria, role.currentRevision?.preferences) ??
       sourceWords(role.currentRevision?.sourceRefs);
-    if (requirements) records.set(role.id, { requirements });
+    const criteria = role.currentRevision?.criteria;
+    const place = localRolePlace([
+      ...sourceQuotes(role.currentRevision?.sourceRefs),
+      ...(Array.isArray(criteria) ? criteria : []).flatMap((row) =>
+        statements((row as { expression?: Expression }).expression),
+      ),
+    ]);
+    const record: RoleRecord = {
+      ...(requirements ? { requirements } : {}),
+      ...(place ? { place: `${place.label}, within ${COMMUTE_MILES} miles` } : {}),
+    };
+    if (requirements || place) records.set(role.id, record);
   }
   const effects = runs.length
     ? await prisma.externalEffect.findMany({
