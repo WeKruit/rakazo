@@ -9,6 +9,7 @@ function fixture({
   secretId = null as string | null,
   endpoint = null as string | null,
   assigned = true,
+  name = "Instantly",
   pendingRun = undefined as string | undefined,
   rows = [] as Array<{ id: string; slug: string; name: string; endpoint: string | null }>,
 } = {}) {
@@ -16,7 +17,8 @@ function fixture({
     mcpServer: {
       findFirst: vi.fn(async () => ({
         id: "server-1",
-        name: "Instantly",
+        name,
+        slug: name.toLowerCase(),
         secretId,
         transport: "streamable_http",
         endpoint,
@@ -91,6 +93,35 @@ describe("request_connection", () => {
       status: "pending",
       connection: { serverId: "server-1", name: "Instantly", reason: "To read candidate replies." },
     });
+  });
+
+  it("names the address the recruiter typed on a mail connect card", async () => {
+    const f = fixture({ name: "Gmail" });
+    const typed = "用我的邮箱马上发给 Wei.Zhang.Test@example.com";
+    const reasonShown = (reason: string) =>
+      expect.objectContaining({ connection: expect.objectContaining({ reason }) });
+    await requestConnection(
+      f.db,
+      scope,
+      { serverId: "server-1", reason: "用来发这封邮件。" },
+      f.pause,
+      typed,
+    );
+    expect(f.pause).toHaveBeenNthCalledWith(
+      1,
+      reasonShown("用来发这封邮件。（发给 wei.zhang.test@example.com）"),
+    );
+    await requestConnection(
+      f.db,
+      scope,
+      { serverId: "server-1", reason: "To send to wei.zhang.test@example.com." },
+      f.pause,
+      typed,
+    );
+    expect(f.pause).toHaveBeenNthCalledWith(
+      2,
+      reasonShown("To send to wei.zhang.test@example.com."),
+    );
   });
 
   it("returns the pending ask instead of opening a second card for the same server", async () => {

@@ -6702,9 +6702,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         /**
          * A card is the turn's answer, so it takes the place of the first line that stood in for
          * it (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
-         * only the service: there a written line stays and only the fixed one goes.
+         * only the service, so it never replaces the first line (gate 9fd9c2ff).
          */
-        const cardTakesLinesPlace = async (fixedOnly: boolean) => {
+        const cardTakesLinesPlace = async () => {
           const lineId = quickReplyMessageId;
           // A teammate's fixed line goes too when this bot's card answers it (gates 71a2cac2,
           // acd31504: 「好，这就处理。」 stood alone, then the handed-in card came under it).
@@ -6720,7 +6720,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (!lineFromTeammate && line.botId !== bot.id) ||
             line.clientNonce ||
             !oneLineNote(text) ||
-            ((fixedOnly || lineFromTeammate) && !isFixedAck(text)) ||
+            (lineFromTeammate && !isFixedAck(text)) ||
             !(await lineIsLatestReply(lineId))
           )
             return;
@@ -6903,9 +6903,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 leaseLost = true;
                 return;
               }
-              await cardTakesLinesPlace(true).catch((error) =>
-                getLogger().warn("first line kept beside the card", { error: String(error) }),
-              );
+              // The first line stays: it is the quick reply, and the card only names the service.
               await workspaceCheckpoint.flush();
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
@@ -6926,6 +6924,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 threadId: thread.id,
               });
             },
+            [lastRecruiterText, steeredText ?? ""].join("\n"),
           );
           if (result) return result;
           approvalPausePending = true;
@@ -17867,7 +17866,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
-              await cardTakesLinesPlace(false).catch((error) =>
+              await cardTakesLinesPlace().catch((error) =>
                 getLogger().warn("first line kept beside the card", { error: String(error) }),
               );
               if (
