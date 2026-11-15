@@ -481,7 +481,9 @@ async function play(journey, label, owner, mailbox, out) {
   journey = { ...journey, variation: variationFor(seed) };
   const kruit = (await groupsOf(rpc)).find((group) => group.id.startsWith("recruiting-global-"));
   if (!kruit) throw new Error("the account has no Kruit conversation");
-  const ui = UI
+  // A journey about pages can only be judged by looking at them, so it always uses the browser.
+  const browser = UI || journey.mechanisms?.includes("pages");
+  const ui = browser
     ? await openUi({
         origin: ORIGIN,
         email: credentials[0],
