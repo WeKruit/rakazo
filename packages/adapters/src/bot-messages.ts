@@ -21,6 +21,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import { ROUND_HEADING } from "./recruiting-round-check.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -772,9 +773,6 @@ export async function reportDelegatedTeamBlocked(
   if (!sent.ok)
     getLogger().warn("delegated team block not reported", { runId: run.id, error: sent.error });
 }
-
-/** The first line of a calibration round's people list, as the server writes it. */
-const ROUND_HEADING = /^(?:\d+ (?:people|person) this round:|本轮 \d+ 人：)/;
 
 /** Only a recent delegation is still waiting for its team's result. */
 const DELEGATION_RETURN_WINDOW_MS = 24 * 60 * 60 * 1000;
