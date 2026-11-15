@@ -65,6 +65,7 @@ import {
   RecruitingBriefDraftSchema,
   RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCandidateReportSchema,
   RecruitingCrmBindingInputSchema,
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
@@ -8114,6 +8115,7 @@ async function saveUnassessedCandidatePage(
   if (!role.currentRevisionId) throw new RecruitingConflictError();
   const artifact = await createResearchArtifact(tx, actor, run, thread, file);
   if (input.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
+  const reports = savedCandidateReports(input.rows.map((item) => item.row));
   const rows = input.rows.map(({ rowIndex, row, matchFields }) => {
     // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
     const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
@@ -8127,6 +8129,7 @@ async function saveUnassessedCandidatePage(
       ...profile,
       evidenceUrls: Prisma.DbNull,
       issues: [...profile.issues],
+      report: reports[rowIndex]!,
       ...(matchFields ? { matchFields } : {}),
     };
   });
@@ -8644,6 +8647,21 @@ const candidateMatchKeys = [
   "match_score",
   "score",
 ];
+/**
+ * Each row's display report, projected once at save so the candidate list never re-reads the
+ * page. Rows are read in the receipt's canonical key order, as a read of the saved page sees them.
+ */
+function savedCandidateReports(pageRows: readonly unknown[]) {
+  const saved = JSON.parse(stableJsonValue(pageRows)) as unknown[];
+  return saved.map((row) => {
+    try {
+      return projectRecruitingCandidateReport(row, saved) as Prisma.InputJsonObject;
+    } catch {
+      return Prisma.DbNull;
+    }
+  });
+}
+
 /**
  * Copies each saved provider row's match cells onto its occurrence, once. Rows without such
  * cells get {} so NULL always means "not filled yet". Idempotent; `scope` filters alias `o`.
@@ -11570,6 +11588,23 @@ export async function listRecruitingCandidates(
         actor,
         selected.map((row) => row.candidateKey),
       );
+      const sourceOccurrences = selected.flatMap((row) =>
+        row.sourcePageId && row.sourceRowIndex !== null
+          ? [{ pageId: row.sourcePageId, rowIndex: row.sourceRowIndex }]
+          : [],
+      );
+      const reports = new Map(
+        (sourceOccurrences.length
+          ? await tx.recruitingCandidateOccurrence.findMany({
+              where: { roleId: role.id, OR: sourceOccurrences },
+              select: { pageId: true, rowIndex: true, report: true },
+            })
+          : []
+        ).flatMap((row) => {
+          const report = RecruitingCandidateReportSchema.safeParse(row.report);
+          return report.success ? [[`${row.pageId}:${row.rowIndex}`, report.data] as const] : [];
+        }),
+      );
       // The source receipt is already read and authorized with these pages. Display its facts
       // before the background projection finishes, without another query or waiting for media.
       const selectedSources = new Map(
@@ -11686,10 +11721,12 @@ export async function listRecruitingCandidates(
               decisionAt: decision?.source.createdAt ?? null,
               ...(sourcePageId && sourceRowIndex !== null
                 ? {
-                    latestSource: candidateSourceReference(
-                      pages.get(sourcePageId)!,
-                      sourceRowIndex,
-                    ),
+                    latestSource: {
+                      ...candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
+                      ...(reports.has(`${sourcePageId}:${sourceRowIndex}`)
+                        ? { report: reports.get(`${sourcePageId}:${sourceRowIndex}`) }
+                        : {}),
+                    },
                   }
                 : {}),
               latestAssessment:

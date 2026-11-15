@@ -13,7 +13,7 @@ import type {
   RecruitingSourceRef,
   SaveRecruitingAssessmentInput,
 } from "@rakazo/contracts";
-import { boundDirectApprovalRequest } from "@rakazo/core";
+import { boundDirectApprovalRequest, projectRecruitingCandidateReport } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { projectRecruitingCandidateProfiles } from "../../adapters/src/recruiting-profiles.js";
@@ -998,6 +998,17 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       education: [{ school_logo_url: "https://images.example.test/school.png" }],
     });
     const displayed = immediate.items.find((item) => item.candidateKey === `linkedin:/in/${slug}`)!;
+    // The list carries the report saved with the row; it never re-reads the saved page.
+    const snapshotRows = JSON.parse(Buffer.from(files[0]!).toString("utf8")).rows.map(
+      (item: { row: unknown }) => item.row,
+    );
+    expect(displayed.latestSource?.report).toEqual(
+      projectRecruitingCandidateReport(
+        snapshotRows[displayed.latestSource!.rowIndex],
+        snapshotRows,
+      ),
+    );
+    expect(displayed.latestSource?.report?.fields.length).toBeGreaterThan(0);
     const gradeInput = {
       operation: "save_grades" as const,
       expectedRoleRevision: role.role.revision,
