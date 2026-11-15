@@ -8551,6 +8551,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               asked: gapAsked,
               // The recruiter's rule: a short round relaxes the bar over at most three tries.
               relaxed: agentRunsBeforeRound > 0,
+              reviewed:
+                run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX) === true ||
+                (await roundHeld(roleId)),
               shortOfTen: SHORT_OF_TEN,
             });
             if (!checked.ok) {
