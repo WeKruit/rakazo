@@ -268,11 +268,12 @@ export function asksAboutThesePeople(text: string): boolean {
 }
 
 /**
- * A recruiter message that asks to see people. Staging 11-13: "现在must-have有哪些" made Kruit read
- * the role's people and post all of Results, unpicked people included, as the answer.
+ * A recruiter message that asks to see people, "the new ones" included. Staging 11-13: "现在must-have
+ * 有哪些" made Kruit read the role's people and post all of Results, unpicked people included, as
+ * the answer.
  */
 export function asksForPeople(text: string): boolean {
-  return /人|候选|名单|简历|名字|页|谁|candidate|people|person|profile|resume|who|list|page|show|results/i.test(
+  return /人|候选|名单|简历|名字|页|谁|新的|candidate|people|person|profile|resume|who|list|page|show|results|\bones\b|\bsee (?:them|the)\b/i.test(
     text,
   );
 }

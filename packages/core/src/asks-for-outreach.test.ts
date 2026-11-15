@@ -59,7 +59,16 @@ describe("asksToSendTo", () => {
 
 describe("asksForPeople", () => {
   it("tells a request for people from a question about requirements", () => {
-    for (const text of ["给我看看这些人", "下一页", "show me the candidates", "who is in the list?"])
+    // Staging 11-15: "so where are the new ones? want to see them" got a hand-written list
+    // that relisted people the recruiter had already seen.
+    for (const text of [
+      "给我看看这些人",
+      "下一页",
+      "show me the candidates",
+      "who is in the list?",
+      "so where are the new ones? want to see them",
+      "新的呢",
+    ])
       expect(asksForPeople(text)).toBe(true);
     for (const text of ["现在must-have有哪些", "What are the must-haves now?"])
       expect(asksForPeople(text)).toBe(false);
