@@ -246,10 +246,18 @@ export async function countRecruitingPeopleFoundSince(
   prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
   input: { roleId: string; since: Date },
 ): Promise<number> {
+  return (await listRecruitingPeopleFoundSince(prisma, input)).length;
+}
+
+/** The people a role's search has saved since a moment, each once, in the order they were found. */
+export async function listRecruitingPeopleFoundSince(
+  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
+  input: { roleId: string; since: Date },
+): Promise<string[]> {
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: { roleId: input.roleId, page: { observedAt: { gte: input.since } } },
-    distinct: ["candidateKey"],
+    orderBy: [{ page: { observedAt: "asc" } }, { rowIndex: "asc" }],
     select: { candidateKey: true },
   });
-  return rows.length;
+  return [...new Set(rows.map((row) => row.candidateKey))];
 }
