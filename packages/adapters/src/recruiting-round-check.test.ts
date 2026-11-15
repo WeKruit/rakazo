@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
-import { describe, expect, it } from "vitest";
-import { checkRound, roundCriteria } from "./recruiting-round-check.js";
+import { describe, expect, it, vi } from "vitest";
+import { checkRound, listedBeforeRound, roundCriteria } from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
   // From a staging feedback round: Seattle and Spark/Kafka from the JD, then "no production
@@ -124,5 +124,57 @@ describe("roundCriteria", () => {
         added: true,
       },
     ]);
+  });
+});
+
+describe("listedBeforeRound", () => {
+  // Staging 11-15: Kruit listed saved, unreviewed people mid-round; the round then picked four of
+  // them, and asked about repeats Kruit called them repeats of round 1 and had them removed.
+  it("names round people this chat listed before the round, outside any round list", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        blocks: [
+          {
+            kind: "text",
+            text: "Data Eng · 1–8 / 141:\n1. **[Aditi](https://www.linkedin.com/in/aditi-g)**",
+          },
+        ],
+      },
+      {
+        blocks: [
+          {
+            kind: "text",
+            text: "10 people this round:\n1. **[Bo](https://www.linkedin.com/in/bo)**",
+          },
+        ],
+      },
+    ]);
+    const prisma = {
+      recruitingCalibrationRound: {
+        findMany: vi.fn(async () => [{ createdAt: new Date("2026-11-15T03:40:00Z") }]),
+      },
+      message: { findMany },
+    } as unknown as PrismaClient;
+    const listed = await listedBeforeRound(prisma, {
+      threadId: "thread-global",
+      roleId: "role-1",
+      round: 2,
+      createdAt: "2026-11-15T03:51:00Z",
+      candidates: [
+        { name: "Aditi", linkedinUrl: "https://www.linkedin.com/in/aditi-g/" },
+        { name: "Aditya", linkedinUrl: "https://www.linkedin.com/in/aditi" },
+        { name: "Bo", linkedinUrl: "https://www.linkedin.com/in/bo" },
+      ],
+    });
+    expect(listed).toEqual(["Aditi"]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadId: "thread-global",
+          role: "bot",
+          createdAt: { gt: new Date("2026-11-15T03:40:00Z"), lt: new Date("2026-11-15T03:51:00Z") },
+        }),
+      }),
+    );
   });
 });
