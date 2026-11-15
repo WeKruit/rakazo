@@ -35,8 +35,8 @@ export const NEW_ROLE_PREFERENCE_ERROR =
 const NEW_ROLE_TEXT =
   /^\s*(?:新(?:的)?(?:岗位|职位)|(?:岗位|职位)(?:名称)?|new (?:role|position|job|opening)|job title)\s*[:：]|(?:^|\n)\s*job title\s*[:：]/i;
 
-/** People to reach when the recruiter accepts a round without naming a number. */
-const DEFAULT_SCALE_TARGET = 150;
+/** People to add when the recruiter accepts a round without naming a number: one small try. */
+const DEFAULT_SCALE_MORE = 20;
 
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
@@ -188,7 +188,7 @@ export async function executeRecruitingFeedback(
     });
     const target =
       peopleTargetFrom(feedback.intent.quote, inResults) ??
-      Math.max(DEFAULT_SCALE_TARGET, inResults);
+      inResults + DEFAULT_SCALE_MORE;
     return {
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
