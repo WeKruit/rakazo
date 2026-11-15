@@ -17849,6 +17849,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   answersCard: Boolean(nativeSources?.currentAnswer),
                   sent: turnReport.sent(),
                   receipts: turnReport.receipts(),
+                  since: { at: new Date(attemptStartedAt), runId },
                   ...(handedIn
                     ? {
                         personRequest:
