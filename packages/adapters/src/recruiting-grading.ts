@@ -19,6 +19,8 @@ export const RECRUITING_GRADE_SETTLE_MS = 30_000;
 const BUSY_RETRY_MS = 30_000;
 /** A round held for the Reviewer is checked the moment its conversation is free. */
 const HELD_RETRY_MS = 3_000;
+/** How soon the next batch is tried while the batch before it is still grading. */
+const NEXT_BATCH_RETRY_MS = 5_000;
 const MAX_ATTEMPTS = 120;
 /** People per grading request. */
 export const GRADE_BATCH = 50;
@@ -278,12 +280,18 @@ export async function startRecruitingGrading(
     return skipped("no role");
   const busy = await deps.prisma.run.findFirst({
     where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
-    select: { id: true },
+    select: { id: true, trigger: true },
   });
   if (busy) {
-    // The recruiter waits on a held round, so its check starts within seconds of the turn ending.
+    // The recruiter waits on a held round, so its check starts within seconds of the turn ending,
+    // and the next batch starts within seconds of the batch before it (staging 11-15: half of a
+    // search's 20 people were still unscored when the recruiter looked, with 30 s between batches).
     const held = (await roundUnderReview(deps.prisma, role.id, true))?.held;
-    const retry = held ? HELD_RETRY_MS : BUSY_RETRY_MS;
+    const retry = held
+      ? HELD_RETRY_MS
+      : busy.trigger === ("recruiting_grade" satisfies RunTrigger)
+        ? NEXT_BATCH_RETRY_MS
+        : BUSY_RETRY_MS;
     if (attempt + 1 < MAX_ATTEMPTS)
       await deps.jobs.enqueue(
         laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + retry),
