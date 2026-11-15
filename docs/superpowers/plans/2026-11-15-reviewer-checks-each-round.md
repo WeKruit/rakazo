@@ -54,3 +54,11 @@ a `corrects` correction) is therefore held when the team has the Reviewer:
   the misfits or, when everyone fits, records the same people with `corrects: true`. That
   recording posts the list and the next-step card through the existing path.
 - Round 1 still shows at once, and a correction (`corrects`) is the checked round itself.
+
+## Decision (11-15): one shot, the picker's own check
+
+The recruiter chose to keep the picker's self-check. Each round is a quick list shown once, ending
+with the feedback question. A Reviewer pass that arrives minutes later would make them look twice.
+So the hold (#1372) and the swap after showing (#1356) are removed. The Reviewer keeps grading in
+the background, with the round's people first and the recruiter's words as requirements, and that
+changes nothing already shown. Round quality has to come from the picking step itself.

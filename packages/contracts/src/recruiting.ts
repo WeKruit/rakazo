@@ -1122,7 +1122,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .literal(true)
       .optional()
       .describe(
-        "Only when the turn's request says so, after the Reviewer has checked the latest round: candidateKeys are that round's people who passed, in order, with any replacements. A round after the recruiter's feedback is new people, recorded without corrects.",
+        "Not accepted: a round after the recruiter's feedback is new people, recorded without corrects.",
       ),
     checks: z
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
