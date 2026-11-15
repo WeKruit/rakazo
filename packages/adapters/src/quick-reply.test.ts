@@ -4,6 +4,7 @@ import {
   cleanQuickReply,
   firstSentence,
   inPersonLanguage,
+  isFixedAck,
   progressInOtherLanguage,
   quickReply,
   replyLanguage,
@@ -184,6 +185,14 @@ describe("progressInOtherLanguage", () => {
     ).toBe(true);
     expect(progressInOtherLanguage("我先改模板里的薪资和远程安排。", "zh")).toBe(false);
     expect(progressInOtherLanguage("Hi {{firstName}},\n\nI'm reaching out…", "zh")).toBe(false);
+  });
+});
+
+// Gate 51d043cc, one-off-email: 「好，这就处理。」 stayed above the connect card that took its place.
+describe("isFixedAck", () => {
+  it("counts the going-ahead line as a fixed line", () => {
+    expect(isFixedAck("好，这就处理。")).toBe(true);
+    expect(isFixedAck("好，我会把薪资改为70–90万。")).toBe(false);
   });
 });
 

@@ -55,7 +55,7 @@ export function fixedAck(language: ReplyLanguage): string {
 
 /** Whether the text is one of the fixed lines, in any language. */
 export function isFixedAck(text: string): boolean {
-  return Object.values(ON_IT).includes(text.trim());
+  return [...Object.values(ON_IT), ...Object.values(GOING_AHEAD)].includes(text.trim());
 }
 
 const LEADING_ACK =

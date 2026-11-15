@@ -16,6 +16,7 @@ import {
   turnWork,
   droppedDay,
   repastedDraft,
+  sequenceForOneEmail,
   quotesMessage,
 } from "./turn-report.js";
 
@@ -257,6 +258,16 @@ describe("declinedSentence", () => {
       `${intro}\n\n**Email 1 — Day 0**\n**Subject:** TikTok LIVE role\n\nHi Adrian,\n\nWould you be open to a brief conversation?\n\nSubject: Following up\n\nCan't make it this week?`;
     expect(declinedSentence(draft("The three-email sequence is prepared."))).toBeUndefined();
     expect(declinedSentence(draft("I can't find the saved draft."))?.kind).toBe("decline");
+  });
+
+  // Gate 51d043cc, change-mind-mid-run: a template with no subject line was retried for its
+  // "Would you be open…?", and the change came 26 s after the coordinator's line.
+  it("reads an email without a subject line as the draft, not as a question", () => {
+    expect(
+      declinedSentence(
+        "**首次触达邮件模板**\n\nHi {{firstName}},\n\nThe base is RMB 700,000–900,000. Would you be open to a brief conversation to learn more?\n\nBest,\nAlex Morgan",
+      ),
+    ).toBeUndefined();
   });
 
   it("returns the declining sentence itself", () => {
@@ -708,6 +719,20 @@ describe("droppedDay", () => {
 
 // Gate f25185df, change-mind-mid-run: 「一句话说下改了啥，最终版是哪封」 got the line and the whole
 // email pasted again.
+// Gate 51d043cc, change-mind-mid-run: 「帮我写封首次触达邮件模板」 got a three-email sequence.
+describe("sequenceForOneEmail", () => {
+  const sequence =
+    "**邮件 1｜第 0 天**\n**Subject:** Hi\n\nBody\n\n**邮件 2｜第 3 天**\n**Subject:** Re: Hi\n\nBody";
+  it("retries a sequence when one email was asked for", () => {
+    expect(sequenceForOneEmail(sequence, "帮我写封首次触达邮件模板")).toBeDefined();
+    expect(sequenceForOneEmail(sequence, "write a short cold email")).toBeDefined();
+  });
+  it("keeps a sequence that was asked for", () => {
+    expect(sequenceForOneEmail(sequence, "帮我写封邮件，再加两封跟进序列")).toBeUndefined();
+    expect(sequenceForOneEmail(sequence, "写一个触达序列")).toBeUndefined();
+  });
+});
+
 describe("repastedDraft", () => {
   const email =
     "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\n• Working remotely every Friday\n\nBest,\nAlex";
