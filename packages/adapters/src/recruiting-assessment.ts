@@ -55,6 +55,9 @@ import {
 } from "./recruiting-tools.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
+/** A missing record never stops work the recruiter's own words already describe. */
+export const NOTHING_SAVED_IS_NO_BLOCKER =
+  "Nothing saved is not a blocker: when the recruiter's own words describe the work (an email to a person they name, a role they describe), do it now from those words, and ask only the one missing fact the result still needs (such as the address to send to) beside it.";
 /** Role sequences are all this read covers; a one-off email's reply lives only in the mailbox. */
 export const ONE_OFF_REPLIES_NOTE =
   "Covers replies to role email sequences only. For a reply to an email sent outside a role (a one-off email), read the mailbox with search_contact_emails on that person's address before saying there is no reply.";
@@ -372,11 +375,13 @@ export async function executeRecruitingCandidatesTool(
           })),
         );
       succeeded = true;
-      // The query only filters people; a role name passed as one matches no one.
+      // The query only filters people; a role name passed as one matches no one. Gates eec6adf0,
+      // 386f6a46, 808f4f31 (one-off-email): "nothing saved" read as a blocker, and a draft for a
+      // named person turned into a request for a role title and profile link.
       if (!result.items.length && query.query?.trim())
         return {
           ...result,
-          next: "No saved person matched this query. To list the role's people, call again without query.",
+          next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
         };
       const emails = new Map(enriched.map(({ item, email }) => [item, email]));
       // Every list carries what the recruiter already saw of each person, from the one record.
