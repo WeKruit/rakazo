@@ -214,3 +214,60 @@ export function checkRound(input: {
       .join(" "),
   };
 }
+
+/** What a recorded round's read says about repeats: the round record refuses anyone already seen. */
+export const ROUND_REPEATS =
+  "none: a recorded round never holds anyone shown in an earlier round or turned down";
+
+/**
+ * The recruiter's own words on people and the round between the previous round and this one, so
+ * the global conversation can say what changed without the role's chat in its history.
+ */
+export async function feedbackBeforeRound(
+  prisma: PrismaClient,
+  input: { spaceId: string; roleId: string; round: number; createdAt: string },
+): Promise<Array<{ said: string; target?: string; fit?: string }>> {
+  const previous = await prisma.recruitingCalibrationRound.findMany({
+    where: { roleId: input.roleId, round: { lt: input.round } },
+    orderBy: { round: "desc" },
+    take: 1,
+    select: { round: true, createdAt: true },
+  });
+  if (!previous[0]) return [];
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: input.spaceId,
+      kind: "recruiting_feedback",
+      status: "completed",
+      createdAt: { gt: previous[0].createdAt, lte: new Date(input.createdAt) },
+      request: { path: ["roleId"], equals: input.roleId },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { request: true },
+    take: 10,
+  });
+  const said = new Set<string>();
+  return effects.flatMap((effect) => {
+    const request = (effect.request ?? {}) as {
+      target?: unknown;
+      fit?: unknown;
+      summary?: unknown;
+      intent?: { quote?: unknown };
+    };
+    const text =
+      typeof request.intent?.quote === "string"
+        ? request.intent.quote
+        : typeof request.summary === "string"
+          ? request.summary
+          : "";
+    if (!text || said.has(text)) return [];
+    said.add(text);
+    return [
+      {
+        said: text,
+        ...(typeof request.target === "string" ? { target: request.target } : {}),
+        ...(typeof request.fit === "string" ? { fit: request.fit } : {}),
+      },
+    ];
+  });
+}

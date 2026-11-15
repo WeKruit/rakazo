@@ -42,6 +42,7 @@ import {
   createRecruitingCandidateReportReader,
   lookedUpContactEmails,
 } from "./recruiting-research.js";
+import { feedbackBeforeRound, ROUND_REPEATS } from "./recruiting-round-check.js";
 import {
   rememberResolvedContactEmails,
   resolveRecruitingContact,
@@ -388,13 +389,33 @@ export async function executeRecruitingCandidatesTool(
         succeeded = true;
         return { status: "no_current_role" as const };
       }
-      const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {
-        threadId: trusted.threadId,
-        roleId: input.roleId,
-      });
+      const { roleId: roundRoleId, round } = await readRecruitingCalibrationRound(
+        deps.prisma,
+        trusted.actor,
+        {
+          threadId: trusted.threadId,
+          roleId: input.roleId,
+        },
+      );
       itemCount = round?.candidates.length ?? 0;
       succeeded = true;
-      return round ? { status: "found" as const, round } : { status: "no_round" as const };
+      if (!round) return { status: "no_round" as const };
+      // Staging 11-15: asked about repeats and their feedback, global Kruit read round labels
+      // wrong and could not find what the recruiter said in the role's chat.
+      const feedback = await feedbackBeforeRound(deps.prisma, {
+        spaceId: trusted.actor.spaceId,
+        roleId: roundRoleId ?? input.roleId ?? "",
+        round: round.round,
+        createdAt: round.createdAt,
+      }).catch(() => []);
+      return {
+        status: "found" as const,
+        round: {
+          ...round,
+          repeats: ROUND_REPEATS,
+          ...(feedback.length ? { feedbackBeforeThisRound: feedback } : {}),
+        },
+      };
     }
     const { operation: _operation, roleId: namedSourceRoleId, ...query } = input;
     const sourceRoleId = roleId ?? namedSourceRoleId;

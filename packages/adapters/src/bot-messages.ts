@@ -438,7 +438,10 @@ export function teamWorkingFor(
  * "where are they?" is answered with progress instead of "still in progress".
  */
 export async function teamProgress(
-  prisma: Pick<PrismaClient, "run" | "thread" | "recruitingCandidateOccurrence">,
+  prisma: Pick<
+    PrismaClient,
+    "run" | "thread" | "recruitingCandidateOccurrence" | "recruitingCalibrationRound"
+  >,
   input: { threadId: string; returnThreadId: string; roleId?: string },
 ): Promise<{ name: string; minutes: number; peopleFound: number; note: string } | null> {
   const working = await teamWorkingFor(prisma, input);
@@ -452,14 +455,32 @@ export async function teamProgress(
         select: { activeRecruitingRoleId: true },
       })
     )?.activeRecruitingRoleId;
-  const peopleFound = roleId ? await countRecruitingPeopleFoundSince(prisma, { roleId, since }) : 0;
+  const [peopleFound, recorded] = roleId
+    ? await Promise.all([
+        countRecruitingPeopleFoundSince(prisma, { roleId, since }),
+        // Staging 11-15: the team kept working after recording round 2, and Kruit said the new
+        // ten were not finalized a minute after they were shown.
+        Promise.resolve()
+          .then(() =>
+            prisma.recruitingCalibrationRound.findFirst({
+              where: { roleId, createdAt: { gte: since } },
+              orderBy: { round: "desc" },
+              select: { round: true },
+            }),
+          )
+          .catch(() => null),
+      ])
+    : [0, null];
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
+  const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"}`;
   return {
     name: working.bot.name,
     minutes,
     peopleFound,
-    note: `${working.bot.name} has been working on the recruiter's request for ${started} and has found ${peopleFound} ${peopleFound === 1 ? "person" : "people"} so far; the next round comes back here when it is picked. Give the recruiter these numbers; never say it has not started.`,
+    note: recorded
+      ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+      : `${working.bot.name} has been working on the recruiter's request for ${started} and has found ${found} so far; the next round comes back here when it is picked. Give the recruiter these numbers; never say it has not started.`,
   };
 }
 
