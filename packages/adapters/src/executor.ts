@@ -658,7 +658,12 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkRound, feedbackNotYetCriteria, roundCriteria } from "./recruiting-round-check.js";
+import {
+  checkRound,
+  feedbackCriteriaToSave,
+  feedbackNotYetCriteria,
+  roundCriteria,
+} from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -6892,7 +6897,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const locationAsked = new Set<string>();
         // People and feedback the round check already asked the model about once.
         const gapAsked = new Set<string>();
-        let feedbackCriteriaAsked = false;
+        // The recruiter's reasons for turning people down that are not role criteria yet.
+        let feedbackNotCriteria: string[] = [];
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -7991,7 +7997,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
             const roleId =
               typeof args.roleId === "string" ? args.roleId : thread.activeRecruitingRoleId;
-            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey]);
+            const saved =
+              roleId && typeof args[revisionKey] === "number"
+                ? await Promise.resolve()
+                    .then(() =>
+                      deps.prisma.recruitingRole.findFirst({
+                        where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+                        select: { revision: true },
+                      }),
+                    )
+                    // Unread, the call keeps the revision it names, as before.
+                    .then(
+                      (role) => role?.revision ?? undefined,
+                      () => undefined,
+                    )
+                : undefined;
+            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey], saved);
             if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
           }
           // A brief save whose intent is missing or not copied from the recruiter's current
@@ -8113,15 +8134,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             thread.activeRecruitingRoleId
           ) {
             const roleId = thread.activeRecruitingRoleId;
-            const pending = feedbackCriteriaAsked
-              ? []
-              : await feedbackNotYetCriteria(deps.prisma, { spaceId: run.spaceId, roleId });
-            if (pending.length) {
-              feedbackCriteriaAsked = true;
-              return {
-                error: `Not recorded: the recruiter turned people down since the last round, and the reasons are not role criteria yet (${pending.join("; ")}). Save each reason that says what the next people must show or must not be as a hard criterion with recruiting_role revise criteria.upsert, quoting the recruiter, then record the round with a verdict on every hard criterion for each pick.`,
-              };
-            }
+            // Staging 11-15: refusing the round until these reasons were saved as criteria held a
+            // round already shown in chat unrecorded for 75 s while the criteria save failed nine
+            // times, and Kruit told the recruiter the ten were not ready. Saving is record keeping:
+            // the round records now and the reasons are saved after it.
+            feedbackNotCriteria = await feedbackNotYetCriteria(deps.prisma, {
+              spaceId: run.spaceId,
+              roleId,
+            });
             const keys = args.candidateKeys.map(String);
             const given =
               args.checks && typeof args.checks === "object" && !Array.isArray(args.checks)
@@ -12595,7 +12615,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   );
                 }
                 return round && typeof round === "object" && !Array.isArray(round)
-                  ? { ...round, next: RECRUITING_ROUND_NEXT_STEP }
+                  ? {
+                      ...round,
+                      ...(feedbackNotCriteria.length
+                        ? { criteriaToSave: feedbackCriteriaToSave(feedbackNotCriteria) }
+                        : {}),
+                      next: RECRUITING_ROUND_NEXT_STEP,
+                    }
                   : round;
               }
               if (researchInput.data.operation === "save_search") {
