@@ -78,6 +78,8 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
   let shots = 0;
   // How long the last page took to show, for the judge (slow or stuck pages are a UX failure).
   let loadMs = null;
+  // The slowest server calls of the last page open, so a slow page shows where its time went.
+  let calls = null;
 
   // The app keeps a live stream open, so the network is never idle: a page has settled when its
   // text has stopped changing for a second and nothing shows as loading (at most 15 s).
@@ -104,10 +106,32 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
   };
   const open = async (url) => {
     const at = Date.now();
+    const seen = [];
+    const record = (request) => {
+      if (!request.url().includes("/rpc/")) return;
+      const kind = (request.postData() ?? "").match(/"kind":"(\w+)"/)?.[1];
+      const path = new URL(request.url()).pathname.replace("/rpc/", "");
+      seen.push(
+        request
+          .response()
+          .then((response) => ({
+            call: kind ? `${path}#${kind}` : path,
+            doneMs: Date.now() - at,
+            serverMs: Number(response?.headers()["x-envoy-upstream-service-time"]) || null,
+          }))
+          .catch(() => null),
+      );
+    };
+    page.on("requestfinished", record);
     await page.goto(`${origin}${url}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     await settle();
+    page.off("requestfinished", record);
     // Time until the page stopped changing, without the second it had to stay still.
     loadMs = Math.max(0, Date.now() - at - 1_000);
+    calls = (await Promise.all(seen))
+      .filter(Boolean)
+      .sort((a, b) => b.doneMs - a.doneMs)
+      .slice(0, 8);
   };
   const buttons = async () =>
     (
@@ -234,8 +258,10 @@ export async function openUi({ origin, email, password, chinese, out, mobile = f
         text: text.length > limit ? `${text.slice(0, limit)}\n…` : text,
         buttons: await buttons(),
         ...(loadMs === null ? {} : { loadSeconds: Math.round(loadMs / 100) / 10 }),
+        ...(calls?.length ? { calls } : {}),
       };
       loadMs = null;
+      calls = null;
       return seen;
     },
     async shot(label) {

@@ -4302,10 +4302,6 @@ msgstr "Review and send"
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Review the first 10 people"
-msgstr "Review the first 10 people"
-
 #. placeholder {0}: data.campaign!.name
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Review the saved sequence \"{0}\" in this role and prepare its send confirmation with the exact saved emails and recipients. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
