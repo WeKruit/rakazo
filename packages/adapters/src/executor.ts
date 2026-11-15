@@ -1438,6 +1438,10 @@ export const questionAlreadyWaiting = (question: string) =>
 export const globalAskBeforeRole = (latest: string) =>
   `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team takes it from there in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
 
+/** Model-facing: a research save the server refused, never a reason to ask for the JD again. */
+export const RESEARCH_SAVE_REFUSED =
+  "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. Call this operation once more; if it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
+
 /** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
 const GLOBAL_OPEN_ROLE_FIRST =
   "Not asked: the recruiter brought a new role (a JD file or a role they described). Call start_role now with a short title; its team searches from the JD as written and asks any open fact beside the first ten, so nothing is asked here.";
@@ -13091,10 +13095,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });
-              if (error instanceof IsolationError)
-                return finish({
-                  error: "Recruiting research or source is unavailable",
+              // Gate 14d33ed1, jd-upload-pdf: "source is unavailable" read as the JD file being
+              // unreadable, and the team asked for the JD again though it had read it. Say what
+              // failed, and log where, so the cause is found instead of guessed.
+              if (error instanceof IsolationError) {
+                getLogger().warn("recruiting.research.rejected", {
+                  runId,
+                  operation: researchInput.data.operation,
+                  message: error.message,
+                  at: error.stack?.split("\n").slice(1, 4).join(" | "),
                 });
+                return finish({ error: RESEARCH_SAVE_REFUSED });
+              }
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (error instanceof Error && error.name === "ZodError")
