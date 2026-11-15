@@ -574,7 +574,11 @@ import {
   modelAcceptsImageInput,
   modelIdSupportsImages,
 } from "./model-vision.js";
-import { peopleTargetFrom, requestedPeopleTarget } from "./people-target.js";
+import {
+  askAfterPeopleTarget,
+  peopleTargetFrom,
+  requestedPeopleTarget,
+} from "./people-target.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { estimateCatalogTokenCostUsd, listPiCatalog } from "./pi-models.js";
@@ -15861,7 +15865,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ? `${query}. Languages: ${languages.join(", ")}`
                     : query,
                 category: "people",
-                numResults: 25,
+                numResults: 10,
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
@@ -17069,6 +17073,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     }
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
+                    // A number of people the recruiter asked for decides the next step: no card.
+                    const askedFor = recruiterTexts.map(requestedPeopleTarget).findLast(Boolean);
+                    if (askedFor && thread.activeRecruitingRoleId) {
+                      const saved = (
+                        await readRecruitingPlaybookStep(
+                          deps.prisma,
+                          thread.activeRecruitingRoleId,
+                        ).catch(() => null)
+                      )?.savedCandidates;
+                      // Below the number, only after a round: intake questions come before any search.
+                      const instead =
+                        saved !== undefined && (saved >= askedFor || (await roundRecordedThisRun()))
+                          ? askAfterPeopleTarget(askedFor, saved)
+                          : undefined;
+                      if (instead) return { instead };
+                    }
                     // A run that recorded a round asks the next-step choice, which is asked anew each round,
                     // unless the recruiter already wrote their next step after the ten appeared: then it
                     // acts on that first, and may ask its own question after reporting what it did.
