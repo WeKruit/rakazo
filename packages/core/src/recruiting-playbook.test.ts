@@ -674,7 +674,7 @@ describe("a missed requirement is searched for again", () => {
     expect(RECRUITING_MISSED_REQUIREMENT).toContain("never repeating its sentence");
     // Staging eval 11-11: a JD saying 「必须会说普通话和英语」 left the role with no criteria during intake.
     expect(RECRUITING_INTAKE_FLOW).toContain(
-      "save them in that same step beside the question with one recruiting_role update",
+      "save them in that same step beside the searches with one recruiting_role update",
     );
   });
 
