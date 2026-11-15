@@ -614,6 +614,18 @@ describe("withoutRepeatedClosing", () => {
       ),
     ).toBe("候选人和回复分别在左侧的「候选人」和「收件箱」里查看；目前还没有资料或回复可看。");
   });
+  it("drops the same invitation reworded, after a 「；」", () => {
+    expect(
+      withoutRepeatedClosing(
+        "左侧「候选人」看候选人；点候选人姓名，再到「收件箱」看他/她的邮件和回复。现在还没有岗位或候选人记录；发来职位描述，或告诉我职位名称、地点和必备条件，我就可以开始。",
+        [
+          "目前没有已保存的岗位。把职位描述发给我，或告诉我职位名称、地点和必备条件，我就从这里开始。",
+        ],
+      ),
+    ).toBe(
+      "左侧「候选人」看候选人；点候选人姓名，再到「收件箱」看他/她的邮件和回复。现在还没有岗位或候选人记录。",
+    );
+  });
   it("keeps a new closing line, a question, and a reply that is only that line", () => {
     const fresh = "候选人在左侧的「候选人」里。现在把职位描述发来即可。";
     expect(withoutRepeatedClosing(fresh, [earlier])).toBe(fresh);
