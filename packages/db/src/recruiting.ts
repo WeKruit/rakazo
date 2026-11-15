@@ -12251,7 +12251,10 @@ async function calibrationRoundView(
     orderBy: { round: "desc" },
   });
   if (!round) return null;
-  // Newest saved row per person; display only.
+  // Each person as the round's list in chat showed them: the newest row saved by the time the
+  // round was recorded. A later save (a grade's reading of the full profile) can name another
+  // employer, and the page must not disagree with the chat. A person with no row by then falls
+  // back to their newest row.
   const rows = await tx.recruitingCandidateOccurrence.findMany({
     where: { roleId, candidateKey: { in: round.candidateKeys } },
     select: {
@@ -12266,6 +12269,9 @@ async function calibrationRoundView(
     orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
   });
   const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows)
+    if (row.page.observedAt <= round.createdAt && !latest.has(row.candidateKey))
+      latest.set(row.candidateKey, row);
   for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
   return {
     round: round.round,

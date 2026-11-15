@@ -7030,6 +7030,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           ].join("\n");
         let searchFirstBounces = 0;
+        let draftFirstBounces = 0;
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -17248,6 +17249,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       settledAskBounces.set(settled, bounces + 1);
                       return { instead: settledFactNote(settled) };
                     }
+                    // Gates 808f4f31, df83586a (one-off-email): "给 Wei Zhang 写封邮件" drew cards for the
+                    // email's purpose, the role title and a profile link before any draft. Draft first.
+                    if (
+                      draftFirstBounces < 2 &&
+                      draftAskedBeforeShown(
+                        lastRecruiterText,
+                        [
+                          assembled,
+                          JSON.stringify(
+                            await deps.prisma.message
+                              .findMany({
+                                where: { threadId: thread.id, role: "bot" },
+                                orderBy: { seq: "desc" },
+                                take: 12,
+                                select: { blocks: true },
+                              })
+                              .catch(() => []),
+                          ),
+                        ].join("\n"),
+                      )
+                    ) {
+                      draftFirstBounces++;
+                      return { instead: DRAFT_BEFORE_ASKING };
+                    }
                     // Search first, then ask (11-15 card tap): a role the recruiter described is
                     // searched as written before any question.
                     if (
@@ -20024,6 +20049,20 @@ export function gmailCardNeedsDraft(
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );
 }
+
+/** A question asked while the email the recruiter asked to be written is not shown yet. */
+export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
+  return (
+    asksForOutreach(recruiterText) &&
+    /写|起草|草稿|模板|\b(?:write|draft|template)\b/i.test(recruiterText) &&
+    !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
+    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
+  );
+}
+
+/** Model-facing: the email comes first; a question waits beside it. */
+export const DRAFT_BEFORE_ASKING =
+  "Not asked: the recruiter asked you to write an email, and they see the draft before any question. Write the full email now (Subject: and body) from their words and anything saved, for the person they name, with no saved role, profile or address needed and without inventing facts they did not give. Then ask, beside the draft, only the one fact a send still needs (such as the address).";
 
 /** Model-facing: a message the person typed instead of pressing Connect is answered first. */
 export const connectAnswerFirst = (message: string) =>

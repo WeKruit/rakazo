@@ -385,11 +385,12 @@ export async function loadWorkingState(
     if (campaign)
       lines.push(`- This role's ${campaign.charAt(0).toLowerCase()}${campaign.slice(1)}`);
   }
-  // An email shown only in chat is kept nowhere (staging 11-14: "草稿保留着" with no role, no
-  // mailbox and nothing saved). Say so where nothing is on record.
+  // An email shown only in chat is in no role or mailbox (staging 11-14: "草稿保留着" with no role,
+  // no mailbox and nothing saved). It is still the email above, which the Gmail send card takes up:
+  // gate df83586a, "kept nowhere" made Kruit retract "the draft is kept" after the Connect card.
   if (![...records.values()].some((record) => record.savedEmail))
     lines.push(
-      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat is not saved or kept anywhere until a save tool returns it.`,
+      `- Saved emails: none on record${global ? " for the roles below" : " for this role"}. An email written only in chat stays in this conversation as the email above (the one a send card takes up), but is in no role, campaign or mailbox draft until a save tool returns it.`,
     );
 
   const own = receiptLine(receiptsOf(thread.id), now);
