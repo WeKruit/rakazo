@@ -7291,9 +7291,11 @@ describe("quality check grade save", () => {
     const trusted = { ...f.trusted, effectRequest: input };
     const saved = { count: 1 };
     Object.assign(f.tx.recruitingCandidate, {
-      count: vi.fn(async () => saved.count),
+      findMany: vi.fn(async () => (saved.count ? [{ candidateKey: "linkedin:/in/example" }] : [])),
       createManyAndReturn: vi.fn(async () => []),
     });
+    const sameName: Array<{ candidateKey: string; name: string; linkedinUrl: string }> = [];
+    Object.assign(f.tx.recruitingCandidateOccurrence, { findMany: vi.fn(async () => sameName) });
     const bytes = Buffer.from(stableJsonValue(recruiting.recruitingGradesReceipt(input)));
     const outputArtifact = {
       name: "recruiting-grades.json",
@@ -7305,8 +7307,31 @@ describe("quality check grade save", () => {
     };
     const save = () =>
       recruiting.saveRecruitingCandidateGrades(f.prisma, actor, trusted, input, { outputArtifact });
-    return { ...f, input, saved, outputArtifact, save };
+    return { ...f, input, saved, sameName, outputArtifact, save };
   }
+
+  it("matches a grade whose link was mistyped to the one saved person with that name", async () => {
+    // Staging 11-15: one misspelled link refused the whole batch, so nobody was scored.
+    const f = gradesFixture();
+    f.saved.count = 0;
+    f.sameName.push({
+      candidateKey: "linkedin:/in/example-1",
+      name: "ada example",
+      linkedinUrl: "https://www.linkedin.com/in/example-1",
+    });
+    await f.save();
+    expect(f.tx.recruitingCandidateOccurrence.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [expect.objectContaining({ candidateKey: "linkedin:/in/example-1" })],
+    });
+    // Two saved people share the name: the grade is refused, naming the row to fix.
+    f.sameName.push({ ...f.sameName[0]!, candidateKey: "linkedin:/in/example-2" });
+    const again = gradesFixture();
+    again.saved.count = 0;
+    again.sameName.push(...f.sameName);
+    await expect(again.save()).rejects.toThrow(
+      "Not saved for this role: Ada Example (https://www.linkedin.com/in/example)",
+    );
+  });
 
   it("saves grades for people already in the role with their score and tier", async () => {
     const f = gradesFixture();

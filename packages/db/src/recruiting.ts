@@ -65,6 +65,7 @@ import {
   RecruitingBriefDraftSchema,
   RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCandidateReportSchema,
   RecruitingCrmBindingInputSchema,
   RecruitingCrmImportArgsSchema,
   RecruitingCrmImportInputSchema,
@@ -7989,30 +7990,65 @@ export async function saveRecruitingCandidateGrades(
     const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
     if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
       throw new RecruitingConflictError();
-    const rows = input.rows.map((grade, rowIndex) => {
+    const typed = input.rows.map((grade) => {
       const row: Record<string, string> = { name: grade.name, linkedin_url: grade.linkedin_url };
       if (grade.current_title) row.current_title = grade.current_title;
       if (grade.current_company) row.current_company = grade.current_company;
       if (grade.location) row.location = grade.location;
       return {
-        rowIndex,
         row,
         matchFields: { match_score: grade.match_score, match_tier: grade.match_tier },
         candidateKey: normalizeRecruitingCandidateRow(row, { schemaKnown: true }).candidateKey,
       };
     });
-    const keys = rows.map((row) => row.candidateKey);
-    const saved = await tx.recruitingCandidate.count({
-      where: { roleId: role.id, candidateKey: { in: keys.filter((key) => key !== null) } },
-    });
-    if (
-      keys.some((key) => key === null) ||
-      new Set(keys).size !== keys.length ||
-      saved !== keys.length
-    )
-      throw new RecruitingGradeRowsError(
-        "Grade only people already saved for this role, each once, with their saved LinkedIn profile link.",
+    const saved = new Set(
+      (
+        await tx.recruitingCandidate.findMany({
+          where: {
+            roleId: role.id,
+            candidateKey: {
+              in: typed.flatMap((row) => (row.candidateKey ? [row.candidateKey] : [])),
+            },
+          },
+          select: { candidateKey: true },
+        })
+      ).map((candidate) => candidate.candidateKey),
+    );
+    // A grade whose link was mistyped is matched to the one saved person with that name.
+    // Staging 11-15: one misspelled link refused every grade of the batch, again and again, and
+    // the search's people stayed unscored.
+    const mistyped = typed.filter((row) => !row.candidateKey || !saved.has(row.candidateKey));
+    const named = mistyped.length
+      ? await tx.recruitingCandidateOccurrence.findMany({
+          where: {
+            roleId: role.id,
+            linkedinUrl: { not: null },
+            OR: mistyped.map((row) => ({
+              name: { equals: row.row.name?.trim() ?? "", mode: "insensitive" as const },
+            })),
+          },
+          distinct: ["candidateKey"],
+          select: { candidateKey: true, name: true, linkedinUrl: true },
+        })
+      : [];
+    const unmatched: string[] = [];
+    for (const row of mistyped) {
+      const same = named.filter(
+        (person) => person.name?.trim().toLowerCase() === row.row.name?.trim().toLowerCase(),
       );
+      const only = same.length === 1 ? same[0] : undefined;
+      if (only?.linkedinUrl) {
+        row.row.linkedin_url = only.linkedinUrl;
+        row.candidateKey = only.candidateKey;
+      } else unmatched.push(`${row.row.name} (${row.row.linkedin_url})`);
+    }
+    if (unmatched.length)
+      throw new RecruitingGradeRowsError(
+        `Grade only people already saved for this role, with their saved LinkedIn profile link. Not saved for this role: ${unmatched.join("; ")}. Copy their link exactly from the list you were given, or leave them out, and save the grades again.`,
+      );
+    // A person graded twice keeps the last grade.
+    const last = new Map(typed.map((row) => [row.candidateKey, row]));
+    const rows = [...last.values()].map((row, rowIndex) => ({ rowIndex, ...row }));
     const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)));
     const file = captured.outputArtifact;
     if (
@@ -8079,6 +8115,7 @@ async function saveUnassessedCandidatePage(
   if (!role.currentRevisionId) throw new RecruitingConflictError();
   const artifact = await createResearchArtifact(tx, actor, run, thread, file);
   if (input.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
+  const reports = savedCandidateReports(input.rows.map((item) => item.row));
   const rows = input.rows.map(({ rowIndex, row, matchFields }) => {
     // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
     const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
@@ -8092,6 +8129,7 @@ async function saveUnassessedCandidatePage(
       ...profile,
       evidenceUrls: Prisma.DbNull,
       issues: [...profile.issues],
+      report: reports[rowIndex]!,
       ...(matchFields ? { matchFields } : {}),
     };
   });
@@ -8609,6 +8647,21 @@ const candidateMatchKeys = [
   "match_score",
   "score",
 ];
+/**
+ * Each row's display report, projected once at save so the candidate list never re-reads the
+ * page. Rows are read in the receipt's canonical key order, as a read of the saved page sees them.
+ */
+function savedCandidateReports(pageRows: readonly unknown[]) {
+  const saved = JSON.parse(stableJsonValue(pageRows)) as unknown[];
+  return saved.map((row) => {
+    try {
+      return projectRecruitingCandidateReport(row, saved) as Prisma.InputJsonObject;
+    } catch {
+      return Prisma.DbNull;
+    }
+  });
+}
+
 /**
  * Copies each saved provider row's match cells onto its occurrence, once. Rows without such
  * cells get {} so NULL always means "not filled yet". Idempotent; `scope` filters alias `o`.
@@ -11535,6 +11588,23 @@ export async function listRecruitingCandidates(
         actor,
         selected.map((row) => row.candidateKey),
       );
+      const sourceOccurrences = selected.flatMap((row) =>
+        row.sourcePageId && row.sourceRowIndex !== null
+          ? [{ pageId: row.sourcePageId, rowIndex: row.sourceRowIndex }]
+          : [],
+      );
+      const reports = new Map(
+        (sourceOccurrences.length
+          ? await tx.recruitingCandidateOccurrence.findMany({
+              where: { roleId: role.id, OR: sourceOccurrences },
+              select: { pageId: true, rowIndex: true, report: true },
+            })
+          : []
+        ).flatMap((row) => {
+          const report = RecruitingCandidateReportSchema.safeParse(row.report);
+          return report.success ? [[`${row.pageId}:${row.rowIndex}`, report.data] as const] : [];
+        }),
+      );
       // The source receipt is already read and authorized with these pages. Display its facts
       // before the background projection finishes, without another query or waiting for media.
       const selectedSources = new Map(
@@ -11651,10 +11721,12 @@ export async function listRecruitingCandidates(
               decisionAt: decision?.source.createdAt ?? null,
               ...(sourcePageId && sourceRowIndex !== null
                 ? {
-                    latestSource: candidateSourceReference(
-                      pages.get(sourcePageId)!,
-                      sourceRowIndex,
-                    ),
+                    latestSource: {
+                      ...candidateSourceReference(pages.get(sourcePageId)!, sourceRowIndex),
+                      ...(reports.has(`${sourcePageId}:${sourceRowIndex}`)
+                        ? { report: reports.get(`${sourcePageId}:${sourceRowIndex}`) }
+                        : {}),
+                    },
                   }
                 : {}),
               latestAssessment:
