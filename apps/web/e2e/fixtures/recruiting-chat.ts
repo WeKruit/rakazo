@@ -386,16 +386,7 @@ export async function recruitingChatFixture(
       case "memory/providerConfig":
         return reply(null);
       case "recruiting/roleSetup":
-        return reply({
-          ready: false,
-          attention: {
-            kind: "question",
-            threadId: bot.threadId,
-            cardId: "calibration-question",
-            createdAt,
-          },
-          items: [],
-        });
+        return reply({});
       case "messaging/status":
         return reply({ enabled: false, providers: [] });
       case "bots/listArchived":

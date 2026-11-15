@@ -4281,14 +4281,7 @@ export function createRouter(deps: RouterDeps) {
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
         getRecruitingRoleSetup(
-          {
-            prisma: deps.prisma,
-            connectors: deps.connectors,
-            signal: context.signal,
-            stillAuthorized: context.stillAuthorized,
-            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
-          },
+          deps.prisma,
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
         ),

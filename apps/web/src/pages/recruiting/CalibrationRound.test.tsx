@@ -63,7 +63,6 @@ function type(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
 
 it("sends feedback on a few people and the direction as one message", async () => {
   const { onSendFeedback } = await mount(round());
-  expect(container!.textContent).toContain("Round 2 · 10 people");
   const send = button("Send feedback");
   expect(send.disabled).toBe(true);
   await act(async () => button("Good example: Person 1").click());

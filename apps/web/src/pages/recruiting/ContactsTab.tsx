@@ -281,6 +281,7 @@ export function ContactsTab(
       {rows.length ? (
         <CandidateDirectory
           rows={rows}
+          grading={autumn?.grading}
           criterionRevision={props.criterionRevision}
           toolbar={toolbar}
           selectedKey={

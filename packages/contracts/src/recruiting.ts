@@ -1479,6 +1479,8 @@ export const ListRecruitingCandidatesOutput = z.strictObject({
     assessed: z.number().int().nonnegative(),
     shortlisted: z.number().int().nonnegative(),
   }),
+  /** The Reviewer is scoring this role's people right now; people without a score get one soon. */
+  grading: z.boolean().optional(),
 });
 export type ListRecruitingCandidatesOutput = z.infer<typeof ListRecruitingCandidatesOutput>;
 /** One merged person per row: Autumn search result and/or the role's CRM contact. */
@@ -1873,19 +1875,26 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
 });
 export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema>;
 
-/** Role setup checklist: what a role still needs before its first outreach works out of the box. */
+/** What comes next in a role's playbook; screens word it in their own language. */
+export const RecruitingPlaybookNextSchema = z.strictObject({
+  step: z.enum([
+    "questions",
+    "brief",
+    "find_first_10",
+    "show_first_10",
+    "review_first_10",
+    "scale",
+    "enrichment",
+    "outreach",
+    "replies",
+  ]),
+  /** Open questions for `questions`; people still to find for `find_first_10`. */
+  count: z.number().int().nonnegative().optional(),
+});
+export type RecruitingPlaybookNext = z.infer<typeof RecruitingPlaybookNextSchema>;
+
+/** Where a role is in the recruiting playbook and what comes next. */
 export const RecruitingRoleSetupSchema = z.strictObject({
-  ready: z.boolean(),
-  /** A run in this role's conversation is waiting for the human (e.g. the send confirmation). */
-  attention: z
-    .strictObject({
-      kind: z.enum(["approval", "question"]),
-      threadId: Id,
-      cardId: Id.nullable(),
-      createdAt: IsoDate,
-    })
-    .nullable(),
-  /** Where the role is in the recruiting playbook; label and next step are display text. */
   playbookStage: z
     .strictObject({
       stage: z.enum([
@@ -1901,26 +1910,9 @@ export const RecruitingRoleSetupSchema = z.strictObject({
         "interview",
         "closed",
       ]),
-      label: z.string(),
-      nextStep: z.string().nullable().optional(),
+      next: RecruitingPlaybookNextSchema.nullable(),
     })
     .optional(),
-  items: z.array(
-    z.strictObject({
-      key: z.enum(["campaign", "sender", "crm", "leads"]),
-      state: z.enum(["ready", "missing", "unavailable"]),
-      label: z.string().optional(),
-      detail: z.record(z.string(), z.unknown()).optional(),
-      action: z
-        .strictObject({
-          kind: z.enum(["ask_agent", "connect", "bind"]),
-          prompt: z.string().optional(),
-          serverId: z.string().optional(),
-          options: z.array(z.strictObject({ orgId: z.string(), roleLabel: z.string() })).optional(),
-        })
-        .optional(),
-    }),
-  ),
 });
 export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 

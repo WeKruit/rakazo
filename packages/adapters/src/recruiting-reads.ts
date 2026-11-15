@@ -58,12 +58,10 @@ import {
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
   isRecruitingPlaybookStage,
-  pendingInputAttention,
   type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
-  recruitingPlaybookStageLabels,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -84,7 +82,6 @@ import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
 import { readActorArtifact } from "./artifact-read.js";
 import { sentCount } from "./campaign-send-record.js";
-import { lastUsedMailbox } from "./instantly-native-writes.js";
 import { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { hasPlatformMcpCredential } from "./mcp-connector.js";
@@ -946,174 +943,26 @@ export async function getRecruitingRoleCampaign(
   });
 }
 
-/**
- * Role setup checklist for the frontend: campaign, sender mailbox, CRM link and leads. Reads only
- * saved bindings plus the read-only campaign view; nothing here creates or sends. CRM linking is
- * not required for outreach, so `ready` ignores it.
- */
+/** Where a role is in the playbook and what comes next; a saved-record read, nothing external. */
 export async function getRecruitingRoleSetup(
-  deps: Parameters<typeof getRecruitingRoleCampaign>[0],
+  prisma: PrismaClient,
   actor: Actor,
   target: ThreadTarget,
 ): Promise<RecruitingRoleSetup> {
   return authenticated(async () => {
-    const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
+    const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
       threadId: target.threadId,
     });
-    if (!workspace) return { ready: false, attention: null, items: [] };
-    const [campaign, attention] = await Promise.all([
-      getRecruitingRoleCampaign(deps, actor, target),
-      roleAttention(deps.prisma, actor, workspace.role.id),
-    ]);
-    const items: RecruitingRoleSetup["items"] = [];
-    if (campaign.campaign) {
-      items.push({
-        key: "campaign",
-        state: campaign.status === "ready" ? "ready" : "unavailable",
-        label: campaign.campaign.name,
-        detail: {
-          id: campaign.campaign.id,
-          name: campaign.campaign.name,
-          status: campaign.campaign.status,
-          ...(campaign.leadsComplete === true ? { leadCount: campaign.leads.length } : {}),
-        },
-      });
-      const email = campaign.campaign.eaccount;
-      items.push(
-        email
-          ? { key: "sender", state: "ready", label: email, detail: { email } }
-          : { key: "sender", state: "unavailable", label: "Sender unknown" },
-      );
-    } else if (campaign.selectionRequired) {
-      items.push(
-        { key: "campaign", state: "unavailable", label: "Select an existing campaign in Sequence" },
-        {
-          key: "sender",
-          state: "unavailable",
-          label: "Sender unknown until a campaign is selected",
-        },
-      );
-    } else if (!campaign.serverId) {
-      const server = await deps.prisma.mcpServer.findFirst({
-        where: { userId: actor.userId, spaceId: actor.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT },
-        select: { id: true },
-      });
-      const action = { kind: "connect" as const, ...(server ? { serverId: server.id } : {}) };
-      items.push(
-        { key: "campaign", state: "unavailable", label: "Instantly is not connected", action },
-        { key: "sender", state: "unavailable", label: "Instantly is not connected", action },
-      );
-    } else {
-      items.push({
-        key: "campaign",
-        state: "missing",
-        label: "First email not prepared yet; prepared automatically on first outreach",
-        action: { kind: "ask_agent", prompt: "Prepare the first email for this role" },
-      });
-      const email = await lastUsedMailbox(
-        deps.prisma,
-        actor.spaceId,
-        campaign.serverId,
-        actor.userId,
-      );
-      items.push(
-        email
-          ? { key: "sender", state: "ready", label: email, detail: { email } }
-          : {
-              key: "sender",
-              state: "missing",
-              label: "Sender picked automatically on first use",
-            },
-      );
-    }
-    const crm = workspace.crmTarget?.target;
-    items.push(
-      crm
-        ? {
-            key: "crm",
-            state: "ready",
-            label: `${crm.clientLabel} / ${crm.roleLabel}`,
-            detail: { orgId: crm.organizationId, roleLabel: crm.roleLabel },
-          }
-        : {
-            key: "crm",
-            state: "missing",
-            label: "Role record not linked yet",
-            action: { kind: "ask_agent", prompt: "Prepare the candidate list for this role" },
-          },
-    );
-    const count = campaign.leads.length;
-    items.push(
-      campaign.status !== "none" && campaign.leadsComplete !== true
-        ? { key: "leads", state: "unavailable", label: "Recipient count unavailable" }
-        : count
-          ? { key: "leads", state: "ready", label: `${count} recipients`, detail: { count } }
-          : {
-              key: "leads",
-              state: "missing",
-              label: "No recipients for the first email yet",
-              detail: { count },
-              action: {
-                kind: "ask_agent",
-                prompt: "Add the shortlisted candidates as recipients of the first email",
-              },
-            },
-    );
-    const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
+    if (!workspace) return {};
     const playbook = await recruiting
-      .readRecruitingPlaybookStep(deps.prisma, workspace.role.id)
+      .readRecruitingPlaybookStep(prisma, workspace.role.id)
       .catch(() => null);
     const rawStage = playbook?.stage ?? workspace.role.playbookStage;
     const stage: RecruitingPlaybookStage = isRecruitingPlaybookStage(rawStage)
       ? rawStage
       : "intake";
-    return {
-      ready: ready("campaign") && ready("sender") && ready("leads"),
-      attention,
-      items,
-      playbookStage: {
-        stage,
-        label: recruitingPlaybookStageLabels[stage],
-        nextStep: playbook?.step?.label ?? null,
-      },
-    };
+    return { playbookStage: { stage, next: playbook?.step?.next ?? null } };
   });
-}
-
-/** The newest run waiting for the human in a conversation linked to this role, with its ask card. */
-async function roleAttention(
-  prisma: PrismaClient,
-  actor: Actor,
-  roleId: string,
-): Promise<RecruitingRoleSetup["attention"]> {
-  const run = await prisma.run.findFirst({
-    where: {
-      spaceId: actor.spaceId,
-      userId: actor.userId,
-      status: "waiting_input",
-      thread: { activeRecruitingRoleId: roleId, userId: actor.userId, spaceId: actor.spaceId },
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { id: true, threadId: true, createdAt: true },
-  });
-  if (!run) return null;
-  // Same lookup shape as answerRunInput: the bot message carrying the pending ask block.
-  const card = await prisma.message.findFirst({
-    where: {
-      threadId: run.threadId,
-      runId: run.id,
-      role: "bot",
-      blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
-    },
-    orderBy: { seq: "desc" },
-    select: { id: true, createdAt: true, blocks: true },
-  });
-  return {
-    kind: pendingInputAttention(card?.blocks) ?? "question",
-    threadId: run.threadId,
-    cardId: card?.id ?? null,
-    createdAt: (card?.createdAt ?? run.createdAt).toISOString(),
-  };
 }
 
 /** Scoped operation outcomes remain separate from calendar events: no receipt joins them. */
@@ -3157,6 +3006,26 @@ async function hydrateRecruitingCandidateReports(
   }
 }
 
+/** Whether the Reviewer is scoring a role's people right now: a hint for the screen, never a gate. */
+export async function recruitingRoleGrading(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<boolean> {
+  const run = await prisma.run
+    .findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        status: { in: ["queued", "leased", "running"] },
+        clientNonce: { startsWith: recruiting.RECRUITING_GRADE_NONCE_PREFIX },
+        thread: { activeRecruitingRoleId: roleId },
+      },
+      select: { id: true },
+    })
+    .catch(() => null);
+  return run !== null;
+}
 export const listRecruitingCandidates = (
   deps: RecruitingReadDeps,
   actor: Actor,
@@ -3167,14 +3036,14 @@ export const listRecruitingCandidates = (
     const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
     if (options.reports === false) {
       for (const candidate of page.items) delete candidate.latestSource?.report;
-      return page;
+    } else {
+      await hydrateRecruitingCandidateReports(
+        deps,
+        actor,
+        input.roleId,
+        page.items.flatMap((candidate) => (candidate.latestSource ? [candidate.latestSource] : [])),
+      );
     }
-    await hydrateRecruitingCandidateReports(
-      deps,
-      actor,
-      input.roleId,
-      page.items.flatMap((candidate) => (candidate.latestSource ? [candidate.latestSource] : [])),
-    );
     return page;
   });
 export const listRecruitingCandidateSources = (
