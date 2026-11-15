@@ -24,6 +24,9 @@ export {
   jobPayloadBindings,
   recordJobStatement,
   runCorrelatedJob,
+  startStatementTally,
+  statementTallyId,
+  takeStatementTally,
   unwrapJobPayload,
   wrapJobPayload,
 } from "./jobs.js";

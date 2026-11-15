@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { getLogContext, getLogger, recordJobStatement } from "@rakazo/logging";
+import { getLogContext, getLogger, recordJobStatement, statementTallyId } from "@rakazo/logging";
 import type { Client, PoolClient } from "pg";
 import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
@@ -353,8 +353,8 @@ function timeQueries(client: PoolClient, queried: (ms: number) => void): void {
   const query = client.query.bind(client) as (...args: unknown[]) => unknown;
   client.query = ((...args: unknown[]) => {
     const startedAt = performance.now();
-    // Inside a background job, name the statement's source line for that job's tally.
-    const site = getLogContext()["job.id"] ? (callerFrame() ?? statementShape(args[0])) : undefined;
+    // Inside a counted job or request, name the statement's source line for its tally.
+    const site = statementTallyId() ? (callerFrame() ?? statementShape(args[0])) : undefined;
     const lost = setTimeout(() => {
       getLogger().warn("db.reply.lost", { waitedMs: LOST_REPLY_MS });
       (client as { connection?: { stream?: { destroy(): void } } }).connection?.stream?.destroy();
