@@ -14,6 +14,7 @@ const {
   gradingToolRefusal,
   gradingTools,
   listsPeople,
+  mentionsPeople,
   nextRoundHeld,
   roundAwaitingReview,
   RECRUITING_GRADE_NONCE_PREFIX,
@@ -760,5 +761,20 @@ describe("listsPeople", () => {
       false,
     );
     expect(listsPeople("The checked round comes in a minute or two.")).toBe(false);
+  });
+});
+
+describe("mentionsPeople", () => {
+  const held = [
+    { name: "Karthik Tirunagari", linkedinUrl: "https://www.linkedin.com/in/karrthikt" },
+    { name: "Fal Tur", linkedinUrl: "https://www.linkedin.com/in/fal-tur-data" },
+    { name: "Akhil K", linkedinUrl: null },
+  ];
+  it("finds a summary that names a held round's people without links", () => {
+    // Staging 11-15: "Round 2's nine profiles have been graded and saved. Strong: …" by name.
+    expect(mentionsPeople("Strong: Karthik Tirunagari. Promising: fal tur.", held)).toBe(true);
+    expect(mentionsPeople("Only karrthikt and Akhil K fit.", held)).toBe(true);
+    expect(mentionsPeople("Karthik Tirunagari looks strong.", held)).toBe(false);
+    expect(mentionsPeople("The checked round comes in a minute or two.", held)).toBe(false);
   });
 });
