@@ -7208,14 +7208,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The recruiter sees each round once, already checked. Staging 11-15: asked "where's the
           // new batch?" while the team prepared round 2, Kruit listed six unreviewed people from
           // Results, then the round came with different people. While the team works, Kruit
-          // gets no rows to list, only the team's progress.
+          // gets no rows to list, only the team's progress; asked to see people meanwhile, it
+          // once declined with no time at all, so it says when the round comes.
           const working = await globalTeamProgress(args.roleId);
           const held = working ? null : await globalRoundAwaitingReview(args.roleId);
           if (working || held)
             return {
               items: [],
               total: page?.total,
-              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes. Asked to see people now, say in one line that the checked round arrives here in a minute or two; never just decline.`,
             };
           if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
