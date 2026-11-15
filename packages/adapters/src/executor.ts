@@ -494,6 +494,7 @@ import {
 import {
   globalPeopleSearchRefusal,
   globalRoleWriteRefusal,
+  PEOPLE_SEARCH_TOOLS,
   roleRequestMessage,
 } from "./global-role-writes.js";
 import {
@@ -652,6 +653,7 @@ import {
   nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
+  ROUND_HELD_SEARCH_REFUSAL,
   roundAwaitingReview,
   roundHeldForReview,
   scheduleRecruitingGrading,
@@ -10018,6 +10020,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             readExternalText: runReadExternalText,
           });
           if (memoryRefusal) return { error: memoryRefusal };
+          // Feedback-round 11-15: after recording the held round 2, the lead kept searching for
+          // "the next 10" for another minute, and the Reviewer's check waited for its turn to end.
+          if (
+            roundHeldRecorded &&
+            connectorCall.route?.connectorId === "mcp" &&
+            PEOPLE_SEARCH_TOOLS.has(connectorCall.route.toolName)
+          )
+            return { error: ROUND_HELD_SEARCH_REFUSAL };
           if (
             connectorCall.route?.connectorId === "mcp" &&
             thread.groupId?.startsWith("recruiting-global-")
