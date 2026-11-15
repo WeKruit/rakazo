@@ -133,7 +133,12 @@ export async function requestConnection(
       error: `${server.name} is not assigned to you. In a team chat, hand the request to the teammate who has it with handoff_to_bot, quoting the user's words; otherwise ask the user to add it to this agent's MCP servers.`,
     };
   const pending = await findPendingConnectAsk(prisma, { threadId: scope.threadId, serverId });
-  if (pending) return { status: "pending" as const, askId: pending.askId };
+  if (pending)
+    return {
+      status: "pending" as const,
+      askId: pending.askId,
+      message: `The ${server.name} card is still showing above, waiting for the recruiter. Do not show another: answer what they asked in your reply, and if it needs ${server.name}, say in one line to press Connect on that card.`,
+    };
   await pause(connectAskBlock({ serverId, name: server.name.slice(0, 80), reason }));
   return undefined;
 }

@@ -55,7 +55,6 @@ import {
   createGroupRepos,
   createRepos,
   createThreadMessageInTransaction,
-  declineConnectionAskInTransaction,
   expireComputerExecutionLeases,
   IsolationError,
   listThreadBackgroundWork,
@@ -198,10 +197,10 @@ async function answerStatusQuestion(
 }
 
 /**
- * A typed message moves past an open connect or form card: the card closes (not connected, or
- * cancelled), its run resumes and the message steers it. Approval and secret cards stay open.
+ * A typed message moves past an open form card: the form closes as cancelled, its run resumes
+ * and the message steers it. Approval, secret and connect cards stay open.
  */
-async function declineConnectionAsks(
+async function cancelFormAsks(
   tx: Prisma.TransactionClient,
   actor: Actor,
   threadId: string,
@@ -210,24 +209,18 @@ async function declineConnectionAsks(
   for (const run of runs)
     if (
       run.status === "waiting_input" &&
-      ((await declineConnectionAskInTransaction(tx, {
+      (await cancelFormAskInTransaction(tx, {
         spaceId: actor.spaceId,
         threadId,
         runId: run.id,
         answeredByUserId: actor.userId,
-      })) ||
-        (await cancelFormAskInTransaction(tx, {
-          spaceId: actor.spaceId,
-          threadId,
-          runId: run.id,
-          answeredByUserId: actor.userId,
-        })))
+      }))
     )
       run.status = "queued";
 }
 
 /**
- * A message written while an approval or secret card waits cannot answer it. It gets its own turn
+ * A message written while an approval, secret or connect card waits cannot answer it. It gets its own turn
  * beside the paused run, which keeps its card open exactly as it is, instead of waiting unread
  * until someone taps the card.
  */
@@ -1106,7 +1099,7 @@ export async function sendThreadMessage(
             target.botId,
           );
           if (input.queueMode !== "follow_up")
-            await declineConnectionAsks(tx, actor, target.threadId, unheld);
+            await cancelFormAsks(tx, actor, target.threadId, unheld);
           const activeRuns = await withoutCardHeldRuns(
             tx,
             target.threadId,
@@ -1362,7 +1355,7 @@ export async function sendThreadMessage(
         });
         const unheld = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
         if (input.queueMode !== "follow_up")
-          await declineConnectionAsks(tx, actor, target.threadId, unheld);
+          await cancelFormAsks(tx, actor, target.threadId, unheld);
         const activeRuns = await withoutCardHeldRuns(tx, target.threadId, unheld, input.queueMode);
         const queueMode = input.queueMode;
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();

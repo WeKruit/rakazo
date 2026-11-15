@@ -1567,29 +1567,13 @@ export async function waitingAskTakesText(
 ): Promise<boolean> {
   const found = await findPendingAsk(tx, input);
   if (!found) return true;
+  // A connect card stays open under the message: typing past it closed it, and each reply then
+  // brought a new card (gate eec6adf0).
   return !(
     isApprovalAskBlock(found.pendingAsk) ||
     isSecretAskBlock(found.pendingAsk) ||
+    found.pendingAsk.connection ||
     found.pendingAsk.requestedSchema
-  );
-}
-
-/**
- * A connect card cannot be answered by typing. A recruiter who writes past it has moved on, so the
- * card closes as not connected and the run resumes; the caller delivers the message as steering.
- */
-export async function declineConnectionAskInTransaction(
-  tx: Prisma.TransactionClient,
-  input: { spaceId: string; threadId: string; runId: string; answeredByUserId: string },
-): Promise<boolean> {
-  const found = await findPendingAsk(tx, input);
-  if (!found?.pendingAsk.connection) return false;
-  return Boolean(
-    await commitAnswerRunInput(tx, {
-      ...input,
-      messageId: found.messageId,
-      answer: "not_connected" satisfies ConnectionAskAnswer,
-    }),
   );
 }
 
