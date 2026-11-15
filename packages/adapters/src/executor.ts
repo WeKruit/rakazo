@@ -12808,7 +12808,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (invalid) return finish({ error: invalid });
             }
             // "#6 and #8 are off, find more like the rest" turns people down: the next round
-            // reflects that before the recruiter accepts one. Asked once; a second call stands.
+            // reflects that before the recruiter accepts one. Every typed acceptance is checked
+            // once against what accepting does; a second call stands.
             if (
               name === "recruiting_feedback" &&
               args.target === "round" &&
@@ -12825,6 +12826,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({
                   error: `Not recorded: this message also names people of round ${named.round} (${named.named.join(", ")}). When it turns any of them down it is feedback, not acceptance: record each turned-down person's review, then run the next round of ten that reflects it, without them and without anyone like them. Only if it names them as examples of who to find more of, call approve again.`,
                 });
+              // Staging 11-15: "next batch? nothing i've already seen" was recorded as acceptance,
+              // and the scale-out that followed showed the recruiter nobody.
+              return finish({
+                error:
+                  "Not recorded yet: accepting the round ends calibration and starts finding people in bulk for Results, without showing them here. Call approve again only if the recruiter's words accept this round (these people look right, go find more like them). A request to see another batch or round of people they have not seen is the next round: run it instead.",
+              });
             }
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
