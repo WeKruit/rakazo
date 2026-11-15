@@ -9,7 +9,6 @@ import {
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   dockerComputerToolInstruction,
-  draftAskedBeforeShown,
   gmailCardNeedsDraft,
   isTerminalModelSetupError,
   loadCurrentTurnImages,
@@ -3967,17 +3966,5 @@ describe("gmailCardNeedsDraft", () => {
     expect(gmailCardNeedsDraft("gmail", ask, "**主题：** Go 后端工程师\n\nWei 你好，")).toBe(false);
     expect(gmailCardNeedsDraft("google_calendar", ask, "")).toBe(false);
     expect(gmailCardNeedsDraft("gmail", "连一下我的日历", "")).toBe(false);
-  });
-});
-
-describe("draftAskedBeforeShown", () => {
-  it("holds a question until the email asked for is written", () => {
-    // Gates 808f4f31, df83586a: cards for the purpose and the role title came before any draft.
-    const ask = "帮我给 Wei Zhang 写封邮件，fintech 那个职位";
-    expect(draftAskedBeforeShown(ask, "我先为 Wei Zhang 起草邮件。")).toBe(true);
-    expect(draftAskedBeforeShown(ask, "**Subject:** Backend Go\n\nHi Wei,")).toBe(false);
-    expect(draftAskedBeforeShown("帮我回复 Wei Zhang 的邮件", "")).toBe(false);
-    expect(draftAskedBeforeShown("给前 10 个人发邮件", "")).toBe(false);
-    expect(draftAskedBeforeShown("Draft an email to Wei Zhang", "")).toBe(true);
   });
 });

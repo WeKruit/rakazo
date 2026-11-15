@@ -1,4 +1,5 @@
 import type { ConnectorTool } from "@rakazo/adapter-kit";
+import { asksForOutreach } from "@rakazo/core";
 import type { Receipts } from "./claim-receipts.js";
 
 /**
@@ -883,3 +884,20 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
   if (a.size >= 5 && shared / a.size >= 0.9) return true;
   return shared / (a.size + b.size - shared) >= 0.55;
 }
+
+/** A question asked while the email the recruiter asked to be written is not shown yet. */
+export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
+  return (
+    asksForOutreach(recruiterText) &&
+    /写(?:一?[封个份])?(?:邮件|信|模板)|起草|模板|\b(?:write|draft)\s+(?:(?:me|up)\s+)?(?:an?\s+|the\s+)?(?:e-?mail|message|note|outreach|template)|\btemplate\b/i.test(recruiterText) &&
+    !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
+    !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
+  );
+}
+
+/** Model-facing: the email comes first; a question waits beside it. */
+export const DRAFT_BEFORE_ASKING =
+  "Not asked: the recruiter asked you to write an email, and they see the draft before any question. Write the full email now (Subject: and body) from their words and anything saved, for the person they name, with no saved role, profile or address needed and without inventing facts they did not give. Then ask, beside the draft, only the one fact a send still needs (such as the address).";
+
+/** Model-facing retry: a final reply asked for more instead of writing the email asked for. */
+export const DRAFT_FIRST_RETRY = `Not shown: the recruiter asked you to write an email and your reply asked for more instead. ${DRAFT_BEFORE_ASKING.replace(/^Not asked: [^.]*\. /, "")}`;
