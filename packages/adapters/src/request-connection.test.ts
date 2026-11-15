@@ -95,32 +95,25 @@ describe("request_connection", () => {
     });
   });
 
-  it("names the address the recruiter typed on a mail connect card", async () => {
+  it("builds a mail card's reason for a send the recruiter asked for, naming the typed address", async () => {
     const f = fixture({ name: "Gmail" });
-    const typed = "用我的邮箱马上发给 Wei.Zhang.Test@example.com";
-    const reasonShown = (reason: string) =>
-      expect.objectContaining({ connection: expect.objectContaining({ reason }) });
-    await requestConnection(
-      f.db,
-      scope,
-      { serverId: "server-1", reason: "用来发这封邮件。" },
-      f.pause,
-      typed,
+    const shown = async (reason: string, typed: string) => {
+      await requestConnection(f.db, scope, { serverId: "server-1", reason }, f.pause, typed);
+      return (f.pause.mock.calls.at(-1) as unknown as [{ connection: { reason: string } }])[0]
+        .connection.reason;
+    };
+    const send = "邮箱在上面 Wei.Zhang.Test@example.com，直接发吧";
+    const zh = await shown(
+      "连接 Gmail 后，这封已写好的邮件会保留在这里，并出现单独的发送卡片。",
+      send,
     );
-    expect(f.pause).toHaveBeenNthCalledWith(
-      1,
-      reasonShown("用来发这封邮件。（发给 wei.zhang.test@example.com）"),
+    expect(zh).toContain("wei.zhang.test@example.com");
+    expect(zh).not.toContain("这封已写好的邮件");
+    expect(await shown("To send the email above.", send)).toMatch(
+      /^The draft is kept\..*to wei\.zhang\.test@example\.com/,
     );
-    await requestConnection(
-      f.db,
-      scope,
-      { serverId: "server-1", reason: "To send to wei.zhang.test@example.com." },
-      f.pause,
-      typed,
-    );
-    expect(f.pause).toHaveBeenNthCalledWith(
-      2,
-      reasonShown("To send to wei.zhang.test@example.com."),
+    expect(await shown("用来读取候选人的回复。", "帮我看看有没有人回复")).toBe(
+      "用来读取候选人的回复。",
     );
   });
 
