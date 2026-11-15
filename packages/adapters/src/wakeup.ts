@@ -488,7 +488,12 @@ export function startJobQueueReporter(pool: Pool, slots: number, signal: AbortSi
       [BACKGROUND_PRIORITY],
     );
     const row = rows[0] ?? {};
+    // Resident size beside the JavaScript heap: a gap that only grows is native memory kept.
+    const memory = process.memoryUsage();
     getLogger().info("jobs.queue", {
+      rssMb: Math.round(memory.rss / 1e6),
+      heapUsedMb: Math.round(memory.heapUsed / 1e6),
+      externalMb: Math.round(memory.external / 1e6),
       slots,
       ready: Number(row.ready ?? 0),
       readyChats: Number(row.readyChats ?? 0),

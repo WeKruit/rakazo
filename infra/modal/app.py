@@ -57,7 +57,7 @@ config = modal.Secret.from_name(SECRET_NAME)
 secrets = [config, modal.Secret.from_name(f"{APP_NAME}-db")] if TEST_ENVIRONMENT else [config]
 image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")
-    .apt_install("ca-certificates", "git", "openssl", "poppler-utils")
+    .apt_install("ca-certificates", "git", "openssl", "poppler-utils", "libjemalloc2")
     .run_commands("corepack enable", "corepack prepare pnpm@9.15.0 --activate")
     .workdir("/app")
     .add_local_file(ROOT / "package.json", "/app/package.json", copy=True)
@@ -91,7 +91,11 @@ image = (
     )
     # Node resolves hostnames on a 4-thread pool by default; a few slow lookups then hold up every
     # new database and model connection in the process.
-    .env({"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/supabase.crt", "UV_THREADPOOL_SIZE": "32"})
+    # glibc's allocator keeps memory freed by many threads (sharp/libvips image work on that pool),
+    # so the worker's resident size only grew: 2.5 GB with a 0.65 GB JavaScript heap, until the
+    # container hit its limit. jemalloc returns it, as sharp's documentation recommends on glibc.
+    .env({"NODE_EXTRA_CA_CERTS": "/usr/local/share/ca-certificates/supabase.crt", "UV_THREADPOOL_SIZE": "32",
+          "LD_PRELOAD": "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"})
 )
 
 
