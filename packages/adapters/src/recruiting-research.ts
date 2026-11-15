@@ -14,7 +14,6 @@ import {
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import {
-  countRecruitingPeopleFoundSince,
   IsolationError,
   listRecruitingPeopleFoundSince,
   listRecruitingResearch,
@@ -495,7 +494,7 @@ export async function limitPeopleSearch(
     PEOPLE_SEARCH_MAX_RESULTS,
   );
   if (room === undefined || !roleId) return { ...args, numResults: wanted };
-  const { granted, entry } = await takePeople(prisma, roleId, room, wanted, true);
+  const { granted, entry } = takePeople(roleId, room, wanted, true);
   if (granted <= 0) throw new IsolationError(room > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
   const limited = { ...args, numResults: granted };
   if (entry) reservationOf.set(limited, { roleId, entry });
@@ -503,16 +502,15 @@ export async function limitPeopleSearch(
 }
 
 /**
- * People asked for by searches still running or not yet saved. Saves are async, so four searches
- * sent together all saw an empty role and each asked for ten (staging 808f4f31: 29 saved for 20).
- * A reservation lasts while its search runs and briefly after, for the save; a failed search
- * gives it back at once (staging 7b5230e4: failed searches held the 20 and the role stayed at 0).
+ * People asked for by searches still running. Four searches sent together all saw an empty role
+ * and each asked for ten (staging 808f4f31: 29 saved for 20). A reservation lasts while its
+ * search runs; a failed search gives it back at once (staging 7b5230e4: failed searches held the
+ * 20 and the role stayed at 0).
  */
 const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
 /** An agent run searches longer; it holds its people until it finishes or this runs out. */
 const AGENT_RUN_HOLD_MS = 10 * 60 * 1000;
-const PEOPLE_SAVE_GRACE_MS = 30 * 1000;
-type PeopleReservation = { people: number; since: number; until: number };
+type PeopleReservation = { people: number; until: number };
 type HeldPeople = { roleId: string; entry: PeopleReservation };
 const peopleReserved = new Map<string, PeopleReservation[]>();
 const reservationOf = new WeakMap<object, HeldPeople>();
@@ -525,34 +523,20 @@ export const PEOPLE_SEARCH_BUSY =
   "Not searched: searches already running for this role cover the rest of the number the recruiter asked for. Do not search again now: wait for their people, which are saved to Results automatically; you are woken when a running agent run finishes.";
 
 /**
- * The room left once people asked for and not yet saved are counted; with `reserve`, take up to
- * `wanted` of it. The check and the reservation run with no await between them, so searches
- * sent together share it.
+ * The room left once people asked for by running searches are counted; with `reserve`, take up
+ * to `wanted` of it. Synchronous, so searches sent together share it.
  */
-async function takePeople(
-  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
+function takePeople(
   roleId: string,
   room: number,
   wanted: number,
   reserve: boolean,
   holdMs = PEOPLE_RESERVATION_MS,
-): Promise<{ granted: number; entry?: PeopleReservation }> {
-  const live = () => (peopleReserved.get(roleId) ?? []).filter((entry) => entry.until > Date.now());
-  const earliest = live().reduce<number | undefined>(
-    (min, entry) => Math.min(min ?? Number.POSITIVE_INFINITY, entry.since),
-    undefined,
-  );
-  const saved =
-    earliest === undefined
-      ? 0
-      : await countRecruitingPeopleFoundSince(prisma, { roleId, since: new Date(earliest) });
-  const entries = live();
+): { granted: number; entry?: PeopleReservation } {
+  const entries = (peopleReserved.get(roleId) ?? []).filter((entry) => entry.until > Date.now());
   const pending = entries.reduce((sum, entry) => sum + entry.people, 0);
-  const granted = Math.max(0, Math.min(wanted, room - Math.max(0, pending - saved)));
-  const entry =
-    reserve && granted
-      ? { people: granted, since: Date.now(), until: Date.now() + holdMs }
-      : undefined;
+  const granted = Math.max(0, Math.min(wanted, room - pending));
+  const entry = reserve && granted ? { people: granted, until: Date.now() + holdMs } : undefined;
   if (entry) entries.push(entry);
   if (entries.length) peopleReserved.set(roleId, entries);
   else peopleReserved.delete(roleId);
@@ -560,9 +544,10 @@ async function takePeople(
 }
 
 /**
- * A people search answered: a failed one gives its reservation back, a finished one keeps it only
- * while its people are being saved. An agent run still searching keeps it until a later read of
- * that run shows it finished.
+ * A people search answered: its reservation is given back, since a finished search's people are
+ * saved before anyone reads its result (staging 14d33ed1: a 30 s hold on a search that found
+ * people already in Results refused the next one, and 13 of 20 were left). An agent run still
+ * searching keeps it until a later read of that run shows it finished.
  */
 export function settlePeopleSearch(
   args: object | undefined,
@@ -585,10 +570,6 @@ export function settlePeopleSearch(
   // A failed read of a run says nothing about the run itself.
   if (typeof named === "string" && outcome === "failed") return;
   if (typeof named === "string") heldByAgentRun.delete(named);
-  if (outcome === "done") {
-    held.entry.until = Math.min(held.entry.until, Date.now() + PEOPLE_SAVE_GRACE_MS);
-    return;
-  }
   const left = (peopleReserved.get(held.roleId) ?? []).filter((entry) => entry !== held.entry);
   if (left.length) peopleReserved.set(held.roleId, left);
   else peopleReserved.delete(held.roleId);
@@ -690,8 +671,7 @@ export async function prepareAgentRun(
   if (allowed === undefined) return ready;
   // A run holds the people it may return while it searches (staging 71a2cac2: a run and quick
   // searches sent together each filled the 20, and 29 were saved). Nothing awaits after this.
-  const { granted: room, entry } = await takePeople(
-    prisma,
+  const { granted: room, entry } = takePeople(
     roleId,
     allowed,
     AGENT_RUN_MAX_PEOPLE,
