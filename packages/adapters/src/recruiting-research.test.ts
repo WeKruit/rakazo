@@ -221,45 +221,59 @@ describe("people-search agent runs", () => {
   });
 
   it("never searches past the number the recruiter asked for", async () => {
-    // Long-search-finishes 11-15 (eec6adf0): "找20个人，找完告诉我" still saved 41.
-    const db = fixture();
-    const asked = new Date("2026-11-15T10:06:00Z");
-    db.message.findMany.mockResolvedValue([
-      {
-        createdAt: asked,
-        blocks: [{ kind: "text", text: "Senior SRE，Austin。找20个人，找完告诉我" }],
-      },
-    ]);
-    const limit = (args: Record<string, unknown>) =>
-      limitPeopleSearch(db as never, actor, server, "web_search_advanced_exa", args);
-    // 14 saved, all from this request: 6 more at most.
-    db.recruitingCandidate.count.mockResolvedValue(14);
-    db.recruitingCandidateOccurrence.findMany.mockResolvedValue(
-      Array.from({ length: 14 }, (_, i) => ({ candidateKey: `k${i}` })),
-    );
-    await expect(limit({ category: "people", numResults: 10 })).resolves.toMatchObject({
-      numResults: 6,
-    });
-    const run = await prepare(db, { query: "Find 6 more people", effort: "low" });
-    expect(
-      (run.outputSchema as { properties: { people: { maxItems: number } } }).properties.people
-        .maxItems,
-    ).toBe(6);
-    // Once the role holds 20, neither search runs.
-    db.recruitingCandidate.count.mockResolvedValue(20);
-    db.recruitingCandidateOccurrence.findMany.mockResolvedValue(
-      Array.from({ length: 20 }, (_, i) => ({ candidateKey: `k${i}` })),
-    );
-    await expect(limit({ category: "people" })).rejects.toThrow(/already holds/);
-    await expect(prepare(db, { query: "Find 10 more", effort: "low" })).rejects.toThrow(
-      /already holds/,
-    );
-    // "find 20" on a role that already held 40 before the request means 20 more.
-    db.recruitingCandidate.count.mockResolvedValue(45);
-    db.recruitingCandidateOccurrence.findMany.mockResolvedValue(
-      Array.from({ length: 5 }, (_, i) => ({ candidateKey: `k${i}` })),
-    );
-    await expect(limit({ category: "people" })).resolves.toMatchObject({ numResults: 10 });
+    // Long-search-finishes 11-15: "找20个人，找完告诉我" saved 41 (eec6adf0), then 29 (808f4f31),
+    // because searches sent together all saw an empty role.
+    vi.useFakeTimers({ now: new Date("2026-11-15T10:06:00Z"), toFake: ["Date"] });
+    try {
+      const db = fixture("role-target");
+      db.message.findMany.mockResolvedValue([
+        {
+          createdAt: new Date("2026-11-15T10:05:00Z"),
+          blocks: [{ kind: "text", text: "Senior SRE，Austin。找20个人，找完告诉我" }],
+        },
+      ]);
+      const found = (n: number) =>
+        db.recruitingCandidateOccurrence.findMany.mockResolvedValue(
+          Array.from({ length: n }, (_, i) => ({ candidateKey: `k${i}` })),
+        );
+      const limit = () =>
+        limitPeopleSearch(db as never, actor, server, "web_search_advanced_exa", {
+          category: "people",
+          numResults: 10,
+        });
+      // Four searches sent together on an empty role share the 20.
+      db.recruitingCandidate.count.mockResolvedValue(0);
+      found(0);
+      const sizes = await Promise.allSettled([limit(), limit(), limit(), limit()]);
+      expect(
+        sizes.map((size) => (size.status === "fulfilled" ? size.value.numResults : 0)),
+      ).toEqual([10, 10, 0, 0]);
+      // Later, 14 are saved from this request: 6 more at most, for a search or an agent run.
+      vi.setSystemTime(new Date("2026-11-15T10:20:00Z"));
+      db.recruitingCandidate.count.mockResolvedValue(14);
+      found(14);
+      await expect(limit()).resolves.toMatchObject({ numResults: 6 });
+      vi.setSystemTime(new Date("2026-11-15T10:30:00Z"));
+      const run = await prepare(db, { query: "Find 6 more people", effort: "low" });
+      expect(
+        (run.outputSchema as { properties: { people: { maxItems: number } } }).properties.people
+          .maxItems,
+      ).toBe(6);
+      // Once the role holds 20, neither search runs.
+      vi.setSystemTime(new Date("2026-11-15T10:40:00Z"));
+      db.recruitingCandidate.count.mockResolvedValue(20);
+      found(20);
+      await expect(limit()).rejects.toThrow(/already holds/);
+      await expect(prepare(db, { query: "Find 10 more", effort: "low" })).rejects.toThrow(
+        /already holds/,
+      );
+      // "find 20" on a role that already held 40 before the request means 20 more.
+      db.recruitingCandidate.count.mockResolvedValue(45);
+      found(5);
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("grades given people with the grade format and leaves them in", async () => {

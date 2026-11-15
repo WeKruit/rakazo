@@ -478,14 +478,49 @@ export async function limitPeopleSearch(
   const run = await runRole(prisma, actor);
   const roleId = run?.thread.activeRecruitingRoleId;
   const room = roleId ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
-  if (room === 0) throw new IsolationError(PEOPLE_TARGET_MET);
   const asked = Number(args.numResults);
-  const numResults = Math.min(
+  const wanted = Math.min(
     Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
     PEOPLE_SEARCH_MAX_RESULTS,
-    room ?? PEOPLE_SEARCH_MAX_RESULTS,
   );
+  const numResults =
+    room === undefined || !roleId ? wanted : await takePeople(prisma, roleId, room, wanted);
+  if (numResults <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
   return { ...args, numResults };
+}
+
+/**
+ * People asked for by searches still running or not yet saved. Saves are async, so four searches
+ * sent together all saw an empty role and each asked for ten (staging 808f4f31: 29 saved for 20).
+ */
+const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
+const peopleReserved = new Map<string, Array<{ people: number; at: number }>>();
+/**
+ * Take up to `wanted` of the room left once people asked for and not yet saved are counted. The
+ * check and the reservation run with no await between them, so searches sent together share it.
+ */
+async function takePeople(
+  prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
+  roleId: string,
+  room: number,
+  wanted: number,
+): Promise<number> {
+  const live = () =>
+    (peopleReserved.get(roleId) ?? []).filter(
+      (entry) => Date.now() - entry.at < PEOPLE_RESERVATION_MS,
+    );
+  const earliest = live()[0]?.at;
+  const saved = earliest
+    ? await countRecruitingPeopleFoundSince(prisma, { roleId, since: new Date(earliest) })
+    : 0;
+  const entries = live();
+  const pending = entries.reduce((sum, entry) => sum + entry.people, 0);
+  const granted = Math.max(0, Math.min(wanted, room - Math.max(0, pending - saved)));
+  peopleReserved.set(roleId, [
+    ...entries,
+    ...(granted ? [{ people: granted, at: Date.now() }] : []),
+  ]);
+  return granted;
 }
 
 /** Most saved people sent as one agent run's exclusion list. */
@@ -560,8 +595,12 @@ export async function prepareAgentRun(
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
-  const room = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
-  if (room === 0) throw new IsolationError(PEOPLE_TARGET_MET);
+  const allowed = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
+  const room =
+    allowed === undefined
+      ? undefined
+      : await takePeople(prisma, roleId, allowed, AGENT_RUN_MAX_PEOPLE);
+  if (room !== undefined && room <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
   // The default schema caps the people a run returns; it never returns past the recruiter's number.
   if (
     room !== undefined &&
