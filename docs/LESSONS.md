@@ -68,6 +68,12 @@ that repeats into the existing line instead of adding another.
 - The worker's startup account walk redid every account on every boot and was cut off by each
   deploy, logging thousands of pool errors as staging accumulated test accounts. **A backfill
   runs once per change, records where it got, and stops with the process.**
+- A guard against pasting an email again (#1366) read 「直接贴那一封」 as no request to see it,
+  so Kruit described the email instead of pasting it. **A guard that withholds content lists
+  every way the recruiter asks to see it, and its test includes the words from the gate.**
+- The Connect card took three reply-level fixes before the cause showed: typing past it closed
+  the card. **When a card misbehaves twice, check what closes or reopens it before changing
+  the replies around it.**
 - 2026-11-15 — `corrects: true` was added for recruiter swaps and later reused to mark the
   Reviewer's checked round. The team then used it to slip round-1 people back in and to skip the
   check. **An escape flag has one owner: key a bypass on who is calling (the run), not on an

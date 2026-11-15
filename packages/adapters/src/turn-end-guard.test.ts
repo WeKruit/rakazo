@@ -1226,6 +1226,33 @@ describe("planDeclineRetry", () => {
     expect(await planDeclineRetry({ prisma: prisma(newer) }, { ...input, since })).toBeUndefined();
   });
 
+  // Gate 386f6a46, change-mind-mid-run: four messages after 「给我一封首次联系邮件模板」, the pasted
+  // template was retried for its {{firstName}} and came back opening "Hello,".
+  it("keeps a template's variables several messages after the template was asked for", async () => {
+    const said = (text: string) => ({ clientNonce: null, blocks: [{ kind: "text", text }] });
+    const users = [
+      said("把那一封完整贴出来"),
+      said("直接贴那一封"),
+      said("最终是哪版？"),
+      said("base改成70-90万"),
+      said("给我一封首次联系邮件模板"),
+    ];
+    const db = {
+      message: {
+        findMany: vi.fn(async ({ take }: { take?: number }) => users.slice(0, take)),
+      },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    } as unknown as Parameters<typeof planDeclineRetry>[0]["prisma"];
+    const reply =
+      "**Subject:** Staff Frontend Engineer\n\nHi {{firstName}},\n\nThe base is RMB 700,000–900,000.\n\nBest,\nAlex";
+    expect(
+      await planDeclineRetry(
+        { prisma: db },
+        { ...input, reply, blocks: [{ kind: "text", text: reply }], request: "把那一封完整贴出来" },
+      ),
+    ).toBeUndefined();
+  });
+
   // Staging 11-12: after the recruiter approved the Send card, "已发送给 Noah" was retried as a refusal.
   it("keeps a reply that reports the send after its card was answered", async () => {
     const human = { prisma: prisma([{ clientNonce: "send:human" }]) };

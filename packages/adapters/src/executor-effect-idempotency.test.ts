@@ -6131,6 +6131,91 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("每周五远程");
   });
 
+  // Gate 386f6a46, change-mind-mid-run: the change came while Main ran, its brief took it, and
+  // the report's turn handed the same change over again, so two versions came out.
+  it("does not hand over again a message the stage just reported was handed after", async () => {
+    vi.mocked(handoffToGroupBot).mockClear();
+    const f = fixture("rehand-after-report");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: { findUnique: vi.fn(async () => null) },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: "report-1" });
+    const change = "等等，base改成70-90万，邮件里加一句每周五remote";
+    const rows = [
+      {
+        id: "change-1",
+        seq: 5,
+        role: "user",
+        botId: null,
+        clientNonce: null,
+        runId: null,
+        blocks: [{ kind: "text", text: change }],
+        createdAt: new Date(),
+      },
+      {
+        id: "brief-1",
+        seq: 6,
+        role: "bot",
+        botId: "bot-1",
+        clientNonce: null,
+        runId: "run-0",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: "bot-1",
+            toBotId: "bot-2",
+            text: "Goal: write the first-touch template for Staff Frontend Engineer, Beijing.",
+          },
+        ],
+        createdAt: new Date(),
+      },
+      {
+        id: "report-1",
+        seq: 7,
+        role: "bot",
+        botId: "bot-2",
+        clientNonce: null,
+        runId: "run-2",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: "bot-2",
+            toBotId: "bot-1",
+            report: "completed",
+            text: "Finished the stage you handed me.",
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ];
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async (query: {
+      where?: { seq?: { gt?: number } };
+    }) => rows.filter((row) => row.seq > (query?.where?.seq?.gt ?? 0))) as never);
+    vi.mocked(f.prisma.message.findFirst).mockImplementation((async (query: {
+      where?: { role?: string; blocks?: unknown };
+    }) =>
+      query?.where?.role === "user" ? rows[0] : query?.where?.blocks ? rows[1] : null) as never);
+    let answer: unknown;
+    f.runtimeRun.mockImplementation(async function* (request) {
+      answer = await request.executeTool!(
+        "handoff_to_bot",
+        { confirm_name: "Writer", message: `Goal: the recruiter says “${change}”.` },
+        "h1",
+      );
+      yield { type: "done" as const, text: "NO_RESPONSE" };
+    });
+    await f.run();
+    expect(JSON.stringify(answer)).toContain("Not handed off");
+    expect(handoffToGroupBot).not.toHaveBeenCalled();
+  });
+
   // Gate ab68f06d, change-mind: after handing the change to the writer, the coordinator posted
   // 「我会查看更新后的工具处理说明…」 beside the writer's revised template.
   it("posts no update of its own once the request is handed off", async () => {
