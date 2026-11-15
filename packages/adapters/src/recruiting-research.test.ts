@@ -260,17 +260,30 @@ describe("people-search agent runs", () => {
       expect(
         sizes.map((size) => (size.status === "fulfilled" ? size.value.numResults : 0)),
       ).toEqual([10, 10, 0, 0]);
-      // Staging 7b5230e4: searches that failed, and an agent run, held the 20 and the role
-      // stayed at 0. A failed search gives its share back; an agent run reserves nothing.
+      // Staging 7b5230e4: searches that failed held the 20 and the role stayed at 0. A failed
+      // search, or a failed agent run, gives its share back.
       vi.setSystemTime(new Date("2026-11-15T10:10:00Z"));
       const failed = [await limit(), await limit()];
       for (const args of failed) settlePeopleSearch(args, "failed");
-      await prepare(db, { query: "Find 20 people", effort: "low" });
+      settlePeopleSearch(await prepare(db, { query: "Find 20 people", effort: "low" }), "failed");
+      // Staging 71a2cac2: a run and quick searches sent together each filled the 20 (29 saved).
+      // A run holds its people while it searches; a quick search waits instead of saying done.
+      const reply = (status: string) => ({
+        content: [{ type: "text", text: JSON.stringify({ id: "agent_run_held", status }) }],
+      });
+      const started = await prepare(db, { query: "Find 20 people", effort: "low" });
+      await expect(limit()).rejects.toThrow(/already running/);
+      settlePeopleSearch(started, "done", reply("running"));
+      settlePeopleSearch({ runId: "agent_run_held" }, "failed");
+      settlePeopleSearch({ runId: "agent_run_held" }, "done", reply("running"));
+      await expect(limit()).rejects.toThrow(/already running/);
+      settlePeopleSearch({ runId: "agent_run_held" }, "done", reply("completed"));
+      vi.setSystemTime(new Date("2026-11-15T10:10:40Z"));
       const retried = await limit();
       expect(retried).toMatchObject({ numResults: 10 });
       // A finished search keeps its share only while its people are saved.
       settlePeopleSearch(retried, "done");
-      vi.setSystemTime(new Date("2026-11-15T10:10:40Z"));
+      vi.setSystemTime(new Date("2026-11-15T10:11:20Z"));
       await expect(limit()).resolves.toMatchObject({ numResults: 10 });
       // Later, 14 are saved from this request: 6 more at most, for a search or an agent run.
       vi.setSystemTime(new Date("2026-11-15T10:20:00Z"));
