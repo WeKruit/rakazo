@@ -1,4 +1,4 @@
-import { INSTANTLY_MCP_ENDPOINT, sendRecipients } from "@rakazo/core";
+import { INSTANTLY_MCP_ENDPOINT, sendRecipients, textLanguage } from "@rakazo/core";
 import {
   connectAskBlock,
   findPendingConnectAsk,
@@ -6,6 +6,7 @@ import {
   type PrismaClient,
 } from "@rakazo/db";
 
+import { SEND_NOW_REQUEST } from "./instantly-senders.js";
 import { hasPlatformMcpCredential } from "./mcp-connector.js";
 
 type ConnectBlock = ReturnType<typeof connectAskBlock>;
@@ -103,16 +104,22 @@ async function resolveProvider(prisma: PrismaClient, scope: Scope, provider: str
 }
 
 /**
- * A mail connect card names the addresses the recruiter typed, so it confirms the send they asked
- * for (gate 9fd9c2ff, one-off email: the card never showed the address).
+ * A mail connect card for a send the recruiter asked for says, in one line built here, that the
+ * draft is kept and goes out to the addresses they typed only when they press Send (gate
+ * 9fd9c2ff: the card never showed the address; gate ecebc59b: the agent's own reason ran long).
+ * Any other mail card keeps the agent's reason.
  */
-function withTypedRecipients(reason: string, recruiterText: string) {
-  const missing = sendRecipients({ text: recruiterText }).filter(
-    (address) => !reason.toLowerCase().includes(address),
-  );
-  if (!missing.length) return reason;
-  const list = missing.join(", ");
-  return /\p{Script=Han}/u.test(reason) ? `${reason}（发给 ${list}）` : `${reason} (to ${list})`;
+function mailReason(reason: string, recruiterText: string) {
+  const typed = sendRecipients({ text: recruiterText });
+  if (!typed.length && !SEND_NOW_REQUEST.test(recruiterText)) return reason;
+  const list = typed.join(", ");
+  const language = textLanguage(reason, 1);
+  if (language === "zh")
+    return `草稿已保留。连上 Gmail 后会出现发送卡片，按下发送才从你的邮箱${list ? `发给 ${list}` : "发出"}。`;
+  if (language === "en")
+    return `The draft is kept. Once Gmail is connected it comes back on a Send card and goes out from your own address${list ? ` to ${list}` : ""} only when you press Send.`;
+  const missing = typed.filter((address) => !reason.toLowerCase().includes(address));
+  return missing.length ? `${reason} (${missing.join(", ")})` : reason;
 }
 
 /** request_connection: connected → result; otherwise one pending connect card per server and thread. */
@@ -158,7 +165,7 @@ export async function requestConnection(
     connectAskBlock({
       serverId,
       name: server.name.slice(0, 80),
-      reason: mail ? withTypedRecipients(reason, recruiterText) : reason,
+      reason: mail ? mailReason(reason, recruiterText) : reason,
     }),
   );
   return undefined;
