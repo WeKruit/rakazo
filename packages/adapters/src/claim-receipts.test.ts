@@ -28,6 +28,9 @@ describe("claims of what happened", () => {
     "还没有发送，等你确认。",
     "I'll save it as a template now.",
     "Did it get sent?",
+    // Gate 808f4f31 first-timer: explaining what the Sequence page shows is not a status claim.
+    "Sequence 页用来管理联系步骤，例如哪些邮件已发出、哪些还在排队。",
+    "It shows each step, for example which emails were sent and which are queued.",
   ])("leaves alone %s", (text) => expect(claimsIn(text)).toEqual([]));
 });
 
