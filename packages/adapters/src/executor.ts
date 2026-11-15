@@ -509,7 +509,14 @@ import {
   shouldEnqueueCompaction,
   steppedHistoryWindow,
 } from "./history-compaction.js";
-import { intakeFieldsNote, settledFactAsked, settledFactNote } from "./intake-open-fields.js";
+import {
+  describesRole,
+  intakeFieldsNote,
+  openFactAsked,
+  SEARCH_BEFORE_ASKING,
+  settledFactAsked,
+  settledFactNote,
+} from "./intake-open-fields.js";
 import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { describeReplyToEmail, type InstantlyReplyDisplay } from "./instantly-native-writes.js";
 import type { InstantlyEmail } from "./instantly-reply.js";
@@ -1429,13 +1436,13 @@ export const questionAlreadyWaiting = (question: string) =>
   `Not asked: the recruiter has not answered the question already waiting in this conversation ("${question.slice(0, 300)}"). Never ask it or another question again now; carry on with work that does not need the answer, or end the turn with no reply.`;
 
 export const globalAskBeforeRole = (latest: string) =>
-  `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team asks its questions in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
+  `Not asked yet. The recruiter's latest message is: "${latest.slice(0, 600)}". Only when that message itself is a new role they are hiring for (a JD, a title with requirements, or a request to find people for one), do not ask about it here: call start_role now with a short title, and its team takes it from there in the role's conversation. An email, a send, a person, a reply to your question or anything else is not a new role: ask this same question again with ask_user.`;
 
 const ROLE_NOT_SAVED_NOTE =
-  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then ask the first clarifying question with ask_user and the four plannedSearches. Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
+  "This role team has no saved role yet. Only when the recruiter's message describes a role they are hiring for (a title, requirements or a JD; a request to find people for a named role counts, however short or vague, for example 'We need a backend engineer, can you help me find people?'), save it first with recruiting_role create, titled in their words, then issue the four calibration people searches from what they wrote (the recruiter sees the first ten before any question; ask first only when they named no title, place or requirement at all). Anything else, such as a greeting or a question about what you can do or about other roles, gets a short direct answer: no role, no intake question and no people search.";
 
 const FILE_JOB_NOTE =
-  "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
+  "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then issue the calibration people searches from it as written (the recruiter sees the first ten before any question).";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
 /** Model-facing: a turn that recorded its round leaves a newer request to the turn answering it. */
@@ -7003,6 +7010,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const settledAskBounces = new Map<string, number>();
         // A JD read from a file or link is in no message; the first-step note keeps its text here.
         let intakeJobText = "";
+        /** The recruiter's own words in this conversation, with a JD read from a file or link. */
+        const recruiterWordsText = async () =>
+          [
+            intakeJobText,
+            ...(
+              await deps.prisma.message
+                .findMany({
+                  where: { threadId: thread.id, role: "user" },
+                  orderBy: { seq: "asc" },
+                  select: { blocks: true },
+                })
+                .catch(() => [])
+            ).flatMap((message) =>
+              (message.blocks as MessageBlock[]).flatMap((block) =>
+                block.kind === "text" ? [block.text] : [],
+              ),
+            ),
+          ].join("\n");
+        let searchFirstBounces = 0;
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -15718,7 +15744,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             intakeJobText = jd;
             return writesToNamedPeople(words)
               ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
-              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)} ${PLANNED_SEARCHES_NOTE}`;
+              : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)}`;
           };
           if (request) {
             // A role Kruit opened (start_role) is already named after it: keep that title.
@@ -16261,7 +16287,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           [
             plannedNote
               ? PLANNED_SEARCHES_NOTE
-              : `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`,
+              : `Never search connectors or tools before the people searches. The recruiter sees the first ten before any question: issue the four people searches as your very next step, from what the role already holds. ${PLANNED_SEARCHES_NOTE}`,
             intake.page &&
               `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
           ]
@@ -17195,6 +17221,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       settledAskBounces.set(settled, bounces + 1);
                       return { instead: settledFactNote(settled) };
                     }
+                    // Search first, then ask (11-15 card tap): a role the recruiter described is
+                    // searched as written before any question.
+                    if (
+                      firstRoundPending &&
+                      !firstPicksShown &&
+                      searchFirstBounces < 3 &&
+                      describesRole(await recruiterWordsText())
+                    ) {
+                      searchFirstBounces++;
+                      return { instead: SEARCH_BEFORE_ASKING };
+                    }
                     // Questions follow the recruiter's own language, never the JD's.
                     if (
                       hideVendors &&
@@ -17543,7 +17580,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
-                const card = await nextStepCardInstead();
+                // The one question allowed beside the ten asks a fact still open; it stands.
+                const card = openFactAsked(event.text ?? "", await recruiterWordsText())
+                  ? undefined
+                  : await nextStepCardInstead();
                 if (card) {
                   turnReport.report();
                   event.text = card.text;

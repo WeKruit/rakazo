@@ -27,12 +27,14 @@ export type IntakeFields = {
   settled: string[];
   open: string[];
   settledKeys: IntakeField[];
+  openKeys: IntakeField[];
 };
 
 export function intakeFields(text: string): IntakeFields {
   const settled: string[] = [];
   const open: string[] = [];
   const settledKeys: IntakeField[] = [];
+  const openKeys: IntakeField[] = [];
   if (WORK_MODE.test(text)) {
     const local = localRolePlace([text]);
     const place = local
@@ -40,19 +42,28 @@ export function intakeFields(text: string): IntakeFields {
       : namedPlace([text])?.label;
     settled.push(`location and work mode (${place ? `${place}, ` : ""}as the JD states)`);
     settledKeys.push("location");
-  } else open.push("the location scope with the work mode (onsite, hybrid or remote)");
+  } else {
+    open.push("the location scope with the work mode (onsite, hybrid or remote)");
+    openKeys.push("location");
+  }
   if (jobStatesYears(text)) {
     settled.push("years of experience (as stated)");
     settledKeys.push("years");
-  } else open.push("the years-of-experience range (offer two or three ranges that fit the pay)");
+  } else {
+    open.push("the years-of-experience range (offer two or three ranges that fit the pay)");
+    openKeys.push("years");
+  }
   if (!LANGUAGE.test(text)) {
     settled.push("language (the location's own; not a requirement)");
     settledKeys.push("language");
   } else if (LANGUAGE_WEIGHT.test(text)) {
     settled.push("language (as the recruiter states it, required or preferred)");
     settledKeys.push("language");
-  } else open.push("whether the language it names is required or preferred");
-  return { settled, open, settledKeys };
+  } else {
+    open.push("whether the language it names is required or preferred");
+    openKeys.push("language");
+  }
+  return { settled, open, settledKeys, openKeys };
 }
 
 const ASKS: Record<IntakeField, RegExp> = {
@@ -70,14 +81,36 @@ export function settledFactAsked(question: string, recruiterText: string): Intak
   return settledKeys.find((key) => ASKS[key].test(question));
 }
 
+/** The open intake fact a question asks, if any: the one question allowed beside the ten. */
+export function openFactAsked(question: string, recruiterText: string): IntakeField | undefined {
+  const { openKeys } = intakeFields(recruiterText);
+  return openKeys.find((key) => ASKS[key].test(question));
+}
+
+const JOB_TITLE =
+  /\b(engineer|developer|architect|scientist|analyst|manager|director|lead|head of|designer|sales|account executive|recruiter|marketer|marketing|operations|consultant|specialist|vp|cto|cfo|ceo)\b|工程师|开发|架构师|科学家|分析师|经理|总监|主管|设计师|销售|运营|产品|顾问|专员|招聘/i;
+
+/** A recruiter who names no title, place or years has not said what role it is. */
+export const describesRole = (recruiterText: string) =>
+  JOB_TITLE.test(recruiterText) || intakeFields(recruiterText).openKeys.length < 2;
+
+/**
+ * The recruiter chose to see the first ten before any question (staging 11-15, card tap
+ * 「先出前十个，再问」): a described role is searched as written.
+ */
+export const SEARCH_BEFORE_ASKING =
+  "Not asked: the recruiter sees the first ten before any question. Issue the calibration people searches now from the JD and their words as written, leaving whatever they did not state open, then record the ten with calibration_round. The one question allowed comes after the ten, on the card beside them, and only for a fact still open that changes who is searched for.";
+
 export const settledFactNote = (field: IntakeField) =>
   `Not asked: the recruiter's own words already settle the ${field === "years" ? "years of experience" : field === "location" ? "location and work mode" : "language requirement"}. Never ask about it, ask to confirm it${field === "years" ? ", or ask for a cap on stated years (propose one in the brief as a preference)" : ""}. Ask only about a fact still open that changes who is searched for; if none is, issue the calibration searches now with no question.`;
 
-/** What the role's team is told before its first step about the facts its question may cover. */
+/** What the role's team is told before its first step: search first, then ask (11-15 card tap). */
 export function intakeFieldsNote(text: string): string {
   const { settled, open } = intakeFields(text);
   const known = `Settled by the recruiter's words: ${settled.join("; ")}. Never ask about these, ask to confirm them, or ask for a cap on stated years (propose one in the brief as a preference).`;
+  const search =
+    "The recruiter sees the first ten before any question: issue the calibration people searches now, in this first step, from the JD and their words as written, with no question, role read or assessment first.";
   return open.length
-    ? `${known} Still open: ${open.join("; ")}. Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first, about the open fact that most changes who is searched for.`
-    : `${known} Nothing else needs a question unless the JD leaves out a fact that changes who is searched for: issue the calibration searches now, in this first step, with no question.`;
+    ? `${known} ${search} Still open: ${open.join("; ")}; search without it. After the ten are recorded, the card beside them may ask the one open fact that most changes who is searched for, never before.`
+    : `${known} ${search}`;
 }
