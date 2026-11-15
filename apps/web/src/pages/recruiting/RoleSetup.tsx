@@ -35,7 +35,8 @@ export function RoleSetup({ status }: { status: RecruitingRoleSetup | undefined 
       find_first_10:
         count < 10 ? t`Finding ${count} more of the first 10` : t`Find the first 10 people`,
       show_first_10: t`Show the first 10 people`,
-      review_first_10: t`Review the first 10 people`,
+      // The round panel on the same screen already asks for this review.
+      review_first_10: null,
       scale: t`Find more people`,
       enrichment: t`Find contact details`,
       outreach: t`Prepare outreach`,
