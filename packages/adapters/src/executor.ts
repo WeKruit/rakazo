@@ -1444,6 +1444,9 @@ export const askAfterNewerMessage = (text: string) =>
   `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. End the turn with a final reply of one or two lines on what this work did, without mentioning or answering that message.`;
 
 /** Work behind a newer message reports once, in its final reply, never also mid-turn. */
+export const HANDED_OFF_NOT_SHOWN =
+  "Not shown: the teammate you handed this request to answers the person. Say nothing more about it; end the turn.";
+
 export const REPORT_IN_FINAL_REPLY =
   "Not sent: another turn is answering the person's newer message. Give this report once, as this turn's final reply.";
 
@@ -1485,7 +1488,13 @@ export const withoutPolls = <T extends { name: string }>(tools: T[], recruiting:
 /** Built-in calls after a handoff that leave the request with the teammate. */
 // Waiting for the teammate is not new work: staging 11-13, Main waited for Outreach's template,
 // then posted it again as its own reply.
-const AFTER_HANDOFF_QUIET = new Set(["read_memory", "save_memory", "wait_for_work"]);
+// A progress update is talk, not work: after a handoff the teammate answers (gate ab68f06d).
+const AFTER_HANDOFF_QUIET = new Set([
+  "read_memory",
+  "save_memory",
+  "wait_for_work",
+  "message_user",
+]);
 
 /** Whether a call after a handoff means this turn took the request back and must reply itself. */
 export function takesBackHandoff(
@@ -6723,7 +6732,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : written;
           messageSegments = extracted.remaining;
           currentTextSegment = "";
-          if (!narration) {
+          if (!narration || (hideVendors && handedOff)) {
             if (written) {
               assembled = "";
               hasStreamedText = false;
@@ -14271,6 +14280,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (name === "message_user") {
             if (movedElsewhere) return finish({ error: REPORT_IN_FINAL_REPLY });
+            // Gate ab68f06d: the teammate answers what was handed to it; an update of this bot's
+            // own beside that answer ("我会查看更新后的工具处理说明…") says nothing to the person.
+            if (hideVendors && handedOff) return finish({ ok: true, note: HANDED_OFF_NOT_SHOWN });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const unnudged = clampUserProgressMessage(withoutNudge(rawMessage));
             const text = fixedAckSent ? withoutLeadingAck(unnudged) : unnudged;

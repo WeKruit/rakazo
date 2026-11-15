@@ -6131,6 +6131,41 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("每周五远程");
   });
 
+  // Gate ab68f06d, change-mind: after handing the change to the writer, the coordinator posted
+  // 「我会查看更新后的工具处理说明…」 beside the writer's revised template.
+  it("posts no update of its own once the request is handed off", async () => {
+    vi.mocked(handoffToGroupBot).mockClear();
+    vi.mocked(handoffToGroupBot).mockResolvedValueOnce({ ok: true } as never);
+    const f = fixture("quiet-after-handoff");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: { findUnique: vi.fn(async () => null) },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    let update: unknown;
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.executeTool!(
+        "handoff_to_bot",
+        { confirm_name: "Writer", message: "Change the base to 70-90万" },
+        "h1",
+      );
+      update = await request.executeTool!(
+        "message_user",
+        { message: "我会查看更新后的工具处理说明，并按它完成模板修订。" },
+        "m1",
+      );
+      yield { type: "done" as const, text: "" };
+    });
+    await f.run();
+    expect(JSON.stringify(f.prisma.message.create.mock.calls)).not.toContain("工具处理说明");
+    expect(JSON.stringify(update)).toContain("Not shown");
+  });
+
   async function firstMessageRole(groupId: string, groupName: string | null) {
     const f = fixture(`first-message-${groupId}`);
     vi.mocked(executeRecruitingRoleTool).mockClear();
