@@ -7,6 +7,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  teamProgress,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
 import * as mailReplies from "./mail-reply.js";
@@ -1157,5 +1158,29 @@ describe("automatic outcome return", () => {
     expect(returned).toBe(true);
     expect(harness.enqueue).not.toHaveBeenCalled();
     expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("teamProgress", () => {
+  it("says a round recorded while the team works is already shown (staging 2026-11-15)", async () => {
+    // Global Kruit said "the new ten aren't finalized yet" a minute after round 2 was recorded.
+    const startedAt = new Date(Date.now() - 3 * 60_000);
+    const prisma = {
+      run: {
+        findFirst: vi.fn(async () => ({ createdAt: startedAt, startedAt, bot: { name: "Lead" } })),
+      },
+      thread: { findUnique: vi.fn() },
+      recruitingCandidateOccurrence: { findMany: vi.fn(async () => [{ candidateKey: "a" }]) },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({ round: 2, createdAt: new Date(Date.now() - 60_000) })),
+      },
+    } as unknown as PrismaClient;
+    const progress = await teamProgress(prisma, {
+      threadId: "role-thread",
+      returnThreadId: "global",
+      roleId: "role",
+    });
+    expect(progress?.note).toContain("Round 2 is already recorded");
+    expect(progress?.note).not.toContain("comes back here when it is picked");
   });
 });
