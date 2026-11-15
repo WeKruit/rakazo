@@ -788,6 +788,12 @@ export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): strin
   return undefined;
 }
 
+/** The same message again, apart from spacing. */
+export function sameWords(reply: string, earlier: string | undefined): boolean {
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  return earlier !== undefined && flat(reply) !== "" && flat(reply) === flat(earlier);
+}
+
 export function restatesUpdate(reply: string, update: string | undefined): boolean {
   if (!update?.trim() || !reply.trim()) return false;
   if (reply.trim().length > update.trim().length * 1.5) return false;
