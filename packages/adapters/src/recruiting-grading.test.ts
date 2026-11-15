@@ -516,7 +516,18 @@ describe("startRecruitingGrading", () => {
         replaceKey: "recruiting_grade.start:thread",
         // The running start holds this key until it ends; a kept job would end with it.
         keepExisting: false,
+        availableAt: new Date(now + 30_000),
       }),
+    );
+    // Behind a grading batch the next one is tried within seconds.
+    const behind = fixture({ busy: true, found: [person("a")] });
+    behind.prisma.run.findFirst.mockResolvedValueOnce({
+      id: "busy",
+      trigger: "recruiting_grade",
+    } as never);
+    await startRecruitingGrading(behind.deps, { threadId: "thread" }, now);
+    expect(behind.enqueue).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ availableAt: new Date(now + 5_000) }),
     );
   });
 
