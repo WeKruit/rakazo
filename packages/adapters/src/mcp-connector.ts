@@ -1547,7 +1547,7 @@ export class McpConnector implements ConnectorProvider {
         session = await this.sessionFor(current.server, context);
         material = this.sessions.get(sessionKey)?.material;
       }
-      settlePeopleSearch(searched, result?.isError ? "failed" : "done");
+      settlePeopleSearch(searched, result?.isError ? "failed" : "done", result);
       await recordAgentRunCost(
         this.prisma,
         context,

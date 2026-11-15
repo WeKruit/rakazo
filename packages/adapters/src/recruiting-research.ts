@@ -496,7 +496,7 @@ export async function limitPeopleSearch(
   );
   if (room === undefined || !roleId) return { ...args, numResults: wanted };
   const { granted, entry } = await takePeople(prisma, roleId, room, wanted, true);
-  if (granted <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
+  if (granted <= 0) throw new IsolationError(room > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
   const limited = { ...args, numResults: granted };
   if (entry) reservationOf.set(limited, { roleId, entry });
   return limited;
@@ -509,10 +509,20 @@ export async function limitPeopleSearch(
  * gives it back at once (staging 7b5230e4: failed searches held the 20 and the role stayed at 0).
  */
 const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
+/** An agent run searches longer; it holds its people until it finishes or this runs out. */
+const AGENT_RUN_HOLD_MS = 10 * 60 * 1000;
 const PEOPLE_SAVE_GRACE_MS = 30 * 1000;
-type PeopleReservation = { people: number; until: number };
+type PeopleReservation = { people: number; since: number; until: number };
+type HeldPeople = { roleId: string; entry: PeopleReservation };
 const peopleReserved = new Map<string, PeopleReservation[]>();
-const reservationOf = new WeakMap<object, { roleId: string; entry: PeopleReservation }>();
+const reservationOf = new WeakMap<object, HeldPeople>();
+/** Agent runs still searching at the provider, by run id, until a read shows them finished. */
+const heldByAgentRun = new Map<string, HeldPeople>();
+const STILL_SEARCHING = new Set(["running", "pending", "queued", "in_progress"]);
+
+/** Model-facing: the recruiter's number is taken by searches still running for this role. */
+export const PEOPLE_SEARCH_BUSY =
+  "Not searched: searches already running for this role cover the rest of the number the recruiter asked for. Do not search again now: wait for their people, which are saved to Results automatically; you are woken when a running agent run finishes.";
 
 /**
  * The room left once people asked for and not yet saved are counted; with `reserve`, take up to
@@ -525,10 +535,11 @@ async function takePeople(
   room: number,
   wanted: number,
   reserve: boolean,
+  holdMs = PEOPLE_RESERVATION_MS,
 ): Promise<{ granted: number; entry?: PeopleReservation }> {
   const live = () => (peopleReserved.get(roleId) ?? []).filter((entry) => entry.until > Date.now());
   const earliest = live().reduce<number | undefined>(
-    (min, entry) => Math.min(min ?? Number.POSITIVE_INFINITY, entry.until - PEOPLE_RESERVATION_MS),
+    (min, entry) => Math.min(min ?? Number.POSITIVE_INFINITY, entry.since),
     undefined,
   );
   const saved =
@@ -539,7 +550,9 @@ async function takePeople(
   const pending = entries.reduce((sum, entry) => sum + entry.people, 0);
   const granted = Math.max(0, Math.min(wanted, room - Math.max(0, pending - saved)));
   const entry =
-    reserve && granted ? { people: granted, until: Date.now() + PEOPLE_RESERVATION_MS } : undefined;
+    reserve && granted
+      ? { people: granted, since: Date.now(), until: Date.now() + holdMs }
+      : undefined;
   if (entry) entries.push(entry);
   if (entries.length) peopleReserved.set(roleId, entries);
   else peopleReserved.delete(roleId);
@@ -547,13 +560,31 @@ async function takePeople(
 }
 
 /**
- * A quick people search finished: a failed one gives its reservation back, a finished one keeps
- * it only while its people are being saved.
+ * A people search answered: a failed one gives its reservation back, a finished one keeps it only
+ * while its people are being saved. An agent run still searching keeps it until a later read of
+ * that run shows it finished.
  */
-export function settlePeopleSearch(args: object | undefined, outcome: "failed" | "done"): void {
-  const held = args && reservationOf.get(args);
-  if (!held || !args) return;
+export function settlePeopleSearch(
+  args: object | undefined,
+  outcome: "failed" | "done",
+  result?: unknown,
+): void {
+  if (!args) return;
+  const body = mcpObject(result);
+  const runId = typeof body?.id === "string" ? body.id : undefined;
+  const searching = runId !== undefined && STILL_SEARCHING.has(String(body?.status));
+  const named = (args as { runId?: unknown }).runId;
+  const held =
+    reservationOf.get(args) ?? (typeof named === "string" ? heldByAgentRun.get(named) : undefined);
+  if (!held) return;
   reservationOf.delete(args);
+  if (outcome === "done" && searching && runId) {
+    heldByAgentRun.set(runId, held);
+    return;
+  }
+  // A failed read of a run says nothing about the run itself.
+  if (typeof named === "string" && outcome === "failed") return;
+  if (typeof named === "string") heldByAgentRun.delete(named);
   if (outcome === "done") {
     held.entry.until = Math.min(held.entry.until, Date.now() + PEOPLE_SAVE_GRACE_MS);
     return;
@@ -641,25 +672,6 @@ export async function prepareAgentRun(
     );
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
   const allowed = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
-  const room =
-    allowed === undefined
-      ? undefined
-      : // An agent run returns its people later, through another call: it reserves nothing.
-        (await takePeople(prisma, roleId, allowed, AGENT_RUN_MAX_PEOPLE, false)).granted;
-  if (room !== undefined && room <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
-  // The default schema caps the people a run returns; it never returns past the recruiter's number.
-  if (
-    room !== undefined &&
-    room < AGENT_RUN_MAX_PEOPLE &&
-    prepared.outputSchema === AGENT_RUN_PEOPLE_SCHEMA
-  )
-    prepared.outputSchema = {
-      ...AGENT_RUN_PEOPLE_SCHEMA,
-      properties: {
-        ...AGENT_RUN_PEOPLE_SCHEMA.properties,
-        people: { ...AGENT_RUN_PEOPLE_SCHEMA.properties.people, maxItems: room },
-      },
-    };
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },
@@ -670,10 +682,34 @@ export async function prepareAgentRun(
       ? [{ linkedin_url: `https://www.linkedin.com${candidateKey.slice("linkedin:".length)}` }]
       : [],
   );
-  if (!exclusion.length) return prepared;
   const input = record(args.input) ?? {};
   const given = Array.isArray(input.exclusion) ? input.exclusion : [];
-  return { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } };
+  const ready = exclusion.length
+    ? { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } }
+    : prepared;
+  if (allowed === undefined) return ready;
+  // A run holds the people it may return while it searches (staging 71a2cac2: a run and quick
+  // searches sent together each filled the 20, and 29 were saved). Nothing awaits after this.
+  const { granted: room, entry } = await takePeople(
+    prisma,
+    roleId,
+    allowed,
+    AGENT_RUN_MAX_PEOPLE,
+    true,
+    AGENT_RUN_HOLD_MS,
+  );
+  if (room <= 0) throw new IsolationError(allowed > 0 ? PEOPLE_SEARCH_BUSY : PEOPLE_TARGET_MET);
+  // The default schema caps the people a run returns; it never returns past the recruiter's number.
+  if (room < AGENT_RUN_MAX_PEOPLE && ready.outputSchema === AGENT_RUN_PEOPLE_SCHEMA)
+    ready.outputSchema = {
+      ...AGENT_RUN_PEOPLE_SCHEMA,
+      properties: {
+        ...AGENT_RUN_PEOPLE_SCHEMA.properties,
+        people: { ...AGENT_RUN_PEOPLE_SCHEMA.properties.people, maxItems: room },
+      },
+    };
+  if (entry) reservationOf.set(ready, { roleId, entry });
+  return ready;
 }
 
 /**
