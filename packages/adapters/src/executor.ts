@@ -7551,13 +7551,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               take: 12,
               select: { blocks: true },
             });
+            // Gate 386f6a46: the message came while this bot ran, and the brief it handed next
+            // took it in other words; the stage handed after the message is the one reporting now.
             return handed.some((message) =>
               (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
                 (block) =>
                   block.kind === "handoff" &&
                   !block.report &&
                   block.fromBotId === bot.id &&
-                  quotesMessage(block.text ?? "", words),
+                  (block.toBotId === handback?.fromBotId ||
+                    quotesMessage(block.text ?? "", words)),
               ),
             );
           } catch {

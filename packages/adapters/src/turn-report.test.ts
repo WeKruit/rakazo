@@ -748,6 +748,8 @@ describe("repastedDraft", () => {
   it("keeps a changed email, and one the recruiter asked to see again", () => {
     expect(repastedDraft(email.replace("Friday", "Monday"), [email], "改成周一")).toBeUndefined();
     expect(repastedDraft(email, [email], "把完整版再发一遍")).toBeUndefined();
+    // Gate 386f6a46: 「直接贴那一封」 got a description of the email instead of the email.
+    expect(repastedDraft(email, [email], "到底哪封是最终？直接贴那一封")).toBeUndefined();
   });
 });
 

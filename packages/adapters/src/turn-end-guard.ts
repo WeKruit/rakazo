@@ -776,10 +776,11 @@ export async function planDeclineRetry(
     askedTemplate(asked) ||
     (draftVariables(input.reply) !== undefined &&
       (
+        // Gate 386f6a46: 「直接贴」 four messages on from the template ask is still about it.
         await deps.prisma.message.findMany({
           where: { threadId: input.run.threadId, role: "user" },
           orderBy: { seq: "desc" },
-          take: 4,
+          take: 12,
           select: { blocks: true },
         })
       ).some((message) =>

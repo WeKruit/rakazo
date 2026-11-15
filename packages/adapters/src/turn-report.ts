@@ -698,7 +698,7 @@ export function repastedDraft(
   if (!start) return undefined;
   // 「把完整版再发一遍」: the recruiter asked to see it again.
   if (
-    /完整|全文|全部|再(?:发|贴|给|看)|贴(?:一下|出来)|\b(?:full|whole|paste|again|show)\b/i.test(
+    /贴|完整|全文|全部|原文|再(?:发|给|看)|给我看|\b(?:full|whole|paste|again|show|copy)\b/i.test(
       asked,
     )
   )
