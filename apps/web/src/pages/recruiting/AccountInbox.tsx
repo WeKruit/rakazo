@@ -79,10 +79,7 @@ export function accountInboxPerson(
 }
 
 /** A list entry keeps its exact role/source/mailbox; missing provider threads stay single messages. */
-export function accountInboxThreads(
-  items: readonly AccountItem[],
-  requested?: { roleId: string; emailId: string; sourceId: string },
-) {
+export function accountInboxThreads(items: readonly AccountItem[]) {
   const rows = new Map<
     string,
     {
@@ -133,15 +130,6 @@ export function accountInboxThreads(
     }
   }
   return [...rows.values()]
-    .filter((row) =>
-      row.emails.some(
-        (email) =>
-          email.direction !== "sent" ||
-          (row.roleId === requested?.roleId &&
-            email.id === requested.emailId &&
-            email.sourceId === requested.sourceId),
-      ),
-    )
     .map((row) => ({
       ...row,
       emails: row.emails.sort(
@@ -175,7 +163,7 @@ export function AccountInbox({
 }: Props) {
   const { t } = useLingui();
   const requestedServerThread = serverThreads?.find((item) => item.key === requestedThread);
-  const rows = accountInboxThreads(items, requestedServerThread);
+  const rows = accountInboxThreads(items);
   for (const row of rows) {
     const saved = serverThreads?.find(
       (thread) =>
@@ -391,6 +379,9 @@ export function AccountInbox({
               const latest = row.emails[0]!;
               const incoming =
                 row.emails.find((message) => message.direction === "received") ?? latest;
+              // Nobody has replied yet: the thread is the email Kruit sent, so name its recipient.
+              const sentOnly = incoming.direction === "sent";
+              const counterpart = sentOnly ? incoming.recipients[0] : incoming.sender;
               const unread = row.emails.some((message) => readState.unread(message) === true);
               const person = row.person;
               const profile = person?.autumn?.savedProfile;
@@ -432,7 +423,7 @@ export function AccountInbox({
                   <button
                     type="button"
                     aria-pressed={selected?.key === row.key}
-                    aria-label={`${incoming.sender || t`Sender unavailable`} · ${roleTitle(row.roleId)} · ${latest.subject || t`No subject`}`}
+                    aria-label={`${counterpart || t`Sender unavailable`} · ${roleTitle(row.roleId)} · ${latest.subject || t`No subject`}`}
                     className="flex w-full items-start gap-3 rounded-2xl border border-border bg-card p-4 text-start focus-visible:outline-2 focus-visible:outline-ring hover:bg-muted/50 aria-pressed:bg-muted"
                     onClick={(event) => {
                       railTrigger.current = event.currentTarget;
@@ -446,14 +437,14 @@ export function AccountInbox({
                   >
                     <ProfileImage
                       src={profile?.profileImageUrl}
-                      fallback={initials(person?.name || incoming.sender || "")}
+                      fallback={initials(person?.name || counterpart || "")}
                       photo
                       className="grid size-10 shrink-0 place-items-center rounded-full bg-muted text-sm font-medium text-muted-foreground"
                     />
                     <span className="min-w-0 flex-1 space-y-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <strong className="truncate text-sm" title={incoming.sender ?? undefined}>
-                          {person?.name || incoming.sender || t`Sender unavailable`}
+                        <strong className="truncate text-sm" title={counterpart ?? undefined}>
+                          {person?.name || counterpart || t`Sender unavailable`}
                         </strong>
                         {grade ? <Badge variant="outline">{grade}</Badge> : null}
                       </span>
@@ -515,6 +506,10 @@ export function AccountInbox({
                           ) : incoming.direction === "received" ? (
                             <span>
                               <Trans>Received</Trans>
+                            </span>
+                          ) : sentOnly ? (
+                            <span>
+                              <Trans>Sent</Trans>
                             </span>
                           ) : null}
                           {latest.date && Number.isFinite(Date.parse(latest.date)) ? (

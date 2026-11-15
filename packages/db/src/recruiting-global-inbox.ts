@@ -487,7 +487,6 @@ export async function readGlobalRecruitingInbox(
       }[]
     >(Prisma.sql`${base}, annotated AS (
       SELECT mail.*,
-        bool_or(direction='received' OR direction IS NULL) OVER(PARTITION BY role_id,view_key) AS has_incoming,
         ${input.query ? Prisma.sql`bool_or(search_text ILIKE ${safeLike(input.query)}) OVER(PARTITION BY role_id,view_key)` : Prisma.sql`true`} AS matches,
         bool_or(direction IS NULL OR (direction='received' AND (message_at IS NULL OR message_at>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')))) OVER(PARTITION BY view_key) AS unknown,
         CASE WHEN bool_or(direction IS NULL OR (direction='received' AND message_at IS NULL)) OVER(PARTITION BY view_key) THEN NULL
@@ -496,7 +495,7 @@ export async function readGlobalRecruitingInbox(
     ), eligible AS (
       SELECT mail.* FROM annotated mail ${input.unreadOnly ? Prisma.sql`LEFT JOIN recruiting_inbox_cursors c ON c.user_id=${actor.userId} AND c.space_id=${actor.spaceId} AND c.thread_key=mail.thread_key` : Prisma.empty}
       WHERE true ${filter}
-      ${thread ? Prisma.sql`AND role_id=${thread.roleId}` : Prisma.sql`AND has_incoming`}
+      ${thread ? Prisma.sql`AND role_id=${thread.roleId}` : Prisma.empty}
       ${thread?.emailId ? Prisma.sql`AND mail.provider_message_id=${thread.emailId}` : Prisma.empty}
       ${input.unreadOnly ? Prisma.sql`AND mail.thread_key IS NOT NULL AND NOT unknown AND latest_incoming_at IS NOT NULL AND (COALESCE(c.unread,false) OR latest_incoming_at>COALESCE(c.last_read_at,${baseline.initializedAt}))` : Prisma.empty}
     ), selected AS (
