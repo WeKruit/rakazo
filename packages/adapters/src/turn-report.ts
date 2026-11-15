@@ -492,6 +492,7 @@ export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
 const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:|主题[:：]|第\s*\d+\s*封)/i;
+const DRAFT_GREETING = /(?:^|\n)\s*(?:Hi|Hello|Hey|Dear)\s+[^\n,，]{1,40}[,，]\s*\n/i;
 /** A question to the user about the draft itself, after the draft (not the candidate's "open to a chat?"). */
 const ABOUT_DRAFT =
   /\b(?:draft|emails?|change|edit|send|tweak|adjust|version|tone|shorter|longer)\b|改|发/i;
@@ -505,7 +506,9 @@ export function declinedSentence(text: string): Declined | undefined {
   // A drafted email is the deliverable, not the reply's own words: its "Would you be open…?"
   // is no question to the user, so only the text before the first email is read, and after it
   // only a closing question about the draft.
-  const draft = text.search(DRAFT_START);
+  // An email without a subject line starts at its greeting ("Hi {{firstName}},").
+  const starts = [text.search(DRAFT_START), text.search(DRAFT_GREETING)].filter((at) => at >= 0);
+  const draft = starts.length ? Math.min(...starts) : -1;
   const own = draft >= 0 ? text.slice(0, draft) : text;
   const sentences = own
     .split(/(?<=[.!?。！？\n])/)
@@ -608,7 +611,8 @@ export const ONE_EMAIL_NOTE =
 
 /** A sequence of drafts shown when the recruiter asked for one email ("a short cold email…", "一封…"). */
 export function sequenceForOneEmail(reply: string, request: string): DeclineRetry | undefined {
-  if (!/\b(?:an?|one|single)\s+(?:\w+\s+){0,3}e-?mail\b|一封/i.test(request)) return undefined;
+  if (!/\b(?:an?|one|single)\s+(?:\w+\s+){0,3}e-?mail\b|[一写发]封/i.test(request))
+    return undefined;
   if (/\b(?:sequence|campaign|follow-?ups)\b|序列|跟进序列/i.test(request)) return undefined;
   const subjects = reply.match(/(?:^|\n)\s*(?:[#*_]+\s*)?Subject:/gi) ?? [];
   return subjects.length > 1 ? { sentence: "", note: ONE_EMAIL_NOTE } : undefined;
