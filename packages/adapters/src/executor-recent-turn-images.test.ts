@@ -158,6 +158,8 @@ async function runWithModel(
     savedRecruitingCandidates?: number;
     /** Starts the run from this thread message, which is added to the history. */
     sourceMessage?: HistoryMessage;
+    /** When the person's newer message was written; run-0, which a retry continues, began before it. */
+    personWroteAt?: Date;
     /** The model's final reply; defaults to "Done". */
     finalText?: string;
     replySuggestions?: boolean;
@@ -301,7 +303,11 @@ async function runWithModel(
     },
     run: {
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
-        options.ackFromEndedRun && args?.where?.id === "run-0" ? { status: "completed" } : run,
+        options.ackFromEndedRun && args?.where?.id === "run-0"
+          ? { status: "completed" }
+          : options.personWroteAt && args?.where?.id === "run-0"
+            ? { createdAt: new Date(options.personWroteAt.getTime() - 10_000) }
+            : run,
       ),
       // A fresh row each read, as the database returns.
       findUniqueOrThrow: vi.fn(async () => ({ ...run })),
@@ -438,25 +444,30 @@ async function runWithModel(
       count: vi.fn(async () => 0),
       findFirst: vi.fn(
         async (args?: {
-          where?: { role?: string; id?: string; seq?: object };
+          where?: { role?: string; id?: string; seq?: object; createdAt?: { gt?: Date } };
           orderBy?: object;
         }) =>
-          options.newerBrief && args?.where?.seq
-            ? { id: "brief-2" }
-            : args?.orderBy && !args.where?.role && !args.where?.id
-              ? // The thread's newest message: the last one this run posted.
-                options.cardsAfterLine?.length
-                ? { id: "card-0", ...options.cardsAfterLine[0] }
-                : (prisma.message.create.mock.results.at(-1)?.value ??
-                  (options.ackFromEndedRun ? endedRunAck : null))
-              : args?.where?.role === "user" || args?.where?.id
-                ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
-                    (message: { role: string; id?: string }) =>
-                      message.role === "user" && (!args.where?.id || message.id === args.where.id),
-                  ) ?? null)
-                : options.priorRoutineRun
-                  ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
-                  : null,
+          options.personWroteAt &&
+          args?.where?.role === "user" &&
+          (args.where.createdAt?.gt ?? new Date(0)) >= options.personWroteAt
+            ? null
+            : options.newerBrief && args?.where?.seq
+              ? { id: "brief-2" }
+              : args?.orderBy && !args.where?.role && !args.where?.id
+                ? // The thread's newest message: the last one this run posted.
+                  options.cardsAfterLine?.length
+                  ? { id: "card-0", ...options.cardsAfterLine[0] }
+                  : (prisma.message.create.mock.results.at(-1)?.value ??
+                    (options.ackFromEndedRun ? endedRunAck : null))
+                : args?.where?.role === "user" || args?.where?.id
+                  ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
+                      (message: { role: string; id?: string }) =>
+                        message.role === "user" &&
+                        (!args.where?.id || message.id === args.where.id),
+                    ) ?? null)
+                  : options.priorRoutineRun
+                    ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+                    : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
       delete: vi.fn(async () => ({})),
@@ -1238,6 +1249,8 @@ describe("handed-in stage", () => {
     const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
       sourceMessage: source() as never,
+      // Gate 36e6d7f0, change-mind: the retry began 0.8 s after the recruiter changed the base.
+      ...(_ === "retry of a brief" ? { personWroteAt: new Date(Date.now() - 1000) } : {}),
       recruitingRoleId: "role-1",
       finalText:
         "Subject: Staff Frontend Engineer\n\nHi {{firstName}}, the base is RMB 600,000–800,000.",
@@ -1254,6 +1267,19 @@ describe("handed-in stage", () => {
       finalText: "NO_RESPONSE",
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");
+  });
+
+  // Gate 36e6d7f0, change-mind-mid-run: the revised email went out headed 「NO_RESPONSE」.
+  it("drops the silent marker from the start of a reply that has more to say", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      recruitingRoleId: "role-1",
+      finalText:
+        "NO_RESPONSE\n\nSubject: Staff Frontend Engineer\n\nThe base is RMB 700,000–900,000.",
+    });
+    const posted = JSON.stringify(finalizeRun.mock.calls);
+    expect(posted).not.toContain("NO_RESPONSE");
+    expect(posted).toContain("700,000");
   });
 
   // Gate edfa2b9e, change-mind-mid-run: the run handling a teammate's report posted 「收到，马上处理。」
