@@ -14,6 +14,7 @@ import {
   cancelRunsInTransaction,
   countRecruitingPeopleFoundSince,
   createThreadMessageInTransaction,
+  listRecruitingPeopleFoundSince,
   type PrismaClient,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -22,6 +23,7 @@ import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
+import { recruitingRoundListText } from "./turn-end-guard.js";
 import { ROLE_START_NONCE } from "./working-state.js";
 
 /**
@@ -688,6 +690,15 @@ export async function returnDelegatedTeamOutcome(
   // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
   // Kruit could neither show the people nor say who has both must-haves. The round comes too.
   if (round && round !== text) text = `${text}\n\n${round}`;
+  const saved =
+    thread.activeRecruitingRoleId &&
+    (await savedForRequest(deps.prisma, {
+      threadId: run.threadId,
+      spaceId: run.spaceId,
+      roleId: thread.activeRecruitingRoleId,
+      since: delegated.createdAt,
+    }));
+  if (saved) text = text ? `${text}\n\n${saved}` : saved;
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
@@ -709,6 +720,38 @@ export async function returnDelegatedTeamOutcome(
   );
   if (!sent.ok)
     getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
+}
+
+/**
+ * Everyone the role's search saved for a request and no round lists, read from the record.
+ * Long-search-finishes 11-15: "找20个人，好了叫我" saved 20, but the team's reply named the round's
+ * 10 and 4 more, so Kruit listed 14 and said 6 were missing. A round after feedback is the
+ * Reviewer's checked list and the whole answer: the recruiter sees each round once.
+ */
+async function savedForRequest(
+  prisma: PrismaClient,
+  input: { threadId: string; spaceId: string; roleId: string; since: Date },
+) {
+  const [keys, rounds] = await Promise.all([
+    listRecruitingPeopleFoundSince(prisma, input),
+    prisma.recruitingCalibrationRound.findMany({
+      where: { roleId: input.roleId, createdAt: { gte: input.since } },
+      select: { round: true, candidateKeys: true },
+    }),
+  ]);
+  if (rounds.some((round) => round.round > 1)) return "";
+  const inRound = new Set(rounds.flatMap((round) => round.candidateKeys));
+  const rest = keys.filter((key) => !inRound.has(key));
+  if (!rest.length) return "";
+  const listed = keys.length - rest.length;
+  const all = `${keys.length} ${keys.length === 1 ? "person" : "people"} in all`;
+  return recruitingRoundListText(prisma, {
+    ...input,
+    candidateKeys: rest,
+    brief: true,
+    firstNumber: listed + 1,
+    heading: `Saved for this request, from the record: ${all}${listed ? `, the round above and these ${rest.length}` : ""}. List every one of them once:`,
+  });
 }
 
 /** The latest request another conversation delegated to this role team, if it still answers back. */

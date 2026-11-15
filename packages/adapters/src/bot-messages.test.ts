@@ -628,12 +628,14 @@ describe("delegating to a role team in another conversation", () => {
     returnThreadId: "thread-global",
   };
   /** A role team's conversation after Kruit's request, with what the team said since. */
-  function team(options: { busy?: boolean; later?: unknown[]; root?: unknown } = {}) {
+  function team(
+    options: { busy?: boolean; later?: unknown[]; root?: unknown; roleId?: string } = {},
+  ) {
     const harness = deps({ bots: mainBot, hopBlocks: [delegation] });
     const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
     prisma.thread!.findFirst = vi.fn(async (args: { select?: { group?: unknown } }) =>
       args.select?.group
-        ? { activeRecruitingRoleId: null, group: { name: "SUI Engineer" } }
+        ? { activeRecruitingRoleId: options.roleId ?? null, group: { name: "SUI Engineer" } }
         : { id: "thread-global" },
     );
     prisma.message!.findFirst = vi.fn(async () => ({
@@ -804,6 +806,38 @@ describe("delegating to a role team in another conversation", () => {
     expect(returnedTo(harness)).toEqual([
       expect.objectContaining({ text: `Round 2 is posted.\n\n${round}` }),
     ]);
+  });
+
+  it("lists everyone the request saved from the record, beside the round, each once", async () => {
+    // Long-search-finishes 11-15: "找20个人，好了叫我" saved 20, but the team's reply named the
+    // round's 10 and 4 more, so Kruit listed 14 and said 6 were missing.
+    const round = "10 people this round:\n\n1. **[Amy A](https://www.linkedin.com/in/amy)** · SRE";
+    const harness = team({
+      roleId: "role-1",
+      later: [said(round), said("Saved 20; 4 more: Bo B")],
+    });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    const person = (slug: string, name: string) => ({
+      candidateKey: `linkedin:/in/${slug}`,
+      name,
+      title: "SRE",
+      company: "Visa",
+      location: "Austin",
+    });
+    const saved = [person("amy", "Amy A"), person("bo", "Bo B"), person("cy", "Cy C")];
+    prisma.recruitingCandidateOccurrence!.findMany = vi.fn(async () => saved);
+    prisma.recruitingCalibrationRound = {
+      findMany: vi.fn(async () => [{ round: 1, candidateKeys: ["linkedin:/in/amy"] }]),
+    };
+    prisma.recruitingResearchTask = { findMany: vi.fn(async () => []) };
+    prisma.externalEffect = { findMany: vi.fn(async () => []) };
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    const [returned] = returnedTo(harness) as Array<{ text: string }>;
+    expect(returned?.text).toContain(round);
+    expect(returned?.text).toContain("3 people in all");
+    expect(returned?.text).toContain("2. **[Bo B](https://www.linkedin.com/in/bo)** · SRE · Visa");
+    expect(returned?.text).toContain("3. **[Cy C](https://www.linkedin.com/in/cy)**");
+    expect(returned?.text.split("Amy A")).toHaveLength(2);
   });
 
   it("stops at the recruiter's own next message in the role conversation", async () => {
