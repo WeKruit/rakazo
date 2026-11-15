@@ -7555,7 +7555,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
          * already handed it the new brief. The finished report is for the old one: the new stage
          * answers.
          */
-        /** The recruiter's newest message is in this brief, and a teammate was already handed it. */
+        /**
+         * The recruiter's newest message is in this brief, and a teammate was already handed it or
+         * this bot already answered it.
+         */
         const messageAlreadyHanded = async (brief: string) => {
           try {
             const latest = await deps.prisma.message.findFirst({
@@ -7583,14 +7586,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
             // Gate 386f6a46: the message came while this bot ran, and the brief it handed next
             // took it in other words; the stage handed after the message is the one reporting now.
+            // Gate df83586a: this bot answered the message itself (a full template), so handing it
+            // over again only makes a second version.
             return handed.some((message) =>
               (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
                 (block) =>
-                  block.kind === "handoff" &&
-                  !block.report &&
-                  block.fromBotId === bot.id &&
-                  (block.toBotId === handback?.fromBotId ||
-                    quotesMessage(block.text ?? "", words)),
+                  (block.kind === "text" && block.text.trim().length >= 80) ||
+                  (block.kind === "handoff" &&
+                    !block.report &&
+                    block.fromBotId === bot.id &&
+                    (block.toBotId === handback?.fromBotId ||
+                      quotesMessage(block.text ?? "", words))),
               ),
             );
           } catch {
