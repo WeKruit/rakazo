@@ -7491,6 +7491,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ({ result }) => !(result && typeof result === "object" && "error" in result),
           );
         };
+        /** The role this conversation works on now, which this run may have just saved. */
+        const currentRoleId = async () =>
+          thread.activeRecruitingRoleId ??
+          (
+            await deps.prisma.thread
+              .findUnique({ where: { id: thread.id }, select: { activeRecruitingRoleId: true } })
+              .catch(() => null)
+          )?.activeRecruitingRoleId ??
+          undefined;
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
@@ -15919,8 +15928,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const place = localRolePlace([...planned.data.queries, ...words]);
           // The searches run together, so they share what the recruiter's number still allows.
-          const room = thread.activeRecruitingRoleId
-            ? await peopleRoomForRequest(deps.prisma, thread.activeRecruitingRoleId, thread.id)
+          const roleNow = await currentRoleId();
+          const room = roleNow
+            ? await peopleRoomForRequest(deps.prisma, roleNow, thread.id)
             : undefined;
           const searchCount = planned.data.queries.length;
           const perSearch = Math.max(
@@ -17149,12 +17159,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     const askedFor = [...recruiterTexts, ...roleStartTexts]
                       .map(requestedPeopleTarget)
                       .find(Boolean);
-                    if (askedFor && thread.activeRecruitingRoleId) {
+                    // Read now: a role saved during this run is not on the thread loaded at its start.
+                    const roleNow = askedFor ? await currentRoleId() : undefined;
+                    if (askedFor && roleNow) {
                       const saved = (
-                        await readRecruitingPlaybookStep(
-                          deps.prisma,
-                          thread.activeRecruitingRoleId,
-                        ).catch(() => null)
+                        await readRecruitingPlaybookStep(deps.prisma, roleNow).catch(() => null)
                       )?.savedCandidates;
                       // Below the number, only after a round: intake questions come before any search.
                       const instead =
