@@ -66,7 +66,11 @@ function statedFields(brief: unknown): Requirement[] {
       ? [
           {
             id: `brief:${field.key}`,
-            statement: `${field.key}: ${field.value}`,
+            // A field saved from an intake question keeps the question as its key; the answer
+            // alone says the requirement.
+            statement: field.key.trim().endsWith("?")
+              ? field.value
+              : `${field.key}: ${field.value}`,
             messages: citedMessages(field.sourceRefIds),
           },
         ]

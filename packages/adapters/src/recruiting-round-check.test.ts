@@ -94,6 +94,7 @@ describe("roundCriteria", () => {
               field("production technologies", "Spark and Kafka in production", "m-jd"),
               field("location", "Seattle metro, hybrid", "m-after"),
               field("language", "none", "m-jd", "inferred"),
+              field("Should I cap experience at 10 years?", "Target 6–10 years", "m-jd"),
             ],
           },
         },
@@ -126,6 +127,11 @@ describe("roundCriteria", () => {
         added: false,
       },
       { id: "brief:location", statement: "location: Seattle metro, hybrid", added: true },
+      {
+        id: "brief:Should I cap experience at 10 years?",
+        statement: "Target 6–10 years",
+        added: false,
+      },
       { id: "titles", statement: "data engineer titles only", added: true },
       {
         id: "turned-down:fb-1",
