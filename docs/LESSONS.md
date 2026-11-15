@@ -65,3 +65,6 @@ that repeats into the existing line instead of adding another.
 - 2026-11-15 — "#6 and #8 are off, find me more like the rest" was recorded as accepting the
   calibration round, so the next people skipped the round check and the Reviewer. **A message that
   turns some of the round down is feedback for the next round, not acceptance of this one.**
+- The worker's startup account walk redid every account on every boot and was cut off by each
+  deploy, logging thousands of pool errors as staging accumulated test accounts. **A backfill
+  runs once per change, records where it got, and stops with the process.**

@@ -502,7 +502,7 @@ async function main() {
   // conversation, the tools it grades with) on each release, not only when the person signs in.
   void backfillRecruitingCrews(
     prisma,
-    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint },
+    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint, signal: shutdown.signal },
     (error) => logger.error("recruiting crew backfill", error),
   )
     .then((accounts) => logger.info("recruiting crew backfill done", { accounts }))

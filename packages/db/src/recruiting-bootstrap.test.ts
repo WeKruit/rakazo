@@ -176,7 +176,10 @@ function fixture() {
         return row;
       }),
     },
-    deploymentSettings: { findUnique: vi.fn(async () => ({ computerHost: "docker" })) },
+    deploymentSettings: {
+      findUnique: vi.fn(async () => ({ computerHost: "docker" })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     mcpServer: {
       findFirst: vi.fn(async ({ where }) => servers.find((row) => row.slug === where.slug) ?? null),
       findMany: vi.fn(async () =>
@@ -1428,6 +1431,7 @@ describe("startup recruiting account backfill", () => {
     });
     Object.assign(f.prisma, {
       spaceMember: { findMany: vi.fn(async () => [privateMembership()]) },
+      deploymentSettings: { findUnique: vi.fn(async () => null), updateMany: vi.fn() },
       user: { findMany: vi.fn(async () => [{ id: actor.userId, email: actor.email }]) },
       chatGroup: f.tx.chatGroup,
       mcpServer: f.tx.mcpServer,
