@@ -636,6 +636,20 @@ export function teamSignedDraft(reply: string): DeclineRetry | undefined {
   return signature ? { sentence: signature.trim(), note: TEAM_SIGNED_DRAFT_NOTE } : undefined;
 }
 
+/**
+ * Whether a brief carries the recruiter's message: most of the message's character pairs, spaces
+ * and punctuation aside, appear in the brief, as they do when it is quoted.
+ */
+export function quotesMessage(brief: string, message: string): boolean {
+  const flat = (text: string) => text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+  const pairs = (text: string) =>
+    Array.from({ length: Math.max(0, text.length - 1) }, (_, at) => text.slice(at, at + 2));
+  const wanted = pairs(flat(message));
+  if (wanted.length < 4) return false;
+  const shown = new Set(pairs(flat(brief)));
+  return wanted.filter((pair) => shown.has(pair)).length / wanted.length >= 0.8;
+}
+
 // A day the recruiter named, as they wrote it, and its English name. 「每周五天」 is a count.
 const NAMED_DAYS = (
   [

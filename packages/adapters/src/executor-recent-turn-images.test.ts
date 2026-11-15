@@ -1194,6 +1194,19 @@ describe("handed-in stage", () => {
     expect(request.prompt).not.toContain("Begin your first step with one short sentence");
   });
 
+  // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter changed the base,
+  // and the corrected one followed; the run that took the newer message hands the change on.
+  it("posts no result for a brief the recruiter has written past", async () => {
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      recruitingRoleId: "role-1",
+      finalText:
+        "Subject: Staff Frontend Engineer\n\nHi {{firstName}}, the base is RMB 600,000–800,000.",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("600,000");
+  });
+
   it("posts nothing when the answer to a teammate's check-in is NO_RESPONSE", async () => {
     const checkIn = handoff("bot-1");
     checkIn.blocks[0] = { ...checkIn.blocks[0], report: "progress" } as never;

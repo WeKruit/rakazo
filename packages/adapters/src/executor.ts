@@ -827,6 +827,7 @@ import {
   CLAIMS_CARD_PENDING,
   readsOnly,
   lastOwnUpdate,
+  quotesMessage,
   restatesUpdate,
   sameWords,
   TurnReportLedger,
@@ -7514,6 +7515,45 @@ export function createRunExecutor(deps: ExecutorDeps) {
          * already handed it the new brief. The finished report is for the old one: the new stage
          * answers.
          */
+        /** The recruiter's newest message is in this brief, and a teammate was already handed it. */
+        const messageAlreadyHanded = async (brief: string) => {
+          try {
+            const latest = await deps.prisma.message.findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                OR: [
+                  { clientNonce: null },
+                  { NOT: { clientNonce: { startsWith: "autocontinue:" } } },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { seq: true, blocks: true },
+            });
+            const words = (Array.isArray(latest?.blocks) ? (latest.blocks as MessageBlock[]) : [])
+              .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+              .join("\n");
+            if (!latest || !quotesMessage(brief, words)) return false;
+            const handed = await deps.prisma.message.findMany({
+              where: { threadId: thread.id, botId: bot.id, seq: { gt: latest.seq } },
+              orderBy: { seq: "desc" },
+              take: 12,
+              select: { blocks: true },
+            });
+            return handed.some((message) =>
+              (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : []).some(
+                (block) =>
+                  block.kind === "handoff" &&
+                  !block.report &&
+                  block.fromBotId === bot.id &&
+                  quotesMessage(block.text ?? "", words),
+              ),
+            );
+          } catch {
+            return false;
+          }
+        };
         const handbackSuperseded = async () => {
           if (!handback || !run.sourceMessageId) return false;
           try {
@@ -14876,7 +14916,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
                   block.kind === "handoff" && block.toBotId === handback.fromBotId,
               )?.text;
-              if (restatesUpdate(String(args.message ?? ""), brief))
+              // Gate 95185659: the brief worded differently, but it carried the same recruiter
+              // message a teammate was already handed, and the second answer contradicted the first.
+              if (
+                restatesUpdate(String(args.message ?? ""), brief) ||
+                (await messageAlreadyHanded(String(args.message ?? "")))
+              )
                 return finish({
                   error: `Not handed off: this is the request it just finished, and its result is shown above. Reply exactly ${NO_RESPONSE}, or hand it only the concrete part that is still undone.`,
                 });
@@ -18055,7 +18100,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
                   restatesUpdate(text, await lastRunMessageText()) ||
                   (await handbackAnswered(text)) ||
-                  (await handbackSuperseded())))
+                  (await handbackSuperseded()) ||
+                  // Gate 95185659, change-mind: the old 60–80万 version came after the recruiter
+                  // changed the base; the coordinator hands the change on with the request.
+                  (hideVendors &&
+                    handedIn &&
+                    (await newerMessageAnsweredElsewhere()) !== undefined)))
           ) {
             text = "";
             blocks = [];
