@@ -6699,9 +6699,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
          */
         const cardTakesLinesPlace = async (fixedOnly: boolean) => {
           const lineId = quickReplyMessageId;
-          // A teammate's fixed line goes too when this bot's card answers it (gate 71a2cac2:
-          // 「好，这就处理。」 stood alone for 25 s, then the handed-in Connect card came under it).
-          if (!hideVendors || !lineId || (lineFromTeammate && !fixedOnly)) return;
+          // A teammate's fixed line goes too when this bot's card answers it (gates 71a2cac2,
+          // acd31504: 「好，这就处理。」 stood alone, then the handed-in card came under it).
+          if (!hideVendors || !lineId) return;
           const line = await deps.prisma.message.findUnique({
             where: { id: lineId },
             select: { botId: true, clientNonce: true, blocks: true },
@@ -6713,7 +6713,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (!lineFromTeammate && line.botId !== bot.id) ||
             line.clientNonce ||
             !oneLineNote(text) ||
-            (fixedOnly && !isFixedAck(text)) ||
+            ((fixedOnly || lineFromTeammate) && !isFixedAck(text)) ||
             !(await lineIsLatestReply(lineId))
           )
             return;
@@ -6827,7 +6827,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return secretPausedToolResult();
         };
 
-        let gmailDraftAsked = false;
+        // Gate acd31504: a second call with still no email written went through; it is refused
+        // again, and only a third goes through so a run cannot loop on it.
+        let gmailDraftRefusals = 0;
         // Like request_secret: an unconnected MCP server pauses on a native connect card.
         const requestConnectionTool = async (args: Record<string, unknown>) => {
           // Gate 398accae, one-off-email: each message typed past the card ("草稿还在吗") got only
@@ -6843,36 +6845,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return { error: connectAnswerFirst(steeredText) };
           }
           // Staging 11-13: the Gmail card said "the email is above" when no email had been shown.
-          if (
-            hideVendors &&
-            !gmailDraftAsked &&
-            gmailCardNeedsDraft(
-              args.provider,
-              lastRecruiterText,
-              [...midTurnUserTexts, assembled].join("\n"),
-              // An email already shown earlier in this conversation is not written out again,
-              // unless the recruiter has since given facts it lacks.
-              await deps.prisma.message
-                .findMany({
-                  where: { threadId: thread.id, role: "bot" },
-                  orderBy: { seq: "desc" },
-                  take: 12,
-                  select: { blocks: true },
-                })
-                .then((messages) =>
-                  messages
-                    .map((message) =>
-                      (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
-                        .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-                        .join("\n"),
-                    )
-                    .find((text) => /Subject\s*[:：]|主题\s*[:：]/i.test(text)),
-                )
-                .catch(() => ""),
+          if (hideVendors && gmailDraftRefusals < 2 && /gmail/i.test(String(args.provider ?? ""))) {
+            // An email already shown earlier in this conversation is not written out again,
+            // unless the recruiter has since given facts it lacks.
+            const earlierDraft = await deps.prisma.message
+              .findMany({
+                where: { threadId: thread.id, role: "bot" },
+                orderBy: { seq: "desc" },
+                take: 12,
+                select: { blocks: true },
+              })
+              .then((messages) =>
+                messages
+                  .map((message) =>
+                    (Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  )
+                  .find((text) => /Subject\s*[:：]|主题\s*[:：]/i.test(text)),
+              )
+              .catch(() => "");
+            if (
+              gmailCardNeedsDraft(
+                args.provider,
+                lastRecruiterText,
+                [...midTurnUserTexts, assembled].join("\n"),
+                earlierDraft,
+              )
             )
-          ) {
-            gmailDraftAsked = true;
-            return { error: GMAIL_DRAFT_FIRST_NOTE };
+              return {
+                error: gmailDraftFirstNote(
+                  earlierDraft ? draftLacks(lastRecruiterText, earlierDraft) : [],
+                  gmailDraftRefusals++ > 0,
+                ),
+              };
           }
           let leaseLost = false;
           const result = await requestConnection(
@@ -20120,14 +20126,22 @@ export function gmailCardNeedsDraft(
   if (earlierDraft === undefined) return asksForOutreach(recruiterText);
   // A send, connect or status ask ("send it via Gmail", "发出去了吗") is about the shown email.
   if (/发|寄|连|\b(?:send|sent|connect)|[?？吗呢]/i.test(recruiterText)) return false;
-  // Gate 14d33ed1: a generic first draft does not stand for the email once the recruiter gave
-  // the role's facts; their names and numbers are compared, the address alone adds none.
-  const draft = earlierDraft.toLowerCase();
-  return (recruiterText.replace(/[^\s@，,]+@[^\s@，,]+/g, " ").match(/[a-z]{2,}|\d+/gi) ?? []).some(
+  return draftLacks(recruiterText, earlierDraft).length > 0;
+}
+
+/**
+ * Names and numbers the recruiter wrote that the shown email lacks (gate 14d33ed1: a generic first
+ * draft does not stand for the email once they gave the role's facts). An address adds none.
+ */
+export function draftLacks(recruiterText: string, draft: string): string[] {
+  const shown = draft.toLowerCase();
+  return [
+    ...new Set(recruiterText.replace(/[^\s@，,]+@[^\s@，,]+/g, " ").match(/[a-z]{2,}|\d+/gi) ?? []),
+  ].filter(
     (fact) =>
       !new RegExp(
         /\d/.test(fact) ? `(?<!\\d)${fact}(?!\\d)` : `(?<![a-z])${fact.toLowerCase()}(?![a-z])`,
-      ).test(draft),
+      ).test(shown),
   );
 }
 
@@ -20138,8 +20152,8 @@ export const connectAnswerFirst = (message: string) =>
   `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
 
 /** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
-export const GMAIL_DRAFT_FIRST_NOTE =
-  "Not shown yet: write the full email (Subject: and body) in your reply first, so the recruiter sees it above the card, then call request_connection again.";
+export const gmailDraftFirstNote = (lacking: string[], again: boolean) =>
+  `${again ? "Still not shown: no email was written since the last call. " : "Not shown yet: "}${lacking.length ? `the email shown earlier lacks what the recruiter just gave (${lacking.slice(0, 8).join(", ")}). ` : ""}Write the full ${lacking.length ? "revised " : ""}email (Subject: and body) as text in your reply now, before any other tool call, so the recruiter sees it above the card; then call request_connection again.`;
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
   return trigger !== "routine" && !isBackgroundRunTrigger(trigger);

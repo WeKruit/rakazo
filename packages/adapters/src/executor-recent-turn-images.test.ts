@@ -1296,16 +1296,43 @@ describe("handed-in stage", () => {
 
   // Gate 71a2cac2, one-off-email: after 「直接发吧」 the coordinator's 「好，这就处理。」 stood alone
   // for 25 s, and the teammate's Connect card came under it instead of in its place.
-  it("lets a handed-in connect card take the coordinator's fixed line's place", async () => {
+  // Gate acd31504: after 「发给他」 the same line stood above the teammate's question card.
+  it.each([
+    [
+      "connect card",
+      { toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]] },
+    ],
+    [
+      "question card",
+      { events: [{ type: "ask", text: "Wei Zhang 的邮箱是什么？", actions: [] } as never] },
+    ],
+  ] as const)("lets a handed-in %s take the coordinator's fixed line's place", async (_, card) => {
     const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "follow_up",
       sourceMessage: handoff("bot-1"),
       briefAfterLine: "好，这就处理。",
       recruitingRoleId: "role-1",
       finalText: "",
-      toolCalls: [["request_connection", { provider: "calendar", reason: "book the call" }]],
+      ...(card as object),
     });
     expect(prisma.message.delete).toHaveBeenCalledWith({ where: { id: "line-main" } });
+  });
+
+  // Gate acd31504, one-off-email: the Gmail card was refused for want of the email, and the
+  // agent's next call, still with no email written, went through.
+  it("refuses the Gmail card again while the email is still not written", async () => {
+    const { requestConnection } = await import("./request-connection.js");
+    vi.mocked(requestConnection).mockClear();
+    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      currentText: "给 Wei Zhang 写封邮件，fintech 那个职位",
+      recruitingRoleId: "role-1",
+      finalText: "",
+      toolCalls: [
+        ["request_connection", { provider: "gmail", reason: "send it" }],
+        ["request_connection", { provider: "gmail", reason: "send it" }],
+      ],
+    });
+    expect(requestConnection).not.toHaveBeenCalled();
   });
 
   // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the
