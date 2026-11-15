@@ -7795,12 +7795,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!run.createdAt) return undefined;
           let newer: { blocks: unknown } | null = null;
           try {
+            // The server's retry carries on the run it names, so the person's message is newer
+            // than that run (gate 36e6d7f0, change-mind: the retry began 0.8 s after the
+            // recruiter changed the base and posted the old email).
+            const source = [...messages, ...canonicalMessages.values()].find(
+              (message) => message.id === run.sourceMessageId,
+            );
+            const retried =
+              source && "clientNonce" in source
+                ? source.clientNonce?.match(/^autocontinue:([^:]+):/)?.[1]
+                : undefined;
+            const retriedAt = retried
+              ? (
+                  await deps.prisma.run.findUnique({
+                    where: { id: retried },
+                    select: { createdAt: true },
+                  })
+                )?.createdAt
+              : undefined;
+            const since = retriedAt && retriedAt < run.createdAt ? retriedAt : run.createdAt;
             newer = await deps.prisma.message.findFirst({
               where: {
                 threadId: thread.id,
                 role: "user",
                 botId: null,
-                createdAt: { gt: run.createdAt },
+                createdAt: { gt: since },
                 // The server's own continuation prompt is not the person's message.
                 AND: [
                   {
@@ -13252,6 +13271,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread.groupId?.startsWith("recruiting-global-")
                   ? await globalTeamProgress(args.roleId)
                   : null;
+              // Staging 11-15: one second after the team recorded round 2, Kruit read it here and
+              // listed its unchecked ten; the checked round came later with other people.
+              const found = result as { status?: unknown; round?: { round?: unknown } } | null;
+              const held =
+                !shown &&
+                args.operation === "round" &&
+                found?.status === "found" &&
+                typeof args.roleId === "string" &&
+                thread.groupId?.startsWith("recruiting-global-")
+                  ? await globalRoundAwaitingReview(args.roleId)
+                  : null;
+              if (held && found?.round?.round === held)
+                return finish({
+                  status: "held",
+                  teamWorking:
+                    `${progress?.note ?? ""} Round ${held} is being checked and is shown here once, already checked: never list, name or count its people before it comes. Asked to see them now, say in one line that the checked round arrives here in a minute or two.`.trim(),
+                });
               return finish(
                 redactConnectorPayload(
                   shown ??
@@ -17432,6 +17468,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
+                        // A held round's check runs in this conversation once this turn ends, so
+                        // newer messages start the next turn instead of keeping this one open.
+                        // Staging 11-15: two steered follow-ups held the turn for six minutes.
+                        if (roundHeldRecorded) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,
@@ -18203,10 +18243,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           flushPendingTools();
           // The server's no-model completion uses the same silent token as quiet model replies.
           // A recruiting agent that answers only NO_RESPONSE (a report-back with nothing to add)
-          // stays silent: the recruiter never sees the token.
+          // stays silent: the recruiter never sees the token, nor at the edge of a longer reply
+          // (gate 36e6d7f0, change-mind: the revised email went out headed NO_RESPONSE).
           const recruitingSilent = hideVendors && isExactNoResponse(assembled);
           let silentReply =
-            quietRun || probeFoundNothing || recruitingSilent
+            quietRun || probeFoundNothing || hideVendors
               ? stripNoResponseReply(assembled, messageSegments)
               : { assembled, blocks: messageSegments };
           if (hideVendors)

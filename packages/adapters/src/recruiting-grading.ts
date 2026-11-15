@@ -4,7 +4,11 @@ import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import { recruitingBotKey } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { listRecruitingCandidates, RECRUITING_GRADE_NONCE_PREFIX } from "@rakazo/db";
+import {
+  listRecruitingCandidates,
+  RECRUITING_GRADE_NONCE_PREFIX,
+  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { roundCriteria } from "./recruiting-round-check.js";
 
@@ -677,8 +681,7 @@ async function startLeadRun(
   return runId;
 }
 
-/** Run nonce of the lead's swap of a round's people the Reviewer found not to fit. */
-export const RECRUITING_ROUND_REVIEW_NONCE_PREFIX = "recruiting-round-review:";
+export { RECRUITING_ROUND_REVIEW_NONCE_PREFIX };
 /** Tiers the Reviewer gives someone who misses a hard requirement or whose current work doesn't fit. */
 const NOT_FIT_TIERS = new Set(["Partial"]);
 

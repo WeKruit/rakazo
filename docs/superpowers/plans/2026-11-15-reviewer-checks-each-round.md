@@ -81,3 +81,15 @@ searches returns about 40 rows, and only 10 of them are shown, so the role soon 
 people the recruiter has never seen. Later searches return mostly those same people. A repeat is
 now someone a round showed or someone the recruiter turned down. Saved people that no round has
 shown count as new, which also follows "reuse saved findings instead of repeating paid research".
+
+## Update: the held turn ends at once, and the checked round keeps its number
+
+In the 36e6d7f0 feedback play, round 2 was recorded and held at once, but the recruiter's two
+follow-up messages were steered into that same turn, which stayed open for six more minutes, and
+the check (which runs after the turn) waited behind it. A turn that has held its round now takes
+no steered messages: they start the next turn, which runs after the check, as usual.
+
+The checked version was then recorded as round 3, although the recruiter had seen only round 1.
+A correction recorded by the check's run now replaces the held round in place, so the number the
+recruiter sees follows the rounds they saw. A later correction (from the recruiter's feedback on
+the shown round) is still the next round, so swapped-out people stay seen.

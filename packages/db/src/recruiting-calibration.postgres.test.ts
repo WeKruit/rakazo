@@ -304,6 +304,42 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(
       recordRound([...swapped.slice(0, 9), keys("first")[0] ?? ""], true),
     ).rejects.toThrow(/already shown in an earlier round or turned down/);
+
+    // Staging 11-15: round 2 was held for the Reviewer, and its checked version was recorded as
+    // round 3 although the recruiter had seen only round 1. The check's correction takes its place.
+    const heldBy = runId;
+    const { taskId } = await prisma.run.findUniqueOrThrow({ where: { id: heldBy } });
+    runId = (
+      await prisma.run.create({
+        data: {
+          spaceId,
+          userId,
+          botId,
+          threadId,
+          taskId,
+          status: "running",
+          trigger: "user",
+          clientNonce: `${recruiting.RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${threadId}:check`,
+        },
+      })
+    ).id;
+    try {
+      await expect(recordRound(swapped, true)).resolves.toMatchObject({ round: 2 });
+      // A second correction from a check is a later round: the recruiter saw the checked one.
+      await savePage(["swap-2"]);
+      await expect(recordRound([...swapped.slice(0, 9), "swap-2"], true)).resolves.toMatchObject({
+        round: 3,
+      });
+    } finally {
+      runId = heldBy;
+    }
+    await prisma.recruitingCalibrationRound.deleteMany({ where: { roleId, round: 3 } });
+    const checkedView = await recruiting.readRecruitingCalibrationRound(prisma, actor, {
+      threadId,
+    });
+    expect(checkedView.round?.candidates.map((candidate) => candidate.candidateKey)).toEqual(
+      swapped,
+    );
   });
 
   it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {
