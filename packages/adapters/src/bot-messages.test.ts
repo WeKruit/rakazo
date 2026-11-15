@@ -1262,4 +1262,17 @@ describe("teamProgress", () => {
     expect(progress?.note).toContain("Round 2 is already recorded");
     expect(progress?.note).not.toContain("comes back here when it is picked");
   });
+
+  it("counts a team turn requeued after a follow-up as still working (staging 2026-11-15)", async () => {
+    // A follow-up steered into the team's turn requeued it for 50 s; in between Kruit listed
+    // three pages of unchecked people from Results with repeats.
+    const findFirst = vi.fn(async () => null);
+    const prisma = { run: { findFirst } } as unknown as PrismaClient;
+    await teamProgress(prisma, { threadId: "role-thread", returnThreadId: "global", roleId: "r" });
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ["queued", "leased", "running"] } }),
+      }),
+    );
+  });
 });
