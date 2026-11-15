@@ -777,6 +777,36 @@ export async function nextRoundHeld(
   return !!latest && !latest.approvedAt && (await hasRoundReviewer(prisma, input.threadId));
 }
 
+/** How long a held round is waited on before people from Results may be listed again. */
+const HELD_ROUND_WAIT_MS = 15 * 60_000;
+
+/**
+ * The round waiting for the Reviewer's check right now, if any. Staging 11-15: asked "where's the
+ * rest of the round?" while round 2 was held, Kruit listed eight unchecked people from Results and
+ * then said only two were in the round.
+ */
+export async function roundAwaitingReview(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string },
+  now = Date.now(),
+): Promise<number | null> {
+  const latest = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { round: true, createdAt: true, approvedAt: true, effectId: true },
+  });
+  if (!latest || latest.approvedAt || now - latest.createdAt.getTime() > HELD_ROUND_WAIT_MS)
+    return null;
+  const recorded = await prisma.externalEffect.findUnique({
+    where: { id: latest.effectId },
+    select: { run: { select: { clientNonce: true } } },
+  });
+  return roundHeldForReview(latest.round, recorded?.run?.clientNonce) &&
+    (await hasRoundReviewer(prisma, input.threadId))
+    ? latest.round
+    : null;
+}
+
 /** Whether this conversation's team has the Reviewer, who checks a held round. */
 export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): Promise<boolean> {
   const thread = await prisma.thread.findUnique({

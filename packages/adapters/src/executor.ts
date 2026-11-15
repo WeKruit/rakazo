@@ -648,6 +648,7 @@ import {
   nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
+  roundAwaitingReview,
   roundHeldForReview,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
@@ -7152,6 +7153,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               })
             : null;
         };
+        const globalRoundAwaitingReview = async (roleId: string) => {
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+            select: { sourceThreadId: true },
+          });
+          return role
+            ? roundAwaitingReview(deps.prisma, { threadId: role.sourceThreadId, roleId })
+            : null;
+        };
         // A plain list of one role's people in Kruit's conversation. A name or
         // profile lookup finds one person; it is not a list to show.
         const isGlobalRoleList = (args: Record<string, unknown>) =>
@@ -7182,11 +7192,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // Results, then the round came with different people. While the team works, Kruit
           // gets no rows to list, only the team's progress.
           const working = await globalTeamProgress(args.roleId);
-          if (working)
+          const held = working ? null : await globalRoundAwaitingReview(args.roleId);
+          if (working || held)
             return {
               items: [],
               total: page?.total,
-              teamWorking: `${working.note} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
             };
           if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
