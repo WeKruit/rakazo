@@ -41,6 +41,7 @@ import {
   groupsOf,
   InfraError,
   PROFILE,
+  retireRoutines,
   roleChats,
   send,
   settle,
@@ -220,6 +221,10 @@ async function play(scenario, owner, sample) {
     chats = await transcripts(user.rpc, startedAt, mostlyChinese(first));
   } finally {
     await stopAll(user.rpc).catch((error) => log(`${label}: stop failed: ${error.message}`));
+    if (!scenario.account)
+      await retireRoutines(user.rpc).catch((error) =>
+        log(`${label}: routines not stopped: ${error.message}`),
+      );
   }
   const lines = [];
   for (const { group, messages } of chats) {
