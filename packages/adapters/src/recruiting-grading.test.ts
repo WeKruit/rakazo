@@ -15,6 +15,7 @@ const {
   gradingTools,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
+  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
 
@@ -50,6 +51,10 @@ function fixture(options: {
   readOnlyBots?: string[];
   /** Bots whose people-search assignment allows agent runs. */
   agentRunBots?: string[];
+  /** The role's calibration rounds, latest first. */
+  rounds?: Array<{ id: string; round: number; candidateKeys: string[]; createdAt: Date }>;
+  /** Grades of the latest round's people saved since the previous round. */
+  roundGrades?: Array<{ candidateKey: string; name: string; matchFields: unknown }>;
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -85,11 +90,35 @@ function fixture(options: {
       ),
     },
     recruitingCandidateOccurrence: {
-      findMany: vi.fn(async ({ where }: { where: { page?: unknown } }) =>
-        where.page
-          ? (options.graded ?? []).map((candidateKey) => ({ candidateKey }))
-          : (options.found ?? []),
+      findMany: vi.fn(async ({ where }: { where: { page?: unknown; candidateKey?: unknown } }) =>
+        where.candidateKey
+          ? (options.roundGrades ?? []).map((row) => ({ title: null, company: null, ...row }))
+          : where.page
+            ? (options.graded ?? []).map((candidateKey) => ({ candidateKey }))
+            : (options.found ?? []),
       ),
+    },
+    recruitingCalibrationRound: {
+      findMany: vi.fn(async () =>
+        (options.rounds ?? []).map((round) => ({ ...round, approvedAt: null })),
+      ),
+      findFirst: vi.fn(async () => options.rounds?.[0] ?? null),
+    },
+    recruitingRole: {
+      findUnique: vi.fn(async () => ({
+        currentRevision: {
+          criteria: null,
+          brief: {
+            fields: [
+              { key: "Title", value: "Data Engineer", state: "known", origin: "user_instruction" },
+            ],
+          },
+        },
+      })),
+    },
+    message: {
+      findFirst: vi.fn(async () => ({ id: "said-last" })),
+      findMany: vi.fn(async () => []),
     },
     chatGroupMember: {
       findMany: vi.fn(async () => [{ botId: "main" }, { botId: "sourcer" }]),
@@ -137,6 +166,64 @@ const promptOf = (f: ReturnType<typeof fixture>) =>
   (f.taskCreate.mock.calls[0] as unknown as [{ data: { prompt: string } }])[0].data.prompt;
 
 describe("startRecruitingGrading", () => {
+  const round = (keys: string[]) => [
+    { id: "round-2", round: 2, candidateKeys: keys, createdAt: new Date(now - 5 * 60_000) },
+    { id: "round-1", round: 1, candidateKeys: [], createdAt: new Date(now - 60 * 60_000) },
+  ];
+
+  it("grades the round under review first, against what the recruiter said", async () => {
+    const f = fixture({
+      found: [person("newer"), person("picked")],
+      // Graded before the recruiter's feedback on round 1.
+      graded: ["linkedin:/in/picked"],
+      rounds: round(["linkedin:/in/picked"]),
+      researchBots: [],
+      agentRunBots: ["sourcer"],
+    });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    const prompt = promptOf(f);
+    expect(prompt.indexOf("in/picked")).toBeLessThan(prompt.indexOf("in/newer"));
+    expect(prompt).toContain("* Title: Data Engineer");
+  });
+
+  it("has the lead swap out the round's people the Reviewer found not to fit", async () => {
+    const options = {
+      found: [person("fits"), person("misfit")],
+      graded: ["linkedin:/in/fits", "linkedin:/in/misfit"],
+      rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+        {
+          candidateKey: "linkedin:/in/misfit",
+          name: "Misfit",
+          matchFields: { match_tier: "Partial" },
+        },
+      ],
+    };
+    const f = fixture(options);
+    f.prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "sourcer", bot: { name: "Sourcer", spawnKey: null } },
+      { botId: "lead", bot: { name: "Main", spawnKey: null } },
+    ] as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
+      }),
+    });
+    expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
+    expect(promptOf(f)).not.toContain("Fits:");
+    // Nobody is swapped while a round person still waits for a grade made with the feedback.
+    const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
+    await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
+    expect(
+      (waiting.runCreate.mock.calls as unknown as [{ data: { clientNonce: string } }][]).map(
+        ([call]) => call.data.clientNonce,
+      ),
+    ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
+  });
+
   it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {
     const f = fixture({
       found: [person("graded")],
