@@ -1118,6 +1118,12 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
+    corrects: z
+      .literal(true)
+      .optional()
+      .describe(
+        "true when the recruiter asked to swap some people of the latest round: candidateKeys are that round's people they kept, in order, with the replacements in place of the ones they turned down. The corrected ten are shown in chat as the next round.",
+      ),
     checks: z
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
       .optional()

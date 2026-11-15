@@ -88,12 +88,13 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     });
   }
 
-  async function recordRound(candidateKeys: string[]) {
+  async function recordRound(candidateKeys: string[], corrects?: true) {
     await liveRun("继续");
     const request = {
       operation: "calibration_round" as const,
       expectedRoleRevision: 1,
       candidateKeys,
+      ...(corrects ? { corrects } : {}),
     };
     const effect = await prisma.externalEffect.create({
       data: {
@@ -284,6 +285,19 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
       name: "Person second-0",
       linkedinUrl: "https://www.linkedin.com/in/second-0",
     });
+
+    // Staging 11-15: the recruiter asked to swap two people of round 2, and the kept eight were
+    // refused as repeats, so the corrected ten could not be shown. A correction keeps them.
+    await savePage(["swap-0", "swap-1"]);
+    const swapped = [...keys("second").slice(0, 8), "swap-0", "swap-1"];
+    await expect(recordRound(swapped)).rejects.toThrow(/8 of these ten were already returned/);
+    await expect(recordRound(["swap-0", "swap-1"], true)).rejects.toThrow(
+      /record them as a new round/,
+    );
+    // Only the kept people are exempt: someone from round 1 is still refused.
+    await expect(
+      recordRound([...swapped.slice(0, 9), keys("first")[0] ?? ""], true),
+    ).rejects.toThrow(/1 of these ten were already returned/);
   });
 
   it("accepts a round from the recruiter's own words and then refuses more rounds", async () => {
