@@ -434,7 +434,12 @@ export async function messageBot(
 /** The role team's turn still working on a request sent from the given conversation, if any. */
 export function teamWorkingFor(
   prisma: Pick<PrismaClient, "run">,
-  input: { threadId: string; returnThreadId: string },
+  input: {
+    threadId: string;
+    returnThreadId: string;
+    /** A turn requeued after a follow-up was steered into it is still on the request. */
+    queued?: boolean;
+  },
 ): Promise<{
   id: string;
   botId: string;
@@ -446,7 +451,7 @@ export function teamWorkingFor(
     where: {
       threadId: input.threadId,
       trigger: "bot_message",
-      status: { in: ["leased", "running"] },
+      status: { in: input.queued ? ["queued", "leased", "running"] : ["leased", "running"] },
       sourceMessage: {
         is: {
           blocks: {
@@ -476,7 +481,9 @@ export async function teamProgress(
   prisma: PrismaClient,
   input: { threadId: string; returnThreadId: string; roleId?: string },
 ): Promise<{ name: string; minutes: number; peopleFound: number; note: string } | null> {
-  const working = await teamWorkingFor(prisma, input);
+  // Staging 11-15: a follow-up requeued the team's turn for 50 s, and in between Kruit listed
+  // three pages of unchecked people from Results.
+  const working = await teamWorkingFor(prisma, { ...input, queued: true });
   if (!working) return null;
   const since = working.startedAt ?? working.createdAt;
   const roleId =
