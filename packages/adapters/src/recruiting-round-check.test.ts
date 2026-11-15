@@ -38,44 +38,64 @@ describe("checkRound", () => {
   it("lets an unknown on a criterion the recruiter has not raised since the last round through", () => {
     const result = checkRound({
       ...base,
-      keys: ["a"],
-      checks: { a: { seattle: "shown", years: "unknown", "prod-stack": "shown" } },
+      keys: ["a", "b"],
+      checks: { a: { seattle: "shown", years: "unknown", "prod-stack": "shown" }, b: all("shown") },
     });
     expect(result).toEqual({ ok: true, unverified: { a: "6+ years" } });
+  });
+
+  it("keeps what no pick's row shows off each person's note", () => {
+    const shown = { seattle: "shown", "prod-stack": "shown" } as const;
+    const result = checkRound({
+      ...base,
+      keys: ["a", "b"],
+      checks: { a: { ...shown, years: "unknown" }, b: { ...shown, years: "unknown" } },
+    });
+    expect(result).toEqual({ ok: true, unverified: {} });
   });
 });
 
 describe("roundCriteria", () => {
-  // The staging role had no criteria: its must-haves lived only in the brief, so the round check
-  // had nothing to hold the picks to.
-  const field = (key: string, value: string, origin = "user_instruction") => ({
+  // Staging 11-15: the brief was saved seconds after round one was recorded, so every brief field
+  // looked raised since that round and "unknown" was refused for every person, base pay included,
+  // leaving round two short. New means the recruiter said it after the last round.
+  const field = (key: string, value: string, message: string, origin = "user_instruction") => ({
     key,
     value,
     origin,
     state: "known",
+    sourceRefIds: [`human-message:${message}`],
   });
   const roundAt = new Date("2026-11-15T00:18:00Z");
   const prisma = {
     recruitingRole: {
       findUnique: async () => ({
         currentRevision: {
-          criteria: [],
+          criteria: [
+            {
+              id: "titles",
+              priority: "hard",
+              expression: { kind: "atom", statement: "data engineer titles only" },
+              sourceRefs: [{ id: "x", anchor: { kind: "message", messageId: "m-after" } }],
+            },
+          ],
           brief: {
             fields: [
-              field("production technologies", "Spark and Kafka in production"),
-              field("location", "Seattle metro, hybrid"),
-              field("language", "none", "inferred"),
+              field("production technologies", "Spark and Kafka in production", "m-jd"),
+              field("location", "Seattle metro, hybrid", "m-after"),
+              field("language", "none", "m-jd", "inferred"),
             ],
           },
         },
       }),
     },
     recruitingCalibrationRound: { findFirst: async () => ({ createdAt: roundAt }) },
-    recruitingRoleRevision: {
-      findFirst: async () => ({
-        criteria: [],
-        brief: { fields: [field("production technologies", "Spark and Kafka in production")] },
-      }),
+    message: {
+      findMany: async ({ where }: { where: { createdAt: { gt: Date } } }) =>
+        [
+          { id: "m-jd", createdAt: new Date("2026-11-15T00:17:00Z") },
+          { id: "m-after", createdAt: new Date("2026-11-15T00:19:00Z") },
+        ].filter((message) => message.createdAt > where.createdAt.gt),
     },
     externalEffect: {
       findMany: async () => [
@@ -88,7 +108,7 @@ describe("roundCriteria", () => {
     },
   } as unknown as PrismaClient;
 
-  it("holds the brief in the recruiter's words and each turn-down reason, marking what is new", async () => {
+  it("marks only what the recruiter said after the last round as new", async () => {
     expect(await roundCriteria(prisma, { roleId: "r", spaceId: "s" })).toEqual([
       {
         id: "brief:production technologies",
@@ -96,6 +116,7 @@ describe("roundCriteria", () => {
         added: false,
       },
       { id: "brief:location", statement: "location: Seattle metro, hybrid", added: true },
+      { id: "titles", statement: "data engineer titles only", added: true },
       {
         id: "turned-down:fb-1",
         statement:

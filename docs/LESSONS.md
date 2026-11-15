@@ -54,3 +54,7 @@ that repeats into the existing line instead of adding another.
   prompt said a short target is "never a reason to stop early" and nothing in code counted
   results. **Every paid loop gets a stop in code on what it returned, not a sentence in a prompt.**
 - 2026-11-15: a thread branch reused after squash merges was merged with `-X ours`, which brought back a hunk another PR had removed and broke the stage type check. Merge an old thread branch with `-s ours` and typecheck after the merge, before pushing.
+- The round check counted a requirement as "new since the last round" by when it was saved, and
+  the brief is saved seconds after round one, so every brief field (base pay included) looked new
+  and round two came up five short. **Date a requirement by when the person said it, not when the
+  record was written.**
