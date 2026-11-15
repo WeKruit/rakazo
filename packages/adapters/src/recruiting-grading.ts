@@ -963,3 +963,39 @@ export function listsPeople(text: string): boolean {
   );
   return profiles.size >= 2;
 }
+
+/** The people of the round waiting for the Reviewer's check, or null when no round waits. */
+export async function heldRoundPeople(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string },
+  now = Date.now(),
+): Promise<Array<{ name: string | null; linkedinUrl: string | null }> | null> {
+  if ((await roundAwaitingReview(prisma, input, now)) === null) return null;
+  const round = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { candidateKeys: true },
+  });
+  return prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId: input.roleId, candidateKey: { in: round?.candidateKeys ?? [] } },
+    distinct: ["candidateKey"],
+    select: { name: true, linkedinUrl: true },
+  });
+}
+
+/**
+ * Whether a reply talks about two or more of these people, by name or profile. Staging 11-15: a
+ * turn's summary of a held round's grades named its people without links, before the round showed.
+ */
+export function mentionsPeople(
+  text: string,
+  people: ReadonlyArray<{ name: string | null; linkedinUrl: string | null }>,
+): boolean {
+  const lower = text.toLowerCase();
+  const named = people.filter((person) => {
+    const name = person.name?.trim().toLowerCase();
+    const slug = person.linkedinUrl?.match(/\/in\/([^/?#]+)/i)?.[1]?.toLowerCase();
+    return (name && name.length >= 4 && lower.includes(name)) || (slug && lower.includes(slug));
+  });
+  return named.length >= 2;
+}
