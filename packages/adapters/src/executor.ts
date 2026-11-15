@@ -6998,7 +6998,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let askDeclineBounced = false;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
-        const settledAskBounced = new Set<string>();
+        // Bounced up to three times a run: on staging the model asked the same settled fact again
+        // right after one bounce. A search is always open to it, so this never dead-ends.
+        const settledAskBounces = new Map<string, number>();
+        // A JD read from a file or link is in no message; the first-step note keeps its text here.
+        let intakeJobText = "";
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -15703,10 +15707,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           // Asked to write to the people they named, the team writes to them: no question, no search.
           const words = texts.map((item) => item.text).join("\n");
-          const ask = (jd: string) =>
-            writesToNamedPeople(words)
+          const ask = (jd: string) => {
+            intakeJobText = jd;
+            return writesToNamedPeople(words)
               ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
               : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)} ${PLANNED_SEARCHES_NOTE}`;
+          };
           if (request) {
             // A role Kruit opened (start_role) is already named after it: keep that title.
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
@@ -17154,17 +17160,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // "6+ years" drew a years-cap card, "Seattle hybrid" a work-scope card).
                     const settled = settledFactAsked(
                       question,
-                      messages
-                        .filter((message) => message.role === "user")
-                        .flatMap((message) =>
-                          (message.blocks as MessageBlock[]).flatMap((block) =>
-                            block.kind === "text" ? [block.text] : [],
+                      [
+                        intakeJobText,
+                        ...messages
+                          .filter((message) => message.role === "user")
+                          .flatMap((message) =>
+                            (message.blocks as MessageBlock[]).flatMap((block) =>
+                              block.kind === "text" ? [block.text] : [],
+                            ),
                           ),
-                        )
-                        .join("\n"),
+                      ].join("\n"),
                     );
-                    if (settled && !settledAskBounced.has(settled)) {
-                      settledAskBounced.add(settled);
+                    const bounces = settled ? (settledAskBounces.get(settled) ?? 0) : 3;
+                    if (settled && bounces < 3) {
+                      settledAskBounces.set(settled, bounces + 1);
                       return { instead: settledFactNote(settled) };
                     }
                     // Questions follow the recruiter's own language, never the JD's.
