@@ -963,7 +963,9 @@ export const DRAFT_FIRST_RETRY = `Not shown: the recruiter asked you to write an
  */
 export function narratesRecords(recruiterText: string, reply: string): boolean {
   if (/记录|\brecords?\b/i.test(recruiterText)) return false;
-  return /(?:^|[^\p{Script=Han}]|当前|系统|根据|按|目前)记录(?:显示|里|中|上|为)|\b(?:records?\s+(?:show|say)|on\s+record|in\s+the\s+records)\b/iu.test(
+  // Any 记录 but a recruiter's own kind of record (面试记录, 沟通记录…): gate 686a9eae said
+  // 「我查了当前记录：」, which a list of following words missed.
+  return /(?<!面试|沟通|通话|聊天|联系|工作|跟进|会议|教育|发送)记录|\b(?:records?\s+(?:show|say)|on\s+record|in\s+the\s+records|(?:checked|per)\s+the\s+records?)\b/iu.test(
     reply,
   );
 }

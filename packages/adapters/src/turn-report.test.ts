@@ -862,5 +862,8 @@ describe("narratesRecords", () => {
     expect(narratesRecords(ask, "我把底薪改为 70万–90万元，并加了每周五远程。")).toBe(false);
     expect(narratesRecords("约了吗", "面试记录里还没有他。")).toBe(false);
     expect(narratesRecords("记录里有他吗", "记录里没有他。")).toBe(false);
+    // Gate 686a9eae: first-timer-no-gmail.
+    expect(narratesRecords("Sequence 页是干嘛的", "我查了当前记录：没有邮件序列记录。")).toBe(true);
+    expect(narratesRecords("发了吗", "还没发，发送记录里会显示。")).toBe(false);
   });
 });
