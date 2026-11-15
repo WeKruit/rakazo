@@ -898,6 +898,10 @@ msgstr "候选人列表"
 msgid "Candidate reference"
 msgstr "候选人参考"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Candidate replies"
+msgstr "候选人回复"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Candidate sort"
 msgstr "候选人排序"
@@ -1083,6 +1087,10 @@ msgstr "关闭面板"
 msgid "Close preview"
 msgstr "关闭预览"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Closed"
+msgstr "已结束"
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Cloud"
 msgstr "云端"
@@ -1139,6 +1147,10 @@ msgstr "公司介绍材料"
 #: src/pages/shell/Composer.tsx
 msgid "Company: {0}"
 msgstr "公司：{0}"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Complete the role details"
+msgstr "补全岗位信息"
 
 #: src/pages/recruiting/AccountSequences.tsx
 #: src/pages/recruiting/SequenceRuns.tsx
@@ -2199,6 +2211,14 @@ msgstr "按已存联系人筛选…"
 msgid "Find candidates with Kruit"
 msgstr "让 Kruit 帮你找候选人"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find contact details"
+msgstr "查找联系方式"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find more people"
+msgstr "找更多人"
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -2208,13 +2228,25 @@ msgstr "为此岗位寻找与这 {0} 位已选候选人相似的人选。"
 msgid "Find similar"
 msgstr "查找相似人选"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find the first 10 people"
+msgstr "找前 10 人"
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr "根据已保存的证据或已连接的服务查找这个人的工作邮箱。如果缺少连接，请说明需要连接什么。保存返回的来源和状态，不要编造联系方式，也不要发送消息。"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Finding {count} more of the first 10"
+msgstr "还在找前 10 人中的 {count} 人"
+
 #: src/components/BackgroundTasks.tsx
 msgid "Finding candidates"
 msgstr "寻找候选人"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Finding emails"
+msgstr "查找邮箱"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
@@ -2240,6 +2272,10 @@ msgstr "已完成。"
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Fired"
 msgstr "已触发"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "First 10 people"
+msgstr "前 10 人"
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
 msgid "First page"
@@ -2340,6 +2376,10 @@ msgstr "分组方式"
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Grouped by"
 msgstr "分组依据"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Handle candidate replies"
+msgstr "处理候选人回复"
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Handoffs"
@@ -2528,6 +2568,7 @@ msgstr "内部结论：不符合"
 msgid "Interrupted, resuming…"
 msgstr "已中断，正在恢复…"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr "面试"
@@ -3543,6 +3584,7 @@ msgid "Output"
 msgstr "输出"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Outreach"
 msgstr "外联"
 
@@ -3704,6 +3746,10 @@ msgstr "为选中的 {0} 位候选人准备一份可以发给客户的短名单 
 msgid "Prepare adding exactly {0} selected people to the saved sequence {1} in role {2}. Verify this exact saved sequence, sender and current enrollment before changing anything. Sender: {3}. Requested start: {schedule}. Use saved email addresses only; resolve missing addresses with me before enrollment. Show the final recipients, content and schedule in the existing approval flow before any sending."
 msgstr "准备将恰好 {0} 位已选人员添加到岗位 {2} 中已保存的邮件序列 {1}。更改前，核实此确切序列、发件人及当前加入情况。发件人：{3}。请求的开始时间：{schedule}。仅使用已保存的邮箱；加入前与我确认并解决缺失邮箱。发送前，通过现有审批流程展示最终收件人、内容和发送安排。"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Prepare outreach"
+msgstr "准备外联"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Present"
 msgstr "至今"
@@ -3771,6 +3817,10 @@ msgstr "拉取请求"
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Qualifying work"
 msgstr "符合条件的工作"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Questions to confirm: {count}"
+msgstr "待确认的问题：{count}"
 
 #: src/pages/Legal.tsx
 msgid "Questions: <0>{email}</0>"
@@ -4252,6 +4302,10 @@ msgstr "检查并发送"
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Review the first 10 people"
+msgstr "看看前 10 人"
+
 #. placeholder {0}: data.campaign!.name
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Review the saved sequence \"{0}\" in this role and prepare its send confirmation with the exact saved emails and recipients. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
@@ -4290,6 +4344,10 @@ msgid "Role pages"
 msgstr "职位列表分页"
 
 #: src/pages/recruiting/RoleSetup.tsx
+msgid "Role setup"
+msgstr "岗位设置"
+
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr "岗位阶段"
 
@@ -4318,8 +4376,8 @@ msgstr "岗位"
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
-msgid "Round {0} · {1} people"
-msgstr "第 {0} 轮 · {1} 人"
+msgid "Round {0} · Review these {1} first"
+msgstr "第 {0} 轮 · 先看这 {1} 人"
 
 #. placeholder {0}: round.round
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -4502,6 +4560,14 @@ msgstr "学校"
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Schools"
 msgstr "学校"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Scoring…"
+msgstr "正在评分…"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Screening"
+msgstr "筛选"
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/recruiting/RecruitingGlobalSearch.tsx
@@ -4729,6 +4795,7 @@ msgstr "正在发送…"
 
 #: src/components/MailReplyAskContent.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4916,6 +4983,10 @@ msgstr "显示密码"
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Show settings"
 msgstr "显示设置"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Show the first 10 people"
+msgstr "展示前 10 人"
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -5177,6 +5248,10 @@ msgstr "暂无主题。"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Subject: {0}"
 msgstr "主题：{0}"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Submission"
+msgstr "推荐"
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Subsequently replied"
@@ -5814,6 +5889,10 @@ msgstr "返回什么"
 msgid "When to use"
 msgstr "何时使用"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Wider search"
+msgstr "扩大搜索"
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Won"
 msgstr "已成交"
@@ -5898,6 +5977,10 @@ msgstr "额度已用完，请发邮件到 {email} 充值。"
 #: src/pages/Auth.tsx
 msgid "Your email address"
 msgstr "你的邮箱"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Your feedback"
+msgstr "你的反馈"
 
 #: src/pages/Auth.tsx
 msgid "Your name"

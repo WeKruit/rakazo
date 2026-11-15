@@ -13,6 +13,8 @@ export type CrmCandidate = Extract<
 /** The role's Autumn results as the workbench already reads and validates them. */
 export type AutumnCandidatesRead = {
   items: readonly RecruitingCandidate[];
+  /** The Reviewer is scoring this role's people right now. */
+  grading?: boolean;
   loading: boolean;
   failed: boolean;
   retry: () => void;

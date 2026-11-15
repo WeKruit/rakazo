@@ -898,6 +898,10 @@ msgstr ""
 msgid "Candidate reference"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Candidate replies"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Candidate sort"
 msgstr ""
@@ -1083,6 +1087,10 @@ msgstr "Fechar painel"
 msgid "Close preview"
 msgstr "Fechar pré-visualização"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Closed"
+msgstr ""
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Cloud"
 msgstr "Nuvem"
@@ -1138,6 +1146,10 @@ msgstr ""
 #. placeholder {0}: candidate.company
 #: src/pages/shell/Composer.tsx
 msgid "Company: {0}"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Complete the role details"
 msgstr ""
 
 #: src/pages/recruiting/AccountSequences.tsx
@@ -2199,6 +2211,14 @@ msgstr ""
 msgid "Find candidates with Kruit"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find contact details"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find more people"
+msgstr ""
+
 #. placeholder {0}: chosen.length
 #: src/pages/recruiting/ShortlistDirectory.tsx
 msgid "Find people similar to these {0} selected candidates for this role."
@@ -2208,12 +2228,24 @@ msgstr ""
 msgid "Find similar"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Find the first 10 people"
+msgstr ""
+
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Finding {count} more of the first 10"
+msgstr ""
+
 #: src/components/BackgroundTasks.tsx
 msgid "Finding candidates"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Finding emails"
 msgstr ""
 
 #: src/lib/model-connection-preflight.ts
@@ -2239,6 +2271,10 @@ msgstr "Concluído."
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Fired"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "First 10 people"
 msgstr ""
 
 #: src/pages/recruiting/ProfileSequenceHistory.tsx
@@ -2339,6 +2375,10 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
 msgid "Grouped by"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Handle candidate replies"
 msgstr ""
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
@@ -2528,6 +2568,7 @@ msgstr ""
 msgid "Interrupted, resuming…"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Interview"
 msgstr ""
@@ -3543,6 +3584,7 @@ msgid "Output"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Outreach"
 msgstr ""
 
@@ -3704,6 +3746,10 @@ msgstr ""
 msgid "Prepare adding exactly {0} selected people to the saved sequence {1} in role {2}. Verify this exact saved sequence, sender and current enrollment before changing anything. Sender: {3}. Requested start: {schedule}. Use saved email addresses only; resolve missing addresses with me before enrollment. Show the final recipients, content and schedule in the existing approval flow before any sending."
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Prepare outreach"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Present"
 msgstr ""
@@ -3770,6 +3816,10 @@ msgstr "Solicitação de pull"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Qualifying work"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Questions to confirm: {count}"
 msgstr ""
 
 #: src/pages/Legal.tsx
@@ -4252,6 +4302,10 @@ msgstr ""
 msgid "Review provider settings and test again."
 msgstr "Revise as configurações do provedor e teste novamente."
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Review the first 10 people"
+msgstr ""
+
 #. placeholder {0}: data.campaign!.name
 #: src/pages/recruiting/SequenceEditor.tsx
 msgid "Review the saved sequence \"{0}\" in this role and prepare its send confirmation with the exact saved emails and recipients. If this sequence cannot be identified uniquely, ask me to select it. Do not substitute another sequence."
@@ -4290,6 +4344,10 @@ msgid "Role pages"
 msgstr ""
 
 #: src/pages/recruiting/RoleSetup.tsx
+msgid "Role setup"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr ""
 
@@ -4318,7 +4376,7 @@ msgstr ""
 #. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
-msgid "Round {0} · {1} people"
+msgid "Round {0} · Review these {1} first"
 msgstr ""
 
 #. placeholder {0}: round.round
@@ -4501,6 +4559,14 @@ msgstr ""
 
 #: src/pages/recruiting/TalentInsights.tsx
 msgid "Schools"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Scoring…"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Screening"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -4729,6 +4795,7 @@ msgstr "Enviando…"
 
 #: src/components/MailReplyAskContent.tsx
 #: src/pages/Auth.tsx
+#: src/pages/recruiting/AccountInbox.tsx
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Sent"
@@ -4916,6 +4983,10 @@ msgstr ""
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Show settings"
 msgstr "Mostrar configurações"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Show the first 10 people"
+msgstr ""
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -5176,6 +5247,10 @@ msgstr ""
 #. placeholder {0}: draft.email.subject
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Subject: {0}"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Submission"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingAnalytics.tsx
@@ -5814,6 +5889,10 @@ msgstr "O que devolver"
 msgid "When to use"
 msgstr "Quando usar"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Wider search"
+msgstr ""
+
 #: src/pages/recruiting/SequenceRuns.tsx
 msgid "Won"
 msgstr ""
@@ -5898,6 +5977,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Your email address"
 msgstr "Seu endereço de e-mail"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Your feedback"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Your name"
