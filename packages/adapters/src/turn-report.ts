@@ -955,3 +955,17 @@ export const DRAFT_BEFORE_ASKING =
 
 /** Model-facing retry: a final reply asked for more instead of writing the email asked for. */
 export const DRAFT_FIRST_RETRY = `Not shown: the recruiter asked you to write an email and your reply asked for more instead. ${DRAFT_BEFORE_ASKING.replace(/^Not asked: [^.]*\. /, "")}`;
+
+/**
+ * A reply that tells the recruiter how the records read ("当前记录显示岗位和邮件序列均为 0",
+ * gate e7805c70 change-mind-mid-run; "记录里没有", first-timer-no-gmail) narrates the working
+ * state instead of answering. The working state is for the agent; the recruiter asked a question.
+ */
+export function narratesRecords(recruiterText: string, reply: string): boolean {
+  if (/记录|\brecords?\b/i.test(recruiterText)) return false;
+  return /(?:^|[^\p{Script=Han}]|当前|系统|根据|按|目前)记录(?:显示|里|中|上|为)|\b(?:records?\s+(?:show|say)|on\s+record|in\s+the\s+records)\b/iu.test(
+    reply,
+  );
+}
+export const RECORDS_NARRATED_RETRY =
+  "Not shown: your reply told the recruiter how the records read (records, counts of roles or sequences) instead of answering. That state is for you. Answer what they asked in the first line, in plain words about their role, people or email (for example that the email has not been sent), and add only what they need.";
