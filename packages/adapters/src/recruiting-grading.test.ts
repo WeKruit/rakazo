@@ -15,6 +15,7 @@ const {
   gradingTools,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
+  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   startRecruitingGrading,
 } = await import("./recruiting-grading.js");
 
@@ -52,6 +53,8 @@ function fixture(options: {
   agentRunBots?: string[];
   /** The role's calibration rounds, latest first. */
   rounds?: Array<{ id: string; round: number; candidateKeys: string[]; createdAt: Date }>;
+  /** Whether the latest round was recorded as a correction. */
+  corrects?: boolean;
   /** Grades of the latest round's people saved since the previous round. */
   roundGrades?: Array<{ candidateKey: string; name: string; matchFields: unknown }>;
 }) {
@@ -150,6 +153,7 @@ function fixture(options: {
     },
     externalEffect: {
       findMany: vi.fn(async () => []),
+      findUnique: vi.fn(async () => ({ request: { corrects: options.corrects } })),
     },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
   };
@@ -185,6 +189,85 @@ describe("startRecruitingGrading", () => {
     const prompt = promptOf(f);
     expect(prompt.indexOf("in/picked")).toBeLessThan(prompt.indexOf("in/newer"));
     expect(prompt).toContain("* Title: Data Engineer");
+  });
+
+  it("has the lead replace a held round's people the Reviewer found not to fit", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const options = {
+      found: [person("fits"), person("misfit")],
+      graded: ["linkedin:/in/fits", "linkedin:/in/misfit"],
+      rounds: round(["linkedin:/in/fits", "linkedin:/in/misfit"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+        {
+          candidateKey: "linkedin:/in/misfit",
+          name: "Misfit",
+          matchFields: { match_tier: "Partial" },
+        },
+      ],
+    };
+    const f = fixture(options);
+    f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
+      }),
+    });
+    expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
+    expect(promptOf(f)).not.toContain("Fits:");
+    // Nothing is shown while a round person still waits for a grade made with the feedback.
+    const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
+    waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
+    // A round already shown is never swapped afterwards: the recruiter sees each round once.
+    const shown = fixture(options);
+    await startRecruitingGrading(shown.deps, { threadId: "thread" }, now);
+    for (const g of [waiting, shown])
+      expect(
+        (g.runCreate.mock.calls as unknown as [{ data: { clientNonce: string } }][]).map(
+          ([call]) => call.data.clientNonce,
+        ),
+      ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
+  });
+
+  it("has the lead show a round held for the Reviewer once everyone in it is checked", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
+    const f = fixture({
+      found: [person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        clientNonce: `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`,
+      }),
+    });
+    expect(promptOf(f)).toContain("Everyone in it fits.");
+    // Without the Reviewer nothing holds the round, so nothing is started for it.
+    const solo = fixture({
+      found: [person("fits")],
+      graded: ["linkedin:/in/fits"],
+      rounds: round(["linkedin:/in/fits"]),
+      roundGrades: [
+        { candidateKey: "linkedin:/in/fits", name: "Fits", matchFields: { match_tier: "Strong" } },
+      ],
+    });
+    await startRecruitingGrading(solo.deps, { threadId: "thread" }, now);
+    expect(solo.runCreate).not.toHaveBeenCalled();
   });
 
   it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {
