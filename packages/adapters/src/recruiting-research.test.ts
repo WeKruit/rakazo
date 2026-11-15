@@ -18,6 +18,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   savedContactLookups,
+  settlePeopleSearch,
 } from "./recruiting-research.js";
 import { receiptQuery, receiptScope } from "./testing/receipt-query.js";
 
@@ -248,6 +249,18 @@ describe("people-search agent runs", () => {
       expect(
         sizes.map((size) => (size.status === "fulfilled" ? size.value.numResults : 0)),
       ).toEqual([10, 10, 0, 0]);
+      // Staging 7b5230e4: searches that failed, and an agent run, held the 20 and the role
+      // stayed at 0. A failed search gives its share back; an agent run reserves nothing.
+      vi.setSystemTime(new Date("2026-11-15T10:10:00Z"));
+      const failed = [await limit(), await limit()];
+      for (const args of failed) settlePeopleSearch(args, "failed");
+      await prepare(db, { query: "Find 20 people", effort: "low" });
+      const retried = await limit();
+      expect(retried).toMatchObject({ numResults: 10 });
+      // A finished search keeps its share only while its people are saved.
+      settlePeopleSearch(retried, "done");
+      vi.setSystemTime(new Date("2026-11-15T10:10:40Z"));
+      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
       // Later, 14 are saved from this request: 6 more at most, for a search or an agent run.
       vi.setSystemTime(new Date("2026-11-15T10:20:00Z"));
       db.recruitingCandidate.count.mockResolvedValue(14);

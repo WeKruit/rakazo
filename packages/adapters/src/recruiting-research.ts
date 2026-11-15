@@ -483,44 +483,73 @@ export async function limitPeopleSearch(
     Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
     PEOPLE_SEARCH_MAX_RESULTS,
   );
-  const numResults =
-    room === undefined || !roleId ? wanted : await takePeople(prisma, roleId, room, wanted);
-  if (numResults <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
-  return { ...args, numResults };
+  if (room === undefined || !roleId) return { ...args, numResults: wanted };
+  const { granted, entry } = await takePeople(prisma, roleId, room, wanted, true);
+  if (granted <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
+  const limited = { ...args, numResults: granted };
+  if (entry) reservationOf.set(limited, { roleId, entry });
+  return limited;
 }
 
 /**
  * People asked for by searches still running or not yet saved. Saves are async, so four searches
  * sent together all saw an empty role and each asked for ten (staging 808f4f31: 29 saved for 20).
+ * A reservation lasts while its search runs and briefly after, for the save; a failed search
+ * gives it back at once (staging 7b5230e4: failed searches held the 20 and the role stayed at 0).
  */
 const PEOPLE_RESERVATION_MS = 3 * 60 * 1000;
-const peopleReserved = new Map<string, Array<{ people: number; at: number }>>();
+const PEOPLE_SAVE_GRACE_MS = 30 * 1000;
+type PeopleReservation = { people: number; until: number };
+const peopleReserved = new Map<string, PeopleReservation[]>();
+const reservationOf = new WeakMap<object, { roleId: string; entry: PeopleReservation }>();
+
 /**
- * Take up to `wanted` of the room left once people asked for and not yet saved are counted. The
- * check and the reservation run with no await between them, so searches sent together share it.
+ * The room left once people asked for and not yet saved are counted; with `reserve`, take up to
+ * `wanted` of it. The check and the reservation run with no await between them, so searches
+ * sent together share it.
  */
 async function takePeople(
   prisma: Pick<PrismaClient, "recruitingCandidateOccurrence">,
   roleId: string,
   room: number,
   wanted: number,
-): Promise<number> {
-  const live = () =>
-    (peopleReserved.get(roleId) ?? []).filter(
-      (entry) => Date.now() - entry.at < PEOPLE_RESERVATION_MS,
-    );
-  const earliest = live()[0]?.at;
-  const saved = earliest
-    ? await countRecruitingPeopleFoundSince(prisma, { roleId, since: new Date(earliest) })
-    : 0;
+  reserve: boolean,
+): Promise<{ granted: number; entry?: PeopleReservation }> {
+  const live = () => (peopleReserved.get(roleId) ?? []).filter((entry) => entry.until > Date.now());
+  const earliest = live().reduce<number | undefined>(
+    (min, entry) => Math.min(min ?? Number.POSITIVE_INFINITY, entry.until - PEOPLE_RESERVATION_MS),
+    undefined,
+  );
+  const saved =
+    earliest === undefined
+      ? 0
+      : await countRecruitingPeopleFoundSince(prisma, { roleId, since: new Date(earliest) });
   const entries = live();
   const pending = entries.reduce((sum, entry) => sum + entry.people, 0);
   const granted = Math.max(0, Math.min(wanted, room - Math.max(0, pending - saved)));
-  peopleReserved.set(roleId, [
-    ...entries,
-    ...(granted ? [{ people: granted, at: Date.now() }] : []),
-  ]);
-  return granted;
+  const entry =
+    reserve && granted ? { people: granted, until: Date.now() + PEOPLE_RESERVATION_MS } : undefined;
+  if (entry) entries.push(entry);
+  if (entries.length) peopleReserved.set(roleId, entries);
+  else peopleReserved.delete(roleId);
+  return { granted, entry };
+}
+
+/**
+ * A quick people search finished: a failed one gives its reservation back, a finished one keeps
+ * it only while its people are being saved.
+ */
+export function settlePeopleSearch(args: object | undefined, outcome: "failed" | "done"): void {
+  const held = args && reservationOf.get(args);
+  if (!held || !args) return;
+  reservationOf.delete(args);
+  if (outcome === "done") {
+    held.entry.until = Math.min(held.entry.until, Date.now() + PEOPLE_SAVE_GRACE_MS);
+    return;
+  }
+  const left = (peopleReserved.get(held.roleId) ?? []).filter((entry) => entry !== held.entry);
+  if (left.length) peopleReserved.set(held.roleId, left);
+  else peopleReserved.delete(held.roleId);
 }
 
 /** Most saved people sent as one agent run's exclusion list. */
@@ -599,7 +628,8 @@ export async function prepareAgentRun(
   const room =
     allowed === undefined
       ? undefined
-      : await takePeople(prisma, roleId, allowed, AGENT_RUN_MAX_PEOPLE);
+      : // An agent run returns its people later, through another call: it reserves nothing.
+        (await takePeople(prisma, roleId, allowed, AGENT_RUN_MAX_PEOPLE, false)).granted;
   if (room !== undefined && room <= 0) throw new IsolationError(PEOPLE_TARGET_MET);
   // The default schema caps the people a run returns; it never returns past the recruiter's number.
   if (
