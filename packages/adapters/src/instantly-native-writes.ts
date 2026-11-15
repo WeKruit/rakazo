@@ -26,6 +26,7 @@ import {
 import { confirmedSends, sendingElsewhere } from "./campaign-send-record.js";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
+import type { SendingToday } from "./instantly-senders.js";
 import {
   adoptAssignedSenders,
   adoptLegacySender,
@@ -36,6 +37,7 @@ import {
   ensureSendingIdentity,
   requireSendingMailboxReady,
   sendingMailboxState,
+  sendingToday,
 } from "./instantly-senders.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
 import { recipientParts, untypedAddressRefusal } from "./named-address.js";
@@ -425,8 +427,9 @@ export function instantlyRest(
       throw new InstantlyRestError(response.status, providerError(response.status, text));
     if (truncated) throw new Error("Instantly response exceeded its bound");
     const value: unknown = text ? JSON.parse(text) : {};
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      throw new Error("Instantly response is not an object");
+    // A few reads (daily analytics) answer with a bare list; it is read as a page of items.
+    if (Array.isArray(value)) return { items: value };
+    if (!value || typeof value !== "object") throw new Error("Instantly response is not an object");
     return value as Record<string, unknown>;
   };
 }
@@ -920,6 +923,9 @@ function sendTime(
   sendNow = false,
 ) {
   if (!campaign) return null;
+  const today = campaign.sendingToday as SendingToday | undefined;
+  if (today && !today.left)
+    return `After the mailbox's daily limit resets at 00:00 UTC (${today.sent} of ${today.limit} sent today)`;
   const window = nextSendWindow(campaign);
   if (sendNow) return window && !window.now ? `Now, instead of ${window.local}` : "Now";
   if (!window || waitsForHours(campaign, binding))
@@ -984,6 +990,12 @@ export function queuePace(
   let time: string;
   let queuedAt: string;
   try {
+    const today = campaign?.sendingToday as SendingToday | undefined;
+    if (today && today.left < count) {
+      const reset = new Date(today.resetsAt);
+      const hours = Math.max(1, Math.round((reset.getTime() - now.getTime()) / 3_600_000));
+      return `held by the sending mailbox's daily limit, not failed: it has sent ${today.sent} of its ${today.limit} emails for today${today.left ? `, so ${today.left} of these go out today and the other ${count - today.left}` : ", so these"} go out after the limit resets at 00:00 UTC (about ${hours} hours from now; ${at(reset)} ${shown} on ${on(reset)}). Tell the recruiter exactly that; sending now or changing the hours cannot get them out sooner today`;
+    }
     const end = overdue ? new Date(now.getTime() + spread) : done;
     // UTC and the time left beside it: agents read the conversation's clock in UTC, so a bare
     // local time still ahead was taken as one already passed.
@@ -1085,6 +1097,13 @@ export function ownedInstantlyRest(rest: InstantlyRest, owned: OwnedInstantly): 
       const listed = await rest(method, path, body);
       const items = Array.isArray(listed.items) ? (listed.items as { email?: unknown }[]) : [];
       return { items: items.filter((item) => sender(item.email)) };
+    }
+    if (route === "/accounts/analytics/daily" && method === "GET") {
+      const listed = await rest(method, path, body);
+      const items = Array.isArray(listed.items)
+        ? (listed.items as { email_account?: unknown }[])
+        : [];
+      return { items: items.filter((item) => sender(item.email_account)) };
     }
     if (route!.startsWith("/accounts/")) {
       if (method !== "GET" || !sender(decodeURIComponent(route!.slice("/accounts/".length))))
@@ -2654,6 +2673,7 @@ async function sendCampaign(
     );
   const leads = await allLeads(rest, campaignId);
   const templated = isTemplated(campaign);
+  campaign = { ...campaign, sendingToday: await sendingToday(rest, campaign.email_list) };
   const plan = planSend(
     campaign,
     leads,
@@ -2714,7 +2734,10 @@ async function sendCampaign(
       if (resume) await rest("POST", `/campaigns/${campaignId}/activate`);
       throw error;
     }
-    campaign = await rest("GET", `/campaigns/${campaignId}`);
+    campaign = {
+      ...(await rest("GET", `/campaigns/${campaignId}`)),
+      sendingToday: campaign.sendingToday,
+    };
   }
   // Inside sending hours a confirmed send is queued, not sent: say until when.
   const paced = (count: number) => ({
@@ -3521,8 +3544,10 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_get_campaign": {
       const observedAt = new Date().toISOString();
-      const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
-      const senders = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+      const read = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
+      const senders = Array.isArray(read.email_list) ? read.email_list : [];
+      const today = read.status === ACTIVE ? await sendingToday(rest, senders) : null;
+      const campaign = today ? { ...read, sendingToday: today } : read;
       const binding =
         owned && !senders.length
           ? await bindingOfCampaign(prisma, context, serverId, String(campaign.id))
@@ -3540,6 +3565,7 @@ export async function runInstantlyWrite(
         // email_list is the sending mailbox; recipients are the leads.
         sendingMailbox: campaign.email_list,
         ...(senderState ? { senderState } : {}),
+        ...(today ? { sendingToday: today } : {}),
         ...(await leadDelivery(rest, campaign)),
         ...(owned
           ? await confirmedSends(prisma, context, String(campaign.id)).catch(() => ({}))
