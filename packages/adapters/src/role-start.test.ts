@@ -5,6 +5,7 @@ import {
   roleStartKey,
   startRoleFromRecruiterMessage,
   templateOnlyRequest,
+  writesToNamedPeople,
 } from "./role-start.js";
 
 vi.mock("@rakazo/db", () => ({
@@ -53,6 +54,20 @@ describe("templateOnlyRequest", () => {
     ).toBe(false);
     expect(templateOnlyRequest("帮我找人：上海的高级后端，顺便写个邮件模板")).toBe(false);
     expect(templateOnlyRequest("Senior data engineer in Seattle, here is the JD")).toBe(false);
+  });
+});
+
+describe("writesToNamedPeople", () => {
+  it("is an ask to write to the people named, not to find people (simulated 2026-11-15)", () => {
+    expect(
+      writesToNamedPeople(
+        "新岗位 西雅图 Senior Data Engineer ref 00581，hybrid一周3天。Noah Liu noah+1@example.com 和 Ada Chen ada@example.com 写第一封，今晚发",
+      ),
+    ).toBe(true);
+    expect(writesToNamedPeople("Seattle data engineer, find people like ada@example.com")).toBe(
+      false,
+    );
+    expect(writesToNamedPeople("Senior data engineer in Seattle, show me people")).toBe(false);
   });
 });
 

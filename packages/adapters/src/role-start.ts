@@ -18,12 +18,19 @@ import { ROLE_START_NONCE } from "./working-state.js";
  * about hybrid attendance, and the draft never came.
  */
 export function templateOnlyRequest(text: string): boolean {
-  return (
-    askedTemplate(text) &&
-    !/\b(?:find|search|source|sourcing|look for|candidates? like)\b|找人|找候选|搜|寻访|物色|찾아|検索|探して/i.test(
-      text,
-    )
-  );
+  return askedTemplate(text) && !FIND_PEOPLE.test(text);
+}
+
+const FIND_PEOPLE =
+  /\b(?:find|search|source|sourcing|look for|candidates? like)\b|找人|找候选|搜|寻访|物色|찾아|検索|探して/i;
+
+/**
+ * A request to write to people the recruiter names with their addresses, with no ask to find
+ * people: simulated 11-15, "Noah … and Ada … 写第一封，今晚发" opened a role whose team asked a
+ * location question and listed ten strangers before the two emails.
+ */
+export function writesToNamedPeople(text: string): boolean {
+  return /[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}/i.test(text) && !FIND_PEOPLE.test(text);
 }
 
 /** Model-facing: start_role refused for a template-only request. */
