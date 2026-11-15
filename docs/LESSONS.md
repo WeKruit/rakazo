@@ -74,3 +74,7 @@ that repeats into the existing line instead of adding another.
 - The Connect card took three reply-level fixes before the cause showed: typing past it closed
   the card. **When a card misbehaves twice, check what closes or reopens it before changing
   the replies around it.**
+- 2026-11-15 — `corrects: true` was added for recruiter swaps and later reused to mark the
+  Reviewer's checked round. The team then used it to slip round-1 people back in and to skip the
+  check. **An escape flag has one owner: key a bypass on who is calling (the run), not on an
+  argument the model can set.**

@@ -1122,13 +1122,13 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .literal(true)
       .optional()
       .describe(
-        "true when the recruiter asked to swap some people of the latest round: candidateKeys are that round's people they kept, in order, with the replacements in place of the ones they turned down. The corrected ten are shown in chat as the next round.",
+        "Only when the turn's request says so, after the Reviewer has checked the latest round: candidateKeys are that round's people who passed, in order, with any replacements. A round after the recruiter's feedback is new people, recorded without corrects.",
       ),
     checks: z
       .record(RecruitingId, z.record(RecruitingId, z.enum(["shown", "unknown", "fails"])))
       .optional()
       .describe(
-        "candidateKey → { requirementId → verdict } for every requirement of the role (a refusal lists them with their ids: the brief fields in the recruiter's words, the hard criteria and the reasons they turned people down): \"shown\" when the person's row shows it, \"unknown\" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), \"fails\" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round's \"not verified\" notes are written from the unknown verdicts.",
+        'candidateKey → { requirementId → verdict } for every requirement of the role (a refusal lists them with their ids: the brief fields in the recruiter\'s words, the hard criteria and the reasons they turned people down): "shown" when the person\'s row shows it, "unknown" only when nothing in the row bears on it (its title, company, location and dates always do: judge them), "fails" when the row contradicts it, as a title outside the asked titles or like those the recruiter turned down does. The round\'s "not verified" notes are written from the unknown verdicts.',
       ),
     unverified: z
       .record(

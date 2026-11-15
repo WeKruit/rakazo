@@ -191,7 +191,11 @@ describe("startRecruitingGrading", () => {
     expect(prompt).toContain("* Title: Data Engineer");
   });
 
-  it("has the lead swap out the round's people the Reviewer found not to fit", async () => {
+  it("has the lead replace a held round's people the Reviewer found not to fit", async () => {
+    const team = [
+      { botId: "lead", bot: { name: "Main", spawnKey: null, archivedAt: null } },
+      { botId: "reviewer", bot: { name: "Reviewer", spawnKey: null, archivedAt: null } },
+    ];
     const options = {
       found: [person("fits"), person("misfit")],
       graded: ["linkedin:/in/fits", "linkedin:/in/misfit"],
@@ -205,12 +209,8 @@ describe("startRecruitingGrading", () => {
         },
       ],
     };
-    // A correction is the checked round itself, already shown.
-    const f = fixture({ ...options, corrects: true });
-    f.prisma.chatGroupMember.findMany.mockResolvedValue([
-      { botId: "sourcer", bot: { name: "Sourcer", spawnKey: null } },
-      { botId: "lead", bot: { name: "Main", spawnKey: null } },
-    ] as never);
+    const f = fixture(options);
+    f.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
@@ -220,18 +220,19 @@ describe("startRecruitingGrading", () => {
     });
     expect(promptOf(f)).toContain("Misfit: Partial (candidateKey linkedin:/in/misfit)");
     expect(promptOf(f)).not.toContain("Fits:");
-    // Nobody is swapped while a round person still waits for a grade made with the feedback.
-    const waiting = fixture({
-      ...options,
-      corrects: true,
-      roundGrades: options.roundGrades.slice(1),
-    });
+    // Nothing is shown while a round person still waits for a grade made with the feedback.
+    const waiting = fixture({ ...options, roundGrades: options.roundGrades.slice(1) });
+    waiting.prisma.chatGroupMember.findMany.mockResolvedValue(team as never);
     await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
-    expect(
-      (waiting.runCreate.mock.calls as unknown as [{ data: { clientNonce: string } }][]).map(
-        ([call]) => call.data.clientNonce,
-      ),
-    ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
+    // A round already shown is never swapped afterwards: the recruiter sees each round once.
+    const shown = fixture(options);
+    await startRecruitingGrading(shown.deps, { threadId: "thread" }, now);
+    for (const g of [waiting, shown])
+      expect(
+        (g.runCreate.mock.calls as unknown as [{ data: { clientNonce: string } }][]).map(
+          ([call]) => call.data.clientNonce,
+        ),
+      ).not.toContainEqual(expect.stringContaining(RECRUITING_ROUND_REVIEW_NONCE_PREFIX));
   });
 
   it("has the lead show a round held for the Reviewer once everyone in it is checked", async () => {

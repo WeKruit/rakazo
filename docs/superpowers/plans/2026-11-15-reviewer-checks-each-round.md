@@ -54,3 +54,16 @@ a `corrects` correction) is therefore held when the team has the Reviewer:
   the misfits or, when everyone fits, records the same people with `corrects: true`. That
   recording posts the list and the next-step card through the existing path.
 - Round 1 still shows at once, and a correction (`corrects`) is the checked round itself.
+
+## Update: one showing, checked fast
+
+The recruiter should see each round once. A list followed a few minutes later by a revised list is
+confusing, so a round that is already shown is never swapped afterwards. The hold stays for rounds
+after feedback, and the wait is cut instead:
+
+- The held round's grading starts with no settle delay, and a busy conversation is retried every
+  3 seconds instead of 30 while a round is held.
+- The Reviewer's grading prompt asks for short grades and no other calls between the profile
+  reads and the save. In the eec6adf0 run, about 90 of the check's ~130 seconds went to writing
+  long grades and to lookups between the reads and the save.
+- Round 1 is still shown at once with the feedback question.

@@ -13,10 +13,17 @@ import {
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
-import { IsolationError, listRecruitingResearch, listRunToolResults, Prisma } from "@rakazo/db";
+import {
+  countRecruitingPeopleFoundSince,
+  IsolationError,
+  listRecruitingResearch,
+  listRunToolResults,
+  Prisma,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
+import { peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 
@@ -398,12 +405,68 @@ async function requireDeeperSearchBudget(
  */
 export const PEOPLE_SEARCH_MAX_RESULTS = 10;
 
-/** A quick people search asks for at most ten people, however the agent or a plan sized it. */
-export function limitPeopleSearch(
+/**
+ * How many more people the recruiter's latest number allows this role, or undefined when no
+ * recent message of theirs names one. Long-search-finishes 11-15: "找20个人，找完告诉我" saved 41,
+ * because every search was capped but nothing held the request's total.
+ */
+export async function peopleRoomForRequest(
+  prisma: Pick<PrismaClient, "message" | "recruitingCandidate" | "recruitingCandidateOccurrence">,
+  roleId: string,
+  threadId: string,
+): Promise<number | undefined> {
+  const messages = await prisma.message.findMany({
+    where: { threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    take: 10,
+    select: { createdAt: true, blocks: true },
+  });
+  for (const message of messages) {
+    const text = (Array.isArray(message.blocks) ? message.blocks : [])
+      .map((block) => {
+        const value = record(block)?.text;
+        return typeof value === "string" ? value : "";
+      })
+      .join(" ");
+    if (!peopleTargetFrom(text, 0)) continue;
+    const [total, gained] = await Promise.all([
+      prisma.recruitingCandidate.count({ where: { roleId } }),
+      countRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
+    ]);
+    const target = peopleTargetFrom(text, Math.max(0, total - gained)) ?? 0;
+    return Math.max(0, target - total);
+  }
+  return undefined;
+}
+
+/** Model-facing: a search refused because the role already holds the number asked for. */
+export const PEOPLE_TARGET_MET =
+  "Not searched: the role already holds the number of people the recruiter asked for, so their request is done. Do not search again: tell them in one short message, in their language, how many people this role holds and that the search is finished.";
+
+/** The conversation and role a run works in. */
+async function runRole(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+) {
+  return actor.runId
+    ? prisma.run.findFirst({
+        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+        select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
+      })
+    : null;
+}
+
+/**
+ * A quick people search asks for at most ten people, however the agent or a plan sized it, and
+ * never for more than the recruiter's number still allows.
+ */
+export async function limitPeopleSearch(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
   server: Pick<McpServer, "transport" | "endpoint">,
   toolName: string,
   args: Record<string, unknown>,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (
     toolName !== "web_search_advanced_exa" ||
     args.category !== "people" ||
@@ -412,11 +475,16 @@ export function limitPeopleSearch(
     new URL(server.endpoint).host !== "mcp.exa.ai"
   )
     return args;
+  const run = await runRole(prisma, actor);
+  const roleId = run?.thread.activeRecruitingRoleId;
+  const room = roleId ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
+  if (room === 0) throw new IsolationError(PEOPLE_TARGET_MET);
   const asked = Number(args.numResults);
-  const numResults =
-    Number.isFinite(asked) && asked >= 1
-      ? Math.min(Math.floor(asked), PEOPLE_SEARCH_MAX_RESULTS)
-      : PEOPLE_SEARCH_MAX_RESULTS;
+  const numResults = Math.min(
+    Number.isFinite(asked) && asked >= 1 ? Math.floor(asked) : PEOPLE_SEARCH_MAX_RESULTS,
+    PEOPLE_SEARCH_MAX_RESULTS,
+    room ?? PEOPLE_SEARCH_MAX_RESULTS,
+  );
   return { ...args, numResults };
 }
 
@@ -461,12 +529,7 @@ export async function prepareAgentRun(
   if (args.runId !== undefined) return args;
   const toGrade = record(args.input)?.data;
   const grading = Array.isArray(toGrade) && toGrade.length > 0;
-  const run = actor.runId
-    ? await prisma.run.findFirst({
-        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
-        select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
-      })
-    : null;
+  const run = await runRole(prisma, actor);
   if (grading && run?.threadId) {
     const earlier = await earlierGradingRun(prisma, actor, server, run.threadId, toGrade);
     if (earlier) return { runId: earlier };
@@ -497,6 +560,21 @@ export async function prepareAgentRun(
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
+  const room = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
+  if (room === 0) throw new IsolationError(PEOPLE_TARGET_MET);
+  // The default schema caps the people a run returns; it never returns past the recruiter's number.
+  if (
+    room !== undefined &&
+    room < AGENT_RUN_MAX_PEOPLE &&
+    prepared.outputSchema === AGENT_RUN_PEOPLE_SCHEMA
+  )
+    prepared.outputSchema = {
+      ...AGENT_RUN_PEOPLE_SCHEMA,
+      properties: {
+        ...AGENT_RUN_PEOPLE_SCHEMA.properties,
+        people: { ...AGENT_RUN_PEOPLE_SCHEMA.properties.people, maxItems: room },
+      },
+    };
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },

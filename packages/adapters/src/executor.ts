@@ -387,7 +387,6 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
-  showRoundInDelegatingChat,
   teamProgress,
 } from "./bot-messages.js";
 import {
@@ -639,6 +638,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
   roundHeldForReview,
   scheduleRecruitingGrading,
@@ -670,7 +670,7 @@ import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting
 import type { RoundVerdict } from "./recruiting-round-check.js";
 import { checkRound, roundCriteria, roundPeopleNamed } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
+import { lookedUpContacts, mcpObject, peopleRoomForRequest } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -6998,7 +6998,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let askDeclineBounced = false;
         // A question bounced once as already answered may be asked again: the reply may have been about something else.
         const knownAskBounced = new Set<string>();
-        const settledAskBounced = new Set<string>();
+        // Bounced up to three times a run: on staging the model asked the same settled fact again
+        // right after one bounce. A search is always open to it, so this never dead-ends.
+        const settledAskBounces = new Map<string, number>();
+        // A JD read from a file or link is in no message; the first-step note keeps its text here.
+        let intakeJobText = "";
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -7454,7 +7458,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               request: { path: ["operation"], equals: "calibration_round" },
             },
             orderBy: { createdAt: "desc" },
-            select: { createdAt: true, result: true, request: true },
+            select: { createdAt: true, result: true },
             take: 20,
           });
           return rounds.find(
@@ -7470,7 +7474,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const number = (round.result as { round?: unknown } | null)?.round;
           if (
             typeof number === "number" &&
-            roundHeldForReview(number, (round.request as { corrects?: unknown } | null)?.corrects) &&
+            roundHeldForReview(number, run.clientNonce) &&
             (await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
           )
             return undefined;
@@ -8334,6 +8338,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // One round check for everything the recruiter asked for (brief, criteria and the reasons
           // they turned people down): the agent's verdict on each decides who is in.
+          // Keeping earlier people is for the round the Reviewer checked; after feedback the next
+          // round is new people.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            args.corrects === true &&
+            !run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+          )
+            return {
+              error:
+                "Not recorded: after the recruiter's feedback the next round holds only new people, so record it without corrects: people who fit, none shown before or turned down. If fewer than ten fit, record the ones who do.",
+            };
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -12805,10 +12821,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // After the recruiter's feedback the Reviewer checks the round before it is shown.
                 const held =
                   typeof recorded?.round === "number" &&
-                  roundHeldForReview(recorded.round, researchInput.data.corrects) &&
+                  roundHeldForReview(recorded.round, run.clientNonce) &&
                   (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
                 if (held) {
-                  await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
+                  // No settle wait: the check starts seconds after this turn ends.
+                  await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch((error) =>
                     getLogger().warn("recruiting grade schedule", { error: String(error) }),
                   );
                   return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
@@ -12851,15 +12868,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       )
                   ).catch((error) =>
                     getLogger().warn("round list not posted", {
-                      error: String(error),
-                    }),
-                  );
-                  // The conversation that asked for this round shows it too, as posted.
-                  void showRoundInDelegatingChat(deps, run, {
-                    text,
-                    key: applied.effect.id,
-                  }).catch((error) =>
-                    getLogger().warn("round not shown in the delegating chat", {
                       error: String(error),
                     }),
                   );
@@ -15706,10 +15714,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           // Asked to write to the people they named, the team writes to them: no question, no search.
           const words = texts.map((item) => item.text).join("\n");
-          const ask = (jd: string) =>
-            writesToNamedPeople(words)
+          const ask = (jd: string) => {
+            intakeJobText = jd;
+            return writesToNamedPeople(words)
               ? "The role is revision 1 once saved. The recruiter asked you to write to the people they named, with their addresses, not to find people: do only that, now. Write the first email to each from the role details in their message and put it on the Send card for their decision; ask nothing before the card (the card is their confirmation) and run no search or round."
               : `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). ${intakeFieldsNote(`${jd}\n${words}`)} ${PLANNED_SEARCHES_NOTE}`;
+          };
           if (request) {
             // A role Kruit opened (start_role) is already named after it: keep that title.
             const named = thread.groupId?.startsWith(KRUIT_ROLE_GROUP_PREFIX)
@@ -15882,6 +15892,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             words,
           );
           const place = localRolePlace([...planned.data.queries, ...words]);
+          // The searches run together, so they share what the recruiter's number still allows.
+          const room = thread.activeRecruitingRoleId
+            ? await peopleRoomForRequest(deps.prisma, thread.activeRecruitingRoleId, thread.id)
+            : undefined;
+          const searchCount = planned.data.queries.length;
+          const perSearch = Math.max(
+            1,
+            Math.min(10, Math.ceil((room ?? 10 * searchCount) / searchCount)),
+          );
           const pendings = planned.data.queries.map((query, index) =>
             applyTool(
               searchTool,
@@ -15891,7 +15910,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ? `${query}. Languages: ${languages.join(", ")}`
                     : query,
                 category: "people",
-                numResults: 10,
+                numResults: perSearch,
                 enableHighlights: true,
                 highlightsMaxCharacters: 900,
                 highlightsQuery: `concrete evidence of: ${query}`,
@@ -17100,7 +17119,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     await briefSaving;
                     await turnReport.caughtUpToAsk();
                     // A number of people the recruiter asked for decides the next step: no card.
-                    const askedFor = recruiterTexts.map(requestedPeopleTarget).findLast(Boolean);
+                    // Newest first; a role opened from Kruit's chat starts with a copy of their words.
+                    const askedFor = [...recruiterTexts, ...roleStartTexts]
+                      .map(requestedPeopleTarget)
+                      .find(Boolean);
                     if (askedFor && thread.activeRecruitingRoleId) {
                       const saved = (
                         await readRecruitingPlaybookStep(
@@ -17157,17 +17179,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // "6+ years" drew a years-cap card, "Seattle hybrid" a work-scope card).
                     const settled = settledFactAsked(
                       question,
-                      messages
-                        .filter((message) => message.role === "user")
-                        .flatMap((message) =>
-                          (message.blocks as MessageBlock[]).flatMap((block) =>
-                            block.kind === "text" ? [block.text] : [],
+                      [
+                        intakeJobText,
+                        ...messages
+                          .filter((message) => message.role === "user")
+                          .flatMap((message) =>
+                            (message.blocks as MessageBlock[]).flatMap((block) =>
+                              block.kind === "text" ? [block.text] : [],
+                            ),
                           ),
-                        )
-                        .join("\n"),
+                      ].join("\n"),
                     );
-                    if (settled && !settledAskBounced.has(settled)) {
-                      settledAskBounced.add(settled);
+                    const bounces = settled ? (settledAskBounces.get(settled) ?? 0) : 3;
+                    if (settled && bounces < 3) {
+                      settledAskBounces.set(settled, bounces + 1);
                       return { instead: settledFactNote(settled) };
                     }
                     // Questions follow the recruiter's own language, never the JD's.

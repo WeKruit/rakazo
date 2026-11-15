@@ -147,6 +147,7 @@ import {
   listRecruitingSavedProfiles,
   mergeRecruitingProfileFacts,
 } from "./recruiting-saved-profiles.js";
+import { readRecruiterSeen } from "./recruiting-search-quality.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -12174,6 +12175,18 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         `corrects is for swapping some people of round ${previous?.round ?? 1} after the recruiter's feedback: keep the ones they did not turn down and add the replacements. None of these people were in that round, so record them as a new round without corrects.`,
       );
+    // A swap keeps only the people the recruiter did not turn down.
+    if (kept.size) {
+      const seen = await readRecruiterSeen(tx, actor, {
+        roleId: role.id,
+        candidateKeys: [...kept],
+      });
+      const turnedDown = [...kept].filter((key) => seen.people.get(key)?.verdict === "not_fit");
+      if (turnedDown.length)
+        throw new RecruitingCalibrationRoundError(
+          `The recruiter turned down ${turnedDown.join(", ")}, so a corrected round never keeps them: replace them with new people who fit, or leave the places short.`,
+        );
+    }
     const repeated =
       previous &&
       (await calibrationRoundRepeats(

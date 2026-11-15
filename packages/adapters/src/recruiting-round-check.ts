@@ -185,7 +185,7 @@ export function checkRound(input: {
     return {
       ok: false,
       asked: [],
-      error: `Not recorded: checks needs a verdict ("shown", "unknown" or "fails", from the person's row) on every hard criterion for every pick; missing for ${missing.join(", ")}. The hard criteria: ${input.criteria.map((criterion) => `${criterion.id} = ${criterion.statement}`).join("; ")}.`,
+      error: `Not recorded: checks needs a verdict ("shown", "unknown" or "fails", from the person's row) on every hard criterion for every pick; missing for ${missing.join(", ")}. The hard criteria: ${input.criteria.map((criterion) => `${criterion.id} = ${criterion.statement}`).join("; ")}. Call calibration_round again now with the same people and a verdict on each of these for every pick; nothing else is needed first.`,
     };
   const failing: string[] = [];
   const newlyUnknown: string[] = [];

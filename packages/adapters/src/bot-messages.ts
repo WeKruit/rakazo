@@ -22,6 +22,7 @@ import type { ExecutorDeps } from "./executor.js";
 import { readMailReplyOutcomeReport } from "./mail-reply.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { ROUND_HEADING, roundListedNotRecorded } from "./recruiting-round-check.js";
+import { ROLE_START_NONCE } from "./working-state.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -508,9 +509,6 @@ export async function teamProgress(
           .then(() => roundListedNotRecorded(prisma, { roleId, after: since.toISOString() }))
           .catch(() => null)
       : null;
-  const shownHere = recorded
-    ? await roundShownSince(prisma, input.returnThreadId, { createdAt: since })
-    : false;
   const minutes = Math.max(0, Math.round((Date.now() - since.getTime()) / 60_000));
   const started = minutes < 1 ? "under a minute" : `${minutes} min`;
   const found = `${peopleFound} ${peopleFound === 1 ? "person" : "people"}`;
@@ -522,11 +520,9 @@ export async function teamProgress(
     // count; the people found so far can be listed, marked as not yet reviewed.
     note: listed
       ? `The next round is being posted right now. Read it with recruiting_candidates round and roleId ${roleId} in a moment and show its people here; never say it is not ready, never mention records, and never send the recruiter to another chat.`
-      : recorded && shownHere
-        ? `Round ${recorded.round} is already recorded and listed in this conversation above, exactly as the team posted it; ${working.bot.name} is still working on the rest of the recruiter's request. Never list, count or retell the round's people; point the recruiter to the list above in one line.`
-        : recorded
-          ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
-          : `${working.bot.name} has been working on the recruiter's request for ${started}${peopleFound ? ` and has found ${found} so far` : " and is searching now"}; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.${roleId ? ` When the recruiter asks to see people now, list them with recruiting_candidates list and roleId ${roleId}: the page shows only people the recruiter has not seen, as search results not yet reviewed, never as the round.` : ""}`,
+      : recorded
+        ? `Round ${recorded.round} is already recorded and shown in the role's chat; ${working.bot.name} is still working on the rest of the recruiter's request (${started}, ${found} found). Read the round with recruiting_candidates round and this roleId and answer from it; never say the round is not ready.`
+        : `${working.bot.name} has been working on the recruiter's request for ${started}${peopleFound ? ` and has found ${found} so far` : " and is searching now"}; the next round comes back here when it is picked. Give the recruiter these numbers once; never say it has not started.${roleId ? ` When the recruiter asks to see people now, list them with recruiting_candidates list and roleId ${roleId}: the page shows only people the recruiter has not seen, as search results not yet reviewed, never as the round.` : ""}`,
   };
 }
 
@@ -689,13 +685,9 @@ export async function returnDelegatedTeamOutcome(
     if (reply) text = reply;
     if (ROUND_HEADING.test(reply)) round = reply;
   }
-  // Staging 11-15: a round already shown in the delegating conversation was retold there with
-  // wrong counts; it is never sent again, and Kruit is told it is on screen.
-  const shown = round ? await roundShownSince(deps.prisma, root.returnThreadId, delegated) : false;
-  if (shown) text = `${text === round ? "" : `${text}\n\n`}${ROUND_ALREADY_LISTED}`;
   // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
   // Kruit could neither show the people nor say who has both must-haves. The round comes too.
-  else if (round && round !== text) text = `${text}\n\n${round}`;
+  if (round && round !== text) text = `${text}\n\n${round}`;
   const mail = await readMailReplyOutcomeReport(deps.prisma, run);
   if (mail)
     text = `${mail.text}\n\nAdditional child output (may include earlier progress; the mail status above is authoritative):\n${text}`;
@@ -719,95 +711,35 @@ export async function returnDelegatedTeamOutcome(
     getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
 }
 
-const ROUND_ALREADY_LISTED =
-  "The round is already listed in your conversation above, exactly as the team posted it. Never list, count or retell its people; reply in at most one short line on what the recruiter can do next, or not at all.";
-const DELEGATED_ROUND_NONCE = "delegated-round:";
-
-/** Whether a round was shown in the delegating conversation since the request. */
-async function roundShownSince(
-  prisma: PrismaClient,
-  threadId: string,
-  delegated: { createdAt: Date },
-): Promise<boolean> {
-  const count = await Promise.resolve()
-    .then(() =>
-      prisma.message.count({
-        where: {
-          threadId,
-          clientNonce: { startsWith: DELEGATED_ROUND_NONCE },
-          createdAt: { gte: delegated.createdAt },
-        },
-      }),
-    )
-    .catch(() => 0);
-  return count > 0;
-}
-
-/**
- * A round the role team recorded for work another conversation delegated appears there exactly as
- * posted, headed with the role's name, so the recruiter reads it where they asked instead of a
- * retelling. Once per recorded round.
- */
-export async function showRoundInDelegatingChat(
-  deps: Pick<ExecutorDeps, "prisma" | "events">,
-  run: { spaceId: string; threadId: string; userId: string },
-  round: { text: string; key: string },
-): Promise<void> {
-  const thread = await deps.prisma.thread.findFirst({
-    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
-    select: { group: { select: { name: true } } },
-  });
-  if (!thread?.group) return;
-  const found = await openDelegation(deps.prisma, run.threadId);
-  if (!found) return;
-  const blocks: MessageBlock[] = [{ kind: "text", text: `${thread.group.name} · ${round.text}` }];
-  const threadId = found.root.returnThreadId;
-  let seq: number;
-  try {
-    seq = await withTransactionRetry(() =>
-      deps.prisma.$transaction(async (tx) => {
-        const message = await createThreadMessageInTransaction(tx, {
-          threadId,
-          role: "bot",
-          blocks,
-          botId: found.root.fromBotId,
-          clientNonce: `${DELEGATED_ROUND_NONCE}${round.key}`,
-        });
-        const event = await appendEventInTransaction(tx, {
-          spaceId: run.spaceId,
-          threadId,
-          botId: found.root.fromBotId,
-          type: "thread.message.created",
-          payload: { messageId: message.id, role: "bot", blocks },
-        });
-        return event.seq;
-      }),
-    );
-  } catch (error) {
-    // The same round shown twice (a retried turn) keeps the first.
-    if (isUniqueConstraintError(error)) return;
-    throw error;
-  }
-  await deps.events.notify(threadId, seq).catch((error) => {
-    getLogger().error("delegated round realtime notification", error);
-  });
-}
-
 /** The latest request another conversation delegated to this role team, if it still answers back. */
 async function openDelegation(prisma: PrismaClient, threadId: string) {
   const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
-  const delegated = await prisma.message.findFirst({
-    where: {
-      threadId,
-      role: "user",
-      createdAt: { gte: since },
-      blocks: { array_contains: [{ kind: "bot_message_received" }] },
-      // A request whose turn has not started yet is not the work that just finished.
-      sourceRuns: { none: { status: "queued" } },
-    },
-    orderBy: { seq: "desc" },
-    select: { id: true, seq: true, blocks: true, createdAt: true },
-  });
+  const where = {
+    threadId,
+    role: "user",
+    createdAt: { gte: since },
+    // A request whose turn has not started yet is not the work that just finished.
+    sourceRuns: { none: { status: "queued" as const } },
+  };
+  const select = { id: true, seq: true, blocks: true, createdAt: true } as const;
+  const [delegated, started] = await Promise.all([
+    prisma.message.findFirst({
+      where: { ...where, blocks: { array_contains: [{ kind: "bot_message_received" }] } },
+      orderBy: { seq: "desc" },
+      select,
+    }),
+    prisma.message.findFirst({
+      where: { ...where, clientNonce: { startsWith: ROLE_START_NONCE } },
+      orderBy: { seq: "desc" },
+      select: { ...select, clientNonce: true, sourceRuns: { select: { botId: true }, take: 1 } },
+    }),
+  ]);
+  // Long-search-finishes 11-15: a role opened from Kruit's chat with "找完告诉我" finished in the
+  // role's chat and never came back, although Kruit had said it would tell the recruiter.
+  if (started && (!delegated || started.seq > delegated.seq)) {
+    const root = await roleStartReturn(prisma, threadId, started);
+    if (root) return { delegated: started, root };
+  }
   const root = botMessageContext(
     Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
   );
@@ -816,6 +748,45 @@ async function openDelegation(prisma: PrismaClient, threadId: string) {
   if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question")
     return null;
   return { delegated, root: { ...root, returnThreadId: root.returnThreadId } };
+}
+
+/** Where a role opened from Kruit's chat returns: the chat holding the recruiter's message. */
+async function roleStartReturn(
+  prisma: PrismaClient,
+  threadId: string,
+  started: { clientNonce: string | null; sourceRuns: Array<{ botId: string }> },
+) {
+  const askedId = started.clientNonce?.slice(ROLE_START_NONCE.length).split(":")[0];
+  const fromBotId = started.sourceRuns[0]?.botId;
+  if (!askedId || !fromBotId) return null;
+  const role = await prisma.thread.findUnique({
+    where: { id: threadId },
+    select: { spaceId: true, userId: true },
+  });
+  const asked = role
+    ? await prisma.message.findFirst({
+        where: {
+          id: askedId,
+          role: "user",
+          thread: {
+            spaceId: role.spaceId,
+            userId: role.userId,
+            groupId: { startsWith: "recruiting-global-" },
+          },
+        },
+        select: { threadId: true },
+      })
+    : null;
+  const bot = asked
+    ? await prisma.bot.findFirst({ where: { id: fromBotId }, select: { name: true } })
+    : null;
+  if (!asked || !bot) return null;
+  return {
+    fromBotId,
+    fromBotName: bot.name,
+    returnThreadId: asked.threadId,
+    intent: "request" as const,
+  };
 }
 
 /**

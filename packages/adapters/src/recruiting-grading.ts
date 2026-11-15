@@ -13,6 +13,8 @@ export { RECRUITING_GRADE_NONCE_PREFIX };
 export const RECRUITING_GRADE_SETTLE_MS = 30_000;
 /** A busy conversation is checked again this often, for at most this many tries (about 1 hour). */
 const BUSY_RETRY_MS = 30_000;
+/** A round held for the Reviewer is checked the moment its conversation is free. */
+const HELD_RETRY_MS = 3_000;
 const MAX_ATTEMPTS = 120;
 /** People per grading request. */
 export const GRADE_BATCH = 50;
@@ -34,10 +36,9 @@ export async function scheduleRecruitingGrading(
   jobs: Pick<JobPublisher, "enqueue">,
   threadId: string,
   now = Date.now(),
+  settleMs = RECRUITING_GRADE_SETTLE_MS,
 ): Promise<void> {
-  await jobs.enqueue(
-    recruitingGradeStartJob({ threadId }, new Date(now + RECRUITING_GRADE_SETTLE_MS)),
-  );
+  await jobs.enqueue(recruitingGradeStartJob({ threadId }, new Date(now + settleMs)));
 }
 
 /**
@@ -191,7 +192,7 @@ export function recruitingGradePrompt(
       `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements. You grade them yourself, from each person's full public profile.`,
       `First, in one step, read every person's full profile: one web_fetch per person below with maxChars ${SELF_GRADE_PAGE_CHARS}, all in parallel. Judge only from what each page shows; when a page can't be read, use the person's saved profile from recruiting_candidates.`,
       SELF_GRADE_RUBRIC,
-      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (each degree with school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "Then save every person's grade with one recruiting_research save_grades call (expectedRoleRevision is the role's current revision): name and linkedin_url exactly as listed below, current title, company, location, education (each degree with school, degree and dates), match_score 0 to 100, match_tier, fit_reasons naming the evidence, concerns, and requirements_assessment with every hard requirement and every preference by name as met, not_met or unknown and the profile words that show it. Keep every grade short, since the recruiter is waiting: the evidence is the few profile words that show it, one short fit reason, a concern only for what is not met. Between the reads and the save, call nothing else. End the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
       "",
       ...list,
     ].join("\n");
@@ -274,9 +275,12 @@ export async function startRecruitingGrading(
     select: { id: true },
   });
   if (busy) {
+    // The recruiter waits on a held round, so its check starts within seconds of the turn ending.
+    const held = (await roundUnderReview(deps.prisma, role.id, true))?.held;
+    const retry = held ? HELD_RETRY_MS : BUSY_RETRY_MS;
     if (attempt + 1 < MAX_ATTEMPTS)
       await deps.jobs.enqueue(
-        laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + BUSY_RETRY_MS),
+        laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + retry),
       );
     return skipped("busy");
   }
@@ -415,7 +419,7 @@ export async function startRecruitingGrading(
       return grade && NOT_FIT_TIERS.has(String(grade.tier)) ? [{ key, ...grade }] : [];
     });
     // A round held for the Reviewer is shown once it is checked, swapped or not.
-    if (misfits.length || review.held) {
+    if (review.held) {
       const latest = await deps.prisma.message.findFirst({
         where: { threadId: thread.id, role: "user" },
         orderBy: { seq: "desc" },
@@ -424,7 +428,7 @@ export async function startRecruitingGrading(
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
       const runId = await startLeadRun(deps, thread, clientNonce, async () =>
-        roundReviewPrompt(review.round.round, misfits, review.held),
+        roundReviewPrompt(review.round.round, misfits),
       );
       if (runId) {
         getLogger().info("recruiting.round.review", {
@@ -715,11 +719,9 @@ async function roundUnderReview(
   if (!round || round.approvedAt) return null;
   const recorded = await prisma.externalEffect.findUnique({
     where: { id: round.effectId },
-    select: { request: true },
+    select: { run: { select: { clientNonce: true } } },
   });
-  const held =
-    reviewer &&
-    roundHeldForReview(round.round, (recorded?.request as { corrects?: unknown } | null)?.corrects);
+  const held = reviewer && roundHeldForReview(round.round, recorded?.run?.clientNonce);
   const rows = await prisma.recruitingCandidateOccurrence.findMany({
     where: {
       roleId,
@@ -751,10 +753,10 @@ async function roundUnderReview(
 /**
  * A round recorded after the recruiter's feedback waits for the Reviewer before it is shown, so
  * the recruiter never sees people who break what they just said. The first round shows at once,
- * and so does a correction (corrects), which is the checked or swapped round itself.
+ * and so does the round the lead records after the check (its run carries the review nonce).
  */
-export function roundHeldForReview(round: number, corrects: unknown): boolean {
-  return round >= 2 && corrects !== true;
+export function roundHeldForReview(round: number, recordedByNonce: string | null | undefined) {
+  return round >= 2 && !recordedByNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX);
 }
 
 /** Whether this conversation's team has the Reviewer, who checks a held round. */
@@ -766,32 +768,21 @@ export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): 
   return !!thread && (await researchTeammate(prisma, thread))?.tool === "self";
 }
 
-/** The lead's turn that swaps out the round's people the Reviewer graded as not fitting. */
+/** The lead's turn that shows a held round once the Reviewer has checked it, swapping misfits first. */
 export function roundReviewPrompt(
   round: number,
   misfits: readonly (RoundGrade & { key: string })[],
-  held = false,
 ) {
-  if (held)
-    return [
-      `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:` : " Everyone in it fits."}`,
-      ...misfits.map((person) => {
-        const role = [person.title, person.company].filter(Boolean).join(" at ");
-        return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
-      }),
-      "",
-      misfits.length
-        ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). Replace exactly these people: one quick search for that many new people who fit every requirement, then record calibration_round with corrects: true, keeping the round's other people in order and adding the replacements; when fewer are found, record the ones found. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or the people replaced."
-        : "Show it now: record calibration_round with corrects: true and the same people in the same order, with their checks. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
-    ].join("\n");
   return [
-    `The Reviewer graded round ${round} from each person's full profile. ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:`,
+    `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:` : " Everyone in it fits."}`,
     ...misfits.map((person) => {
       const role = [person.title, person.company].filter(Boolean).join(" at ");
       return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
     }),
     "",
-    "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). Swap exactly these people out of the round the way a recruiter's turn-down of them is handled: one quick search for that many new people who fit every requirement, then record calibration_round with corrects: true, keeping the round's other people and adding the replacements; when fewer are found, record the ones found. Then post one short message to the recruiter naming who was replaced, each with the one-line reason, and the corrected round. Change no one else and ask no question.",
+    misfits.length
+      ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). Replace exactly these people: one quick search for that many new people who fit every requirement, then record calibration_round with corrects: true, keeping the round's other people in order and adding the replacements; when fewer are found, record the ones found. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or the people replaced."
+      : "Show it now: record calibration_round with corrects: true and the same people in the same order, with their checks. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }
 
