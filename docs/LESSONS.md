@@ -50,3 +50,6 @@ that repeats into the existing line instead of adding another.
   again. **Two writers of one reply repeat each other: make them one message (the answer takes
   the line's place) instead of instructing one about the other.**
 - A judge summary said a wrong-name email "was queued"; it had read a card the customer denied, and the report relayed it to the user as sent. Before reporting a send fault, read the transcript and the records for which card was approved; the judge ties send claims to the approved card and the records only.
+- One role ran 18 paid deeper searches in a row that each found nobody (about $10), because the
+  prompt said a short target is "never a reason to stop early" and nothing in code counted
+  results. **Every paid loop gets a stop in code on what it returned, not a sentence in a prompt.**

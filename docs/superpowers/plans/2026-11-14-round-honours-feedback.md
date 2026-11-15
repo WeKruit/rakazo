@@ -14,12 +14,12 @@ server-side reading of profiles and no rules engine.
 
 ## Mechanism
 
-1. **What the recruiter wants is the role's criteria.** Every stated constraint and every reason for
-   turning people down is saved as a role criterion. The agent does this with the existing
-   `recruiting_role` revise `criteria.upsert`, quoting the recruiter as its source.
-   Gate: a later `calibration_round` is refused while a turn-down or constraint recorded since the
-   last round (`recruiting_feedback`) has no role revision after it. That check is on state, not
-   wording.
+1. **What the recruiter wants is read, not saved.** The requirements are three things: the brief
+   fields in the recruiter's own words (`origin: user_instruction`), the role's hard criteria, and
+   every reason they turned people down (the recorded `recruiting_feedback` summary). Nothing has
+   to be saved first. On staging (11-15) roles carried no criteria at all, because their must-haves
+   lived only in the brief, and asking the agent to save criteria was refused nine times in one
+   turn. Saves are async and never block the round.
 2. **Each pick gets a verdict per hard criterion.** `calibration_round` takes
    `checks: { candidateKey: { criterionId: "shown" | "unknown" | "fails" } }` and drops the
    free-text `unverified`. The server refuses:
