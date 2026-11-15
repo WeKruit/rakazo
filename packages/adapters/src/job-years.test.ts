@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { intakeFields, jobStatesYears, settledFactAsked } from "./intake-open-fields.js";
+import {
+  describesRole,
+  intakeFields,
+  intakeFieldsNote,
+  jobStatesYears,
+  openFactAsked,
+  settledFactAsked,
+} from "./intake-open-fields.js";
 
 describe("jobStatesYears", () => {
   it("finds a stated years requirement", () => {
@@ -71,5 +78,26 @@ describe("settledFactAsked", () => {
     expect(
       settledFactAsked("Which peer companies should I target first?", seattle),
     ).toBeUndefined();
+  });
+});
+
+// 11-15 card tap 「先出前十个，再问」: search first; one open fact may be asked beside the ten.
+describe("search first, then ask", () => {
+  it("tells the first step to search with no question, even with facts open", () => {
+    const note = intakeFieldsNote("Backend engineer, Go, payments. $190k–$230k.");
+    expect(note).toContain("issue the calibration people searches now");
+    expect(note).toContain("After the ten are recorded");
+    expect(note).not.toContain("Ask the first clarifying question");
+  });
+
+  it("lets the one question beside the ten ask an open fact, not a settled one", () => {
+    const words = "Backend engineer in Austin, TX, Go, 5+ years";
+    expect(openFactAsked("Is this role onsite, hybrid or remote?", words)).toBe("location");
+    expect(openFactAsked("What years range should I target?", words)).toBeUndefined();
+  });
+
+  it("asks first only when the recruiter has not said what role it is", () => {
+    expect(describesRole("find me some people")).toBe(false);
+    expect(describesRole("Senior SRE, Austin TX onsite, 6+ years")).toBe(true);
   });
 });
