@@ -164,3 +164,8 @@ export async function feedbackNotYetCriteria(
     })
     .filter(Boolean);
 }
+
+/** What the agent sees, with the recorded round, about reasons that are not role criteria yet. */
+export function feedbackCriteriaToSave(reasons: string[]): string {
+  return `The recruiter turned people down since the last round, and these reasons are not role criteria yet: ${reasons.join("; ")}. In the brief save that comes next, also save each reason that says what the next people must show or must not be as a hard criterion (criteria.upsert, with its brief rule), quoting the recruiter, so the next round is held to it. The round is recorded either way: if that save is refused, carry on to the next step without it.`;
+}

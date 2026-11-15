@@ -166,7 +166,12 @@ export function ownRoleRevisions() {
       role.latest = Math.max(role.latest, to);
       roles.set(roleId, role);
     },
-    current(roleId: string | undefined, expected: unknown): unknown {
+    /**
+     * `saved` is the role's revision now: a newer one named is the agent taking a refused save of
+     * its own for done, not someone else's change, so the call acts on the saved revision.
+     */
+    current(roleId: string | undefined, expected: unknown, saved?: number): unknown {
+      if (typeof expected === "number" && saved !== undefined && expected > saved) return saved;
       const role = roleId ? roles.get(roleId) : undefined;
       return role &&
         typeof expected === "number" &&
