@@ -851,6 +851,7 @@ import {
   quotesMessage,
   restatesUpdate,
   withoutRepeatedClosing,
+  withoutRepastedDraft,
   sameWords,
   TurnReportLedger,
   turnReportText,
@@ -18536,8 +18537,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 )
                 .catch(() => []),
             );
-            if (closed !== text) {
-              text = closed;
+            // Gate e7805c70, change-mind: asked what changed, the reply pasted the email above again.
+            const shown = await deps.prisma.message
+              .findMany({
+                where: { threadId: thread.id, role: "bot", NOT: { runId } },
+                orderBy: { seq: "desc" },
+                take: 6,
+                select: { blocks: true },
+              })
+              .then((rows) =>
+                rows.map((row) =>
+                  (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
+                    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                    .join("\n"),
+                ),
+              )
+              .catch(() => []);
+            const pointed = withoutRepastedDraft(closed, shown, steeredText ?? askedNow);
+            if (pointed !== text) {
+              text = pointed;
               blocks = blocks.map((block) => (block.kind === "text" ? { ...block, text } : block));
             }
           }

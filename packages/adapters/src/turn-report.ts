@@ -715,6 +715,24 @@ export function repastedDraft(
   return { sentence: reply.slice(start.index).trim().slice(0, 120), note: REPASTED_DRAFT_NOTE };
 }
 
+/**
+ * The reply up to an email it pastes again unchanged, without the line introducing it
+ * (「以下是最终模板：」): the email is already shown above. A reply that is only the email stays.
+ */
+export function withoutRepastedDraft(
+  reply: string,
+  shown: readonly string[],
+  asked: string,
+): string {
+  if (!repastedDraft(reply, shown, asked)) return reply;
+  const lead = reply
+    .slice(0, DRAFT_START.exec(reply)?.index ?? 0)
+    .trimEnd()
+    .replace(/(?:^|(?<=[。！!.\n]))[^。！!.\n]*[:：]$/, "")
+    .trim();
+  return lead.length >= 6 ? lead : reply;
+}
+
 /** Model-facing: a template with [bracketed] blanks is written again with real details. */
 export const TEMPLATE_BLANKS_NOTE =
   "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
