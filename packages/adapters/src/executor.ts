@@ -7365,7 +7365,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !roleId ||
             !call.name.endsWith("recruiting_research") ||
             call.args.operation !== "calibration_round" ||
-            !Array.isArray(call.args.candidateKeys)
+            !Array.isArray(call.args.candidateKeys) ||
+            // A correction may name only the people it swaps in; streaming it showed "1 person
+            // this round" before the full ten replaced it (staging 11-15). It shows once, recorded.
+            call.args.corrects === true
           )
             return;
           // The last key may still be cut mid-word; the list leaves it out until it names one person.
