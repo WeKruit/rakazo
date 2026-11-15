@@ -953,3 +953,13 @@ async function researchTeammate(
 /** What the team does after recording a round that waits for the Reviewer. */
 export const ROUND_HELD_NEXT_STEP =
   "Recorded, not shown yet: after the recruiter's feedback the Reviewer first checks each of these people's full profile against it (about three minutes), and the checked round is shown in this chat then, with the next-step card. Save the brief as after any round (one recruiting_role update with brief.fields only), then end the turn with one short line in the recruiter's language saying the checked people come in a few minutes. Don't list anyone, ask nothing and show no card.";
+
+/** Whether a reply lists people: two or more distinct LinkedIn profiles. */
+export function listsPeople(text: string): boolean {
+  const profiles = new Set(
+    [...text.matchAll(/linkedin\.com\/in\/([^\s/)?#\]]+)/gi)].map((match) =>
+      (match[1] ?? "").toLowerCase(),
+    ),
+  );
+  return profiles.size >= 2;
+}
