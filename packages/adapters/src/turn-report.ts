@@ -867,6 +867,33 @@ export function lastOwnUpdate(rows: readonly HistoryRow[], botId: string): strin
   return undefined;
 }
 
+/** The reply's sentences with their end marks, in order. */
+const sentencesOf = (text: string) => text.match(/[^。！？!?\n]+(?:[。！？!?]+|\n+|$)/g) ?? [];
+
+/**
+ * The reply without a closing line this bot already ended an earlier reply on (gate 19bf5552:
+ * every answer ended 「发来职位描述…我就可以开始。」). A question, or a reply that is only that line,
+ * stays as it is.
+ */
+export function withoutRepeatedClosing(reply: string, earlier: readonly string[]): string {
+  const sentences = sentencesOf(reply.trimEnd());
+  const closing = sentences.at(-1)?.trim();
+  if (sentences.length < 2 || !closing || /[?？]/.test(closing)) return reply;
+  const said = earlier.flatMap((text) => sentencesOf(text).map((sentence) => sentence.trim()));
+  if (!said.some((sentence) => sameSentence(closing, sentence))) return reply;
+  const rest = sentences.slice(0, -1).join("").trimEnd();
+  return rest.length >= 20 ? rest : reply;
+}
+
+function sameSentence(a: string, b: string): boolean {
+  const x = words(a);
+  const y = words(b);
+  if (x.size < 4 || y.size < 4) return false;
+  let shared = 0;
+  for (const word of x) if (y.has(word)) shared += 1;
+  return shared / (x.size + y.size - shared) >= 0.6;
+}
+
 /** The same message again, apart from spacing. */
 export function sameWords(reply: string, earlier: string | undefined): boolean {
   const flat = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -889,7 +916,9 @@ export function restatesUpdate(reply: string, update: string | undefined): boole
 export function draftAskedBeforeShown(recruiterText: string, shown: string): boolean {
   return (
     asksForOutreach(recruiterText) &&
-    /写(?:一?[封个份])?(?:邮件|信|模板)|起草|模板|\b(?:write|draft)\s+(?:(?:me|up)\s+)?(?:an?\s+|the\s+)?(?:e-?mail|message|note|outreach|template)|\btemplate\b/i.test(recruiterText) &&
+    /写(?:一?[封个份])?(?:邮件|信|模板)|起草|模板|\b(?:write|draft)\s+(?:(?:me|up)\s+)?(?:an?\s+|the\s+)?(?:e-?mail|message|note|outreach|template)|\btemplate\b/i.test(
+      recruiterText,
+    ) &&
     !/回复|答复|回信|\brepl(?:y|ies)\b/i.test(recruiterText) &&
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );

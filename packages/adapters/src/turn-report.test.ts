@@ -8,6 +8,7 @@ import {
   REPORT_BEFORE_ASK,
   lastOwnUpdate,
   restatesUpdate,
+  withoutRepeatedClosing,
   readsOnly,
   CLAIMS_CARD_PENDING,
   retryReason,
@@ -598,6 +599,28 @@ describe("CLAIMS_CARD_PENDING", () => {
       true,
     );
     expect(CLAIMS_CARD_PENDING.test("初次联系邮件已发出，收件人仅为 Noah Test。")).toBe(false);
+  });
+});
+
+// Gate 19bf5552, progress-and-where: every answer ended with the same 「发来职位描述…」.
+describe("withoutRepeatedClosing", () => {
+  const earlier =
+    "目前没有已保存的岗位，也没有候选人搜索或其他进展记录。发来职位描述，或提供职位名称、地点和必备条件，我就可以开始。";
+  it("drops a closing line this bot already ended on", () => {
+    expect(
+      withoutRepeatedClosing(
+        "候选人和回复分别在左侧的「候选人」和「收件箱」里查看；目前还没有资料或回复可看。发来职位描述，或职位名称、地点和必备条件，我就可以开始。",
+        [earlier],
+      ),
+    ).toBe("候选人和回复分别在左侧的「候选人」和「收件箱」里查看；目前还没有资料或回复可看。");
+  });
+  it("keeps a new closing line, a question, and a reply that is only that line", () => {
+    const fresh = "候选人在左侧的「候选人」里。现在把职位描述发来即可。";
+    expect(withoutRepeatedClosing(fresh, [earlier])).toBe(fresh);
+    const asked = "草稿在上面。Wei 的邮箱是什么？";
+    expect(withoutRepeatedClosing(asked, ["我写好了草稿。Wei 的邮箱是什么？"])).toBe(asked);
+    const only = "发来职位描述，或提供职位名称、地点和必备条件，我就可以开始。";
+    expect(withoutRepeatedClosing(only, [earlier])).toBe(only);
   });
 });
 
