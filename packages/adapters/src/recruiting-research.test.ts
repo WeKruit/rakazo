@@ -278,13 +278,13 @@ describe("people-search agent runs", () => {
       settlePeopleSearch({ runId: "agent_run_held" }, "done", reply("running"));
       await expect(limit()).rejects.toThrow(/already running/);
       settlePeopleSearch({ runId: "agent_run_held" }, "done", reply("completed"));
-      vi.setSystemTime(new Date("2026-11-15T10:10:40Z"));
-      const retried = await limit();
-      expect(retried).toMatchObject({ numResults: 10 });
-      // A finished search keeps its share only while its people are saved.
-      settlePeopleSearch(retried, "done");
-      vi.setSystemTime(new Date("2026-11-15T10:11:20Z"));
-      await expect(limit()).resolves.toMatchObject({ numResults: 10 });
+      // Staging 14d33ed1: two searches of ten found 13 people between them; the next search,
+      // sent at once, gets the 7 left instead of being told the role is done.
+      const wave = [await limit(), await limit()];
+      for (const args of wave) settlePeopleSearch(args, "done");
+      db.recruitingCandidate.count.mockResolvedValue(13);
+      found(13);
+      await expect(limit()).resolves.toMatchObject({ numResults: 7 });
       // Later, 14 are saved from this request: 6 more at most, for a search or an agent run.
       vi.setSystemTime(new Date("2026-11-15T10:20:00Z"));
       db.recruitingCandidate.count.mockResolvedValue(14);
