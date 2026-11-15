@@ -341,6 +341,57 @@ async function earlierGradingRun(
   return undefined;
 }
 
+/**
+ * A deeper (metered) people-search run costs up to about a dollar and a half. When the role's
+ * last two deeper runs in the window together added fewer than this many new people, the market
+ * for the current requirements is used up and another run would pay again for nothing.
+ */
+export const DEEPER_SEARCH_MIN_NEW_PEOPLE = 5;
+const DEEPER_SEARCH_WINDOW_MS = 6 * 60 * 60 * 1000;
+/** A low-effort run is billed at about $0.025; anything at or above this was a deeper run. */
+const DEEPER_SEARCH_MIN_COST_USD = 0.1;
+
+/**
+ * Circuit breaker on paid deeper searches for one role: two deeper runs that added almost nobody
+ * stop further deeper runs until the role's requirements change or the window passes. Every agent
+ * (Main, Sourcer, a role team) goes through this one check, so no prompt can loop on it.
+ */
+async function requireDeeperSearchYield(prisma: PrismaClient, roleId: string): Promise<void> {
+  const since = new Date(Date.now() - DEEPER_SEARCH_WINDOW_MS);
+  const recent = await prisma.usageRecord.findMany({
+    where: {
+      roleId,
+      model: "agent_run",
+      unit: "credits",
+      costUsd: { gte: DEEPER_SEARCH_MIN_COST_USD },
+      createdAt: { gte: since },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+    take: 2,
+  });
+  if (recent.length < 2) return;
+  const from = recent[1]!.createdAt;
+  const changed = await prisma.recruitingRoleRevision.findFirst({
+    where: { roleId, createdAt: { gt: from } },
+    select: { id: true },
+  });
+  if (changed) return;
+  const seen = (observedAt: { gte: Date } | { lt: Date }) =>
+    prisma.recruitingCandidateOccurrence.findMany({
+      where: { roleId, page: { observedAt } },
+      select: { candidateKey: true },
+      distinct: ["candidateKey"],
+    });
+  const [after, before] = await Promise.all([seen({ gte: from }), seen({ lt: from })]);
+  const earlier = new Set(before.map(({ candidateKey }) => candidateKey));
+  const added = after.filter(({ candidateKey }) => !earlier.has(candidateKey)).length;
+  if (added >= DEEPER_SEARCH_MIN_NEW_PEOPLE) return;
+  throw new IsolationError(
+    `The last two deeper searches for this role added ${added} new ${added === 1 ? "person" : "people"} in total, so the market for these requirements is used up and another deeper search would pay for the same people again. Do not run another one or reword it. Tell the recruiter, in their language, how many people this role holds, which requirement rules out the most, and offer to loosen it or widen the area; once they change the requirements, a deeper search can run again.`,
+  );
+}
+
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -431,6 +482,7 @@ export async function prepareAgentRun(
   if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
+  if (metered) await requireDeeperSearchYield(prisma, roleId);
   const saved = await prisma.recruitingCandidate.findMany({
     where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
     select: { candidateKey: true },
