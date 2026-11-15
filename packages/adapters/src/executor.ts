@@ -638,6 +638,9 @@ import {
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   gradingTools,
+  hasRoundReviewer,
+  ROUND_HELD_NEXT_STEP,
+  roundHeldForReview,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
@@ -7451,7 +7454,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               request: { path: ["operation"], equals: "calibration_round" },
             },
             orderBy: { createdAt: "desc" },
-            select: { createdAt: true, result: true },
+            select: { createdAt: true, result: true, request: true },
             take: 20,
           });
           return rounds.find(
@@ -7463,6 +7466,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!thread.activeRecruitingRoleId) return undefined;
           const round = await roundRecordedThisRun();
           if (!round) return undefined;
+          // A round waiting for the Reviewer gets its card when the checked round is shown.
+          const number = (round.result as { round?: unknown } | null)?.round;
+          if (
+            typeof number === "number" &&
+            roundHeldForReview(number, (round.request as { corrects?: unknown } | null)?.corrects) &&
+            (await hasRoundReviewer(deps.prisma, thread.id).catch(() => false))
+          )
+            return undefined;
           const keys = (round.result as { candidateKeys?: unknown } | null)?.candidateKeys;
           return recruitingNextStepCard(
             turnLanguage === "zh",
@@ -12786,7 +12797,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const recorded = round as {
                   roleId?: unknown;
                   candidateKeys?: unknown;
+                  round?: unknown;
                 } | null;
+                // After the recruiter's feedback the Reviewer checks the round before it is shown.
+                const held =
+                  typeof recorded?.round === "number" &&
+                  roundHeldForReview(recorded.round, researchInput.data.corrects) &&
+                  (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
+                if (held) {
+                  await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
+                    getLogger().warn("recruiting grade schedule", { error: String(error) }),
+                  );
+                  return { ...(round as object), next: ROUND_HELD_NEXT_STEP };
+                }
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
                   // A stuck save never holds the turn: the model's own brief save and the
                   // next-step card wait for this one.

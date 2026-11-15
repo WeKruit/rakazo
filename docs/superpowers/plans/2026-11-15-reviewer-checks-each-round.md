@@ -40,3 +40,17 @@ workflow engine or schema.
 
 `us-recruiter-feedback-round` on staging: round 2 had 3/10 fit before. After the deploy, the
 corrected round should contain no one the Reviewer grades Partial.
+
+## Update: rounds after feedback wait for the check
+
+The 6868a8bf and 95185659 runs showed that a swap after the round is shown comes too late: the
+recruiter has already acted on the wrong people. A round recorded after feedback (round 2 on, not
+a `corrects` correction) is therefore held when the team has the Reviewer:
+
+- `calibration_round` records it, but does not post the list or the next-step card. It schedules
+  grading, and its `next` tells the team to save the brief and say in one line that the checked
+  people come in a few minutes.
+- Once every person in the round has a grade made with the feedback, the lead run either swaps
+  the misfits or, when everyone fits, records the same people with `corrects: true`. That
+  recording posts the list and the next-step card through the existing path.
+- Round 1 still shows at once, and a correction (`corrects`) is the checked round itself.
