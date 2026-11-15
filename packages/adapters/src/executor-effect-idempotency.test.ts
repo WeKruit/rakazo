@@ -6062,6 +6062,75 @@ describe("native recruiting assessment effect delivery", () => {
     },
   );
 
+  // Gate 493e9f2e, change-mind-mid-run: the recruiter changed the ask after Main handed off; its
+  // second handoff in the same run reported success but reused the first one's delivery.
+  it("hands off again for a message the recruiter sent while the turn ran", async () => {
+    vi.mocked(handoffToGroupBot).mockClear();
+    vi.mocked(handoffToGroupBot)
+      .mockResolvedValueOnce({ ok: true } as never)
+      .mockResolvedValueOnce({ ok: true } as never);
+    const f = fixture("handoff-after-steer");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: { findUnique: vi.fn(async () => null) },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-2",
+        messageId: "message-2",
+        text: "base改70-90万",
+        blocks: [{ kind: "text", text: "base改70-90万" }],
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const handoff = (message: string, executionId: string) =>
+        request.executeTool!("handoff_to_bot", { confirm_name: "Writer", message }, executionId);
+      await handoff("Write the template", "h1");
+      await request.claimSteering!([]);
+      await handoff("Change the base to 70-90万", "h2");
+      yield { type: "done" as const, text: "" };
+    });
+    await f.run();
+    const keys = vi.mocked(handoffToGroupBot).mock.calls.map(([, , , input]) => input.turnKey);
+    expect(keys).toEqual([undefined, "message-2"]);
+  });
+
+  it("answers a message the recruiter sent after the turn handed off", async () => {
+    vi.mocked(handoffToGroupBot).mockClear();
+    vi.mocked(handoffToGroupBot).mockResolvedValueOnce({ ok: true } as never);
+    const f = fixture("answer-after-steer");
+    Object.assign(f.thread, { groupId: "group-1" });
+    Object.assign(f.prisma, {
+      chatGroup: { findUnique: vi.fn(async () => null) },
+      chatGroupMember: { findMany: vi.fn(async () => []) },
+    });
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-3",
+        messageId: "message-3",
+        text: "一句话说下改了啥",
+        blocks: [{ kind: "text", text: "一句话说下改了啥" }],
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.executeTool!(
+        "handoff_to_bot",
+        { confirm_name: "Writer", message: "Write the template" },
+        "h1",
+      );
+      await request.claimSteering!([]);
+      yield { type: "done" as const, text: "薪资改成了70–90万，加了每周五远程。" };
+    });
+    await f.run();
+    expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("每周五远程");
+  });
+
   async function firstMessageRole(groupId: string, groupName: string | null) {
     const f = fixture(`first-message-${groupId}`);
     vi.mocked(executeRecruitingRoleTool).mockClear();

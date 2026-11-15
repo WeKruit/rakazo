@@ -149,6 +149,8 @@ async function runWithModel(
     newerBrief?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
     teammateResult?: string;
+    /** This bot's last text in the thread, from an earlier run, with no person writing since. */
+    ownLastText?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
     cardsAfterLine?: Array<{ runId: string; blocks: object[] }>;
     /** A message the run reads mid-turn, before the watch sees it unread. */
@@ -290,53 +292,63 @@ async function runWithModel(
       // The run's own replies so far: none until the model writes one.
       findMany: vi.fn(
         async (args: {
-          where?: { threadId?: string; runId?: string; role?: string };
+          where?: { threadId?: string; runId?: string; role?: string; NOT?: object };
           orderBy?: object;
           select?: { runId?: boolean };
           take?: number;
         }) =>
-          args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
-            ? // The thread's newest messages: what came after the first line, then the line.
-              [
-                ...(options.cardsAfterLine ?? []).map((card, index) => ({
-                  id: `card-${index}`,
+          options.ownLastText !== undefined && args.where?.NOT && args.take === 8
+            ? [
+                { role: "bot", botId: "bot-1", blocks: [{ kind: "handoff", report: "completed" }] },
+                { role: "bot", botId: "bot-main", blocks: [{ kind: "handoff", toBotId: "bot-1" }] },
+                {
                   role: "bot",
-                  ...card,
-                })),
-                ...(
-                  await Promise.all(
-                    prisma.message.create.mock.results.map((result) => result.value),
-                  )
-                )
-                  .map((message) => ({ runId: "run-1", role: "bot", ...message }))
-                  .reverse(),
-                ...(options.hiddenContinuation ? [hiddenRow] : []),
-                ...(options.ackFromEndedRun ? [endedRunAck] : []),
+                  botId: "bot-1",
+                  blocks: [{ kind: "text", text: options.ownLastText }],
+                },
               ]
-            : options.ackFromEndedRun && args.take === 4
-              ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
-              : options.replyAfterTurn && args.take === 8 && !args.select?.runId
-                ? [
-                    {
-                      role: "bot",
-                      blocks: [{ kind: "text", text: "I'm writing the template now." }],
-                    },
-                    { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
-                  ]
-                : options.teammateResult && args.take === 12
+            : args.take === 6 && args.select?.runId && !args.where?.runId && !args.where?.role
+              ? // The thread's newest messages: what came after the first line, then the line.
+                [
+                  ...(options.cardsAfterLine ?? []).map((card, index) => ({
+                    id: `card-${index}`,
+                    role: "bot",
+                    ...card,
+                  })),
+                  ...(
+                    await Promise.all(
+                      prisma.message.create.mock.results.map((result) => result.value),
+                    )
+                  )
+                    .map((message) => ({ runId: "run-1", role: "bot", ...message }))
+                    .reverse(),
+                  ...(options.hiddenContinuation ? [hiddenRow] : []),
+                  ...(options.ackFromEndedRun ? [endedRunAck] : []),
+                ]
+              : options.ackFromEndedRun && args.take === 4
+                ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
+                : options.replyAfterTurn && args.take === 8 && !args.select?.runId
                   ? [
                       {
                         role: "bot",
-                        botId: "bot-main",
-                        blocks: [{ kind: "text", text: options.teammateResult }],
+                        blocks: [{ kind: "text", text: "I'm writing the template now." }],
                       },
                       { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
                     ]
-                  : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-                    ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                    : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-                      ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                      : [],
+                  : options.teammateResult && args.take === 12
+                    ? [
+                        {
+                          role: "bot",
+                          botId: "bot-main",
+                          blocks: [{ kind: "text", text: options.teammateResult }],
+                        },
+                        { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                      ]
+                    : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                      ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                      : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+                        ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                        : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
@@ -731,6 +743,17 @@ describe("quick reply", () => {
     expect(finalizeRun).toHaveBeenCalledWith(expect.objectContaining({ blocks: [] }));
   });
 
+  // Gate 493e9f2e, one-off-email: 「连上之后草稿还在吗」 came in after 「发出去吧」, and its answer
+  // was judged against the send request, which sent a second Connect Gmail card.
+  it("judges the reply against the message the recruiter sent while the turn ran", async () => {
+    vi.mocked(planDeclineRetry).mockClear();
+    await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      claimed: { id: "steer-1", messageId: "message-2", text: "连上之后草稿还在吗" },
+      finalText: "草稿会保留。连接 Gmail 后会出现发送确认卡，按下“发送”才会发出。",
+    });
+    expect(vi.mocked(planDeclineRetry).mock.calls.at(-1)?.[1].request).toBe("连上之后草稿还在吗");
+  });
+
   // Gate b8850911: a role link opened mid-turn came between the first line and the answer.
   it("puts the answer in place of the first line after the run's own role link", async () => {
     const { prisma, finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
@@ -1115,6 +1138,20 @@ describe("handed-in stage", () => {
       sourceMessage: report,
       teammateResult: `\n\n${template}`,
       finalText: template,
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
+  });
+
+  // Gate 493e9f2e, change-mind-mid-run: Main handed the teammate a second brief for the same
+  // template, and the teammate posted the identical template again.
+  it("posts nothing that is the same as this bot's last message, with no one writing since", async () => {
+    const template =
+      "**Subject:** Staff Frontend Engineer opportunity in Beijing\n\nHi Wei,\n\nThe role is based in Beijing.\n\nBest,\nAlex Morgan";
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+      ownLastText: template,
+      finalText: `${template}\n`,
     });
     expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
   });

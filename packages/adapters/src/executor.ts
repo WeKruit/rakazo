@@ -827,6 +827,7 @@ import {
   readsOnly,
   lastOwnUpdate,
   restatesUpdate,
+  sameWords,
   TurnReportLedger,
   turnReportText,
 } from "./turn-report.js";
@@ -6516,6 +6517,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        // The person's newest message steered into this run: a handoff for it is a new delivery,
+        // not a replay of the handoff the run made before it arrived.
+        let steeredMessageId: string | undefined;
+        let steeredText: string | undefined;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
         // A reply-card tool ran this turn, so what the turn says about that card came from it.
@@ -14717,7 +14722,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 });
             }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
-              turnKey: nativeSources?.currentAnswer?.id,
+              turnKey: steeredMessageId ?? nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
               message: String(args.message ?? ""),
@@ -16971,6 +16976,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           recruitingSourceMessageId = humanSteering.messageId;
                           replyDiscardActive = false;
                         }
+                        const personSteering = steering.findLast(
+                          (item) => isHuman(item) && !item.internal,
+                        );
+                        if (personSteering) {
+                          steeredMessageId = personSteering.messageId;
+                          steeredText = personSteering.text;
+                        }
+                        // A new message from the person is this turn's to answer, whoever had the
+                        // request before it (gate 493e9f2e: its reply was dropped as handed off).
+                        if (freshHumanSteering && !freshHumanSteering.internal) handedOff = false;
                         // Replies follow the language of the recruiter's newest message, also when
                         // it arrives while the turn runs (an English JD, then 「远程也可以」).
                         const steeringLanguageNote = (text: string) => {
@@ -17746,6 +17761,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
+          // The person's newest message steered into the turn is what the reply answers; a
+          // teammate's handoff carries the request in its brief. Gate 493e9f2e: 「连上之后草稿还在吗」
+          // after 「发出去吧」 was judged against the send request and got a second Connect card.
+          const askedNow =
+            steeredText ??
+            turnRequestText(
+              currentTurnMessage,
+              handedIn
+                ? historyMessages.find((message) => message.id === run.sourceMessageId)
+                : undefined,
+              bot.id,
+            );
           // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
@@ -17754,17 +17781,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Once per turn: never again from that turn's own retry.
             !declinedRunId(run.clientNonce) &&
             !blocks.some((block) => block.kind === "ask")
-              ? unprovenReplyCardRetry(
-                  text,
-                  // A teammate's handoff in this conversation carries the request in its brief.
-                  turnRequestText(
-                    currentTurnMessage,
-                    handedIn
-                      ? historyMessages.find((message) => message.id === run.sourceMessageId)
-                      : undefined,
-                    bot.id,
-                  ),
-                )
+              ? unprovenReplyCardRetry(text, askedNow)
               : undefined) ??
             (turnReport.enabled &&
             !handedOff &&
@@ -17776,13 +17793,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   groupId: thread.groupId,
                   reply: text,
                   blocks,
-                  request: turnRequestText(
-                    currentTurnMessage,
-                    handedIn
-                      ? historyMessages.find((message) => message.id === run.sourceMessageId)
-                      : undefined,
-                    bot.id,
-                  ),
+                  request: askedNow,
                   tools,
                   worked: turnReport.worked(),
                   read: turnReport.read(),
@@ -17796,11 +17807,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   receipts: turnReport.receipts(),
                   ...(handedIn
                     ? {
-                        personRequest: turnRequestText(
-                          historyMessages.findLast((message) => message.role === "user"),
-                          undefined,
-                          bot.id,
-                        ),
+                        personRequest:
+                          steeredText ??
+                          turnRequestText(
+                            historyMessages.findLast((message) => message.role === "user"),
+                            undefined,
+                            bot.id,
+                          ),
                       }
                     : {}),
                   ...(contactLookupOwed
@@ -17862,16 +17875,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // went on in the background may have sent that update before it resumed, so the
           // run's last saved message counts too.
           // A teammate's report relayed after this bot already said the same adds nothing either,
-          // and neither does a second answer after a finished teammate's result.
-          if (
+          // and neither does a second answer after a finished teammate's result, nor the same
+          // text this bot already posted with no one writing since (gate 493e9f2e: a second brief
+          // for the same template, and the teammate posted it again word for word).
+          const textOnly =
             blocks.some((block) => block.kind === "text") &&
-            blocks.every((block) => block.kind === "text" || block.kind === "steps") &&
-            (run.trigger === "bot_message"
-              ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
-              : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
-                restatesUpdate(text, await lastRunMessageText()) ||
-                (await handbackAnswered(text)) ||
-                (await handbackSuperseded()))
+            blocks.every((block) => block.kind === "text" || block.kind === "steps");
+          const ownLast = textOnly ? await lastOwnReplyText() : undefined;
+          if (
+            textOnly &&
+            (sameWords(text, ownLast) ||
+              (run.trigger === "bot_message"
+                ? hideVendors && restatesUpdate(text, ownLast)
+                : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
+                  restatesUpdate(text, await lastRunMessageText()) ||
+                  (await handbackAnswered(text)) ||
+                  (await handbackSuperseded())))
           ) {
             text = "";
             blocks = [];
