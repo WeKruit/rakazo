@@ -316,36 +316,53 @@ export async function messageBot(
           crossThread && (intent === "request" || intent === "question")
             ? await teamWorkingFor(tx, { threadId: targetThreadId, returnThreadId: run.threadId })
             : null;
-        const task = await tx.task.create({
-          data: {
-            spaceId: run.spaceId,
-            botId: target.id,
-            threadId: targetThreadId,
-            userId: run.userId,
-            prompt: wakePrompt,
-            status: "queued",
-          },
-        });
-        const nextRun = await tx.run.create({
-          data: {
-            spaceId: run.spaceId,
-            botId: target.id,
-            threadId: targetThreadId,
-            taskId: task.id,
-            userId: run.userId,
-            status: "queued",
-            trigger: "bot_message",
-            sourceMessageId: inbound.id,
-          },
-          select: { id: true },
-        });
-        await tx.message.update({ where: { id: inbound.id }, data: { runId: nextRun.id } });
+        // Staging 11-15: "where are the new ones?" queued behind the round it asked about, then
+        // ran a second paid search after that round was shown. A request from the same
+        // conversation is steered into the team's running turn instead, like a person's message.
+        let targetRunId: string;
+        if (working) {
+          await tx.steeringMessage.create({
+            data: {
+              messageId: inbound.id,
+              botId: working.botId,
+              userId: run.userId,
+              runId: working.id,
+            },
+          });
+          targetRunId = working.id;
+        } else {
+          const task = await tx.task.create({
+            data: {
+              spaceId: run.spaceId,
+              botId: target.id,
+              threadId: targetThreadId,
+              userId: run.userId,
+              prompt: wakePrompt,
+              status: "queued",
+            },
+          });
+          const nextRun = await tx.run.create({
+            data: {
+              spaceId: run.spaceId,
+              botId: target.id,
+              threadId: targetThreadId,
+              taskId: task.id,
+              userId: run.userId,
+              status: "queued",
+              trigger: "bot_message",
+              sourceMessageId: inbound.id,
+            },
+            select: { id: true },
+          });
+          targetRunId = nextRun.id;
+        }
+        await tx.message.update({ where: { id: inbound.id }, data: { runId: targetRunId } });
         const inboundEvent = await appendEventInTransaction(tx, {
           spaceId: run.spaceId,
           threadId: targetThreadId,
-          botId: target.id,
+          botId: working?.botId ?? target.id,
           type: "thread.message.created",
-          runId: nextRun.id,
+          runId: targetRunId,
           payload: { messageId: inbound.id, role: "user", blocks: [inboundBlock] },
         });
         const outboundEvent = await appendEventInTransaction(tx, {
@@ -359,7 +376,7 @@ export async function messageBot(
         });
         return {
           ok: true as const,
-          runId: nextRun.id,
+          runId: targetRunId,
           targetEventSeq: inboundEvent.seq,
           senderEventSeq: outboundEvent.seq,
           working: Boolean(working),
@@ -387,10 +404,12 @@ export async function messageBot(
   await deps.events.notify(run.threadId, committed.senderEventSeq).catch((error) => {
     getLogger().error("bot message sender echo notification", error);
   });
-  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
-    // The queued run is durable; the job reconciler repairs a missed wake.
-    getLogger().error("bot message enqueue", error);
-  });
+  // A request steered into the team's running turn has no turn of its own to start.
+  if (!committed.working)
+    await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
+      // The queued run is durable; the job reconciler repairs a missed wake.
+      getLogger().error("bot message enqueue", error);
+    });
   const progress = committed.working
     ? await teamProgress(deps.prisma, {
         threadId: targetThreadId,
@@ -403,7 +422,7 @@ export async function messageBot(
     name: targetName,
     delivered: message,
     note: progress
-      ? `${progress.note} This message reaches the team when that work finishes; never say a new search began.`
+      ? `${progress.note} This message reaches that work now and is answered there; never say a new search began.`
       : `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
 }
@@ -412,7 +431,13 @@ export async function messageBot(
 export function teamWorkingFor(
   prisma: Pick<PrismaClient, "run">,
   input: { threadId: string; returnThreadId: string },
-): Promise<{ createdAt: Date; startedAt: Date | null; bot: { name: string } } | null> {
+): Promise<{
+  id: string;
+  botId: string;
+  createdAt: Date;
+  startedAt: Date | null;
+  bot: { name: string };
+} | null> {
   return prisma.run.findFirst({
     where: {
       threadId: input.threadId,
@@ -429,7 +454,13 @@ export function teamWorkingFor(
       },
     },
     orderBy: { createdAt: "asc" },
-    select: { createdAt: true, startedAt: true, bot: { select: { name: true } } },
+    select: {
+      id: true,
+      botId: true,
+      createdAt: true,
+      startedAt: true,
+      bot: { select: { name: true } },
+    },
   });
 }
 
