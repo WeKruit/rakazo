@@ -73,4 +73,12 @@ describe("asksForPeople", () => {
     for (const text of ["现在must-have有哪些", "What are the must-haves now?"])
       expect(asksForPeople(text)).toBe(false);
   });
+
+  // Staging 11-15: "一共找到多少人？" posted a one-person page under the answer "19".
+  it("takes a question about how many as a count, not a request to see people", () => {
+    for (const text of ["一共找到多少人？", "how many people so far?", "找到几个了"])
+      expect(asksForPeople(text)).toBe(false);
+    for (const text of ["多少人？给我看看名单", "how many? show me them"])
+      expect(asksForPeople(text)).toBe(true);
+  });
 });

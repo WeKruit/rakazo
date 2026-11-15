@@ -204,7 +204,7 @@ export function asksForOutreach(text: string): boolean {
  * p90). Only accounts with a credit balance are told, so the agent can say what a step costs.
  */
 export function creditEstimateNote(remaining: number): string {
-  return `This account pays with credits and has ${Math.floor(remaining).toLocaleString("en-US")} left. Typical use: a first round of ten people about 10 to 25 credits; each wider-search wave of about 25 more people about 100 to 170 (150 people about 600 to 1,000); about 80 to 160 per email address found; a chat reply about 1 to 6. When you offer or start a wider search or an email lookup, say in a few words about how many credits it will use (for example "about 600 credits" on the card option), and when that is more than what is left, say so and offer a smaller number instead. Never ask permission because of cost alone.`;
+  return `This account pays with credits and has ${Math.floor(remaining).toLocaleString("en-US")} left. Typical use: a first round of ten people about 10 to 25 credits; each wider-search wave of about 25 more people about 100 to 170 (150 people about 600 to 1,000); about 80 to 160 per email address found; a chat reply about 1 to 6. When you offer a wider search or an email lookup the recruiter has not asked for, say in a few words about how many credits it will use (for example "about 600 credits" on the card option), and when that is more than what is left, say so and offer a smaller number instead. A search or number the recruiter already asked for is started without a credit figure, unless it needs more than what is left. Never ask permission because of cost alone.`;
 }
 
 /** Added to a recruiting turn when the recruiter's latest message is Chinese. */
@@ -273,6 +273,12 @@ export function asksAboutThesePeople(text: string): boolean {
  * the answer.
  */
 export function asksForPeople(text: string): boolean {
+  // Staging 11-15: "一共找到多少人？" posted a one-person page under the answer "19".
+  if (
+    /多少|几(?:个|位|人)|how many|\bcount\b/i.test(text) &&
+    !/看|名单|列|谁|页|show|list|see|who|page/i.test(text)
+  )
+    return false;
   return /人|候选|名单|简历|名字|页|谁|新的|candidate|people|person|profile|resume|who|list|page|show|results|\bones\b|\bsee (?:them|the)\b/i.test(
     text,
   );
