@@ -7148,6 +7148,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           | undefined;
         // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
         let roundHeldThisTurn: Promise<boolean> | undefined;
+        // A round recorded and held this turn: the turn's own reply says only that it is coming.
+        let roundHeldRecorded = false;
         const roundHeld = (roleId: string) =>
           (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
             threadId: run.threadId,
@@ -12922,6 +12924,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   roundHeldForReview(recorded.round, run.clientNonce) &&
                   (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
                 if (held) {
+                  roundHeldRecorded = true;
                   // No settle wait: the check starts seconds after this turn ends.
                   await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch(
                     (error) =>
@@ -18243,6 +18246,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 redactBlocks(completionBlocks, runSecrets, hideVendors),
                 publishedMidTurnUserMessage || quietRun,
               );
+          // Staging 11-15: after holding round 2, the reply described its people and their grades
+          // before the check, so the recruiter read the round twice. It says only that it comes.
+          if (roundHeldRecorded && !handedOff)
+            blocks = [
+              {
+                kind: "text",
+                text:
+                  turnLanguage === "zh"
+                    ? "这一轮检查完后马上发给你，大约一两分钟。"
+                    : "The checked round comes in a minute or two.",
+              },
+            ];
           let text = handedOff
             ? ""
             : visible(
