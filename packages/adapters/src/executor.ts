@@ -7148,6 +7148,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           | undefined;
         // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
         let roundHeldThisTurn: Promise<boolean> | undefined;
+        // A round recorded and held this turn: the turn's own reply says only that it is coming.
+        let roundHeldRecorded = false;
         const roundHeld = (roleId: string) =>
           (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
             threadId: run.threadId,
@@ -7208,14 +7210,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // The recruiter sees each round once, already checked. Staging 11-15: asked "where's the
           // new batch?" while the team prepared round 2, Kruit listed six unreviewed people from
           // Results, then the round came with different people. While the team works, Kruit
-          // gets no rows to list, only the team's progress.
+          // gets no rows to list, only the team's progress; asked to see people meanwhile, it
+          // once declined with no time at all, so it says when the round comes.
           const working = await globalTeamProgress(args.roleId);
           const held = working ? null : await globalRoundAwaitingReview(args.roleId);
           if (working || held)
             return {
               items: [],
               total: page?.total,
-              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+              teamWorking: `${working?.note ?? `The team is checking round ${held} before it is shown.`} The next round is shown here once, already checked: never list, name or count people from Results before it comes. Asked to see people now, say in one line that the checked round arrives here in a minute or two; never just decline.`,
             };
           if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
@@ -12922,6 +12925,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   roundHeldForReview(recorded.round, run.clientNonce) &&
                   (await hasRoundReviewer(deps.prisma, run.threadId).catch(() => false));
                 if (held) {
+                  roundHeldRecorded = true;
                   // No settle wait: the check starts seconds after this turn ends.
                   await scheduleRecruitingGrading(deps.jobs, thread.id, Date.now(), 0).catch(
                     (error) =>
@@ -18243,6 +18247,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 redactBlocks(completionBlocks, runSecrets, hideVendors),
                 publishedMidTurnUserMessage || quietRun,
               );
+          // Staging 11-15: after holding round 2, the reply described its people and their grades
+          // before the check, so the recruiter read the round twice. It says only that it comes.
+          if (roundHeldRecorded && !handedOff)
+            blocks = [
+              {
+                kind: "text",
+                text:
+                  turnLanguage === "zh"
+                    ? "这一轮检查完后马上发给你，大约一两分钟。"
+                    : "The checked round comes in a minute or two.",
+              },
+            ];
           let text = handedOff
             ? ""
             : visible(
