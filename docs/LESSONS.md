@@ -82,3 +82,4 @@ that repeats into the existing line instead of adding another.
   sent together each saw an empty role (saves are async), and a guard read the role id from the
   thread loaded before the run saved the role. **A limit on a total is checked and reserved in
   one step at the shared boundary, and in-run state is read fresh, not from the run's snapshot.**
+- 11-15: #1381 held rounds after feedback, but the round's first picks and streamed round arguments still reached chat before the hold, so the recruiter saw two lists. Rule: a hold on showing something covers every path that posts it (streams, early picks), not only the final record.

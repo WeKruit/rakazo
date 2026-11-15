@@ -645,6 +645,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
   roundHeldForReview,
@@ -7118,6 +7119,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               posting: Promise<unknown>;
             }
           | undefined;
+        // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
+        let roundHeldThisTurn: Promise<boolean> | undefined;
+        const roundHeld = (roleId: string) =>
+          (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
+            threadId: run.threadId,
+            roleId,
+            clientNonce: run.clientNonce,
+          }).catch(() => false));
         let globalListSort: string | undefined;
         // People this turn already listed in Kruit's chat: a later page never lists them again.
         const globalListed = new Set<string>();
@@ -7309,6 +7318,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.shown = named.length;
           stream.posting = stream.posting
             .then(async () => {
+              if (await roundHeld(roleId)) return;
               const text = await recruitingRoundListText(deps.prisma, {
                 chinese: turnLanguage === "zh",
                 threadId: run.threadId,
@@ -8586,8 +8596,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
             const stream = roundStream;
             stream.shown = Math.max(stream.shown, keys.length);
-            stream.posting = stream.posting.then(() => showRoundList(text));
-            await stream.posting;
+            const held = await roundHeld(roleId);
+            if (!held) {
+              stream.posting = stream.posting.then(() => showRoundList(text));
+              await stream.posting;
+            }
             firstPicksShown = true;
             const late = lateSearchRows.splice(0);
             return {
@@ -8605,7 +8618,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (

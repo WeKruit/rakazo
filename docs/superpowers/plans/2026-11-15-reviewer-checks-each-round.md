@@ -67,3 +67,8 @@ after feedback, and the wait is cut instead:
   reads and the save. In the eec6adf0 run, about 90 of the check's ~130 seconds went to writing
   long grades and to lookups between the reads and the save.
 - Round 1 is still shown at once with the feedback question.
+
+The 808f4f31 run still showed two lists: the round's first picks (`show_picks`) and the streamed
+`calibration_round` arguments reached chat before the round was recorded and held. Neither now
+posts in a turn whose round will be held (a round exists, unapproved, the team has the Reviewer,
+and the turn is not the lead's run after the check).

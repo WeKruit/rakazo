@@ -13,6 +13,7 @@ const {
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   gradingTools,
+  nextRoundHeld,
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
@@ -257,6 +258,13 @@ describe("startRecruitingGrading", () => {
       }),
     });
     expect(promptOf(f)).toContain("Everyone in it fits.");
+    // Nothing of the next round streams into chat before the check, except in the lead's turn after it.
+    const held = (clientNonce: string | null) =>
+      nextRoundHeld(f.deps.prisma, { threadId: "thread", roleId: "role", clientNonce });
+    await expect(held(null)).resolves.toBe(true);
+    await expect(held(`${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}thread:said-last`)).resolves.toBe(
+      false,
+    );
     // Without the Reviewer nothing holds the round, so nothing is started for it.
     const solo = fixture({
       found: [person("fits")],
@@ -268,6 +276,9 @@ describe("startRecruitingGrading", () => {
     });
     await startRecruitingGrading(solo.deps, { threadId: "thread" }, now);
     expect(solo.runCreate).not.toHaveBeenCalled();
+    await expect(
+      nextRoundHeld(solo.deps.prisma, { threadId: "thread", roleId: "role", clientNonce: null }),
+    ).resolves.toBe(false);
   });
 
   it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {
