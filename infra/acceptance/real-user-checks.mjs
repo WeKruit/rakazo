@@ -130,6 +130,9 @@ export const botText = (message) =>
     .filter(Boolean)
     .join("\n");
 
+// A recruiter asking for a recap or a one-line summary of what changed.
+const RECAP = /一句话|总结|概括|说下改了|改了(什么|啥)|summari[sz]e|\brecap\b|what changed|in one line|tl;?dr/i;
+
 export function conversationChecks(messages) {
   const failures = [];
   const typed = messages
@@ -204,9 +207,17 @@ export function conversationChecks(messages) {
       .split("\n")
       .filter((line) => !/^\s*[-*•]\s/.test(line))
       .join("\n");
+    // The recap the recruiter asked for ("一句话说下改了什么") restates by design: only the first
+    // reply after that ask; a later or unasked repeat of the same sentence still fails.
+    const recap =
+      asked &&
+      RECAP.test(asked.text) &&
+      !messages.slice(messages.indexOf(asked) + 1, index).some((item) => item.text.trim());
     for (const sentence of sentences(listless)) {
       const again =
-        !quotesThem(sentence) && said.find((earlier) => similar(earlier, sentence) >= 0.8);
+        !recap &&
+        !quotesThem(sentence) &&
+        said.find((earlier) => similar(earlier, sentence) >= 0.8);
       if (again) failures.push(`repeats itself: "${sentence.slice(0, 80)}"`);
       said.push(sentence);
     }
