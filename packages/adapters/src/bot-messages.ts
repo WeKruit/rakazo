@@ -451,17 +451,24 @@ export function teamWorkingFor(
   return prisma.run.findFirst({
     where: {
       threadId: input.threadId,
-      trigger: "bot_message",
       status: { in: input.queued ? ["queued", "leased", "running"] : ["leased", "running"] },
-      sourceMessage: {
-        is: {
-          blocks: {
-            array_contains: [
-              { kind: "bot_message_received", returnThreadId: input.returnThreadId },
-            ],
+      OR: [
+        {
+          trigger: "bot_message",
+          sourceMessage: {
+            is: {
+              blocks: {
+                array_contains: [
+                  { kind: "bot_message_received", returnThreadId: input.returnThreadId },
+                ],
+              },
+            },
           },
         },
-      },
+        // Staging 11-15: a role opened from Kruit's chat ran its first round on the copy of the
+        // recruiter's words, and meanwhile Kruit listed seven unchecked people from Results.
+        { sourceMessage: { is: { clientNonce: { startsWith: ROLE_START_NONCE } } } },
+      ],
     },
     orderBy: { createdAt: "asc" },
     select: {
@@ -704,9 +711,13 @@ export async function returnDelegatedTeamOutcome(
   });
   let text = "";
   let round = "";
+  let answeredThere = false;
   for (const message of later) {
     const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
-    if (message.role === "user" && !botMessageContext(blocks)) break;
+    if (message.role === "user" && !botMessageContext(blocks)) {
+      answeredThere = true;
+      break;
+    }
     if (message.role !== "bot") continue;
     const reply = blocks
       .flatMap((block) => (block.kind === "text" ? [block.text] : []))
@@ -715,6 +726,9 @@ export async function returnDelegatedTeamOutcome(
     if (reply) text = reply;
     if (ROUND_HEADING.test(reply)) round = reply;
   }
+  // Staging 11-15: the recruiter answered the round in the role's chat, and nine minutes later
+  // it came back here and was shown as the new search. A round is seen once, where it was.
+  if (answeredThere && round) return;
   // Staging 11-14: only the team's closing line ("the next round has been posted") came back, so
   // Kruit could neither show the people nor say who has both must-haves. The round comes too.
   if (round && round !== text) text = `${text}\n\n${round}`;
