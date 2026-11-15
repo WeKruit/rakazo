@@ -5,6 +5,7 @@ import {
   listedBeforeRound,
   roundCriteria,
   roundListedNotRecorded,
+  roundPeopleNamed,
 } from "./recruiting-round-check.js";
 
 describe("checkRound", () => {
@@ -227,6 +228,44 @@ describe("roundListedNotRecorded", () => {
     findMany.mockResolvedValueOnce([]);
     await expect(
       roundListedNotRecorded(prisma, { roleId: "role-1", after: "2026-11-15T04:48:02Z" }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("roundPeopleNamed", () => {
+  const prismaFor = (text: string, approvedAt: Date | null = null) =>
+    ({
+      thread: { findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })) },
+      message: { findUnique: vi.fn(async () => ({ blocks: [{ kind: "text", text }] })) },
+      recruitingCalibrationRound: {
+        findFirst: vi.fn(async () => ({ round: 1, candidateKeys: ["a", "b", "c"], approvedAt })),
+      },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "a", name: "Ryan Braley" },
+          { candidateKey: "b", name: "Parthasarathi Samantaray" },
+          { candidateKey: "c", name: "Mohamed Hassan" },
+        ]),
+      },
+    }) as unknown as PrismaClient;
+  const input = { threadId: "thread", messageId: "message" };
+
+  // Staging play, 11-15: this message was recorded as accepting the round.
+  it("finds the people a mixed message turns down, by number or name", async () => {
+    await expect(
+      roundPeopleNamed(
+        prismaFor("#3 is off. parthasarathi is a technical architect. find me more like the rest"),
+        input,
+      ),
+    ).resolves.toEqual({ round: 1, named: ["Parthasarathi Samantaray", "Mohamed Hassan"] });
+  });
+
+  it("finds nobody in a plain request for more, or once the round is approved", async () => {
+    await expect(
+      roundPeopleNamed(prismaFor("these look right, find 20 more"), input),
+    ).resolves.toBeNull();
+    await expect(
+      roundPeopleNamed(prismaFor("ryan is off, find more", new Date()), input),
     ).resolves.toBeNull();
   });
 });
