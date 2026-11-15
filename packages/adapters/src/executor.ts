@@ -6664,6 +6664,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           return true;
         };
+        /**
+         * A card is the turn's answer, so it takes the place of the first line that stood in for
+         * it (gate 960ca37a: 「先发我职位描述…」, then a card asking the same). A connect card names
+         * only the service: there a written line stays and only the fixed one goes.
+         */
+        const cardTakesLinesPlace = async (fixedOnly: boolean) => {
+          const lineId = quickReplyMessageId;
+          if (!hideVendors || !lineId || lineFromTeammate) return;
+          const line = await deps.prisma.message.findUnique({
+            where: { id: lineId },
+            select: { botId: true, clientNonce: true, blocks: true },
+          });
+          const blocks = (Array.isArray(line?.blocks) ? line.blocks : []) as MessageBlock[];
+          const text = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
+          if (
+            !line ||
+            line.botId !== bot.id ||
+            line.clientNonce ||
+            !oneLineNote(text) ||
+            (fixedOnly && !isFixedAck(text)) ||
+            !(await lineIsLatestReply(lineId))
+          )
+            return;
+          await deps.prisma.message.delete({ where: { id: lineId } });
+          await deps.events.append({
+            spaceId: run.spaceId,
+            threadId: thread.id,
+            botId: bot.id,
+            runId,
+            type: "thread.message.deleted",
+            payload: { messageId: lineId },
+          });
+          quickReplyMessageId = undefined;
+        };
         const publishMidTurnNarration = async (nextTool?: string) => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
           // The server's continuation nudge echoed back is never for the recruiter.
@@ -6676,7 +6710,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (progressInOtherLanguage(written, turnLanguage) ||
               // Simulated 11-14: after the first line, "我现在为…起草…" before each step. The first
               // line already said what is happening; the next words are the answer.
-              (nextTool !== undefined && quickReplySaid !== undefined && oneLineNote(written)) ||
+              // A connect card carries only the service's name, so the line before it is the
+              // answer (gate 960ca37a: 「草稿还在吗」 got 「收到，马上处理。」 and a card, three times).
+              (nextTool !== undefined &&
+                nextTool !== "request_connection" &&
+                quickReplySaid !== undefined &&
+                oneLineNote(written)) ||
               unbackedClaim(written, turnReport.receipts()) !== undefined)
               ? ""
               : hideVendors && nextTool === "ask_user"
@@ -6799,6 +6838,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 leaseLost = true;
                 return;
               }
+              await cardTakesLinesPlace(true).catch((error) =>
+                getLogger().warn("first line kept beside the card", { error: String(error) }),
+              );
               await workspaceCheckpoint.flush();
               const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
@@ -17330,6 +17372,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
+              await cardTakesLinesPlace(false).catch((error) =>
+                getLogger().warn("first line kept beside the card", { error: String(error) }),
+              );
               if (
                 event.plannedSearches?.length &&
                 (firstRoundPending || linkRole || attachedJob || roleCreatedInTurn)
