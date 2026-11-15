@@ -152,6 +152,15 @@ describe("role saves in the background", () => {
     expect(revisions.current("role-2", 2)).toBe(2);
     expect(revisions.current(undefined, 2)).toBe(2);
   });
+
+  it("acts on the saved revision when the agent names one its failed save never made", () => {
+    const revisions = ownRoleRevisions();
+    // Staging 11-15: the criteria save was refused, the round named revision 4 and conflicted.
+    expect(revisions.current("role-1", 4, 3)).toBe(3);
+    expect(revisions.current("role-1", 3, 3)).toBe(3);
+    // An older revision is a real conflict with someone else's save.
+    expect(revisions.current("role-1", 2, 3)).toBe(2);
+  });
 });
 
 describe("preference retries", () => {

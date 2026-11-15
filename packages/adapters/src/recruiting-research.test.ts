@@ -70,6 +70,17 @@ describe("people-search agent runs", () => {
           { candidateKey: "email:someone" },
         ]),
       },
+      // The role's recent deeper runs, its requirement changes and who each search returned.
+      usageRecord: { findMany: vi.fn(async (): Promise<{ createdAt: Date }[]> => []) },
+      recruitingRoleRevision: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(
+          async ({ where }: { where: { page: { observedAt: { gte?: Date } } } }) =>
+            where.page.observedAt.gte
+              ? [{ candidateKey: "linkedin:/in/saved-person" }]
+              : [{ candidateKey: "linkedin:/in/saved-person" }],
+        ),
+      },
     };
   }
   const prepare = (db: ReturnType<typeof fixture>, args: Record<string, unknown>) =>
@@ -155,6 +166,46 @@ describe("people-search agent runs", () => {
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");
+  });
+
+  it("stops deeper searches for a role after two that added almost nobody", async () => {
+    const db = fixture();
+    const now = Date.now();
+    db.usageRecord.findMany.mockResolvedValue([
+      { createdAt: new Date(now - 60_000) },
+      { createdAt: new Date(now - 120_000) },
+    ]);
+    // Both runs only returned someone the role already had: nothing new, so the next one is refused.
+    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).rejects.toThrow(
+      /added 0 new people/,
+    );
+    expect(db.usageRecord.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ roleId: "role-1", model: "agent_run" }),
+        take: 2,
+      }),
+    );
+    // Quick low runs stay available: they cost cents and fill the round of ten.
+    await expect(prepare(db, { query: "Find 10 more", effort: "low" })).resolves.toMatchObject({
+      effort: "low",
+    });
+    // Once the recruiter changes the requirements, the market is new and a deeper run may go.
+    db.recruitingRoleRevision.findFirst.mockResolvedValueOnce({ id: "revision-2" });
+    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
+      effort: "auto",
+    });
+    // Runs that keep finding people keep going.
+    db.recruitingCandidateOccurrence.findMany.mockImplementation((async ({
+      where,
+    }: {
+      where: { page: { observedAt: { gte?: Date } } };
+    }) =>
+      where.page.observedAt.gte
+        ? Array.from({ length: 6 }, (_, index) => ({ candidateKey: `linkedin:/in/new-${index}` }))
+        : []) as never);
+    await expect(prepare(db, { query: "Find 10 more", effort: "auto" })).resolves.toMatchObject({
+      effort: "auto",
+    });
   });
 
   it("grades given people with the grade format and leaves them in", async () => {

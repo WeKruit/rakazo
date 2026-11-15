@@ -139,6 +139,12 @@ async function runWithModel(
     replyAfterTurn?: boolean;
     /** The thread's newest message is this bot's fixed line, posted by its run that ended. */
     ackFromEndedRun?: boolean;
+    /** That line's text, when it is a written line rather than the fixed one. */
+    endedRunLine?: string;
+    /** The server's hidden continuation prompt came after that line. */
+    hiddenContinuation?: boolean;
+    /** This bot handed the teammate a newer brief after the report this run answers. */
+    newerBrief?: boolean;
     /** The last message of the teammate that reported back, as its own latest posts return it. */
     teammateResult?: string;
     /** Messages this run posted after its first line, newest first, such as a role link. */
@@ -199,7 +205,15 @@ async function runWithModel(
     botId: "bot-1",
     runId: "run-0",
     role: "bot",
-    blocks: [{ kind: "text", text: "收到，马上处理。" }],
+    blocks: [{ kind: "text", text: options.endedRunLine ?? "收到，马上处理。" }],
+    createdAt: new Date(),
+  };
+  const hiddenRow = {
+    id: "continue-0",
+    runId: "run-0",
+    role: "user",
+    clientNonce: "autocontinue:run-0:decline",
+    blocks: [{ kind: "text", text: "Continue." }],
   };
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
@@ -292,46 +306,56 @@ async function runWithModel(
                 )
                   .map((message) => ({ runId: "run-1", role: "bot", ...message }))
                   .reverse(),
+                ...(options.hiddenContinuation ? [hiddenRow] : []),
                 ...(options.ackFromEndedRun ? [endedRunAck] : []),
               ]
-            : options.replyAfterTurn && args.take === 8 && !args.select?.runId
-              ? [
-                  {
-                    role: "bot",
-                    blocks: [{ kind: "text", text: "I'm writing the template now." }],
-                  },
-                  { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
-                ]
-              : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
-                ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
-                : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
-                  ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
-                  : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
-                    ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
-                    : [],
+            : options.ackFromEndedRun && args.take === 4
+              ? [...(options.hiddenContinuation ? [hiddenRow] : []), endedRunAck]
+              : options.replyAfterTurn && args.take === 8 && !args.select?.runId
+                ? [
+                    {
+                      role: "bot",
+                      blocks: [{ kind: "text", text: "I'm writing the template now." }],
+                    },
+                    { role: "user", blocks: [{ kind: "text", text: "Write a template" }] },
+                  ]
+                : options.teammateResult && (args.where as { botId?: string })?.botId === "bot-main"
+                  ? [{ blocks: [{ kind: "text", text: options.teammateResult }] }]
+                  : args.where?.threadId && !args.where.runId && args.where.role !== "bot"
+                    ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+                    : options.answeredElsewhere && args.where?.role === "bot" && !args.where.runId
+                      ? [{ blocks: [{ kind: "text", text: "好，这就处理。" }] }]
+                      : [],
       ),
       findUnique: vi.fn(async (args?: { where?: { id?: string } }) =>
         options.answeredElsewhere && args?.where?.id === "message-9"
           ? { createdAt: new Date(0) }
-          : null,
+          : options.newerBrief && args?.where?.id === options.sourceMessage?.id
+            ? { seq: options.sourceMessage?.seq }
+            : null,
       ),
       count: vi.fn(async () => 0),
       findFirst: vi.fn(
-        async (args?: { where?: { role?: string; id?: string }; orderBy?: object }) =>
-          args?.orderBy && !args.where?.role && !args.where?.id
-            ? // The thread's newest message: the last one this run posted.
-              options.cardsAfterLine?.length
-              ? { id: "card-0", ...options.cardsAfterLine[0] }
-              : (prisma.message.create.mock.results.at(-1)?.value ??
-                (options.ackFromEndedRun ? endedRunAck : null))
-            : args?.where?.role === "user" || args?.where?.id
-              ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
-                  (message: { role: string; id?: string }) =>
-                    message.role === "user" && (!args.where?.id || message.id === args.where.id),
-                ) ?? null)
-              : options.priorRoutineRun
-                ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
-                : null,
+        async (args?: {
+          where?: { role?: string; id?: string; seq?: object };
+          orderBy?: object;
+        }) =>
+          options.newerBrief && args?.where?.seq
+            ? { id: "brief-2" }
+            : args?.orderBy && !args.where?.role && !args.where?.id
+              ? // The thread's newest message: the last one this run posted.
+                options.cardsAfterLine?.length
+                ? { id: "card-0", ...options.cardsAfterLine[0] }
+                : (prisma.message.create.mock.results.at(-1)?.value ??
+                  (options.ackFromEndedRun ? endedRunAck : null))
+              : args?.where?.role === "user" || args?.where?.id
+                ? (historyMessages(options.sourceMessage ? [options.sourceMessage] : []).find(
+                    (message: { role: string; id?: string }) =>
+                      message.role === "user" && (!args.where?.id || message.id === args.where.id),
+                  ) ?? null)
+                : options.priorRoutineRun
+                  ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+                  : null,
       ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
       update: vi.fn(async ({ where, data }: { where: { id: string }; data: object }) => ({
@@ -1012,6 +1036,35 @@ describe("handed-in stage", () => {
         }),
       }),
     );
+  });
+
+  // Gate 01e9467c, first-timer-no-gmail: the run posted its first line and ended; the
+  // continuation the server gave it answered in a message of its own.
+  it("puts a continuation's answer in place of the line its run left", async () => {
+    const { prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      ackFromEndedRun: true,
+      endedRunLine: "我会说明不连接邮箱时能否直接发邮件。",
+      hiddenContinuation: true,
+      finalText: "需要连接 Gmail 才能给候选人发邮件。",
+    });
+    expect(prisma.message.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "ack-0" } }),
+    );
+  });
+
+  // Gate 01e9467c, change-mind-mid-run: the recruiter changed the ask, this bot handed the
+  // teammate the new brief, and its answer to the old stage's report was a third template.
+  it("posts nothing for a report this bot already handed a newer brief after", async () => {
+    const report = handoff("bot-1");
+    report.blocks[0] = { ...report.blocks[0], report: "completed" } as never;
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: report,
+      newerBrief: true,
+      finalText: "Here is the updated template, signed Alex Morgan.",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("Alex Morgan");
   });
 
   // Gate edfa2b9e, korean-recruiter-template: the teammate posted the template and reported

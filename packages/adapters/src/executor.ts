@@ -1366,6 +1366,8 @@ const ASK_DECLINES =
  */
 const SCHEDULING_PREPARE_NEXT_STEP =
   "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
+/** How recent a finished run's one-line reply must be for the next run's answer to take its place. */
+const LINE_TAKEOVER_MS = 120_000;
 const HANDOFF_STAGE_NOTE =
   "The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
 const HANDOFF_OPENING_NOTE = `A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. ${HANDOFF_STAGE_NOTE}`;
@@ -5476,14 +5478,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
           : userTurnMessageForRun(run.trigger, runId, historyMessages, run.sourceMessageId);
         const turnBlocks = currentTurnMessage?.blocks;
         // Gate edfa2b9e: a run that ended just as the person wrote posted 「收到，马上处理。」 and left
-        // the message to this run. That line is this run's first line: its answer takes its place.
+        // the message to this run. Gate 01e9467c: a run posted its first line and ended, and the
+        // continuation it was given answered; a teammate's result relayed after a status line said
+        // the same twice. That line, still the newest, is this run's own: its answer takes its place.
         if (run.trigger !== "user" && !quickReplyMessageId) {
           try {
-            const newest = await deps.prisma.message.findFirst({
+            const recent = await deps.prisma.message.findMany({
               where: { threadId: thread.id },
               orderBy: { seq: "desc" },
-              select: { id: true, botId: true, runId: true, role: true, blocks: true },
+              take: 4,
+              select: {
+                id: true,
+                botId: true,
+                runId: true,
+                role: true,
+                blocks: true,
+                clientNonce: true,
+                createdAt: true,
+              },
             });
+            const newest = recent.find(
+              (message) => !message.clientNonce?.startsWith("autocontinue:"),
+            );
             const blocks = (Array.isArray(newest?.blocks) ? newest.blocks : []) as MessageBlock[];
             const line = blocks.length === 1 && blocks[0]!.kind === "text" ? blocks[0]!.text : "";
             if (
@@ -5491,7 +5507,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               newest.role === "bot" &&
               newest.runId &&
               newest.runId !== runId &&
-              isFixedAck(line)
+              (isFixedAck(line) ||
+                (oneLineNote(line) &&
+                  !/[?？]\s*$/.test(line) &&
+                  Date.now() - new Date(newest.createdAt).getTime() < LINE_TAKEOVER_MS))
             ) {
               const owner = await deps.prisma.run.findUnique({
                 where: { id: newest.runId },
@@ -6556,22 +6575,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             where: { threadId: thread.id },
             orderBy: { createdAt: "desc" },
             take: 6,
-            select: { id: true, runId: true, role: true, blocks: true },
+            select: { id: true, runId: true, role: true, blocks: true, clientNonce: true },
           });
           const at = recent.findIndex((message) => message.id === lineId);
           return (
             at >= 0 &&
-            recent
-              .slice(0, at)
-              .every(
-                (message) =>
-                  message.runId === runId &&
+            recent.slice(0, at).every(
+              (message) =>
+                // The server's continuation prompt is hidden: the person never sees it.
+                message.clientNonce?.startsWith("autocontinue:") ||
+                (message.runId === runId &&
                   message.role === "bot" &&
                   Array.isArray(message.blocks) &&
                   (message.blocks as MessageBlock[]).every(
                     (block) => block.kind === "role_link" || block.kind === "steps",
-                  ),
-              )
+                  )),
+            )
           );
         };
         /** Writes the run's newest reply into its earlier one, so the person reads one message. */
@@ -7338,6 +7357,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           }
         };
+        /**
+         * Gate 01e9467c: the recruiter changed the ask while the teammate worked, and this bot
+         * already handed it the new brief. The finished report is for the old one: the new stage
+         * answers.
+         */
+        const handbackSuperseded = async () => {
+          if (!handback || !run.sourceMessageId) return false;
+          try {
+            const report = await deps.prisma.message.findUnique({
+              where: { id: run.sourceMessageId },
+              select: { seq: true },
+            });
+            if (!report) return false;
+            const newer = await deps.prisma.message.findFirst({
+              where: {
+                threadId: thread.id,
+                botId: bot.id,
+                seq: { gt: report.seq },
+                blocks: { array_contains: [{ kind: "handoff", toBotId: handback.fromBotId }] },
+              },
+              select: { id: true },
+            });
+            return Boolean(newer);
+          } catch {
+            return false;
+          }
+        };
         /** The result a finished teammate posted just before its report: what the report points to. */
         const handbackResultText = async () => {
           if (!handback) return undefined;
@@ -7944,7 +7990,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               );
             const roleId =
               typeof args.roleId === "string" ? args.roleId : thread.activeRecruitingRoleId;
-            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey]);
+            const saved =
+              roleId && typeof args[revisionKey] === "number"
+                ? await Promise.resolve()
+                    .then(() =>
+                      deps.prisma.recruitingRole.findFirst({
+                        where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+                        select: { revision: true },
+                      }),
+                    )
+                    // Unread, the call keeps the revision it names, as before.
+                    .then(
+                      (role) => role?.revision ?? undefined,
+                      () => undefined,
+                    )
+                : undefined;
+            const current = roleRevisions.current(roleId ?? undefined, args[revisionKey], saved);
             if (current !== args[revisionKey]) args = { ...args, [revisionKey]: current };
           }
           // A brief save whose intent is missing or not copied from the recruiter's current
@@ -17782,7 +17843,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? hideVendors && restatesUpdate(text, await lastOwnReplyText())
               : restatesUpdate(text, midTurnUserTexts.at(-1)) ||
                 restatesUpdate(text, await lastRunMessageText()) ||
-                restatesUpdate(text, await handbackResultText()))
+                restatesUpdate(text, await handbackResultText()) ||
+                (await handbackSuperseded()))
           ) {
             text = "";
             blocks = [];
