@@ -428,7 +428,7 @@ export async function startRecruitingGrading(
       // Once per recruiter message, so the corrected round is never corrected again on its own.
       const clientNonce = `${RECRUITING_ROUND_REVIEW_NONCE_PREFIX}${thread.id}:${latest?.id ?? review.round.id}`;
       const runId = await startLeadRun(deps, thread, clientNonce, async () =>
-        roundReviewPrompt(review.round.round, misfits),
+        roundReviewPrompt(review.round.round, misfits, review.round.candidateKeys.length),
       );
       if (runId) {
         getLogger().info("recruiting.round.review", {
@@ -820,7 +820,11 @@ export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): 
 export function roundReviewPrompt(
   round: number,
   misfits: readonly (RoundGrade & { key: string })[],
+  size = 10,
 ) {
+  // Staging 11-15: two misfits swapped out with no replacement found left a round of 8, and the
+  // recruiter's "only 8?" brought a second list. The checked round is filled to ten first.
+  const open = misfits.length + Math.max(0, 10 - size);
   return [
     `The Reviewer has checked round ${round} from each person's full profile; the recruiter has not seen it yet.${misfits.length ? ` ${misfits.length === 1 ? "This person doesn't" : `These ${misfits.length} people don't`} fit what the recruiter asked for:` : " Everyone in it fits."}`,
     ...misfits.map((person) => {
@@ -828,8 +832,8 @@ export function roundReviewPrompt(
       return `- ${person.name ?? person.key}${role ? `, ${role}` : ""}: ${String(person.tier)} (candidateKey ${person.key})`;
     }),
     "",
-    misfits.length
-      ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). Replace exactly these people: one quick search for that many new people who fit every requirement, then record calibration_round with corrects: true, keeping the round's other people in order and adding the replacements; when fewer are found, record the ones found. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or the people replaced."
+    open
+      ? `${misfits.length ? "Read their concerns and requirement verdicts with recruiting_candidates sources (by candidateKey). " : ""}Fill ${open} ${open === 1 ? "place" : "places"} so the round shows ten${misfits.length ? ", replacing exactly these people" : ""}: first saved people no round has shown who fit every requirement (recruiting_candidates list), then one quick search for the rest, and one more differently worded search only if places are still open. Record calibration_round with corrects: true, keeping the round's other people in order and adding the new ones; fewer than ten only after both searches. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check or anyone replaced.`
       : "Show it now: record calibration_round with corrects: true and the same people in the same order, with their checks. Recording it shows the round to the recruiter; then follow its next step. Don't mention the check.",
   ].join("\n");
 }
