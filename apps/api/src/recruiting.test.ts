@@ -5265,19 +5265,6 @@ describe("live CRM browser reads", () => {
       expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
         false,
       );
-      Object.assign(f.mockPrisma, { run: { findFirst: vi.fn(async () => null) } });
-      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-      expect(setup.items).toContainEqual({
-        key: "campaign",
-        state: "unavailable",
-        label: "Select an existing campaign in Sequence",
-      });
-      expect(
-        setup.items
-          .filter((item) => item.key === "campaign" || item.key === "sender")
-          .every((item) => !item.action),
-      ).toBe(true);
-      expect(JSON.stringify(setup)).not.toContain("not connected");
     } else if (mode === "wrong-selected" || mode === "revoked") {
       await expect(
         api.getRecruitingRoleCampaign(f.deps, actor, target, selection),
@@ -7534,17 +7521,6 @@ describe("role campaign read", () => {
       expect(output.status).toBe("ready");
       expect(output.campaign?.id).toBe(CAMPAIGN);
       expect(output.leadsComplete).toBe(kind === "empty");
-      if (kind !== "empty") {
-        const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-        expect(setup.items.find((item) => item.key === "leads")).toEqual({
-          key: "leads",
-          state: "unavailable",
-          label: "Recipient count unavailable",
-        });
-        expect(setup.items.find((item) => item.key === "campaign")?.detail).not.toHaveProperty(
-          "leadCount",
-        );
-      }
     },
   );
 
@@ -7561,143 +7537,16 @@ describe("role campaign read", () => {
     }
   });
 
-  it("role setup reports a bound campaign, its sender and leads as ready", async () => {
+  it("role setup reads only the saved playbook stage, never a connector", async () => {
     const f = fixture({
       spaceId: actor.spaceId,
       status: "completed",
-      result: {
-        campaignId: CAMPAIGN,
-        campaignName: "Staff [role]",
-        eaccount: "team@example.test",
-        leads: {},
-      },
+      result: { campaignId: CAMPAIGN, campaignName: "Staff [role]", leads: {} },
     });
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup).toEqual({
-      ready: true,
-      playbookStage: { stage: "intake", label: "Role setup", nextStep: null },
-      attention: null,
-      items: [
-        {
-          key: "campaign",
-          state: "ready",
-          label: "Staff [role]",
-          detail: { id: CAMPAIGN, name: "Staff [role]", status: 1, leadCount: 2 },
-        },
-        {
-          key: "sender",
-          state: "ready",
-          label: "team@example.test",
-          detail: { email: "team@example.test" },
-        },
-        {
-          key: "crm",
-          state: "missing",
-          label: "Role record not linked yet",
-          action: { kind: "ask_agent", prompt: expect.any(String) },
-        },
-        { key: "leads", state: "ready", label: "2 recipients", detail: { count: 2 } },
-      ],
-    });
-    for (const item of setup.items)
-      expect(
-        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
-      ).not.toMatch(/crm|campaign|lead/i);
-  });
-
-  it("role setup without a campaign is not ready and points each gap at the agent", async () => {
-    const f = fixture(null);
-    (
-      f.deps.prisma as unknown as { externalEffect: Record<string, unknown> }
-    ).externalEffect.findFirst = vi.fn(async () => ({ result: { eaccount: "last@example.test" } }));
-    vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce({
-      role: { id: "role" },
-      crmTarget: {
-        bindingEffectId: "b1",
-        target: { organizationId: "org-1", clientLabel: "Acme", roleLabel: "Staff Engineer" },
-      },
-    } as never);
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup.ready).toBe(false);
-    expect(setup.items.map((item) => [item.key, item.state, item.action?.kind])).toEqual([
-      ["campaign", "missing", "ask_agent"],
-      ["sender", "ready", undefined],
-      ["crm", "ready", undefined],
-      ["leads", "missing", "ask_agent"],
-    ]);
-    for (const item of setup.items)
-      expect(
-        `${item.label} ${item.action?.kind === "ask_agent" ? item.action.prompt : ""}`,
-      ).not.toMatch(/crm|campaign|lead/i);
-    expect(setup.items[1]).toMatchObject({ detail: { email: "last@example.test" } });
-    expect(setup.items[2]).toMatchObject({
-      detail: { orgId: "org-1", roleLabel: "Staff Engineer" },
+    expect(await api.getRecruitingRoleSetup(f.deps.prisma, actor, target)).toEqual({
+      playbookStage: { stage: "intake", next: null },
     });
     expect(f.calls).toEqual([]);
-  });
-
-  it.each(["approval", "question"] as const)(
-    "role setup surfaces the waiting %s card of the role's conversation",
-    async (kind) => {
-      const f = fixture(null);
-      const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-      const at = new Date("2026-10-23T10:00:00.000Z");
-      prisma.run.findFirst = vi.fn(async () => ({
-        id: "run-9",
-        threadId: "role-thread",
-        createdAt: at,
-      }));
-      prisma.message.findFirst = vi.fn(async () => ({
-        id: "msg-ask",
-        createdAt: at,
-        blocks: [
-          {
-            kind: "ask",
-            text: "Confirm the role requirements",
-            status: "pending",
-            ...(kind === "approval" ? { approvalEffectId: "approval-effect" } : {}),
-          },
-        ],
-      }));
-      prisma.externalEffect.findFirst = vi.fn(async () => null);
-      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-      expect(setup.attention).toEqual({
-        kind,
-        threadId: "role-thread",
-        cardId: "msg-ask",
-        createdAt: at.toISOString(),
-      });
-      expect(prisma.run.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            status: "waiting_input",
-            thread: expect.objectContaining({ activeRecruitingRoleId: "role" }),
-          }),
-        }),
-      );
-      expect(prisma.message.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ runId: "run-9", role: "bot" }),
-        }),
-      );
-    },
-  );
-
-  it("role setup marks campaign and sender unavailable when Instantly is not assigned", async () => {
-    const f = fixture(null);
-    const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    prisma.botMcpServer.findFirst = vi.fn(async () => null);
-    prisma.mcpServer = { findFirst: vi.fn(async () => ({ id: "instantly" })) };
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup.ready).toBe(false);
-    expect(setup.items.slice(0, 2)).toEqual([
-      expect.objectContaining({
-        key: "campaign",
-        state: "unavailable",
-        action: { kind: "connect", serverId: "instantly" },
-      }),
-      expect.objectContaining({ key: "sender", state: "unavailable" }),
-    ]);
   });
 });
 

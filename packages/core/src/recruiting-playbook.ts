@@ -1,4 +1,8 @@
-import type { RecruitingBriefDraft, RecruitingRoleRevision } from "@rakazo/contracts";
+import type {
+  RecruitingBriefDraft,
+  RecruitingPlaybookNext,
+  RecruitingRoleRevision,
+} from "@rakazo/contracts";
 
 export class RecruitingPlaybookValidationError extends Error {}
 
@@ -279,20 +283,6 @@ export const RECRUITING_PLAYBOOK_STAGES = [
 ] as const;
 export type RecruitingPlaybookStage = (typeof RECRUITING_PLAYBOOK_STAGES)[number];
 
-export const recruitingPlaybookStageLabels = {
-  intake: "Role setup",
-  calibration_10: "First 10 people",
-  feedback: "Your feedback",
-  scale: "Wider search",
-  enrichment: "Finding emails",
-  outreach: "Outreach",
-  replies: "Candidate replies",
-  screening: "Screening",
-  submission: "Submission",
-  interview: "Interview",
-  closed: "Closed",
-} as const satisfies Record<RecruitingPlaybookStage, string>;
-
 export function isRecruitingPlaybookStage(value: unknown): value is RecruitingPlaybookStage {
   return (RECRUITING_PLAYBOOK_STAGES as readonly unknown[]).includes(value);
 }
@@ -317,7 +307,9 @@ export type RecruitingPlaybookRoleFacts = {
 
 export type RecruitingPlaybookStep = {
   stage: RecruitingPlaybookStage;
+  /** The agent's wording; screens word `next` in their own language. */
   label: string;
+  next: RecruitingPlaybookNext;
   prompt: string;
   /** Set when the step exists only to ask the recruiter's open clarifications. */
   openClarifications?: number;
@@ -342,6 +334,7 @@ export function nextPlaybookStep(
     return {
       stage,
       label: `${open} open ${open === 1 ? "question" : "questions"} to confirm`,
+      next: { step: "questions", count: open },
       prompt:
         "Ask the recruiter all remaining open questions at once on one card. Do not end after only saving answers. Do not stop until every question has been asked.",
       openClarifications: open,
@@ -352,11 +345,13 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "Find the first 10 people",
+            next: { step: "find_first_10", count: CALIBRATION_TARGET },
             prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → pick ${CALIBRATION_TARGET} people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
           }
         : {
             stage,
             label: "Complete the role details",
+            next: { step: "brief" },
             prompt:
               "If information that would change who to search for is still missing from the material, ask only the next question (one at a time). Otherwise, in the next step of this turn, issue the calibration people searches right away (each result appears in the results automatically), then pick 10 people and record the round. The system saves the brief after the list appears, so do not save or confirm it yourself. If people are already saved in the results, do not search again; pick from them.",
           };
@@ -365,6 +360,7 @@ export function nextPlaybookStep(
       return {
         stage,
         label: remaining ? `Finding ${remaining} more of the first 10` : "Show the first 10 people",
+        next: remaining ? { step: "find_first_10", count: remaining } : { step: "show_first_10" },
         prompt: remaining
           ? `Run the calibration quick search with people data search until ${CALIBRATION_TARGET} people are saved (now ${facts.savedCandidates}), then record the round (the list is posted in chat automatically). ${ONLY_OWN_LIST}`
           : `Pick 10 of the saved people and record them as this round (recruiting_research calibration_round), shown in the Results calibration panel. Search again only when fewer than ten saved people fit the role's hard requirements such as its location: then run four new, differently worded people searches together in one step and record the ten from all saved people; if fewer than ten fit even then, record everyone who fits, even fewer than ten; the next-step card offers a deeper search, which runs only when the recruiter asks. The panel already has per-person feedback controls, so do not build a separate per-person rating card. ${NEXT_STEP_CARD}Let the recruiter give feedback once on anyone, any subset or the overall direction; do not require a rating for every person.`,
@@ -374,12 +370,14 @@ export function nextPlaybookStep(
       return {
         stage,
         label: "Review the first 10 people",
+        next: { step: "review_first_10" },
         prompt: `${facts.hasBrief ? "" : "The brief is not saved yet: first save the JD and the recruiter's answers as the brief with one recruiting_role update (if it fails, fix it once from the error and save again, then carry on either way; a failed save never holds up the round, and a search that already returned is never repeated). "}Read the recruiter's latest message first. If it asks to find more or similar people, widen the search or just start (for example "find 100", "just search", "no need to confirm", or picking find-more on the next-step card), that accepts this round: record it now with recruiting_feedback (target round, operation approve, quoting their words), then start scaling in this turn by the scale rules. Do not run another calibration round or ask for confirmation again. Otherwise, record this round's feedback with recruiting_feedback, quoting their words (people they named go in candidate review with their keys; a changed search direction goes in round scope); it saves in the background, so never wait on it or stop over it. In the same turn fold all feedback into the next quick search (same brief plus the feedback, worded differently, excluding everyone already returned for this role), save_search, pick 10 new people, record them as the next round, and say what changed. ${NEXT_STEP_CARD}Comments on individual people are not acceptance. Rejecting some of this round's people or changing the search direction is feedback for the next round, not acceptance, even if they also say "find more people like …". When there is no new feedback, do not ask again.`,
       };
     case "scale":
       return {
         stage,
         label: "Wider search",
+        next: { step: "scale" },
         prompt:
           "This round is accepted, so widen the search. First scale up yourself with people search in batches: each batch runs 4 differently worded web_search_advanced_exa people searches in parallel in one step, then save_search in the next step. Every query carries every hard requirement, a required language included. Do not read or rank people between batches. Continue until peopleInResults, the role's total returned with each search, reaches the target count (default 100) or a batch adds fewer than 5 new people. Then use message_user to say in two or three sentences how many people are in the results and whether a deep search is still running. Only if people search cannot reach the target, hand off once at the end (your reply after it is not shown): give the sourcing colleague the remaining count for a deep search, with the confirmed brief and every round's feedback, excluding people already returned. If the target is reached, do not hand off and do not run a deep search. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };
@@ -387,6 +385,7 @@ export function nextPlaybookStep(
       return {
         stage,
         label: "Find candidate contact details",
+        next: { step: "enrichment" },
         prompt:
           "Find contact details for the shortlisted candidates, then report how many can be reached.",
       };
@@ -394,6 +393,7 @@ export function nextPlaybookStep(
       return {
         stage,
         label: "Prepare outreach",
+        next: { step: "outreach" },
         prompt:
           "Prepare the outreach sequence and recipient list, and ask the recruiter to confirm sending.",
       };
@@ -401,6 +401,7 @@ export function nextPlaybookStep(
       return {
         stage,
         label: "Handle candidate replies",
+        next: { step: "replies" },
         prompt:
           "Summarize new replies and suggest the next step for each (schedule, follow up or close).",
       };

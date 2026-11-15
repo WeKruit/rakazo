@@ -69,8 +69,9 @@ export function CalibrationRoundView({
   return (
     <section aria-label={t`Calibration round`} className="space-y-3 text-sm">
       <h2 className="text-base font-medium">
+        {/* The round is a sample to react to; the role's full list can be longer. */}
         <Trans>
-          Round {round.round} · {round.candidates.length} people
+          Round {round.round} · Review these {round.candidates.length} first
         </Trans>
       </h2>
       {approved ? (

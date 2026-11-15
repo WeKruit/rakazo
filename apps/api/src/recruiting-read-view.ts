@@ -4,6 +4,7 @@ import {
   getRecruitingWorkspace,
   listRecruitingCandidates,
   listRecruitingResearch,
+  recruitingRoleGrading,
 } from "./recruiting.js";
 
 /**
@@ -39,7 +40,11 @@ export async function readRecruitingView(
       ...input.query,
       roleId: input.roleId,
     });
-    const workspace = await readWorkspace();
+    // The list read authorized the role; the scoring hint is asked beside the final check.
+    const [workspace, grading] = await Promise.all([
+      readWorkspace(),
+      recruitingRoleGrading(deps.prisma, actor, input.roleId),
+    ]);
     return {
       kind: "candidates" as const,
       workspace,
@@ -47,7 +52,9 @@ export async function readRecruitingView(
         matches(workspace) &&
         data.roleId === input.roleId &&
         data.roleRevisionId === input.roleRevisionId
-          ? data
+          ? grading
+            ? { ...data, grading }
+            : data
           : null,
     };
   }

@@ -856,7 +856,7 @@ export async function mockRecruitingApp(
     else if (method === "recruiting/workEstimate") value = null;
     else if (method === "recruiting/searchQuality")
       value = { rounds: [], goodExample: 0, notFit: 0 };
-    else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
+    else if (method === "recruiting/roleSetup") value = {};
     else if (method === "recruiting/listCandidates") {
       const items = candidates
         .map((candidate, index) =>

@@ -29,44 +29,12 @@ async function mount(status: RoleSetupStatus | undefined) {
   await act(async () => root.render(<RoleSetup status={status} />));
 }
 
-it("never shows the setup the agent does on its own", async () => {
-  await mount({
-    ready: false,
-    attention: null,
-    items: [
-      { key: "crm", state: "missing", action: { kind: "ask_agent", prompt: "Link it" } },
-      { key: "leads", state: "unavailable", action: { kind: "connect", serverId: "mail" } },
-    ],
-  });
+it("shows nothing until the role has a stage, then the stage and its next step", async () => {
+  await mount({});
   expect(container!.textContent).toBe("");
-});
-
-it("shows the role's playbook stage and next step", async () => {
+  container!.remove();
   await mount({
-    ready: true,
-    attention: null,
-    playbookStage: {
-      stage: "calibration_10",
-      label: "10 人校准",
-      nextStep: "给这 10 位候选人反馈",
-    },
-    items: [{ key: "campaign", state: "ready" }],
+    playbookStage: { stage: "calibration_10", next: { step: "find_first_10", count: 3 } },
   });
-  expect(container!.textContent).toContain("10 人校准");
-  expect(container!.textContent).toContain("Next: 给这 10 位候选人反馈");
-  expect(container!.querySelector("button")).toBeNull();
-});
-
-it("does not repeat the stage as its next step", async () => {
-  await mount({
-    ready: true,
-    attention: null,
-    playbookStage: {
-      stage: "feedback",
-      label: "Your feedback",
-      nextStep: "Give your feedback",
-    },
-    items: [],
-  });
-  expect(container!.textContent).toBe("Your feedback");
+  expect(container!.textContent).toBe("First 10 peopleNext: Finding 3 more of the first 10");
 });
