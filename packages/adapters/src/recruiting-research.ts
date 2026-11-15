@@ -16,6 +16,7 @@ import type { McpServer, PrismaClient } from "@rakazo/db";
 import {
   countRecruitingPeopleFoundSince,
   IsolationError,
+  listRecruitingPeopleFoundSince,
   listRecruitingResearch,
   listRunToolResults,
   Prisma,
@@ -26,6 +27,7 @@ import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
 import { peopleTargetFrom } from "./people-target.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
+import { runningSearchFor } from "./work-estimate.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -429,11 +431,20 @@ export async function peopleRoomForRequest(
       })
       .join(" ");
     if (!peopleTargetFrom(text, 0)) continue;
-    const [total, gained] = await Promise.all([
+    // Staging 11-15: someone found again after the message is not new, so "继续找 10 位" on a
+    // role of 24 read as a total of 10 while the approve result said 34.
+    const [total, since, before] = await Promise.all([
       prisma.recruitingCandidate.count({ where: { roleId } }),
-      countRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
+      listRecruitingPeopleFoundSince(prisma, { roleId, since: message.createdAt }),
+      prisma.recruitingCandidateOccurrence.findMany({
+        where: { roleId, page: { observedAt: { lt: message.createdAt } } },
+        distinct: ["candidateKey"],
+        select: { candidateKey: true },
+      }),
     ]);
-    const target = peopleTargetFrom(text, Math.max(0, total - gained)) ?? 0;
+    const seen = new Set(before.map((row) => row.candidateKey));
+    const fresh = since.filter((key) => !seen.has(key)).length;
+    const target = peopleTargetFrom(text, Math.max(0, total - fresh)) ?? 0;
     return Math.max(0, target - total);
   }
   return undefined;
@@ -623,6 +634,11 @@ export async function prepareAgentRun(
   if (grading) return prepared;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
+  const running = run && (await runningSearchFor(prisma, actor.spaceId, run.threadId, roleId));
+  if (running)
+    throw new IsolationError(
+      `Not started: agent run ${running} is still searching for this role. Do not start another search: call agent_run with runId "${running}" to collect it, or end the turn; you are woken when it finishes.`,
+    );
   if (metered) await requireDeeperSearchBudget(prisma, roleId, run?.threadId);
   const allowed = run ? await peopleRoomForRequest(prisma, roleId, run.threadId) : undefined;
   const room =
