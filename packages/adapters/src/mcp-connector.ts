@@ -92,6 +92,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireQuickSearchBeforeResearch,
+  requireRoleForPeopleSearch,
   savedContactLookups,
   settlePeopleSearch,
 } from "./recruiting-research.js";
@@ -1345,6 +1346,13 @@ export class McpConnector implements ConnectorProvider {
         call.args,
       );
       await requireQuickSearchBeforeResearch(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        call.args,
+      );
+      await requireRoleForPeopleSearch(
         this.prisma,
         context,
         assignment.server,
