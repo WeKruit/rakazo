@@ -47,3 +47,28 @@ export async function globalRoleWriteRefusal(
   if (!role) return undefined;
   return `Not done: this changes the email of "${role.title}", which that role's team holds and works on. Hand the recruiter's request to that team with delegate_to_role, role_id "${role.id}", in their own words. In the same reply, answer what they asked from what you have already read (for example why nothing has gone out yet, from the queue time a read gave, as minutes from now), and say in one line that the team is doing the rest.`;
 }
+
+/**
+ * What Kruit's handoff of the recruiter's turn tells a role's team. Staging 11-15: "3 and 10
+ * aren't a fit, find more like the rest" reached the team as Kruit's brief "find the next 20
+ * people", so it scaled out and the next round was never built. The recruiter's own words go
+ * first, exactly as written; while a round waits on their answer they are the whole request, so
+ * the team reads the feedback itself.
+ */
+export async function roleRequestMessage(
+  prisma: Pick<PrismaClient, "recruitingCalibrationRound">,
+  input: { roleId?: string; recruiterWords: string; brief: string },
+): Promise<string> {
+  const words = input.recruiterWords.trim();
+  if (!words) return input.brief;
+  const quoted = `The recruiter wrote, word for word:\n"${words}"`;
+  const round = input.roleId
+    ? await prisma.recruitingCalibrationRound.findFirst({
+        where: { roleId: input.roleId },
+        orderBy: { round: "desc" },
+        select: { approvedAt: true },
+      })
+    : null;
+  if (round && !round.approvedAt) return quoted;
+  return input.brief.trim() ? `${quoted}\n\nKruit's brief:\n${input.brief}` : quoted;
+}

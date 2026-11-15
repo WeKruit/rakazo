@@ -490,7 +490,7 @@ import {
   emailsWithAttachments,
   saveEmailAttachments,
 } from "./email-attachments.js";
-import { globalRoleWriteRefusal } from "./global-role-writes.js";
+import { globalRoleWriteRefusal, roleRequestMessage } from "./global-role-writes.js";
 import {
   handoffToGroupBot,
   isQuietStageReport,
@@ -14668,7 +14668,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 thread_id: target.threadId,
                 sender_label: RECRUITING_GLOBAL_AGENT_NAME,
                 target_label: `${target.title} team`,
-                message: redactSecrets(String(args.message ?? ""), runSecrets),
+                message: redactSecrets(
+                  await roleRequestMessage(deps.prisma, {
+                    roleId: role
+                      ? String(args.role_id)
+                      : (group?.thread?.activeRecruitingRoleId ?? undefined),
+                    // Only the recruiter's own turn hands over their words.
+                    recruiterWords: run.trigger === "user" ? lastRecruiterText : "",
+                    brief: String(args.message ?? ""),
+                  }),
+                  runSecrets,
+                ),
                 intent: "request",
                 deliveryKey: effectKey,
               },
