@@ -845,6 +845,7 @@ import {
   lastOwnUpdate,
   quotesMessage,
   restatesUpdate,
+  withoutRepeatedClosing,
   sameWords,
   TurnReportLedger,
   turnReportText,
@@ -18392,6 +18393,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             text = "";
             blocks = [];
+          }
+          // A closing line this bot already ended an earlier reply on is not said again.
+          if (
+            hideVendors &&
+            textOnly &&
+            text.trim() &&
+            blocks.filter((block) => block.kind === "text").length === 1
+          ) {
+            const closed = withoutRepeatedClosing(
+              text,
+              await deps.prisma.message
+                .findMany({
+                  where: { threadId: thread.id, role: "bot", botId: bot.id, NOT: { runId } },
+                  orderBy: { seq: "desc" },
+                  take: 3,
+                  select: { blocks: true },
+                })
+                .then((rows) =>
+                  rows.map((row) =>
+                    (Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : [])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  ),
+                )
+                .catch(() => []),
+            );
+            if (closed !== text) {
+              text = closed;
+              blocks = blocks.map((block) => (block.kind === "text" ? { ...block, text } : block));
+            }
           }
           // One question at a time: while another card waits in this conversation (a teammate's
           // question), the reply keeps only what comes before its own question, and a reply that
