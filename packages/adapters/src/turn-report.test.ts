@@ -14,6 +14,7 @@ import {
   TurnReportLedger,
   turnReportText,
   turnWork,
+  droppedDay,
 } from "./turn-report.js";
 
 describe("turnWork", () => {
@@ -681,5 +682,24 @@ describe("TurnReportLedger.memorySaveFailed", () => {
     ledger.tool("c", "remember", {});
     ledger.settle("c", { ok: true });
     expect(ledger.memorySaveFailed()).toBe(false);
+  });
+});
+
+// Gate 398accae, change-mind: 「邮件里加每周五远程」 became "one remote workday each week".
+describe("droppedDay", () => {
+  const draft = (line: string) =>
+    `Subject: Staff Frontend Engineer\n\nHi {{firstName}},\n\n${line}\n\nBest,\nAlex`;
+  it("retries a draft that lost the weekday the recruiter named", () => {
+    expect(
+      droppedDay(
+        draft("It includes one remote workday each week."),
+        "base改70-90万，邮件里加每周五远程",
+      ),
+    ).toMatchObject({ note: expect.stringContaining("Friday") });
+  });
+  it("keeps a draft that names the day, and a count of days", () => {
+    expect(droppedDay(draft("It is remote every Friday."), "邮件里加每周五远程")).toBeUndefined();
+    expect(droppedDay(draft("It is on site five days a week."), "每周五天坐班")).toBeUndefined();
+    expect(droppedDay("好的，已记下每周五远程。", "每周五远程")).toBeUndefined();
   });
 });

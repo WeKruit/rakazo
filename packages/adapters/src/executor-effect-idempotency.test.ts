@@ -6166,6 +6166,37 @@ describe("native recruiting assessment effect delivery", () => {
     expect(JSON.stringify(update)).toContain("Not shown");
   });
 
+  // Gate 398accae, one-off-email: 「草稿还在吗」 typed past the Connect card got only a new card.
+  it("answers a message typed past the connect card before showing the card again", async () => {
+    const f = fixture("connect-answer-first");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-4",
+        messageId: "message-4",
+        text: "草稿还在吗",
+        blocks: [{ kind: "text", text: "草稿还在吗" }],
+      },
+    ]);
+    let first: unknown;
+    f.runtimeRun.mockImplementation(async function* (request) {
+      await request.claimSteering!([]);
+      first = await request.executeTool!(
+        "request_connection",
+        { provider: "gmail", reason: "发送邮件" },
+        "c1",
+      );
+      yield { type: "done" as const, text: "" };
+    });
+    await f.run();
+    expect(JSON.stringify(first)).toContain("草稿还在吗");
+    expect(JSON.stringify(first)).toContain("Not shown yet");
+  });
+
   async function firstMessageRole(groupId: string, groupName: string | null) {
     const f = fixture(`first-message-${groupId}`);
     vi.mocked(executeRecruitingRoleTool).mockClear();

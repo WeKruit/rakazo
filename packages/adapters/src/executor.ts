@@ -659,7 +659,7 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import { checkRound, roundCriteria } from "./recruiting-round-check.js";
+import { checkRound, roundCriteria, roundPeopleNamed } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -1387,7 +1387,7 @@ const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. Each query carries the role's location and must-haves; a required language goes into every query the way profiles list it (for example \"Mandarin\"). They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
-  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round unless it also turns some of them down). Once you have acted, report the result in two or three lines as your final reply, without a question.`;
 
 /**
  * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
@@ -6566,6 +6566,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // not a replay of the handoff the run made before it arrived.
         let steeredMessageId: string | undefined;
         let steeredText: string | undefined;
+        // The person wrote into this run and nothing has been said to them since.
+        let steeredUnanswered = false;
         // The request went to a role team this turn: that team owns it now.
         let delegatedToRole = false;
         // A reply-card tool ran this turn, so what the turn says about that card came from it.
@@ -6773,6 +6775,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             )?.id;
           midTurnUserTexts.push(narration);
           publishedMidTurnUserMessage = true;
+          steeredUnanswered = false;
         };
         const formatObservation = (
           observation: Awaited<ReturnType<SandboxProvider["observe"]>>,
@@ -6808,6 +6811,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gmailDraftAsked = false;
         // Like request_secret: an unconnected MCP server pauses on a native connect card.
         const requestConnectionTool = async (args: Record<string, unknown>) => {
+          // Gate 398accae, one-off-email: each message typed past the card ("草稿还在吗") got only
+          // a new card, because the turn's one action was this call. The message is answered first.
+          if (
+            hideVendors &&
+            steeredUnanswered &&
+            steeredText?.trim() &&
+            !assembled.trim() &&
+            !currentTextSegment.trim()
+          ) {
+            steeredUnanswered = false;
+            return { error: connectAnswerFirst(steeredText) };
+          }
           // Staging 11-13: the Gmail card said "the email is above" when no email had been shown.
           if (
             hideVendors &&
@@ -6996,6 +7011,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const locationAsked = new Set<string>();
         // People the round check already asked the model about once.
         const gapAsked = new Set<string>();
+        // Recruiter messages whose round acceptance was questioned once because they name people of the round.
+        const approvalAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -12526,6 +12543,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     nativeMemorySaveError(args));
               if (invalid) return finish({ error: invalid });
             }
+            // "#6 and #8 are off, find more like the rest" turns people down: the next round
+            // reflects that before the recruiter accepts one. Asked once; a second call stands.
+            if (
+              name === "recruiting_feedback" &&
+              args.target === "round" &&
+              args.operation === "approve" &&
+              recruitingSourceMessageId &&
+              !approvalAsked.has(recruitingSourceMessageId)
+            ) {
+              approvalAsked.add(recruitingSourceMessageId);
+              const named = await roundPeopleNamed(deps.prisma, {
+                threadId: run.threadId,
+                messageId: recruitingSourceMessageId,
+              }).catch(() => null);
+              if (named)
+                return finish({
+                  error: `Not recorded: this message also names people of round ${named.round} (${named.named.join(", ")}). When it turns any of them down it is feedback, not acceptance: record each turned-down person's review, then run the next round of ten that reflects it, without them and without anyone like them. Only if it names them as examples of who to find more of, call approve again.`,
+                });
+            }
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
@@ -14318,6 +14354,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )?.id;
             midTurnUserTexts.push(text);
             publishedMidTurnUserMessage = true;
+            steeredUnanswered = false;
             return finish(
               truncated
                 ? {
@@ -17087,6 +17124,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         if (personSteering) {
                           steeredMessageId = personSteering.messageId;
                           steeredText = personSteering.text;
+                          if (!personSteering.earlier) steeredUnanswered = true;
                         }
                         // A new message from the person is this turn's to answer, whoever had the
                         // request before it (gate 493e9f2e: its reply was dropped as handed off).
@@ -19749,6 +19787,10 @@ export function gmailCardNeedsDraft(
     !/Subject\s*[:：]|主题\s*[:：]/i.test(shown)
   );
 }
+
+/** Model-facing: a message the person typed instead of pressing Connect is answered first. */
+export const connectAnswerFirst = (message: string) =>
+  `Not shown yet: the recruiter wrote "${message.trim().slice(0, 300)}" instead of pressing the card. Answer that message first in your reply, in one or two plain lines in their language, then call request_connection again so the card sits under your answer.`;
 
 /** Model-facing: the email is written out in chat before the Gmail connect card is shown. */
 export const GMAIL_DRAFT_FIRST_NOTE =
