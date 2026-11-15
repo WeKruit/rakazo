@@ -22,7 +22,10 @@ export function peopleTargetFrom(text: string, totalBefore: number): number | un
   const asked = requestedPeopleTarget(text);
   if (!asked) return undefined;
   if (/\b(?:total|in all|altogether|overall)\b|总共|一共|总数|合计/i.test(text)) return asked;
-  return /\bmore\b|再/i.test(text) || totalBefore >= asked ? totalBefore + asked : asked;
+  return /\b(?:more|another|additional)\b|再|继续|多找|另外|追加/i.test(text) ||
+    totalBefore >= asked
+    ? totalBefore + asked
+    : asked;
 }
 
 /**

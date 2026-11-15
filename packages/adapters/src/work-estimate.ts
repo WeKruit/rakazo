@@ -8,9 +8,9 @@ import {
   workCountdownLeftMs,
   workCountdownsElapsed,
 } from "@rakazo/core";
+import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { PrismaClient } from "@rakazo/db";
 import { COMPLETION_EMAIL_TOOL } from "./completion-email.js";
-import { mcpObject } from "./recruiting-research.js";
 
 /**
  * A big search or contact lookup gets a countdown the recruiter sees (Workloop's wait clock).
@@ -135,6 +135,33 @@ async function sameAsk(
     };
   }
   return null;
+}
+
+/**
+ * The agent run still searching for this role in this conversation, if one is. Staging 11-15:
+ * one "继续找" started two paid runs side by side for the same role.
+ */
+export async function runningSearchFor(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  threadId: string,
+  roleId: string,
+): Promise<string | undefined> {
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      kind: WORK_ESTIMATE_KIND,
+      spaceId,
+      status: "running",
+      createdAt: { gte: new Date(Date.now() - MAX_AGE_MS) },
+      idempotencyKey: { startsWith: key("agent_run_") },
+      run: { threadId },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: { idempotencyKey: true, request: true },
+  });
+  const row = rows.find((row) => (row.request as Partial<Request> | null)?.roleId === roleId);
+  return row?.idempotencyKey.slice(key("").length);
 }
 
 /** Whether the recruiter stopped this work; a stopped search is not followed any more. */

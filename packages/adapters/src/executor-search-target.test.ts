@@ -33,6 +33,8 @@ describe("requested people target", () => {
     ["find 50 total", 69, 50],
     ["一共找100个", 120, 100],
     ["再找20个人", 10, 30],
+    ["继续找 10 位", 24, 34],
+    ["多找10个", 24, 34],
     ["find 30 more candidates", 40, 70],
   ])("%s with %s saved → %s", (text, before, target) => {
     expect(peopleTargetFrom(text, before)).toBe(target);
