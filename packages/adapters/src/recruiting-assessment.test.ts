@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
+  NOTHING_SAVED_IS_NO_BLOCKER,
   peopleToShow,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
@@ -685,6 +686,41 @@ describe("native saved candidate reads", () => {
     expect((result as { items: object[] }).items[2]).not.toHaveProperty("alreadySeen");
   });
 
+  // Staging 11-15: "shown in round 2" on the latest round's own people read as nine repeats.
+  it("says the latest round's people are in it, not repeats", async () => {
+    const f = fixture();
+    db.roleId.mockResolvedValueOnce("role");
+    db.candidates.mockResolvedValueOnce({
+      roleId: "role",
+      items: [{ candidateKey: "first" }, { candidateKey: "latest" }],
+      total: 2,
+      nextCursor: null,
+    });
+    db.seen.mockResolvedValueOnce({
+      latestRound: { round: 2, recordedAt: new Date(), people: 10, accepted: false },
+      people: new Map([
+        ["first", { round: 1, seenBeforeLatestRound: true }],
+        ["latest", { round: 2, seenBeforeLatestRound: false }],
+      ]),
+    });
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list" },
+      context,
+    );
+    expect(result).toMatchObject({
+      items: [
+        { candidateKey: "first", shownInRound: 1, alreadySeen: "shown in round 1" },
+        {
+          candidateKey: "latest",
+          shownInRound: 2,
+          alreadySeen: "in round 2, the latest round, and in no earlier round: not a repeat",
+        },
+      ],
+    });
+  });
+
   it("reads a named role's round from the global conversation", async () => {
     // Staging 11-14: global Kruit was told to read the round with the roleId, the schema refused
     // the key, and it listed the newest saved people instead of the round as the new ten.
@@ -873,7 +909,7 @@ describe("native saved candidate reads", () => {
     );
     expect(result).toMatchObject({
       items: [],
-      next: "No saved person matched this query. To list the role's people, call again without query.",
+      next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
   });
 
@@ -1469,7 +1505,7 @@ describe("native cross-role recruiting reads", () => {
 
 describe("peopleToShow", () => {
   // Staging 11-15: asked for "only the new ones", Kruit's page relisted five of round 1's ten.
-  it("never relists people shown in a round, and holds back the unshown pool while a round is prepared", () => {
+  it("never relists people shown in a round, turned down or already listed", () => {
     const items = [
       { candidateKey: "a", shownInRound: 1, alreadySeen: "shown in round 1" },
       { candidateKey: "b" },
@@ -1477,15 +1513,11 @@ describe("peopleToShow", () => {
       { candidateKey: "d", recruiterVerdict: "not_fit" as const },
       { candidateKey: "e" },
     ];
-    expect(peopleToShow(items, { size: 10, listed: new Set(["e"]), teamWorking: false })).toEqual({
+    expect(peopleToShow(items, { size: 10, listed: new Set(["e"]) })).toEqual({
       shown: [items[1], items[2]],
       inRounds: 1,
       farAway: 0,
     });
-    expect(peopleToShow(items, { size: 10, listed: new Set(), teamWorking: true }).shown).toEqual([
-      items[1],
-      items[4],
-    ]);
   });
 
   // Staging 11-15: a page for a Bay Area role listed two people in Texas whom the search had
@@ -1500,7 +1532,6 @@ describe("peopleToShow", () => {
       peopleToShow(items, {
         size: 10,
         listed: new Set(),
-        teamWorking: false,
         beyond: (location) => location.includes("Texas"),
       }),
     ).toEqual({ shown: [items[1], items[2]], inRounds: 0, farAway: 1 });

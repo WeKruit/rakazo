@@ -759,6 +759,24 @@ export function roundHeldForReview(round: number, recordedByNonce: string | null
   return round >= 2 && !recordedByNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX);
 }
 
+/**
+ * Whether the round this run would record waits for the Reviewer: a round already exists, so the
+ * next one follows feedback, and this run is not the lead's turn after the check. Nothing of such a
+ * round is shown in chat before the check.
+ */
+export async function nextRoundHeld(
+  prisma: PrismaClient,
+  input: { threadId: string; roleId: string; clientNonce: string | null | undefined },
+): Promise<boolean> {
+  if (input.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)) return false;
+  const latest = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { approvedAt: true },
+  });
+  return !!latest && !latest.approvedAt && (await hasRoundReviewer(prisma, input.threadId));
+}
+
 /** Whether this conversation's team has the Reviewer, who checks a held round. */
 export async function hasRoundReviewer(prisma: PrismaClient, threadId: string): Promise<boolean> {
   const thread = await prisma.thread.findUnique({

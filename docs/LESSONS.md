@@ -78,3 +78,8 @@ that repeats into the existing line instead of adding another.
   Reviewer's checked round. The team then used it to slip round-1 people back in and to skip the
   check. **An escape flag has one owner: key a bypass on who is calling (the run), not on an
   argument the model can set.**
+- 2026-11-15 — "Find 20" saved 64, then 41, then 29. Each fix capped one call, but four searches
+  sent together each saw an empty role (saves are async), and a guard read the role id from the
+  thread loaded before the run saved the role. **A limit on a total is checked and reserved in
+  one step at the shared boundary, and in-run state is read fresh, not from the run's snapshot.**
+- 11-15: #1381 held rounds after feedback, but the round's first picks and streamed round arguments still reached chat before the hold, so the recruiter saw two lists. Rule: a hold on showing something covers every path that posts it (streams, early picks), not only the final record.

@@ -645,6 +645,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   hasRoundReviewer,
+  nextRoundHeld,
   RECRUITING_ROUND_REVIEW_NONCE_PREFIX,
   ROUND_HELD_NEXT_STEP,
   roundHeldForReview,
@@ -1389,7 +1390,7 @@ const SCHEDULING_PREPARE_NEXT_STEP =
 /** How recent a finished run's one-line reply must be for the next run's answer to take its place. */
 const LINE_TAKEOVER_MS = 120_000;
 const HANDOFF_STAGE_NOTE =
-  "The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
+  "The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history. Work to the brief's Done when, and end the stage in exactly one of two ways: done, when Done when is met (say the result or count); or stopped, when it cannot be met with what you hold (no access, a provider limit, nobody more to find; a record not saved yet is no such block when the recruiter's words describe the work: do it from them and ask the one missing fact beside the result): say what blocks it, what you tried and what would unblock it. A step that belongs to another teammate's tools is handed to them, never a reason to stop. Never end on a promise of later work.";
 const HANDOFF_OPENING_NOTE = `A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in their language, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. ${HANDOFF_STAGE_NOTE}`;
 // Gate 264149c9: the recruiter already had a line saying what was being done, and the stage's
 // own opening sentence said it again before the answer.
@@ -7118,6 +7119,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               posting: Promise<unknown>;
             }
           | undefined;
+        // A round after the recruiter's feedback is shown only once the Reviewer has checked it.
+        let roundHeldThisTurn: Promise<boolean> | undefined;
+        const roundHeld = (roleId: string) =>
+          (roundHeldThisTurn ??= nextRoundHeld(deps.prisma, {
+            threadId: run.threadId,
+            roleId,
+            clientNonce: run.clientNonce,
+          }).catch(() => false));
         let globalListSort: string | undefined;
         // People this turn already listed in Kruit's chat: a later page never lists them again.
         const globalListed = new Set<string>();
@@ -7157,10 +7166,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             typeof args.roleId !== "string" ||
             !items?.length ||
             // A delegated result waking Kruit is not the recruiter asking for people.
-            run.trigger === "bot_message" ||
-            !asksForPeople(lastRecruiterText)
+            run.trigger === "bot_message"
           )
             return undefined;
+          // The recruiter sees each round once, already checked. Staging 11-15: asked "where's the
+          // new batch?" while the team prepared round 2, Kruit listed six unreviewed people from
+          // Results, then the round came with different people. While the team works, Kruit
+          // gets no rows to list, only the team's progress.
+          const working = await globalTeamProgress(args.roleId);
+          if (working)
+            return {
+              items: [],
+              total: page?.total,
+              teamWorking: `${working.note} The next round is shown here once, already checked: never list, name or count people from Results before it comes.`,
+            };
+          if (!asksForPeople(lastRecruiterText)) return undefined;
           const role = await deps.prisma.recruitingRole.findFirst({
             where: {
               id: args.roleId,
@@ -7181,15 +7201,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             JSON.stringify(role.currentRevision ?? {}),
             ...(await recruiterWords(deps.prisma, role.sourceThreadId)),
           ]);
-          // Staging 11-14: asked for the new people while the team was still searching, Kruit listed
-          // the saved pool and the recruiter took it for the round, repeats from round one included.
-          const working = await globalTeamProgress(args.roleId);
           // One rule from the recruiter's seen record. Staging 11-15: asked for "only the new
           // ones", a page relisted five of round 1's ten and Kruit miscounted the new ones.
           const { shown, inRounds, farAway } = peopleToShow(items as Array<RecruiterListItem>, {
             size,
             listed: globalListed,
-            teamWorking: Boolean(working),
             ...(place ? { beyond: (location: string) => beyondCommute(location, place) } : {}),
           });
           const leftOut = {
@@ -7207,15 +7223,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!shown.length)
             return {
               ...leftOut,
-              ...(working ? { teamWorking: working.note } : {}),
               shownInChat: items.some(
                 (item) =>
                   typeof item.candidateKey === "string" && globalListed.has(item.candidateKey),
               )
                 ? "Everyone left on this page is already listed in chat above in this reply: never list them again. Say in one line how many new people are listed above, or read the next page."
-                : working
-                  ? "Nobody new on this page: everyone was already seen or turned down. Tell the recruiter the round is still being prepared, with the progress in teamWorking; never list these people as new."
-                  : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
+                : "Nobody on this page is left to show: the recruiter already saw them in a round, turned them down, or they live too far. Read the next page, or say so in one line.",
             };
           const first =
             typeof args.page === "number" && args.cursor === undefined
@@ -7250,11 +7263,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return {
             ...(result as object),
             ...leftOut,
-            ...(working
-              ? {
-                  teamWorking: `${working.note} The people listed are saved search results not yet reviewed, leaving out anyone already seen; they are not the next round, so never call them the new round.`,
-                }
-              : {}),
             shownInChat: `People ${shownRange} are already listed in chat above, exactly as the role team lists them. Never write any of them again (no names, no list). Reply with at most one short line, such as that nobody is graded yet or that the recruiter can ask for the next page; never say more people were listed than ${shownRange}. For the next, previous or any other page, call list again with the same roleId and page.`,
           };
         };
@@ -7309,6 +7317,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           stream.shown = named.length;
           stream.posting = stream.posting
             .then(async () => {
+              if (await roundHeld(roleId)) return;
               const text = await recruitingRoundListText(deps.prisma, {
                 chinese: turnLanguage === "zh",
                 threadId: run.threadId,
@@ -7491,6 +7500,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ({ result }) => !(result && typeof result === "object" && "error" in result),
           );
         };
+        /** The role this conversation works on now, which this run may have just saved. */
+        const currentRoleId = async () =>
+          thread.activeRecruitingRoleId ??
+          (
+            await deps.prisma.thread
+              .findUnique({ where: { id: thread.id }, select: { activeRecruitingRoleId: true } })
+              .catch(() => null)
+          )?.activeRecruitingRoleId ??
+          undefined;
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
@@ -8583,8 +8601,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
             const stream = roundStream;
             stream.shown = Math.max(stream.shown, keys.length);
-            stream.posting = stream.posting.then(() => showRoundList(text));
-            await stream.posting;
+            const held = await roundHeld(roleId);
+            if (!held) {
+              stream.posting = stream.posting.then(() => showRoundList(text));
+              await stream.posting;
+            }
             firstPicksShown = true;
             const late = lateSearchRows.splice(0);
             return {
@@ -8602,7 +8623,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `${held ? "These people are kept for the round; the recruiter sees the round once it is recorded and checked, so never list them in chat." : "These people are in chat now;"} the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except, until a top-up search has come back with the round still short, one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (
@@ -15925,8 +15946,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const place = localRolePlace([...planned.data.queries, ...words]);
           // The searches run together, so they share what the recruiter's number still allows.
-          const room = thread.activeRecruitingRoleId
-            ? await peopleRoomForRequest(deps.prisma, thread.activeRecruitingRoleId, thread.id)
+          const roleNow = await currentRoleId();
+          const room = roleNow
+            ? await peopleRoomForRequest(deps.prisma, roleNow, thread.id)
             : undefined;
           const searchCount = planned.data.queries.length;
           const perSearch = Math.max(
@@ -17155,12 +17177,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     const askedFor = [...recruiterTexts, ...roleStartTexts]
                       .map(requestedPeopleTarget)
                       .find(Boolean);
-                    if (askedFor && thread.activeRecruitingRoleId) {
+                    // Read now: a role saved during this run is not on the thread loaded at its start.
+                    const roleNow = askedFor ? await currentRoleId() : undefined;
+                    if (askedFor && roleNow) {
                       const saved = (
-                        await readRecruitingPlaybookStep(
-                          deps.prisma,
-                          thread.activeRecruitingRoleId,
-                        ).catch(() => null)
+                        await readRecruitingPlaybookStep(deps.prisma, roleNow).catch(() => null)
                       )?.savedCandidates;
                       // Below the number, only after a round: intake questions come before any search.
                       const instead =

@@ -55,6 +55,9 @@ import {
 } from "./recruiting-tools.js";
 
 type RecruitingRunContext = { actor: Actor; runId: string; threadId: string; botId: string };
+/** A missing record never stops work the recruiter's own words already describe. */
+export const NOTHING_SAVED_IS_NO_BLOCKER =
+  "Nothing saved is not a blocker: when the recruiter's own words describe the work (an email to a person they name, a role they describe), do it now from those words, and ask only the one missing fact the result still needs (such as the address to send to) beside it.";
 /** Role sequences are all this read covers; a one-off email's reply lives only in the mailbox. */
 export const ONE_OFF_REPLIES_NOTE =
   "Covers replies to role email sequences only. For a reply to an email sent outside a role (a one-off email), read the mailbox with search_contact_emails on that person's address before saying there is no reply.";
@@ -111,16 +114,14 @@ export type RecruiterListItem = {
 
 /**
  * Who a page of a role's people shows the recruiter: never anyone turned down, shown in a round,
- * already listed in this reply or, for a local role, living beyond commuting distance, and, while
- * the team prepares a round, nobody seen before. `inRounds` and `farAway` count the people left
- * out because a round already showed them or they live too far.
+ * already listed in this reply or, for a local role, living beyond commuting distance. `inRounds`
+ * and `farAway` count the people left out because a round already showed them or they live too far.
  */
 export function peopleToShow<T extends RecruiterListItem>(
   items: readonly T[],
   input: {
     size: number;
     listed: ReadonlySet<string>;
-    teamWorking: boolean;
     beyond?: (location: string) => boolean;
   },
 ): { shown: T[]; inRounds: number; farAway: number } {
@@ -132,7 +133,6 @@ export function peopleToShow<T extends RecruiterListItem>(
       item.decision !== "pass" &&
       item.shownInRound === undefined &&
       !far(item) &&
-      !(input.teamWorking && item.alreadySeen) &&
       !(typeof item.candidateKey === "string" && input.listed.has(item.candidateKey)),
   );
   return {
@@ -372,11 +372,13 @@ export async function executeRecruitingCandidatesTool(
           })),
         );
       succeeded = true;
-      // The query only filters people; a role name passed as one matches no one.
+      // The query only filters people; a role name passed as one matches no one. Gates eec6adf0,
+      // 386f6a46, 808f4f31 (one-off-email): "nothing saved" read as a blocker, and a draft for a
+      // named person turned into a request for a role title and profile link.
       if (!result.items.length && query.query?.trim())
         return {
           ...result,
-          next: "No saved person matched this query. To list the role's people, call again without query.",
+          next: `No saved person matched this query. To list the role's people, call again without query. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
         };
       const emails = new Map(enriched.map(({ item, email }) => [item, email]));
       // Every list carries what the recruiter already saw of each person, from the one record.
@@ -411,8 +413,14 @@ export async function executeRecruitingCandidatesTool(
             ...(person?.round !== undefined ? { shownInRound: person.round } : {}),
             // A later round may not show them: shown in a round or returned before the latest one.
             // Said in words, so a person only found is never called a repeat of a round.
+            // Staging 11-15: "shown in round 2" on round 2's own people read as repeats.
             ...(person?.round !== undefined
-              ? { alreadySeen: `shown in round ${person.round}` }
+              ? {
+                  alreadySeen:
+                    person.round > 1 && person.round === seen.latestRound?.round
+                      ? `in round ${person.round}, the latest round, and in no earlier round: not a repeat`
+                      : `shown in round ${person.round}`,
+                }
               : person?.seenBeforeLatestRound
                 ? {
                     alreadySeen: `found before round ${seen.latestRound?.round ?? 1} and never shown in a round: not a repeat of any round`,
