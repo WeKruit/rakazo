@@ -387,6 +387,7 @@ import {
   reportDelegatedTeamBlocked,
   returnBotMessageOutcome,
   returnDelegatedTeamOutcome,
+  showRoundInDelegatingChat,
   teamProgress,
 } from "./bot-messages.js";
 import {
@@ -12786,6 +12787,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       )
                   ).catch((error) =>
                     getLogger().warn("round list not posted", {
+                      error: String(error),
+                    }),
+                  );
+                  // The conversation that asked for this round shows it too, as posted.
+                  void showRoundInDelegatingChat(deps, run, {
+                    text,
+                    key: applied.effect.id,
+                  }).catch((error) =>
+                    getLogger().warn("round not shown in the delegating chat", {
                       error: String(error),
                     }),
                   );
