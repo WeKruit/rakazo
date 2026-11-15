@@ -86,10 +86,22 @@ interface JobStatements {
 const jobStatements = new Map<string, JobStatements>();
 const JOB_STATEMENT_SITES_LOGGED = 8;
 
-/** Adds one database statement to the running job's tally, which job.completed reports. */
+/** The running job or request whose statements are being counted, if any. */
+export function statementTallyId(): string | undefined {
+  const context = getLogContext();
+  const id = context["job.id"] ?? context["request.id"];
+  return typeof id === "string" && jobStatements.has(id) ? id : undefined;
+}
+
+/** Starts counting statements for a request; `takeStatementTally` reports and ends it. */
+export function startStatementTally(id: string): void {
+  jobStatements.set(id, { count: 0, ms: 0, sites: new Map() });
+}
+
+/** Adds one database statement to the running job's or request's tally, which its completion log reports. */
 export function recordJobStatement(site: string, ms: number): void {
-  const jobId = getLogContext()["job.id"];
-  const tally = typeof jobId === "string" ? jobStatements.get(jobId) : undefined;
+  const id = statementTallyId();
+  const tally = id ? jobStatements.get(id) : undefined;
   if (!tally) return;
   tally.count += 1;
   tally.ms += ms;
@@ -99,7 +111,7 @@ export function recordJobStatement(site: string, ms: number): void {
   tally.sites.set(site, entry);
 }
 
-function takeJobStatements(jobId: string): LogBindings {
+export function takeStatementTally(jobId: string): LogBindings {
   const tally = jobStatements.get(jobId);
   jobStatements.delete(jobId);
   if (!tally?.count) return {};
@@ -131,21 +143,21 @@ export async function runCorrelatedJob<T>(options: {
     ...jobPayloadBindings(options.payload),
   };
   if (correlation.parentSpanId) bindings["parent.span.id"] = correlation.parentSpanId;
-  jobStatements.set(correlation.jobId, { count: 0, ms: 0, sites: new Map() });
+  startStatementTally(correlation.jobId);
   return runWithLogContext(bindings, async () => {
     try {
       const result = await options.run();
       logger.info("job.completed", {
         "job.duration_ms": Math.round(performance.now() - started),
         "job.outcome": "ok",
-        ...takeJobStatements(correlation.jobId),
+        ...takeStatementTally(correlation.jobId),
       });
       return result;
     } catch (error) {
       logger.error("job.completed", error, {
         "job.duration_ms": Math.round(performance.now() - started),
         "job.outcome": "error",
-        ...takeJobStatements(correlation.jobId),
+        ...takeStatementTally(correlation.jobId),
       });
       throw error;
     }

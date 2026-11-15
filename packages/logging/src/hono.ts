@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { correlationBindings, establishRequestCorrelation } from "./correlation.js";
 import { formatTraceparent } from "./ids.js";
+import { startStatementTally, takeStatementTally } from "./jobs.js";
 import { getLogger } from "./logger.js";
 import type { Logger } from "./types.js";
 
@@ -14,6 +15,8 @@ export function requestLogging(logger?: Logger): MiddlewareHandler {
     c.header("x-request-id", correlation.requestId);
     c.header("traceparent", formatTraceparent(correlation.traceId, correlation.spanId));
     const started = performance.now();
+    // Round trips, not single slow queries, are what make a page slow: count them per request.
+    startStatementTally(correlation.requestId);
     return log.withContext(correlationBindings(correlation), async () => {
       let thrown: unknown;
       try {
@@ -31,6 +34,7 @@ export function requestLogging(logger?: Logger): MiddlewareHandler {
           "http.route": matchedRoute(c.req.path, c.req.routePath),
           "http.status": status,
           "http.duration_ms": Math.round(performance.now() - started),
+          ...takeStatementTally(correlation.requestId),
         });
       }
     });
