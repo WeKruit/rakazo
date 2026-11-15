@@ -680,6 +680,32 @@ export function droppedDay(reply: string, asked: string): DeclineRetry | undefin
   return undefined;
 }
 
+/** Model-facing: an email already in the conversation is pointed to, not pasted again. */
+export const REPASTED_DRAFT_NOTE =
+  "That email is already shown above, word for word. If the recruiter asked for a change, make it and show the changed email; otherwise answer what they asked in one or two lines and point to the email above instead of pasting it again.";
+
+/** A reply that pastes, unchanged, an email the conversation already shows. */
+export function repastedDraft(
+  reply: string,
+  shown: readonly string[],
+  asked: string,
+): DeclineRetry | undefined {
+  const start = DRAFT_START.exec(reply);
+  if (!start) return undefined;
+  // 「把完整版再发一遍」: the recruiter asked to see it again.
+  if (
+    /完整|全文|全部|再(?:发|贴|给|看)|贴(?:一下|出来)|\b(?:full|whole|paste|again|show)\b/i.test(
+      asked,
+    )
+  )
+    return undefined;
+  const flat = (text: string) => text.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+  const email = flat(reply.slice(start.index));
+  if (email.length < 40 || !shown.some((earlier) => flat(earlier).includes(email)))
+    return undefined;
+  return { sentence: reply.slice(start.index).trim().slice(0, 120), note: REPASTED_DRAFT_NOTE };
+}
+
 /** Model-facing: a template with [bracketed] blanks is written again with real details. */
 export const TEMPLATE_BLANKS_NOTE =
   "Your template shows bracketed blanks. Write {{firstName}} where the candidate's first name goes (it is filled in for each person when sent) and the real role title, company, location and pay from the conversation; leave out a detail nobody gave instead of writing a blank, sign with the recruiter's name or the sign-off alone, and show the whole template again.";
