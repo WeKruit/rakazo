@@ -182,7 +182,9 @@ export async function executeRecruitingCandidatesTool(
         take: 30,
         select: { id: true, title: true },
       }),
-      next: "Call again with the roleId of the role the recruiter named.",
+      // Gate 71a2cac2 (one-off-email): with no fintech role saved, "直接发" became a request for the
+      // role's title or JD instead of the send.
+      next: `If one of these roles is the one the recruiter named, call again with its roleId. ${NOTHING_SAVED_IS_NO_BLOCKER}`,
     });
     if (input.operation === "resolve") {
       const result = roleId
