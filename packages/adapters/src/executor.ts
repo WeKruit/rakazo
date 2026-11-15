@@ -17468,6 +17468,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   claimSteering: scripted
                     ? undefined
                     : async (seenIds) => {
+                        // A held round's check runs in this conversation once this turn ends, so
+                        // newer messages start the next turn instead of keeping this one open.
+                        // Staging 11-15: two steered follow-ups held the turn for six minutes.
+                        if (roundHeldRecorded) return [];
                         const steering = await deps.events.claimSteering({
                           threadId: thread.id,
                           botId: bot.id,

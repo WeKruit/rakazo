@@ -8662,6 +8662,8 @@ function scoreCellPart(fields: Prisma.Sql, part: "plain" | "fraction") {
 
 /** Nonce prefix of the run that grades a conversation's people already saved in Results. */
 export const RECRUITING_GRADE_NONCE_PREFIX = "recruiting-grade:";
+/** Run nonce of the lead's turn after the Reviewer has checked a round the recruiter has not seen. */
+export const RECRUITING_ROUND_REVIEW_NONCE_PREFIX = "recruiting-round-review:";
 
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 export function candidateIndexQuery(
@@ -12199,14 +12201,38 @@ export async function saveRecruitingCalibrationRound(
       throw new RecruitingCalibrationRoundError(
         `Round ${repeated.round + 1} must show only people the recruiter has not seen, but ${repeated.repeats.join(", ")} ${repeated.repeats.length === 1 ? "was" : "were"} already shown in an earlier round or turned down. Replace them with saved people no round has shown (recruiting_candidates list) or people from a new quick search, and record the round again.`,
       );
-    const round = await tx.recruitingCalibrationRound.create({
-      data: {
-        roleId: role.id,
-        round: (previous?.round ?? 0) + 1,
-        candidateKeys: [...keys],
-        effectId: saving.id,
-      },
-    });
+    // The checked version of a round held for the Reviewer takes that round's place: the recruiter
+    // never saw the held list, so it is not a round of its own. Staging 11-15: the checked round 2
+    // was labelled round 3 after the recruiter had seen only round 1.
+    const heldRecordedBy =
+      input.corrects &&
+      previous &&
+      previous.round >= 2 &&
+      run.clientNonce?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX)
+        ? (
+            await tx.externalEffect.findUnique({
+              where: { id: previous.effectId },
+              select: { run: { select: { clientNonce: true } } },
+            })
+          )?.run?.clientNonce
+        : undefined;
+    const replacesHeld =
+      heldRecordedBy !== undefined &&
+      !heldRecordedBy?.startsWith(RECRUITING_ROUND_REVIEW_NONCE_PREFIX);
+    const round =
+      replacesHeld && previous
+        ? await tx.recruitingCalibrationRound.update({
+            where: { id: previous.id },
+            data: { candidateKeys: [...keys], effectId: saving.id },
+          })
+        : await tx.recruitingCalibrationRound.create({
+            data: {
+              roleId: role.id,
+              round: (previous?.round ?? 0) + 1,
+              candidateKeys: [...keys],
+              effectId: saving.id,
+            },
+          });
     await advanceRecruitingPlaybookStage(tx, role.id, "feedback");
     const result = {
       status: "saved",
