@@ -1170,7 +1170,7 @@ describe("turnRequestText", () => {
 });
 
 describe("planDeclineRetry", () => {
-  const prisma = (recent: { clientNonce: string | null }[]) =>
+  const prisma = (recent: { clientNonce: string | null; runId?: string; blocks?: object[] }[]) =>
     ({
       message: { findMany: vi.fn(async () => recent) },
       chatGroupMember: {
@@ -1208,6 +1208,22 @@ describe("planDeclineRetry", () => {
         input,
       ),
     ).toBeUndefined();
+  });
+
+  // Gate 66a2dd3e, change-mind-mid-run: the recruiter changed the ask while the teammate wrote,
+  // and the retry of its old stage posted a template for the old salary.
+  it("does not retry a turn the recruiter has written past", async () => {
+    const newer = [
+      { clientNonce: null, runId: "run-other", blocks: [{ kind: "text", text: "改成70-90万" }] },
+    ];
+    const since = { at: new Date(0), runId: "run-1" };
+    expect(
+      await planDeclineRetry(
+        { prisma: prisma([{ clientNonce: "send:human" }]) },
+        { ...input, since },
+      ),
+    ).toBeDefined();
+    expect(await planDeclineRetry({ prisma: prisma(newer) }, { ...input, since })).toBeUndefined();
   });
 
   // Staging 11-12: after the recruiter approved the Send card, "已发送给 Noah" was retried as a refusal.

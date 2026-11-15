@@ -724,6 +724,8 @@ export async function planDeclineRetry(
     sent?: boolean;
     /** What this turn's tools did and returned (see TurnReportLedger.receipts). */
     receipts?: Receipts;
+    /** When this run began: a message the person sent since, that another run answers, wins. */
+    since?: { at: Date; runId: string };
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -810,6 +812,35 @@ export async function planDeclineRetry(
   // card instead. Work the server counts as unfinished is owedWork above, which keeps going.
   if ((await recentContinues()) >= 1)
     return declined && !variables ? questionCard(input.reply, declined) : undefined;
+  // The person wrote again while this turn ran, and another run answers that: a retry of this
+  // turn would redo work they have moved past (gate 66a2dd3e: a template for the old salary).
+  if (input.since) {
+    const since = input.since;
+    const newer = await deps.prisma.message.findMany({
+      where: {
+        threadId: input.run.threadId,
+        role: "user",
+        botId: null,
+        createdAt: { gt: since.at },
+        NOT: { runId: since.runId },
+      },
+      orderBy: { seq: "desc" },
+      take: 4,
+      select: { clientNonce: true, runId: true, blocks: true },
+    });
+    if (
+      newer.some(
+        (row) =>
+          row.runId &&
+          row.runId !== since.runId &&
+          !row.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX) &&
+          !(Array.isArray(row.blocks) ? (row.blocks as MessageBlock[]) : []).some(
+            (block) => block.kind === "bot_message_received",
+          ),
+      )
+    )
+      return undefined;
+  }
   if (variables) return variables;
   if (!declined) return undefined;
   // The wording check reads any "I can't …" as a refusal, including a coverage aside in an
