@@ -92,6 +92,7 @@ import {
   applyJudgeDecision,
   asksAboutThesePeople,
   asksForPeople,
+  asksForTemplate,
   asksForOutreach,
   asksToSendTo,
   assertTransition,
@@ -1448,6 +1449,10 @@ export const globalAskBeforeRole = (latest: string) =>
 /** Model-facing: a research save the server refused, never a reason to ask for the JD again. */
 export const RESEARCH_SAVE_REFUSED =
   "Not saved: the server refused this save just now. The JD, its file and the people your searches found are still available, so never ask the recruiter for them again. When this conversation's role is not saved yet, save it first with recruiting_role create (title and the JD's requirements), then call this operation once more; otherwise call it once more. If it fails again, say in one line that the people found could not be saved yet, never that the JD or file is unreadable.";
+
+/** Model-facing: a one-email template naming no one is written in the coordinator's own reply. */
+const TEMPLATE_WRITE_YOURSELF =
+  "Not handed off: an email template that names no one is yours to write. Write it in this reply now, from the recruiter to the candidate: Subject: and the full body, {{firstName}} for the name, the real role details from the conversation including any change the recruiter just made, and signed with the recruiter's name. Show only the latest version.";
 
 /** Model-facing: a role the recruiter brought to Kruit's own chat is opened, not asked about. */
 const GLOBAL_OPEN_ROLE_FIRST =
@@ -6597,6 +6602,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A reply-card tool ran this turn, so what the turn says about that card came from it.
         let mailReplyAttempted = false;
         let intakeHandoffRefused = false;
+        let templateHandoffRefused = false;
         // A newer message another turn answers: this turn reports once, in its final reply.
         let movedElsewhere = false;
         const newProgressRedactor = () => {
@@ -15142,6 +15148,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ) {
               intakeHandoffRefused = true;
               return finish({ error: INTAKE_ASK_FIRST });
+            }
+            // Gate 9fd9c2ff, change-mind-mid-run: a one-email template went to the writer, and
+            // only "I'll write a version first" showed before the recruiter changed the pay.
+            if (
+              !templateHandoffRefused &&
+              recruitingBotKey(bot) === "main" &&
+              recruiterTexts.slice(0, 3).some(asksForTemplate)
+            ) {
+              templateHandoffRefused = true;
+              return finish({ error: TEMPLATE_WRITE_YOURSELF });
             }
             // Gate 91a438c4: the teammate posted the template and reported back, and the same
             // brief went to it twice more, so one request got three answers.

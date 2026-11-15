@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   asksAboutThesePeople,
-  asksForPeople,
   asksForOutreach,
+  asksForPeople,
+  asksForTemplate,
   asksToSendTo,
   recruitingBotKey,
 } from "./recruiting-defaults.js";
@@ -80,5 +81,23 @@ describe("asksForPeople", () => {
       expect(asksForPeople(text)).toBe(false);
     for (const text of ["多少人？给我看看名单", "how many? show me them"])
       expect(asksForPeople(text)).toBe(true);
+  });
+});
+
+describe("asksForTemplate", () => {
+  // Gate 9fd9c2ff, change-mind-mid-run: a one-email template went to the writer, and only
+  // "I'll write a version first" showed before the recruiter changed the pay.
+  it("tells a one-email template from a sequence", () => {
+    for (const text of [
+      "帮我写封首次触达邮件模板",
+      "write me an outreach template for a staff role",
+    ])
+      expect(asksForTemplate(text)).toBe(true);
+    for (const text of [
+      "写一个三封的邮件序列模板",
+      "campaign template for these 5",
+      "lets find 50",
+    ])
+      expect(asksForTemplate(text)).toBe(false);
   });
 });
