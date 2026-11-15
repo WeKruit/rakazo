@@ -658,12 +658,7 @@ import {
 } from "./recruiting-profiles.js";
 import { deferRecruitingInboxReceipt, isRecruitingInboxRead } from "./recruiting-reads.js";
 import type { RoundVerdict } from "./recruiting-round-check.js";
-import {
-  checkRound,
-  feedbackCriteriaToSave,
-  feedbackNotYetCriteria,
-  roundCriteria,
-} from "./recruiting-round-check.js";
+import { checkRound, roundCriteria } from "./recruiting-round-check.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
@@ -6895,10 +6890,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
-        // People and feedback the round check already asked the model about once.
+        // People the round check already asked the model about once.
         const gapAsked = new Set<string>();
-        // The recruiter's reasons for turning people down that are not role criteria yet.
-        let feedbackNotCriteria: string[] = [];
         /**
          * Picked people whose saved location names only a country or a state, and those whose
          * location shares no place with where the rest of the picks are.
@@ -7851,7 +7844,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
             peopleSearchesRun = Math.max(peopleSearchesRun, 8);
             return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed, except a criterion saved from the recruiter's feedback since the last round, which a row meets only when it shows it. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people; do not run more quick searches. Fill the rest of the ten with one people-search agent run (agent_run, effort "low", a query that starts "Find N more people" with the role, the location scope and every hard requirement), then record the ten with calibration_round, starting with the people already shown, then the agent run's people who fit, topping up from those rows only where it leaves places short; a must-have a row says nothing about is unknown, not failed, except one the recruiter raised since the last round, which a row meets only when it shows it. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks, then ${SHORT_OF_TEN}.${lateText}`,
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
@@ -8125,8 +8118,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             };
           }
-          // One round check for every hard criterion, including those saved from the recruiter's
-          // feedback since the last round: the agent's per-criterion verdicts decide who is in.
+          // One round check for everything the recruiter asked for (brief, criteria and the reasons
+          // they turned people down): the agent's verdict on each decides who is in.
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -8134,14 +8127,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             thread.activeRecruitingRoleId
           ) {
             const roleId = thread.activeRecruitingRoleId;
-            // Staging 11-15: refusing the round until these reasons were saved as criteria held a
-            // round already shown in chat unrecorded for 75 s while the criteria save failed nine
-            // times, and Kruit told the recruiter the ten were not ready. Saving is record keeping:
-            // the round records now and the reasons are saved after it.
-            feedbackNotCriteria = await feedbackNotYetCriteria(deps.prisma, {
-              spaceId: run.spaceId,
-              roleId,
-            });
             const keys = args.candidateKeys.map(String);
             const given =
               args.checks && typeof args.checks === "object" && !Array.isArray(args.checks)
@@ -8159,7 +8144,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               keys,
               checks,
               // The language check owns a required language; its criterion takes no verdict here.
-              criteria: (await roundCriteria(deps.prisma, roleId)).filter(
+              criteria: (
+                await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })
+              ).filter(
                 (criterion) => !languageRequirement || !languageFilters([criterion.statement]).length,
               ),
               asked: gapAsked,
@@ -8339,12 +8326,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return {
               shown: keys.length,
               ...(left ? { notShown: left } : {}),
+              // The requirements calibration_round's checks take a verdict on, so it records the
+              // first time.
+              checksOn: Object.fromEntries(
+                (await roundCriteria(deps.prisma, { roleId, spaceId: run.spaceId })).map(
+                  (criterion) => [criterion.id, criterion.statement],
+                ),
+              ),
               ...(late.length
                 ? {
                     lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
                   }
                 : {}),
-              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except a criterion saved from the recruiter's feedback since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
+              next: `These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed (except one the recruiter raised since the last round, which a row meets only when it shows it), with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ${SHORT_OF_TEN}.`,
             };
           }
           if (
@@ -12615,13 +12609,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   );
                 }
                 return round && typeof round === "object" && !Array.isArray(round)
-                  ? {
-                      ...round,
-                      ...(feedbackNotCriteria.length
-                        ? { criteriaToSave: feedbackCriteriaToSave(feedbackNotCriteria) }
-                        : {}),
-                      next: RECRUITING_ROUND_NEXT_STEP,
-                    }
+                  ? { ...round, next: RECRUITING_ROUND_NEXT_STEP }
                   : round;
               }
               if (researchInput.data.operation === "save_search") {

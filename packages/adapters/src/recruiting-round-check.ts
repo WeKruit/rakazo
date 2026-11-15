@@ -2,10 +2,10 @@ import type { RecruitingCriterion, RecruitingCriterionExpression } from "@rakazo
 import type { PrismaClient } from "@rakazo/db";
 
 /**
- * One check for every calibration round: the agent gives each pick a verdict on every hard
- * criterion of the role ("shown", "unknown" or "fails"), and the server holds the round to those
- * verdicts. What the recruiter says (a city, a level, the reason they turned people down) becomes
- * a role criterion, so the same check covers it without a rule per trait. The agent judges; this
+ * One check for every calibration round: the agent gives each pick a verdict on every requirement
+ * of the role ("shown", "unknown" or "fails"), and the server holds the round to those
+ * verdicts. What the recruiter says (a city, a level, the reason they turned people down) is one
+ * of those requirements, so the same check covers it without a rule per trait. The agent judges; this
  * only checks the judgement is complete and consistent (structured output against a rubric).
  */
 
@@ -27,18 +27,39 @@ function hardCriteria(criteria: unknown): { id: string; statement: string }[] {
     .map((criterion) => ({ id: criterion.id, statement: statementOf(criterion.expression) }));
 }
 
+type BriefField = { key?: unknown; value?: unknown; state?: unknown; origin?: unknown };
+
+/** The brief fields the recruiter stated themselves, as requirements keyed by field. */
+function statedFields(brief: unknown): Map<string, string> {
+  const fields = (brief as { fields?: unknown } | null)?.fields;
+  const stated = new Map<string, string>();
+  if (!Array.isArray(fields)) return stated;
+  for (const field of fields as BriefField[])
+    if (
+      typeof field?.key === "string" &&
+      typeof field.value === "string" &&
+      field.state === "known" &&
+      field.origin === "user_instruction"
+    )
+      stated.set(field.key, field.value);
+  return stated;
+}
+
 /**
- * The role's hard criteria, each marked when it was added after the last round was recorded
- * (that is where the recruiter's feedback since then lands). No round yet: nothing is new.
+ * Everything the recruiter asked for, as the requirements every pick gets a verdict on: the brief
+ * fields in their own words, the role's hard criteria, and each reason they turned people down
+ * (the recorded recruiting_feedback, so nothing has to be saved first). Each is marked when it is
+ * new or changed since the last round was recorded, which is where their feedback lands.
  */
 export async function roundCriteria(
   prisma: PrismaClient,
-  roleId: string,
+  input: { roleId: string; spaceId: string },
 ): Promise<RoundCriterion[]> {
+  const { roleId } = input;
   const [role, last] = await Promise.all([
     prisma.recruitingRole.findUnique({
       where: { id: roleId },
-      select: { currentRevision: { select: { criteria: true } } },
+      select: { currentRevision: { select: { criteria: true, brief: true } } },
     }),
     prisma.recruitingCalibrationRound.findFirst({
       where: { roleId },
@@ -46,15 +67,53 @@ export async function roundCriteria(
       select: { createdAt: true },
     }),
   ]);
-  const current = hardCriteria(role?.currentRevision.criteria);
-  if (!last) return current.map((criterion) => ({ ...criterion, added: false }));
-  const before = await prisma.recruitingRoleRevision.findFirst({
-    where: { roleId, createdAt: { lte: last.createdAt } },
-    orderBy: { revision: "desc" },
-    select: { criteria: true },
-  });
+  const [before, turnedDown] = await Promise.all([
+    last
+      ? prisma.recruitingRoleRevision.findFirst({
+          where: { roleId, createdAt: { lte: last.createdAt } },
+          orderBy: { revision: "desc" },
+          select: { criteria: true, brief: true },
+        })
+      : null,
+    prisma.externalEffect.findMany({
+      where: {
+        spaceId: input.spaceId,
+        kind: "recruiting_feedback",
+        status: "completed",
+        AND: [
+          { request: { path: ["roleId"], equals: roleId } },
+          { request: { path: ["fit"], equals: "not_fit" } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, request: true, createdAt: true },
+      take: 10,
+    }),
+  ]);
+  const earlierFields = statedFields(before?.brief);
+  const fields = [...statedFields(role?.currentRevision.brief)].map(([key, value]) => ({
+    id: `brief:${key}`,
+    statement: `${key}: ${value}`,
+    added: !!last && earlierFields.get(key) !== value,
+  }));
   const earlier = new Set(hardCriteria(before?.criteria).map((criterion) => criterion.id));
-  return current.map((criterion) => ({ ...criterion, added: !earlier.has(criterion.id) }));
+  const criteria = hardCriteria(role?.currentRevision.criteria).map((criterion) => ({
+    ...criterion,
+    added: !!last && !earlier.has(criterion.id),
+  }));
+  const reasons = turnedDown.reverse().flatMap((effect) => {
+    const summary = (effect.request as { summary?: unknown } | null)?.summary;
+    return typeof summary === "string" && summary.trim()
+      ? [
+          {
+            id: `turned-down:${effect.id}`,
+            statement: `not what the recruiter turned down: ${summary.trim()}`,
+            added: !!last && effect.createdAt > last.createdAt,
+          },
+        ]
+      : [];
+  });
+  return [...fields, ...criteria, ...reasons];
 }
 
 export type RoundCheckResult =
@@ -117,55 +176,4 @@ export function checkRound(input: {
       .filter(Boolean)
       .join(" "),
   };
-}
-
-/**
- * People turned down since the last round, by recruiting_feedback, with no role revision after
- * it: the recruiter's reasons are not criteria yet, so the next round could not be held to them.
- * Returns the feedback summaries to save as criteria.
- */
-export async function feedbackNotYetCriteria(
-  prisma: PrismaClient,
-  input: { spaceId: string; roleId: string },
-): Promise<string[]> {
-  const last = await prisma.recruitingCalibrationRound.findFirst({
-    where: { roleId: input.roleId },
-    orderBy: { round: "desc" },
-    select: { createdAt: true },
-  });
-  if (!last) return [];
-  const [turnedDown, revised] = await Promise.all([
-    prisma.externalEffect.findMany({
-      where: {
-        spaceId: input.spaceId,
-        kind: "recruiting_feedback",
-        status: "completed",
-        createdAt: { gt: last.createdAt },
-        AND: [
-          { request: { path: ["roleId"], equals: input.roleId } },
-          { request: { path: ["fit"], equals: "not_fit" } },
-        ],
-      },
-      orderBy: { createdAt: "asc" },
-      select: { request: true, createdAt: true },
-      take: 10,
-    }),
-    prisma.recruitingRoleRevision.findFirst({
-      where: { roleId: input.roleId },
-      orderBy: { revision: "desc" },
-      select: { createdAt: true },
-    }),
-  ]);
-  return turnedDown
-    .filter((effect) => !revised || effect.createdAt > revised.createdAt)
-    .map((effect) => {
-      const summary = (effect.request as { summary?: unknown } | null)?.summary;
-      return typeof summary === "string" ? summary : "";
-    })
-    .filter(Boolean);
-}
-
-/** What the agent sees, with the recorded round, about reasons that are not role criteria yet. */
-export function feedbackCriteriaToSave(reasons: string[]): string {
-  return `The recruiter turned people down since the last round, and these reasons are not role criteria yet: ${reasons.join("; ")}. In the brief save that comes next, also save each reason that says what the next people must show or must not be as a hard criterion (criteria.upsert, with its brief rule), quoting the recruiter, so the next round is held to it. The round is recorded either way: if that save is refused, carry on to the next step without it.`;
 }
